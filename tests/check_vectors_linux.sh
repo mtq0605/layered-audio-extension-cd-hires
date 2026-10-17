@@ -14,7 +14,7 @@ build() {   # $1 = label, rest = compiler and flags
 build gcc_O2 g++ -O2
 build gcc_O0 g++ -O0
 build clang_O2 clang++ -O2
-build gcc_O2_m32 g++ -O2 -m32 -msse2 -mfpmath=sse
+case "$(uname -m)" in x86_64) build gcc_O2_m32 g++ -O2 -m32 -msse2 -mfpmath=sse ;; esac   # 32-bit SSE2 build: x86 hosts only
 for exe in "$work"/dec_*; do [ -x "$exe" ] || continue; label=${exe##*/dec_}; bad=0; n=0
     grep '^| [a-z]' tests/vectors/MANIFEST.md | while IFS='|' read -r _ name enc h24 h16 hcd hhalf _; do
         name=$(echo "$name" | tr -d ' '); rate=${name#*_}; rate=${rate%%.*}

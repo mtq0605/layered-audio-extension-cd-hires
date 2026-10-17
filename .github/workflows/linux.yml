@@ -21,3 +21,16 @@ jobs:
         if: always()
         shell: bash
         run: sh tests/check_encoder_linux.sh
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compilers
+        run: sudo apt-get update -q && sudo apt-get install -y -q g++ clang
+      - name: Decoder - all conformance vectors
+        shell: bash
+        run: sh tests/check_vectors_linux.sh
+      - name: Encoder - all conformance vectors
+        if: always()
+        shell: bash
+        run: sh tests/check_encoder_linux.sh

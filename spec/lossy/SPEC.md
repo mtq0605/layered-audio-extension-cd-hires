@@ -3,6 +3,8 @@
 
 # LAE Lossy: Bitstream and Decoding Specification, Container Version 5
 
+**English** | [中文](SPEC.zh.md)
+
 **Status:** Draft for public review.
 **Applies to:** LAE Lossy (short name LAEY), the lossy tier of the LAE (Layered Audio Extension) format family, container version 5.
 **Licence of this document:** CC BY 4.0 (see Section 15). Copyright (c) 2026 mtq0605.

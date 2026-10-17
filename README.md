@@ -1,5 +1,7 @@
 # LAE: A Layered High-Resolution Extension of the Compact Disc
 
+**English** | [中文](README.zh.md)
+
 **Status:** this is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), a design document is published ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)); its normative specification is not yet written.
 
 **Normative text:** the bitstream and the decoding process are specified in [spec/lossy/SPEC.md](spec/lossy/SPEC.md), which is currently a draft for public review. Where SPEC.md is silent or ambiguous, the reference decoder is normative. This document is informative.

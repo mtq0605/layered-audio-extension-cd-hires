@@ -16,7 +16,7 @@ build gcc_O0 g++ -O0
 build clang_O2 clang++ -O2
 case "$(uname -m)" in x86_64) build gcc_O2_m32 g++ -O2 -m32 -msse2 -mfpmath=sse ;; esac   # 32-bit SSE2 build: x86 hosts only
 for exe in "$work"/dec_*; do [ -x "$exe" ] || continue; label=${exe##*/dec_}; bad=0; n=0
-    grep '^| [a-z]' tests/vectors/MANIFEST.md | while IFS='|' read -r _ name enc h24 h16 hcd hhalf _; do
+    sed '/^## Full SHA-256/,$d' tests/vectors/MANIFEST.md | grep '^| [a-z]' | while IFS='|' read -r _ name enc h24 h16 hcd hhalf _; do
         name=$(echo "$name" | tr -d ' '); rate=${name#*_}; rate=${rate%%.*}
         if [ $((rate % 44100)) -eq 0 ]; then base=44100; else base=48000; fi
         set -- "full $rate $h24" "16 $rate $h16" "cd24 $base $hcd" "full $((rate / 2)) $hhalf"

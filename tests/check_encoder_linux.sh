@@ -17,7 +17,7 @@ for spec in "sweep_88200 AFCA3A5C89443738" "transients_176400 1D4FA24ADC8C2268" 
     got=$(sha256sum "$w/$c.wav" | cut -c1-16 | tr a-f A-F); [ "$got" = "$ref" ] && echo "source $c: identical" || echo "source $c: DIFFERENT ($got)"
     "$w/cut_wav" "$w/$c.wav" "$w/$c.2s.wav" 5 2 > /dev/null
 done
-grep '^| [a-z]' tests/vectors/MANIFEST.md | while IFS='|' read -r _ name enc h24 _; do
+sed '/^## Full SHA-256/,$d' tests/vectors/MANIFEST.md | grep '^| [a-z]' | while IFS='|' read -r _ name enc h24 _; do
     name=$(echo "$name" | tr -d ' '); enc=$(echo "$enc" | tr -d ' '); h24=$(echo "$h24" | tr -d ' ')
     clip=${name%%.*}; cfg=$(echo "${name#*.}" | tr '.' ' ')
     log=$("$w/lae_enc" "$w/$clip.2s.wav" "$w/e.lae.wav" $cfg 2>&1); ok=$(echo "$log" | grep -c 'LAE encode OK')

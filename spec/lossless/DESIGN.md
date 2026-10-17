@@ -3,6 +3,8 @@
 
 # LAE Lossless (LAES): Design Document
 
+**English** | [中文](DESIGN.zh.md)
+
 **Status:** design document published ([spec/lossless/DESIGN.md](DESIGN.md), this document); normative specification not yet written.
 **Licence of this document:** CC BY 4.0. Copyright (c) 2026 mtq0605.
 

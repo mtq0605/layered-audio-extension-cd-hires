@@ -1,0 +1,27 @@
+LicenseRef-LAE-Commercial
+
+LAE (Layered Audio Extension): commercial licence for the encoder-side sources
+
+Copyright 2026 mtq0605
+
+The encoder-side source files of LAE carry the SPDX expression
+"GPL-3.0-or-later OR LicenseRef-LAE-Commercial". These files may also be
+licensed under a separate commercial licence agreement with the author,
+mtq0605.
+
+This file does not itself grant any licence.
+
+- Rights under LicenseRef-LAE-Commercial exist only for a person who has
+  concluded such an agreement with the author.
+- Those rights are limited to what that agreement sets out.
+- Everyone else may use these files under the GNU General Public License,
+  version 3 or (at your option) any later version. See
+  LICENSES/GPL-3.0-or-later.txt.
+
+To ask for a commercial licence, contact the author through GitHub:
+
+- open an issue in the LAE repository; or
+- use the contact shown on the author's GitHub profile,
+  https://github.com/mtq0605.
+
+See COMMERCIAL.md.

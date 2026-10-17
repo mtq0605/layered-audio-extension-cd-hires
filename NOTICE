@@ -1,0 +1,14 @@
+LAE (Layered Audio Extension)
+Copyright 2026 mtq0605 and the LAE contributors listed in AUTHORS
+
+This product includes software developed by mtq0605
+(https://github.com/mtq0605) as part of LAE (Layered Audio Extension).
+
+The LAE decoder-side sources and tools are licensed under the Apache
+License, Version 2.0.
+
+The LAE encoder-side sources are licensed under the GNU General Public
+License, version 3 or (at your option) any later version. They are also
+available under a separate commercial licence from mtq0605.
+
+The LAE specification texts and documentation are licensed under CC BY 4.0.

@@ -1,0 +1,45 @@
+# LAE (Layered Audio Extension): authors and contributors
+# SPDX-FileCopyrightText: 2026 mtq0605
+# SPDX-License-Identifier: CC0-1.0
+#
+# Contributors keep the copyright in their contributions. Contributions are
+# accepted under the Apache License 2.0, with a Developer Certificate of
+# Origin sign-off on every commit (see CONTRIBUTING.md).
+#
+# Entry format:
+#   Name or pseudonym | GitHub username | area | since
+#   An e-mail address is optional.
+
+## Original author and copyright holder
+
+mtq0605 | @mtq0605 | design of the LAE format, LAE Lossy (LAEY) specification, LAE Lossless (LAES) design, decoder, encoder, tools, tests, documentation | 2026
+
+# "mtq0605" is the author's GitHub name, used as a pseudonym.
+
+## Contributors
+
+# None yet. Contributors add themselves in their first pull request;
+# see CONTRIBUTING.md, Section 3.
+
+## Provenance by file
+
+# Origin of every file of the encoder (dual-licensed: GPL-3.0-or-later OR the
+# commercial licence). Any change by someone other than the author is recorded
+# here before it is merged: file | contributor | commit or pull request | licence
+# (Apache-2.0 inbound, DCO sign-off). Files not listed below are original work
+# of the author.
+
+src/lae_enc.cpp      | mtq0605 | original | -
+src/pad_mirror.cpp   | mtq0605 | original | -
+src/base_layer.cpp   | mtq0605 | original | -
+src/routes.cpp       | mtq0605 | original | -
+src/lossy_v2.cpp     | mtq0605 | original | -
+src/part_coder.cpp   | mtq0605 | original | -
+src/tone_scan.cpp    | mtq0605 | original | -
+src/partition.h      | mtq0605 | original | -
+
+## Use of AI tools
+
+# Parts of the code and of the documentation were drafted with an AI
+# assistant under the author's design, direction and review. The AI
+# assistant is not an author or a copyright holder of LAE.

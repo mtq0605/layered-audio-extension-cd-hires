@@ -1,0 +1,146 @@
+LAE (Layered Audio Extension): licensing overview
+
+SPDX-FileCopyrightText: 2026 mtq0605
+SPDX-License-Identifier: CC0-1.0
+
+Copyright 2026 mtq0605.
+
+"mtq0605" is the GitHub name of the author and copyright holder of LAE. It
+is used as a pseudonym.
+
+This file is an overview. It is not itself a licence.
+
+This repository is not under a single licence. Every file either states its
+licence in an SPDX header or is covered by REUSE.toml, following the REUSE
+specification (https://reuse.software). If this overview and a file-level
+statement differ, the file-level statement governs.
+
+The full licence texts are in the LICENSES/ directory:
+
+  LICENSES/Apache-2.0.txt                 Apache License, Version 2.0
+  LICENSES/GPL-3.0-or-later.txt           GNU General Public License, version 3
+  LICENSES/CC-BY-4.0.txt                  Creative Commons Attribution 4.0
+                                          International
+  LICENSES/CC0-1.0.txt                    Creative Commons CC0 1.0 Universal
+  LICENSES/LicenseRef-LAE-Commercial.txt  Note on the commercial licence for
+                                          the encoder-side sources
+
+
+LICENCE LAYOUT
+
+What                                          Licence (SPDX expression)
+--------------------------------------------  ---------------------------------
+Specification and design texts:               CC-BY-4.0
+  spec/lossy/SPEC.md       LAE Lossy (LAEY)
+  spec/lossless/DESIGN.md  LAE Lossless
+                           (LAES), design
+                           document
+Documentation:                                CC-BY-4.0
+  README.md, docs/ (including docs/BUILD.md)
+Decoder-side sources in src/:                 Apache-2.0
+  lae_dec.cpp, part_stream.h,
+  partition_format.h, mdct_tb.h,
+  mdct_tables.h, halfband.h, wavio.h,
+  fft.h, gen_suite.cpp, cut_wav.cpp,
+  cmp_wav.cpp
+Encoder-side sources in src/:                 GPL-3.0-or-later OR
+  lae_enc.cpp, pad_mirror.cpp,                LicenseRef-LAE-Commercial
+  base_layer.cpp, routes.cpp,
+  lossy_v2.cpp, part_coder.cpp,
+  tone_scan.cpp, partition.h
+Tools: tools/                                 Apache-2.0
+Test scripts in tests/                        Apache-2.0
+Conformance vectors, test data and the        CC0-1.0
+  vector manifest in tests/
+Data: data/                                   CC0-1.0
+Build files and CI configuration (.github/)   Apache-2.0
+Project files: LICENSE, NOTICE, AUTHORS,      CC0-1.0
+  PATENTS.md, COMMERCIAL.md,
+  CONTRIBUTING.md, REUSE.toml
+
+Contributions to any part of the repository are accepted under the Apache
+License 2.0, with a Developer Certificate of Origin sign-off. See
+CONTRIBUTING.md.
+
+
+1. The encoder-side licence
+
+The encoder-side sources are dual licensed:
+
+- You may use them under the GNU General Public License, version 3 or (at
+  your option) any later version.
+- Alternatively, you may use them under a separate commercial licence
+  agreement with mtq0605, if you have concluded one.
+
+Without such an agreement, only the GNU GPL applies. See COMMERCIAL.md.
+
+2. Combined works
+
+Encoder-side programs may be built together with decoder-side files. Those
+files remain under Apache-2.0 and keep their headers.
+
+A program that contains encoder-side code and is distributed under the GNU
+GPL is, as a whole, under GPL-3.0-or-later. The Apache License 2.0 is
+compatible with version 3 of the GNU GPL.
+
+Whoever distributes such a program must also comply with section 4 of the
+Apache License 2.0 for the decoder-side files. This includes passing on the
+NOTICE file.
+
+Decoder-side files must not include, or depend on, encoder-side files.
+
+3. Output of the encoder
+
+Audio files, bitstreams, logs and any other output produced by running the
+LAE encoder, modified or unmodified, belong to whoever produced them.
+mtq0605 claims no rights in such output.
+
+Output may contain material from the encoder that is protected by
+copyright, for example tables or header templates copied into a file. To
+that extent, mtq0605 grants every person a perpetual, worldwide,
+royalty-free and irrevocable permission to use, copy, modify and distribute
+that output under any terms, without any obligation under the GNU GPL.
+
+- The permission covers material in which mtq0605 holds the copyright.
+- Material contributed by others is available under the Apache License
+  2.0, under which it was contributed.
+- The permission is separate from, and in addition to, the GNU GPL.
+
+4. Implementing the format
+
+The author does not require any licence, permission or fee for
+implementing the LAE format. CC-BY-4.0 governs only the copying and
+adapting of the specification and documentation texts. Anyone may write an
+independent encoder or decoder for LAE under any licence.
+
+5. Patents
+
+CC-BY-4.0 and CC0-1.0 grant no patent rights. Section 3 of the Apache
+License 2.0 and section 11 of the GNU GPL v3 contain patent licences from
+contributors. The author's patent pledge is in PATENTS.md.
+
+6. Names
+
+None of these licences grants any right in the following names:
+
+- "LAE"
+- "Layered Audio Extension"
+- "LAE Lossy"
+- "LAE Lossless"
+- "LAEY"
+- "LAES"
+
+You may use these names to state truthfully that a product implements LAE
+or is derived from it.
+
+7. No warranty
+
+Each work is provided without warranty, as stated in its licence.
+
+8. Contact
+
+Contact is through GitHub.
+
+- Open an issue in the LAE repository.
+- For private matters, use the repository's private vulnerability
+  reporting (Security tab).

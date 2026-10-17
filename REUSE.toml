@@ -1,0 +1,71 @@
+# REUSE.toml for LAE (Layered Audio Extension)
+# SPDX-FileCopyrightText: 2026 mtq0605
+# SPDX-License-Identifier: CC0-1.0
+#
+# Purpose: licensing information for files that do not carry their own
+# SPDX header.
+#
+# Rules:
+# - With precedence = "closest", a file's own SPDX header, where present,
+#   takes priority over these annotations.
+# - Where several annotations match the same file, the last one applies.
+# - The encoder-side and decoder-side sources in src/ carry their own
+#   headers and are not annotated here.
+
+version = 1
+
+# Specification texts and documentation.
+[[annotations]]
+path = ["README.md", "spec/**", "docs/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 mtq0605"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+# Tools, build files and CI configuration.
+[[annotations]]
+path = ["tools/**", ".github/**", "CMakeLists.txt", "Makefile"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 mtq0605"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Conformance vectors, test data, the vector manifest, and data/.
+[[annotations]]
+path = ["tests/**", "data/**"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 mtq0605"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Test scripts in tests/. This entry overrides the CC0 entry above for
+# these file types.
+[[annotations]]
+path = [
+  "tests/**.sh",
+  "tests/**.bash",
+  "tests/**.py",
+  "tests/**.ps1",
+  "tests/**.bat",
+  "tests/**.cmd",
+  "tests/**.cpp",
+  "tests/**.h",
+  "tests/**.cmake",
+  "tests/**CMakeLists.txt",
+  "tests/**Makefile",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 mtq0605"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Project files.
+[[annotations]]
+path = [
+  "NOTICE",
+  "AUTHORS",
+  "PATENTS.md",
+  "COMMERCIAL.md",
+  "CONTRIBUTING.md",
+  ".gitignore",
+  ".gitattributes",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 mtq0605"
+SPDX-License-Identifier = "CC0-1.0"

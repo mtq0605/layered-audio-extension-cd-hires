@@ -7,6 +7,8 @@ SPDX-License-Identifier: CC0-1.0
 
 ## Contents
 
+- [SIZES.md](SIZES.md): readable size tables (MB per minute) for every mode, scheme and sample rate, generated from the CSV below.
+
 `loop10_v5_release_candidate.csv` holds the results of the test round of the LAE Lossy v5 release candidate. This round is named "loop10" in the file name and is called the "release-candidate round" in the [README](../README.md). It was measured during development on 2026-10-16.
 
 The procedure was:

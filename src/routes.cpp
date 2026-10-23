@@ -18,6 +18,7 @@
 #include "fft.h"
 #include <algorithm>
 #include "halfband.h"
+#include "enc_io.h"
 using namespace std; using namespace lae;
 static const int32_t* tab(int s, int& half) { switch (s) { case 0: half = kHalfLen0; return kHalf0; case 1: half = kHalfLen1; return kHalf1; case 2: half = kHalfLen2; return kHalf2; default: half = kHalfLen3; return kHalf3; } }
 static vector<double> up2(const vector<double>& x, int s) {   // same tables as the decoder's up-conversion, evaluated in double (encoder-side target only)
@@ -32,12 +33,12 @@ static vector<double> up2(const vector<double>& x, int s) {   // same tables as 
 using fftlib::fft;
 int main(int argc, char** argv) {
     double rate = atof(argv[2]);
-    auto rd32 = [](const char* p, long& n) { FILE* f = fopen(p, "rb"); fseek(f, 0, SEEK_END); n = ftell(f) / 8; fseek(f, 0, SEEK_SET); vector<int32_t> v(n * 2); fread(v.data(), 4, v.size(), f); fclose(f); return v; };
+    auto rd32 = [](const char* p, long& n) { vector<int32_t> v = encio::readAll<int32_t>(p); n = encio::count(v.size()) / 2; v.resize((size_t)n * 2); return v; };
     long L, Lb, Lb2; vector<int32_t> mr = rd32(argv[1], L), b24 = rd32(argv[4], Lb2);
-    FILE* fb = fopen(argv[3], "rb"); fseek(fb, 0, SEEK_END); Lb = ftell(fb) / 4; fseek(fb, 0, SEEK_SET); vector<int16_t> b16(Lb * 2); fread(b16.data(), 2, b16.size(), fb); fclose(fb);
+    vector<int16_t> b16 = encio::readAll<int16_t>(argv[3]); Lb = encio::count(b16.size()) / 2; b16.resize((size_t)Lb * 2);
     double baseRate = fmod(rate, 44100.0) == 0 ? 44100.0 : 48000.0; int stages = (int)round(log2(rate / baseRate));
     // dither regeneration (same seeds and draw order as base_layer / decoder)
-    vector<char> df; long nbk = 0; if (getenv("DITHERFLAGS")) { FILE* fd = fopen(getenv("DITHERFLAGS"), "rb"); fseek(fd, 0, SEEK_END); long sz = ftell(fd); fseek(fd, 0, SEEK_SET); df.resize(sz); fread(df.data(), 1, sz, fd); fclose(fd); nbk = sz / 2; }
+    vector<char> df; long nbk = 0; if (getenv("DITHERFLAGS")) { df = encio::readAll<char>(getenv("DITHERFLAGS")); nbk = encio::count(df.size()) / 2; }
     vector<double> v[2]; for (int c = 0; c < 2; c++) v[c].assign(Lb, 0.0);
     { uint32_t st[2] = {0x12345678u, 0x12345678u + 0x9E3779B9u};
       for (long i = 0; i < Lb; i++) for (int c = 0; c < 2; c++) { uint32_t& s = st[c]; s ^= s << 13; s ^= s >> 17; s ^= s << 5; int u1 = (s >> 20) & 0xFFF; s ^= s << 13; s ^= s >> 17; s ^= s << 5; int u2 = (s >> 20) & 0xFFF;
@@ -45,10 +46,10 @@ int main(int argc, char** argv) {
     // cut-off: first frequency >= 15 kHz where the CD path's transfer (cross-spectrum, robust to the CD's own noise) drops below -0.1 dB
     double fc = argc > 7 ? atof(argv[7]) : 0;
     vector<double> uv[2]; { auto upc = [&](int c) { uv[c] = v[c]; for (int s = 0; s < stages; s++) uv[c] = up2(uv[c], s); uv[c].resize(L, 0.0); }; std::thread t1(upc, 1); upc(0); t1.join(); }
-    if (fc <= 0) { const int M = 16384; vector<double> sxy(M / 2, 0), sxx(M / 2, 0), syy(M / 2, 0);
+    if (fc <= 0) { const int M = 16384; vector<double> sxy(M / 2, 0), sxx(M / 2, 0), syy(M / 2, 0), sxyi(M / 2, 0);
         for (long st0 = 0; st0 + M <= L; st0 += M) for (int c = 0; c < 2; c++) { vector<complex<double>> a(M), b(M);
             for (int i = 0; i < M; i++) { double w = 0.5 - 0.5 * cos(2 * M_PI * i / M); a[i] = (mr[(st0 + i) * 2 + c] >> 8) * w; b[i] = uv[c][st0 + i] * w; }
-            fft(a); fft(b); for (int k = 0; k < M / 2; k++) { sxy[k] += real(b[k] * conj(a[k])); sxx[k] += norm(a[k]); syy[k] += norm(b[k]); } }
+            fft(a); fft(b); for (int k = 0; k < M / 2; k++) { sxy[k] += real(b[k] * conj(a[k])); sxyi[k] += imag(b[k] * conj(a[k])); sxx[k] += norm(a[k]); syy[k] += norm(b[k]); } }
         // scan down from the base Nyquist: the cut-off is just above the highest frequency where the CD still tracks the master
         // (transfer >= -0.1 dB); bins where the master has almost no energy are skipped (no evidence there)
         int k15 = (int)(15000.0 / (rate / M)), kN = (int)(baseRate / 2 / (rate / M)) - 9; double mxx = 0; for (int k = k15; k <= kN; k++) mxx = max(mxx, sxx[k]);
@@ -56,14 +57,19 @@ int main(int argc, char** argv) {
         const bool indep = getenv("CDEXT") != nullptr;   // independent CD: its level / EQ may differ, so judge by coherence (gain-independent), not by the transfer
         for (int k = kN; k >= k15; k--) { double h = 0, xx = 0, yy = 0; for (int d = -8; d <= 8; d++) { h += sxy[k + d]; xx += sxx[k + d]; yy += syy[k + d]; }
             if (indep) { if (xx < 1e-9 * mxx * 17) continue; if (h > 0 && h * h >= 0.98 * xx * yy) { fc = (k + 1) * rate / M; break; } continue; }
-            if (xx < 1e-9 * mxx * 17) continue; if (h / xx >= 0.9886) { fc = (k + 1) * rate / M; break; } } }
+            if (xx < 1e-9 * mxx * 17) continue; if (h / xx >= 0.9886) { fc = (k + 1) * rate / M; break; } }
+        if (indep) {   // diagnostic only (printed, never used): the same scan with the per-bin magnitude of the cross-spectrum, which a time offset does not cancel
+            double fm = 15000; for (int k = kN; k >= k15; k--) { double h = 0, xx = 0, yy = 0; for (int d = -8; d <= 8; d++) { h += sqrt(sxy[k + d] * sxy[k + d] + sxyi[k + d] * sxyi[k + d]); xx += sxx[k + d]; yy += syy[k + d]; }
+                if (xx < 1e-9 * mxx * 17) continue; if (h * h >= 0.98 * xx * yy) { fm = (k + 1) * rate / M; break; } }
+            printf("CD cut-off by magnitude coherence (diagnostic only): %.0f Hz\n", fm);
+            if (fabs(fm - fc) > 500 || fc <= 15000) printf("WARNING: the cut-off of the independent CD looks wrong (%.0f Hz, magnitude coherence %.0f Hz): CD and master may be offset in time\n", fc, fm); } }
     printf("CD cut-off: %.0f Hz\n", fc);
-    if (getenv("CUTOFFOUT")) { FILE* fo = fopen(getenv("CUTOFFOUT"), "wb"); fprintf(fo, "%.0f\n", fc); fclose(fo); }
+    if (getenv("CUTOFFOUT")) { char t[64]; snprintf(t, sizeof t, "%.0f\n", fc); encio::writeText(getenv("CUTOFFOUT"), t); }
     // T = lowpass_fc(base24 - v), windowed-sinc (Kaiser beta 9, 511 taps, zero phase) at the base rate
     const int NT = 255; vector<double> h(2 * NT + 1); double bes0 = 0; { auto I0 = [](double x) { double s = 1, t = 1; for (int k = 1; k < 30; k++) { t *= (x / 2) / k; s += t * t; } return s; }; bes0 = I0(9.0);
         for (int i = -NT; i <= NT; i++) { double r = (double)i / NT; double w = I0(9.0 * sqrt(max(0.0, 1 - r * r))) / bes0; double x = 2 * fc / baseRate; h[i + NT] = (i == 0 ? x : sin(M_PI * x * i) / (M_PI * i)) * w; } }
     bool full = fc >= baseRate / 2 - 1;   // CD complete to Nyquist: no lowpass needed
-    vector<int32_t> leak; if (getenv("LEAKIN")) { FILE* fl = fopen(getenv("LEAKIN"), "rb"); if (fl) { fseek(fl, 0, SEEK_END); long nl = ftell(fl) / 4; fseek(fl, 0, SEEK_SET); leak.resize(nl); fread(leak.data(), 4, nl, fl); fclose(fl); } }
+    vector<int32_t> leak; if (getenv("LEAKIN")) { leak = encio::readAll<int32_t>(getenv("LEAKIN")); if (leak.empty()) encio::fail("leak compensation: empty leak file"); }   // required when asked for: a missing leak must not silently skip the compensation
     vector<int32_t> Tout(Lb * 2), Fout(L * 2);
     auto chanTF = [&](int c) { vector<double> r(Lb), T(Lb);   // one channel; the two channels are independent and run in parallel
         for (long i = 0; i < Lb; i++) r[i] = b24[i * 2 + c] - v[c][i];   // base24 file: plain 24-bit units (may exceed full scale)
@@ -80,6 +86,6 @@ int main(int argc, char** argv) {
         vector<double> u = v[c]; for (long i = 0; i < Lb; i++) u[i] += T[i]; for (int s = 0; s < stages; s++) u = up2(u, s); u.resize(L, 0.0);
         for (long i = 0; i < L; i++) { long long d = (long long)(mr[i * 2 + c] >> 8) - llround(u[i]); d = max(-8388608LL, min(8388607LL, d)); Fout[i * 2 + c] = (int32_t)(d * 256); } };
     { std::thread t1(chanTF, 1); chanTF(0); t1.join(); }   // same arithmetic per channel as a sequential loop: output byte-identical
-    FILE* o = fopen(argv[5], "wb"); fwrite(Tout.data(), 4, Tout.size(), o); fclose(o);
-    o = fopen(argv[6], "wb"); fwrite(Fout.data(), 4, Fout.size(), o); fclose(o);
+    encio::writeVec(argv[5], Tout);
+    encio::writeVec(argv[6], Fout);
     return 0; }

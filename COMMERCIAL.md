@@ -18,6 +18,9 @@ The encoder-side sources in `src/` carry the SPDX expression
 - `part_coder.cpp`
 - `tone_scan.cpp`
 - `partition.h`
+- `cd_align.cpp`
+- `cd_plan.cpp`
+- `enc_io.h`
 
 You may use them under the GNU GPL, version 3 or later. Alternatively, you
 may use them under a separate commercial licence agreement with the author,

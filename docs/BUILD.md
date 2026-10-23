@@ -11,6 +11,9 @@ All code is standard C++17 and uses no third-party libraries.
 
 - The encoder is built from `src/lae_enc.cpp`.
 - The decoder is built from `src/lae_dec.cpp`.
+- The CD-Extra tool `lae_cdx` is built from `src/lae_cdx.cpp`.
+- The decoder library `liblae` is built from `src/lae_api.cpp`.
+- The foobar2000 component is built with `plugins/foo_input_lae/build_fb2k.cmd` ([plugins/foo_input_lae/README.md](../plugins/foo_input_lae/README.md)).
 - The encoder uses `std::filesystem`. On systems other than Windows, it uses `setenv`/`unsetenv`.
 - The source files of each program are listed in the [README](../README.md), Section 14.1.
 
@@ -31,7 +34,7 @@ The output is bit-identical on every platform only if both of the following hold
 
 **x87 builds are not supported.** The decoder's start-up self-test refuses them (Section 2).
 
-Section 3 lists the builds that have been verified. Other builds, including all ARM builds, have not been verified.
+Section 3 lists the builds that have been verified. Other builds, including 32-bit ARM and macOS on ARM, have not been verified.
 
 Example (Linux, decoder and encoder):
 
@@ -39,6 +42,14 @@ Example (Linux, decoder and encoder):
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_dec src/lae_dec.cpp
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_enc src/lae_enc.cpp
 ```
+
+Example (Windows, `lae_cdx`, the same flags as the encoder):
+
+```bat
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /bigobj src\lae_cdx.cpp
+```
+
+`liblae` is compiled from `src/lae_api.cpp` with `/fp:precise`; the verified flags are in `plugins/foo_input_lae/build_fb2k.cmd`.
 
 ### Auxiliary programs
 
@@ -68,8 +79,12 @@ At every start, the decoder passes a fixed data pattern through the inverse MDCT
 | GCC 13 x86-64 `-O2` and `-O0` (Linux) | identical | identical to the reference files, byte for byte |
 | Clang 18 x86-64 `-O2` (Linux) | identical | not checked |
 | GCC 13 x86 32-bit SSE2 (Linux) | identical | not checked |
+| GCC 13 ARM64 (aarch64) `-O2` and `-O0` (Linux) | identical | `-O2`: identical to the reference files, byte for byte |
+| Clang 18 ARM64 (aarch64) `-O2` (Linux) | identical | not checked |
 
-On Linux, 256 of 256 decoder results were identical to the reference.
+On Linux x86, 256 of 256 decoder results were identical to the reference; on Linux ARM64, 192 of 192.
+
+`lae_cdx`, `liblae` and the foobar2000 component have been built and tested on Windows with MSVC 2022 only (README, Sections 10.9, 13.3 and 13.7).
 
 The Linux checks are made with two scripts:
 

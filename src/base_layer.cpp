@@ -11,6 +11,7 @@
 #include <complex>
 #include "fft.h"
 #include "halfband.h"
+#include "enc_io.h"
 using namespace std;
 using namespace lae;
 
@@ -44,11 +45,10 @@ static vector<int32_t> decimate(const vector<int32_t>& x, int s) {
 }
 int main(int argc, char** argv) {
     if (argc < 5) return 1;
-    FILE* f = fopen(argv[1], "rb"); int R = atoi(argv[2]), R0 = atoi(argv[3]);
+    int R = atoi(argv[2]), R0 = atoi(argv[3]);
     int stages = 0; while ((R0 << stages) < R) stages++;
     if ((R0 << stages) != R) { fprintf(stderr, "rate %d is not base %d * 2^n\n", R, R0); return 2; }
-    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
-    long frames = sz / 8; vector<int32_t> raw(frames * 2); fread(raw.data(), 4, raw.size(), f); fclose(f);
+    vector<int32_t> raw = encio::readAll<int32_t>(argv[1]); long frames = encio::count(raw.size()) / 2;
     vector<vector<int32_t>> ch(2);
     for (int c = 0; c < 2; c++) { ch[c].resize(frames); for (long i = 0; i < frames; i++) ch[c][i] = raw[i * 2 + c] >> 4; }
     for (int c = 0; c < 2; c++)
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
             double se = 0; for (long i = P; i < (long)xx.size(); i++) { double p = 0; for (int j = 0; j <= P; j++) p += a[j] * xx[i - j]; se += p * p; } rms = sqrt(se / max(1L, (long)xx.size() - P)); }
         dflag[c * nbk + k] = rms < 128.0 && r[0] > 0;   // 0.5 LSB16 in 24-bit units; digital silence (all-zero block) is never dithered: the CD keeps true zeros
     }
-    if (getenv("DITHERFLAGS")) { FILE* fd = fopen(getenv("DITHERFLAGS"), "wb"); fwrite(dflag.data(), 1, dflag.size(), fd); fclose(fd); }
+    if (getenv("DITHERFLAGS")) encio::writeVec(getenv("DITHERFLAGS"), dflag);
     { long nd = 0; for (char v : dflag) nd += v; printf("adaptive dither: %ld of %ld blocks dithered\n", nd, (long)dflag.size()); }
     uint32_t st[2] = {0x12345678u, 0x12345678u + 0x9E3779B9u};
     for (long i = 0; i < n; i++)
@@ -80,9 +80,9 @@ int main(int argc, char** argv) {
             if (v > 32767) v = 32767; if (v < -32768) v = -32768;
             out[i * 2 + c] = (int16_t)v;
         }
-    FILE* o = fopen(argv[4], "wb"); fwrite(out.data(), 2, out.size(), o); fclose(o);
+    encio::writeVec(argv[4], out);
     if (getenv("BASE24")) { vector<int32_t> b24(n * 2); for (long i = 0; i < n; i++) for (int c = 0; c < 2; c++) { int64_t v = ((int64_t)ch[c][i] + 8) >> 4; b24[i * 2 + c] = (int32_t)v; }   // plain 24-bit units, NOT left-aligned: band-limited overshoot beyond full scale is kept (depth target carries it; only the final output is limited)
-        FILE* o2 = fopen(getenv("BASE24"), "wb"); fwrite(b24.data(), 4, b24.size(), o2); fclose(o2); }
+        encio::writeVec(getenv("BASE24"), b24); }
     printf("base layer: %ld frames @ %d Hz, %d stages\n", n, R0, stages);
     return 0;
 }

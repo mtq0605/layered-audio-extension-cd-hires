@@ -12,3 +12,9 @@ License, version 3 or (at your option) any later version. They are also
 available under a separate commercial licence from mtq0605.
 
 The LAE specification texts and documentation are licensed under CC BY 4.0.
+
+The foobar2000 component in plugins/foo_input_lae is licensed under the
+Apache License, Version 2.0. When it is built, the foobar2000 SDK
+(Copyright (c) 2001-2019 Peter Pawlowski, BSD-style licence) and pfc
+(zlib licence) are compiled into the component DLL. The SDK is not
+included in this repository.

@@ -19,6 +19,7 @@ Sections 14 and 15 and all text marked *informative* are not normative.
 The reference decoder is normative wherever this text is silent or ambiguous. Its files are:
 
 * `src/lae_dec.cpp`
+* `src/lae_decoder.h`
 * `src/part_stream.h`
 * `src/partition_format.h`
 * `src/mdct_tb.h`
@@ -31,7 +32,9 @@ The encoder's partition search is in `src/partition.h`. That file is not needed 
 The format family is called LAE. It has two tiers:
 
 * the lossy tier, LAE Lossy (LAEY), specified here;
-* the lossless tier, LAE Lossless (LAES): design document published ([spec/lossless/DESIGN.md](../lossless/DESIGN.md)); normative specification not yet written.
+* the lossless tier, LAE Lossless (LAES): design document published ([spec/lossless/DESIGN.md](../lossless/DESIGN.md), under review); normative specification not yet written.
+
+The encapsulation of the extension on CD-Extra discs and in separate extension files is specified in [spec/cdx/SPEC.md](../cdx/SPEC.md) (draft).
 
 The RIFF chunk identifier is `LAE `, with a trailing space. The chunk magic is `LAE1` (Section 4).
 
@@ -63,7 +66,7 @@ A decoder can produce the following outputs. All of them are written as 24-bit t
 
 When an output rate below the master rate is selected, the frequency-layer streams that start at or above the output Nyquist frequency are skipped without being decoded (Section 5.4). The result is then brought down to the selected rate with the half-band decimators of Section 10.
 
-LAE Lossless (LAES), the lossless tier, is not specified here. Its status: design document published ([spec/lossless/DESIGN.md](../lossless/DESIGN.md)); normative specification not yet written.
+LAE Lossless (LAES), the lossless tier, is not specified here. Its status: design document published ([spec/lossless/DESIGN.md](../lossless/DESIGN.md), under review); normative specification not yet written.
 
 ### 1.2 Decoding model (informative)
 
@@ -1018,8 +1021,8 @@ Passing the self-test does not replace the conformance test of Section 1.3.
 *Informative.* Status of the reference implementation ([docs/BUILD.md](../../docs/BUILD.md)):
 
 * The decoder and the encoder build and run on Windows (MSVC) and on Linux (GCC 13 at `-O2` and `-O0`, Clang 18). The decoder has also been built with GCC as a 32-bit SSE2 build.
-* On Linux, the decoder outputs were identical in 256 of 256 comparisons, and the encoder reproduces all 16 vector files byte for byte.
-* ARM platforms have not yet been tested.
+* On Linux x86, the decoder outputs were identical in 256 of 256 comparisons, and the encoder reproduces all 16 vector files byte for byte.
+* On Linux ARM64 (aarch64; GCC 13 at `-O2` and `-O0`, Clang 18 at `-O2`), the decoder outputs were identical in 192 of 192 comparisons, and the encoder (GCC 13, `-O2`) reproduces all 16 vector files byte for byte. Other ARM platforms have not been tested.
 * x87 builds are not supported; the reference decoder's self-test refuses them.
 
 ---
@@ -1040,7 +1043,7 @@ Unless another source is cited, the statements in this section are based on the 
   * The frequency layer starts below the detected CD cut-off: the encoder passes a start frequency of `fc - 1000` Hz to the layer coder (`src/lae_enc.cpp`). `fc` records the cut-off.
   * **Cut-off detection** (`src/routes.cpp`). From averaged cross-spectra of the master and the interpolated CD path, the encoder scans downwards from the base-rate Nyquist frequency to 15 kHz. It sets `fc` just above the highest frequency at which the transfer of the CD path is at least −0.1 dB. Bins in which the master has almost no energy are skipped. If no such frequency is found, `fc = 15000` Hz.
 * **Independent CD input.** The encoder option `cd=<file>` accepts a separately supplied 16-bit two-channel CD at the base rate.
-  * The supplied CD becomes the CD layer bit for bit. It must already be aligned with the master and have exactly `ncd` samples per channel; automatic alignment is not implemented.
+  * The supplied CD becomes the CD layer bit for bit. The encoder places the master on the time axis of the CD and moves the master by whole master samples and by a fraction of a master sample; the CD is never moved (README, Section 4.3). Nothing about the alignment is stored in the file, and decoding is unchanged.
   * All dither flags are then 0.
   * The CD cut-off is found by a coherence test (threshold 0.98), which does not depend on the gain of the CD, instead of the transfer test.
   * The extension codes the master minus the CD path.

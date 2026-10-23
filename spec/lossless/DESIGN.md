@@ -5,8 +5,15 @@
 
 **English** | [中文](DESIGN.zh.md)
 
-**Status:** design document published ([spec/lossless/DESIGN.md](DESIGN.md), this document); normative specification not yet written.
+**Status:** design document published ([spec/lossless/DESIGN.md](DESIGN.md), this document), under review; normative specification not yet written.
 **Licence of this document:** CC BY 4.0. Copyright (c) 2026 mtq0605.
+
+**Review.** This document is under review. The following directions were decided after 2026-10-18 and take precedence over the text below. All other statements of this document are under review.
+
+- LAES uses the same alignment, encapsulation and reading chain as LAE Lossy (LAEY) ([README](../../README.md), Sections 4.3, 4.5 and 10.5–10.8; [spec/cdx/SPEC.md](../cdx/SPEC.md)).
+- LAES has its own extension block type, 2, which is reserved in [spec/cdx/SPEC.md](../cdx/SPEC.md).
+- A CD-Extra disc holds only the subset "CD + 24 bit at 44.1 kHz" of LAES. The full lossless tier is distributed on BD or as files.
+- A FLAC-compatible form (Section 9.2) is under design (not decided).
 
 This document is informative. It describes the current design of LAE Lossless, as of 2026-10-18. The outline is stable, but details may still change. Decisions that have not yet been taken are marked **open**. Section 11 collects them.
 

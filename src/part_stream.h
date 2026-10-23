@@ -49,10 +49,11 @@ template <class C> static void codeU(C& c, UModel& m, uint32_t& v, bool enc) {
     if constexpr (is_same<C, Enc>::value) { rest = v & ((1u << nr) - 1); if (nr) c.direct(rest, nr); } else { if (nr) rest = c.direct(nr); v = (1u << (len - 1)) | ((uint32_t)top << nr) | rest; }
 }
 static double g_tierBytes[4]; static long g_tierCoef[4];   // statistics: bytes and coefficients per block tier (encoder side)
-static bool g_streamErr = false;   // decoder: set when a decoded symbol is out of range (corrupt stream); values are clamped, memory is never overrun
+static thread_local bool g_streamErr = false;   // decoder: set when a decoded symbol is out of range (corrupt stream); values are clamped, memory is never overrun; per thread (a thread decodes one stream at a time)
 // CRC-32 (IEEE 802.3 polynomial, reflected, the common public-domain table algorithm) for the LAE chunk integrity check
-inline uint32_t crc32(const uint8_t* p, size_t n) { static uint32_t t[256]; static bool init = false;
-    if (!init) { for (uint32_t i = 0; i < 256; i++) { uint32_t c = i; for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1; t[i] = c; } init = true; }
+inline uint32_t crc32(const uint8_t* p, size_t n) { struct Table { uint32_t t[256]; Table() {
+        for (uint32_t i = 0; i < 256; i++) { uint32_t c = i; for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1; t[i] = c; } } };
+    static const Table tab; const uint32_t* t = tab.t;   // built once, thread-safe (C++11 static initialisation)
     uint32_t c = 0xFFFFFFFFu; for (size_t i = 0; i < n; i++) c = t[(c ^ p[i]) & 0xFF] ^ (c >> 8); return c ^ 0xFFFFFFFFu; }
 struct Hdr { long K; int N, k0, k1, rate; long L; int cw, lv, eq; };   // bins k0..k1-1 of an N-bin plane; lv = mode index (part::MODES)
 
@@ -64,6 +65,9 @@ template <class C> struct Walker {
     vector<UModel> coefM, expM; vector<uint16_t> tierP, zlP, expZero, expSign; size_t pos = 0; int prevTier = 0, prevE = 12;
     Walker(const Hdr& hh) : h(hh), nc(part::numCells(hh.k0, hh.k1)), P{nullptr, hh.K, hh.N, hh.k0, hh.k1, part::numCells(hh.k0, hh.k1)},
         coefM(3 * 13), expM(4), tierP(4 * 4, 1024), zlP(4 * 8, 1024), expZero(4, 1024), expSign(4, 1024) {}
+    // the state of another walker of the same stream, bound to this stream's header hh (h is a reference: the default copy keeps the other's)
+    Walker(const Hdr& hh, const Walker& o) : h(hh), nc(o.nc), P(o.P), M0(o.M0), coefM(o.coefM), expM(o.expM), tierP(o.tierP), zlP(o.zlP),
+        expZero(o.expZero), expSign(o.expSign), pos(o.pos), prevTier(o.prevTier), prevE(o.prevE) {}
     bool done() const { return M0 >= h.K; }
     int rowFrames() const { return (int)min<long>(part::ROOTT, h.K - M0); }
     void row(C& c, vector<int32_t>& s, bool enc, vector<int32_t>& plane, long frame0) {

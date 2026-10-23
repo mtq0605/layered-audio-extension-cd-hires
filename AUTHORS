@@ -37,6 +37,9 @@ src/lossy_v2.cpp     | mtq0605 | original | -
 src/part_coder.cpp   | mtq0605 | original | -
 src/tone_scan.cpp    | mtq0605 | original | -
 src/partition.h      | mtq0605 | original | -
+src/cd_align.cpp     | mtq0605 | original | -
+src/cd_plan.cpp      | mtq0605 | original | -
+src/enc_io.h         | mtq0605 | original | -
 
 ## Use of AI tools
 

@@ -14,6 +14,7 @@
 #include <vector>
 #include <complex>
 #include "fft.h"
+#include "enc_io.h"
 #include <algorithm>
 #include <string>
 #include <chrono>
@@ -106,8 +107,7 @@ static vector<double> loadOrSynth(const string& src, double rate, double secs) {
             x[i] = v; }
         return x;
     }
-    FILE* f = fopen(src.c_str(), "rb"); fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
-    long fr = sz / 8; vector<int32_t> raw(fr * 2); fread(raw.data(), 4, raw.size(), f); fclose(f);
+    vector<int32_t> raw = encio::readAll<int32_t>(src.c_str()); long fr = encio::count(raw.size()) / 2; raw.resize((size_t)fr * 2);
     x.resize(fr); const char* cs = getenv("CHSEL"); char sel = cs ? cs[0] : 'L';
     for (long i = 0; i < fr; i++) { long l = raw[i * 2] >> 8, r = raw[i * 2 + 1] >> 8;
         x[i] = sel == 'R' ? r : sel == 'S' ? (double)(l - r) : sel == 'M' ? (double)(r + ((l - r) >> 1)) : l; }

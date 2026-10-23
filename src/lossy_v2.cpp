@@ -17,6 +17,7 @@
 #include <chrono>
 #include <string>
 #include "mdct_tb.h"
+#include "enc_io.h"
 using namespace std;
 typedef int32_t i32; typedef int64_t i64; static const int N = mdct::N;
 using mdct::forward; using mdct::inverse;
@@ -59,7 +60,7 @@ int main(int argc, char** argv) {
     vector<double> FlM;   // master's own floor (depth layer only), same grouping
     vector<double> XMg;   // master coefficients at the base rate (depth layer only)
     if (getenv("FULLBAND") && getenv("MASTERREF")) {
-        FILE* fm = fopen(getenv("MASTERREF"), "rb"); fseek(fm, 0, SEEK_END); long nm = ftell(fm) / 8; fseek(fm, 0, SEEK_SET); vector<int32_t> rm(nm * 2); fread(rm.data(), 4, rm.size(), fm); fclose(fm);
+        vector<int32_t> rm = encio::readAll<int32_t>(getenv("MASTERREF")); long nm = encio::count(rm.size()) / 2; rm.resize((size_t)nm * 2);
         const char* cs = getenv("CHSEL"); int cc = (cs && cs[0] == 'R') ? 1 : 0; vector<i32> xm(L); for (long i = 0; i < L && i < nm; i++) xm[i] = rm[i * 2 + cc];   // base24 file: plain 24-bit units
         vector<i32> XM = forward(xm); XMg.assign(XM.begin(), XM.end()); FlM.assign((size_t)ng * nseg, 0.0);
         for (int g = 0; g < ng; g++) for (long s = 0; s < nseg; s++) { vector<double> r;
@@ -193,11 +194,11 @@ int main(int argc, char** argv) {
           if (getenv("TIMING")) printf("  [t %.1f s] final bisection done\n", chrono::duration<double>(chrono::steady_clock::now() - T0).count());
           }
         for (size_t si = 0; si < segs.size(); si++) { Seg& S = segs[si]; string suf = segs.size() > 1 ? "." + to_string(si) : "";
-            if (getenv("DUMP")) { FILE* f = fopen((string(getenv("DUMP")) + suf).c_str(), "wb");
+            if (getenv("DUMP")) {
                 int32_t hdr[11] = {0x50415254, (int32_t)K, N, S.P.k0, S.P.k1, (int32_t)rate, (int32_t)L, part::CW + 256 * part::ruleRef(), mi, eq ? 1 : 0, (int32_t)S.R.stream.size()};
-                fwrite(hdr, 4, 11, f); fwrite(S.R.stream.data(), 4, S.R.stream.size(), f); fclose(f); }
-            if (getenv("PLANE")) { FILE* f = fopen((string(getenv("PLANE")) + suf).c_str(), "wb"); fwrite(S.R.Q.data(), 4, S.R.Q.size(), f); fclose(f); } }
-        if (getenv("SEGCOUNT")) { FILE* f = fopen(getenv("SEGCOUNT"), "wb"); fprintf(f, "%zu\n", segs.size()); fclose(f); }
+                vector<int32_t> buf(hdr, hdr + 11); buf.insert(buf.end(), S.R.stream.begin(), S.R.stream.end()); encio::writeVec((string(getenv("DUMP")) + suf).c_str(), buf); }
+            if (getenv("PLANE")) encio::writeAll((string(getenv("PLANE")) + suf).c_str(), S.R.Q.data(), 4, S.R.Q.size()); }
+        if (getenv("SEGCOUNT")) encio::writeText(getenv("SEGCOUNT"), to_string(segs.size()) + "\n");
         printf("runtime %.1f s\n", chrono::duration<double>(chrono::steady_clock::now() - T0).count());
         return 0; }
     printf("lossy_v2: PART=<mode> is required\n"); return 1;

@@ -86,7 +86,7 @@ In the cd24 route, steps 4 to 6 are omitted.
 
 A conforming decoder MUST meet every requirement of Sections 3 to 13 that applies to a decoder, including the validation and refusal rules of Sections 4.3 and 12 and the requirement to remain memory-safe for every input. In addition, for every test vector and every route listed in [tests/vectors/MANIFEST.md](../../tests/vectors/MANIFEST.md) (Appendix B), it MUST produce an output WAV file (header and samples, Section 11.8) whose SHA-256 matches the listed value.
 
-The manifest currently lists only the first 16 hexadecimal digits of each SHA-256 value. The full 64-digit values will be published in a later revision.
+The main table of the manifest lists the first 16 hexadecimal digits of each SHA-256 value; the full 64-digit values are listed in its section "Full SHA-256 values".
 
 The test vectors exercise the process defined in Sections 3 to 13. An implementation that follows these sections exactly produces the listed outputs.
 

@@ -2,13 +2,22 @@
 
 **English** | [中文](README.zh.md)
 
+## Versions
+
+| Version | Date | Contents | Files | Download |
+|---|---|---|---|---|
+| **v5-2026-10-24** (current) | 2026-10-24 | Container version 5. Adds independent-CD alignment, the whole-disc planner, CD-Extra encapsulation (`lae_cdx`), the decoder library `liblae` and the foobar2000 component. Decoding unchanged. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-24) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-24.zip) |
+| v5-2026-10-18 | 2026-10-18 | Container version 5, first public release: specification, reference encoder and decoder, 16 conformance vectors. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-18) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-18.zip) |
+
+Both versions use container version 5 and the same decoding process: files of either version play with the decoder of either version. All changes: [CHANGELOG.md](CHANGELOG.md).
+
 **Status:** this is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), a design document is published ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)); its normative specification is not yet written.
 
 This revision of the repository adds the following: alignment of an independent CD in the encoder; a whole-disc planner; the CD-Extra encapsulation tool `lae_cdx`; a decoder library with a C interface; and a foobar2000 component. The container remains version 5. The bitstream, the decoding process and the lossy specification are unchanged.
 
 **Normative text:** the bitstream and the decoding process are specified in [spec/lossy/SPEC.md](spec/lossy/SPEC.md), which is currently a draft for public review. Where SPEC.md is silent or ambiguous, the reference decoder is normative. This document is informative.
 
-The encapsulation of the extension on CD-Extra, in separate files and in streams is outside the v5 container. Its specification is to be published, as a draft, as [spec/cdx/SPEC.md](spec/cdx/SPEC.md).
+The encapsulation of the extension on CD-Extra, in separate files and in streams is outside the v5 container. It is specified, as a draft, in [spec/cdx/SPEC.md](spec/cdx/SPEC.md).
 
 **Further documents:**
 
@@ -943,7 +952,7 @@ All header fields are validated before use. The reference decoder also provides 
 
 ### 10.5 CD-Extra encapsulation
 
-Sections 10.5–10.9 summarise the encapsulation specification, which is to be published as a draft as [spec/cdx/SPEC.md](spec/cdx/SPEC.md). Where the two differ, the specification governs. The encapsulation lies entirely outside container v5: the v5 container and the decoder are unchanged, and the encapsulation specification has its own version number. The tool `lae_cdx` implements it (commands in Section 14.6).
+Sections 10.5–10.9 summarise the encapsulation specification, published as a draft as [spec/cdx/SPEC.md](spec/cdx/SPEC.md). Where the two differ, the specification governs. The encapsulation lies entirely outside container v5: the v5 container and the decoder are unchanged, and the encapsulation specification has its own version number. The tool `lae_cdx` implements it (commands in Section 14.6).
 
 **Scope.** CD-Extra applies to the 44.1 kHz family only, and every CD layer on a disc is 44,100 Hz. DVD and Blu-ray data discs do not use the CD layout. They carry ordinary files (Section 10.7), and these may belong to either family.
 

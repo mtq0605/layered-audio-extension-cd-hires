@@ -2,6 +2,15 @@
 
 [English](README.md) | **中文**
 
+## 版本
+
+| 版本 | 日期 | 内容 | 文件 | 下载 |
+|---|---|---|---|---|
+| **v5-2026-10-24**（当前） | 2026-10-24 | 容器版本 5。新增独立 CD 对齐、整盘规划器、CD-Extra 封装（`lae_cdx`）、解码库 `liblae` 和 foobar2000 组件。解码不变。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-24) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-24.zip) |
+| v5-2026-10-18 | 2026-10-18 | 容器版本 5，首次公开发布：规范、参考编码器和解码器、16 个一致性向量。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-18) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-18.zip) |
+
+两个版本都使用容器版本 5，解码过程相同：任一版本的文件都能用任一版本的解码器播放。全部改动见 [CHANGELOG.md](CHANGELOG.md)。
+
 **状态：**本文是容器版本 5 的工作论文，也是代码仓库首页。该格式系列名为 **LAE**（**Layered Audio Extension**，分层音频扩展）。本文介绍有损等级 **LAE Lossy**（简称 **LAEY**）。无损等级 **LAE Lossless**（简称 **LAES**）已有设计文档（[spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)）；其规范性规范尚未编写。
 
 本次仓库修订新增以下内容：
@@ -16,7 +25,7 @@
 
 **规范性文本：**比特流和解码过程由 [spec/lossy/SPEC.md](spec/lossy/SPEC.md) 规定；该文件目前是供公开评审的草案。若 SPEC.md 未作说明或存在歧义，以参考解码器为规范依据。本文仅供参考。
 
-扩展在 CD-Extra 上、在单独文件中以及在数据流中的封装不属于 v5 容器的范围。其规范将以草案形式发布为 [spec/cdx/SPEC.md](spec/cdx/SPEC.md)。
+扩展在 CD-Extra 上、在单独文件中以及在数据流中的封装不属于 v5 容器的范围。其规范以草案形式发布于 [spec/cdx/SPEC.md](spec/cdx/SPEC.md)。
 
 **其他文档：**
 
@@ -972,7 +981,7 @@ K 是平面中的 MDCT 帧数，必须为正数，且应等于 $\lceil L_s/512 \
 
 ### 10.5 CD-Extra 封装
 
-第 10.5–10.9 节概述封装规范；该规范将以草案形式发布为 [spec/cdx/SPEC.md](spec/cdx/SPEC.md)。两者不一致时，以该规范为准。封装完全位于容器 v5 之外：v5 容器和解码器均未改变，封装规范有其自身的版本号。工具 `lae_cdx` 实现了该规范（命令见第 14.6 节）。
+第 10.5–10.9 节概述封装规范；该规范以草案形式发布于 [spec/cdx/SPEC.md](spec/cdx/SPEC.md)。两者不一致时，以该规范为准。封装完全位于容器 v5 之外：v5 容器和解码器均未改变，封装规范有其自身的版本号。工具 `lae_cdx` 实现了该规范（命令见第 14.6 节）。
 
 **适用范围。**CD-Extra 仅适用于 44.1 kHz 系列，光盘上的每个 CD 层均为 44,100 Hz。DVD 和蓝光数据光盘不使用 CD 布局。它们承载普通文件（第 10.7 节），这些文件可以属于任一采样率系列。
 

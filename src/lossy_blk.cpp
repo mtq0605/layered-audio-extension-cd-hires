@@ -4,7 +4,7 @@
 // few blocks plus small per-track records. The track is scanned block by block; each scan records per-cell information and adds up whole-track
 // summaries (floors, tone / transient events, mean energies, code-length histogram, shares); the summaries decide the plan (tags, lambdas);
 // then every block is coded by the plan and its piece of each stream is appended in time order (one whole-track stream per segment, as before).
-// Blocks are whole floor segments and whole root rows (lcm(seg, 8) frames x LAE_BLOCKUNITS, default 4; LAE_BLOCKUNITS=0: the whole track as
+// Blocks are whole floor segments and whole root rows (lcm(seg, 8) frames x LAE_BLOCKUNITS, set by the encoder's memory plan, default 4; LAE_BLOCKUNITS=0: the whole track as
 // one block). Every sum is added in the same order as in lossy_v2.cpp. Large intermediate data (the coefficient plane X, the reconstructed plane
 // of all segments) sit in temporary files next to DUMP; the cell records stay in memory (3 bytes per cell).
 // usage and environment as lossy_v2.cpp: lossy_blk <raw s32le stereo> <rate>

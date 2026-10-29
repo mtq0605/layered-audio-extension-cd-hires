@@ -274,7 +274,7 @@ static int encode(int argc, char** argv) {
     // encoder build, the options, the block length and the master's MD5. A run with the same key continues after the last finished step;
     // any other key starts from the beginning. The notes are read only by this encoder and never go into the LAE file.
     std::set<std::string> doneSteps; std::mutex stepMu; const std::string manifest = T("resume.txt");
-    if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | units ") + (getenv("LAE_BLOCKUNITS") ? getenv("LAE_BLOCKUNITS") : "") + " | options";
+    if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | options");   // not the block length: it does not change any result
         for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume")) key += std::string(" ") + argv[i];
         key += " | master " + masterMd5;
         if (cdPath) { wavio::Wav cw; key += " | CD " + (wavio::readCD(cdPath, cw) ? alignhash::cdMd5(cw.pcm16.data(), cw.pcm16.size() / 2) : std::string("unreadable")); }   // cd=: the alignment runs again every time; the steps after it continue
@@ -486,19 +486,35 @@ static int encode(int argc, char** argv) {
     typedef std::vector<std::vector<uint8_t>> Streams;
     // two layers of the same kind at once (L and R, M and S): the second runs in its own thread with its own module variables and printed text.
     // Same arithmetic as one after the other, so the streams are byte-identical.
-    // memory plan (2026-10-29): made once at the start from the track length and the physical memory read then; the whole encode follows it.
-    // Two layers of a pair at once need about 2 x (1 byte per layer sample + 128 MB) (block-wise; measured 2026-10-29); budget = mem=<GB>, default half
-    // the physical memory; never two at once on 32-bit builds (address space) or with PARTTHREADS=1. The output does not depend on the plan.
+    // memory plan (2026-10-29 / 30): made once at the start from the track length and the physical memory read then; the whole encode follows it.
+    // Budget: mem=<GB>, or by default min(1/2, max(1/4, all - 28 GB)) of the physical memory (16 GB: 4, 32 GB: 8, 48 GB: 20, 64 GB: 32), so
+    // that the system and other programs keep room. A layer needs about 1 byte per layer sample (the cell records) + 20 bytes per sample
+    // of one block (measured 2026-10-30: about 17) + 128 MB. The block length (whole floor segments and root rows, a memory unit only) is the largest that fits the budget
+    // with two layers at once, at most 4 units; if not even one unit fits two at once, the layers run one after the other. Never two at once
+    // on 32-bit builds (address space) or with PARTTHREADS=1. LAE_BLOCKUNITS sets the block length by hand (tests). The output depends on
+    // neither: every block length and both orders give byte-identical files.
     struct PairPlan { bool both = false; unsigned long long need = 0; };
     unsigned long long memTotal = 0, memAvail = 0; physMemory(memTotal, memAvail);
-    const unsigned long long memUse = memBudget > 0 ? memBudget : memTotal / 2;
+    const unsigned long long G28 = 28ull << 30, memRule = std::min(memTotal / 2, std::max(memTotal / 4, memTotal > G28 ? memTotal - G28 : 0ull));
+    const unsigned long long memUse = memBudget > 0 ? memBudget : memRule;
     const char* ptEnv = getenv("PARTTHREADS"); const bool oneThread = ptEnv && atoi(ptEnv) == 1;
-    auto planFor = [&](long long samples) { PairPlan p; p.need = 2 * (1ull * (unsigned long long)samples + (128ull << 20));   // a few blocks + the cell records (3 bytes per cell) and the coded streams; measured: 10.16 min at 352.8 kHz, 475 MB in all
-        p.both = sizeof(void*) >= 8 && !oneThread && !getenv("LAE_TESTSEQUENTIAL") && p.need <= memUse && p.need <= memAvail; return p; };
-    const PairPlan planD = planFor((Lm + 2 * P) >> stages), planF = planFor(Lm + 2 * P);
-    printf("memory plan: %.2f min at %d Hz; depth layers %s (two at once about %.0f MB), frequency layers %s (two at once about %.0f MB); budget %.0f MB, available %.0f MB\n",
-           Lm / (60.0 * w.rate), w.rate, planD.both ? "two at once" : "coded one after the other", planD.need / 1e6, planF.both ? "two at once" : "coded one after the other", planF.need / 1e6,
-           memUse / 1e6, memAvail / 1e6);
+    auto unitSamples = [&](int rate) { long seg = std::max(1L, (long)(rate / mdct::N)); long u = seg; while (u % 8) u += seg; return (unsigned long long)u * mdct::N; };   // as lossy_blk.cpp
+    const unsigned long long sF = (unsigned long long)(Lm + 2 * P), sD = sF >> stages, uF = unitSamples(w.rate), uD = unitSamples((int)base), M128 = 128ull << 20;
+    auto layerNeed = [&](unsigned long long samples, unsigned long long unitS, long long units) { return samples + 20ull * std::min(samples, unitS * (unsigned long long)units) + M128; };
+    const bool mayPair = sizeof(void*) >= 8 && !oneThread && !getenv("LAE_TESTSEQUENTIAL");
+    long long units = 0; const char* buEnv = getenv("LAE_BLOCKUNITS");
+    if (buEnv) units = atoll(buEnv);
+    else { const unsigned long long lim = std::min(memUse, memAvail ? memAvail : memUse);
+        auto fit = [&](unsigned long long room) { return room > sF + M128 ? (long long)((room - sF - M128) / (20ull * uF)) : 0LL; };
+        units = mayPair ? fit(lim / 2) : 0; if (units < 1) units = fit(lim); units = std::max(1LL, std::min({4LL, units, (long long)((sF + uF - 1) / uF)}));   // at most 4 units (about 32 s): larger blocks are not faster (measured 2026-10-30: 8 / 32 / 64 s, 52-54 s) and only take memory; never longer than the track
+        env("LAE_BLOCKUNITS", std::to_string(units)); }
+    auto planFor = [&](unsigned long long samples, unsigned long long unitS) { PairPlan p; const long long u = units > 0 ? units : (long long)((samples + unitS - 1) / unitS);
+        p.need = 2 * layerNeed(samples, unitS, u); p.both = mayPair && p.need <= memUse && (!memAvail || p.need <= memAvail); return p; };
+    const PairPlan planD = planFor(sD, uD), planF = planFor(sF, uF);
+    printf("memory plan: %.2f min at %d Hz; blocks of %lld unit(s) (%.0f s); depth layers %s (two at once about %.0f MB), frequency layers %s (two at once about %.0f MB); budget %.0f MB%s, available %.0f MB\n",
+           Lm / (60.0 * w.rate), w.rate, units, units > 0 ? (double)(uF * (unsigned long long)units) / w.rate : Lm / (double)w.rate,
+           planD.both ? "two at once" : "coded one after the other", planD.need / 1e6, planF.both ? "two at once" : "coded one after the other", planF.need / 1e6,
+           memUse / 1e6, memBudget > 0 ? " (mem=)" : "", memAvail / 1e6);
     auto layerPair = [&](const char* in, int rate, const char* c1, const std::string& t1, const char* c2, const std::string& t2, Streams& o1, Streams& o2, bool both) {
         auto sequential = [&]() { o1 = layer(in, rate, c1, t1); if (ok) o2 = layer(in, rate, c2, t2); };
         if (!both) { sequential(); return; }

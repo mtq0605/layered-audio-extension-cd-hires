@@ -399,12 +399,12 @@ static int selftest() {
             bool hit = false; cdx::slide([&](long long j) { return x[(size_t)j]; }, (long long)x.size(), n, max(0LL, t - 3), t, A, B, [&](long long h) { if (h == t) hit = true; }); ok = hit; }
         ck(ok, "1000 random offsets: sliding values = direct values (X5)"); }
     {   vector<int16_t> big(2 * 300000); uint64_t r = 7; for (auto& v : big) { r = r * 6364136223846793005ULL + 1442695040888963407ULL; v = (int16_t)(r >> 48); }
-        cdx::Trailer t = cdx::compute(big.data(), 300000, 44100, 7); auto s = cdx::serialize(t); vector<uint8_t> f(100, 0xAB); f.insert(f.end(), s.begin(), s.end()); cdx::Trailer u; size_t bl = 0;
+        cdx::Trailer t = cdx::compute(big.data(), 300000, 44100, 7); auto s = cdx::serialize(t); vector<uint8_t> f(100, 0xAB); memcpy(f.data(), "LAE1", 4); f.insert(f.end(), s.begin(), s.end()); cdx::Trailer u; size_t bl = 0;
         ck(cdx::parse(f, u, bl) == "" && bl == 100 && u.s1 == t.s1 && u.s2 == t.s2 && u.ncd == 300000 && u.track == 7 && u.md5hex() == t.md5hex(), "trailer serialize / parse round trip");
         bool zero = true; for (int i = 60; i < 76; i++) if (s[(size_t)i]) zero = false; ck(zero && s.size() == 80 && !memcmp(s.data(), "LTVT", 4), "trailer: 80 bytes, LTVT, reserved bytes 0");
-        t.track = 120; s = cdx::serialize(t); f.assign(100, 0xAB); f.insert(f.end(), s.begin(), s.end());
+        t.track = 120; s = cdx::serialize(t); f.assign(100, 0xAB); memcpy(f.data(), "LAE1", 4); f.insert(f.end(), s.begin(), s.end());
         ck(cdx::parse(f, u, bl, false) == "" && cdx::parse(f, u, bl, true) == "invalid trailer field", "track 120: valid outside CD, invalid on a CD (X2)");
-        t.track = 1; t.rate = 48000; s = cdx::serialize(t); f.assign(100, 0xAB); f.insert(f.end(), s.begin(), s.end());
+        t.track = 1; t.rate = 48000; s = cdx::serialize(t); f.assign(100, 0xAB); memcpy(f.data(), "LAE1", 4); f.insert(f.end(), s.begin(), s.end());
         ck(cdx::parse(f, u, bl, false) == "" && cdx::parse(f, u, bl, true) == "invalid trailer field", "48000 Hz: valid outside CD, invalid on a CD (X2)"); }
     printf("selftest: %s\n", bad ? "FAILED" : "all passed"); return bad ? 1 : 0; }
 

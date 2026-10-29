@@ -42,6 +42,6 @@ int main(int argc, char** argv) {
     fwrite(buf.data(), 1, buf.size(), fo); if ((D.Lo * 6) & 1) fputc(0, fo); fclose(fo);
     if (wantMap) { FILE* fm = fopen(hookPath("CLIPMAP"), "wb"); if (fm) { for (int c = 0; c < 2; c++) fwrite(clipPos[c].data(), 4, clipPos[c].size(), fm); fclose(fm); } }   // channel 0 first, as before
     if (g_streamErr) { remove(argv[2]); printf("corrupt stream (values out of range): refusing to decode\n"); return 3; }
-    printf("LAE decode OK: %s -> %s | %s, %d Hz 24 bit, %ld samples/ch | mode %s (share by %s) %s, CD cut-off %d Hz | frequency segments used %d of %d | hard-limited samples %ld\n",
+    printf("LAE decode OK: %s -> %s | %s, %d Hz 24 bit, %ld samples/ch | mode %s (share by %s) %s, CD cut-off %d Hz | frequency segments used %d of %d | hard-limited samples %ld | format LAEY (extension LAE1)\n",
            argv[1], argv[2], mode == "16" ? "16-bit route" : (mode == "cd24" ? "CD + depth" : "24-bit route"), D.wrate, D.Lo, part::MODES[D.mi].name, D.wm == 2 ? "cells+energy" : (D.wm ? "energy" : "cells"), D.eq ? "equal" : "unequal", D.fc, D.nused, D.nseg, D.clip);
     return 0; }

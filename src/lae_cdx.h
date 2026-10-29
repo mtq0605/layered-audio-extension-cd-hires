@@ -48,7 +48,8 @@ inline std::string parse(const std::vector<uint8_t>& file, Trailer& t, size_t& b
     auto g32 = [&](size_t at) { uint32_t v = 0; for (int i = 3; i >= 0; i--) v = v << 8 | r[at + i]; return v; }; auto g64 = [&](size_t at) { uint64_t v = 0; for (int i = 7; i >= 0; i--) v = v << 8 | r[at + i]; return v; };
     if (g32(76) != crc32(r, 76)) return "trailer damaged";
     t.version = g16(4); if (t.version != 1 || g16(6) != TRAILER) return "unknown trailer version";
-    t.type = g16(8); if (t.type == 2) return "LAES extension block, not supported by this reader"; if (t.type != 1) return "unknown extension block type";
+    t.type = g16(8); if (t.type == 2) return "LAES extension block (LAE2), not supported by this reader"; if (t.type != 1) return "unknown extension block type";   // 1 = LAEY (LAE1), 2 = LAES (LAE2)
+    if (memcmp(file.data(), "LAE1", 4)) return "extension block does not match its trailer type";   // type 1 must carry an LAEY block
     t.track = g16(10); t.rate = g32(12); t.ncd = g32(16); memcpy(t.md5, r + 20, 16); t.s1 = g64(36); t.s2 = g64(44); t.lead0 = g32(52); t.tail0 = g32(56);
     bool ok = t.track >= 1 && (!cd || t.track <= 98) && (t.rate == 44100 || (!cd && t.rate == 48000)) && t.ncd >= 1 && t.ncd < (1u << 28) && t.s1 < M && t.s2 < M && t.lead0 <= t.ncd && t.tail0 <= t.ncd
               && ((t.lead0 == t.ncd && t.tail0 == t.ncd) || (uint64_t)t.lead0 + t.tail0 < t.ncd);

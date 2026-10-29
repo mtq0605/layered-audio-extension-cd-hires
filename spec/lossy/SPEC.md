@@ -36,7 +36,7 @@ The format family is called LAE. It has two tiers:
 
 The encapsulation of the extension on CD-Extra discs and in separate extension files is specified in [spec/cdx/SPEC.md](../cdx/SPEC.md) (draft).
 
-The RIFF chunk identifier is `LAE `, with a trailing space. The chunk magic is `LAE1` (Section 4).
+The RIFF chunk identifier is `LAE `, with a trailing space. The chunk magic is `LAE1` (Section 4). The magic names the format: `LAE1` = LAEY (this specification); `LAE2` = LAES, the lossless tier, which has its own specification. A decoder SHOULD tell the user which format it found; an LAEY decoder that finds `LAE2` reports an LAES file and does not decode it (the CD layer stays playable).
 
 ---
 

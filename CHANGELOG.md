@@ -2,6 +2,28 @@
 
 This file records the notable changes to LAE (Layered Audio Extension) and its lossy tier LAE Lossy (LAEY), newest first.
 
+## Unreleased (prepared 2026-10-29)
+
+The container format and the decoding process of LAEY are unchanged. The encoder writes byte-identical files, faster and with less memory.
+
+### Format names
+
+- The first 4 bytes of the `LAE ` chunk name the format: `LAE1` = LAEY (container version 5, unchanged), `LAE2` = LAES, the lossless tier (its own specification). `spec/lossy/SPEC.md` and `spec/cdx/SPEC.md` say so.
+- `lae_dec` reports the format it finds. For `LAE2` it says that the file is an LAES file and names the tool to use, instead of the former "unknown LAE chunk version". Its success line ends with `format LAEY (extension LAE1)`.
+- `lae_cdx` checks that an extension block of trailer type 1 begins with `LAE1` ("extension block does not match its trailer type"). Type 2 (LAES, `LAE2`) is still reported as not supported by this reader.
+
+### Encoder
+
+- **Faster, same output.** About 3–4 times faster: a 60 s stereo master at 352.8 kHz (mode 3, s1) on a 32-thread Windows x64 machine took 43 s instead of 177 s. Every output file is byte-identical to the 2026-10-24 encoder: all modes and options, independent CD with whole and fractional placement, 88.2 / 96 / 176.4 / 192 / 352.8 kHz, 16 / 24 / 32-bit masters, short tracks; also checked on Linux x64 and Linux ARM64 against the conformance vectors.
+  - The partition search no longer allocates a list of cut positions for every rectangle (with many threads these heap allocations waited on each other), reuses its per-block tables, computes the mean D / C energies once per share search, and skips the stream and the planes while it searches the share.
+  - The layer signal's periodogram is computed once (it was computed three times, one result unused); layer settings are read once instead of once per cell.
+  - The route split's filters are divided across threads, and the two layers of a pair (depth L and R, frequency M and S) can be coded at the same time.
+- **Less memory, same output.** One reconstructed plane instead of two identical copies; each octave segment holds only its own bins; signals are freed as soon as they are no longer needed; the master's samples are freed once the CD layer is derived. 60 s at 352.8 kHz: 1.06 GB with the layers one after the other (formerly 1.83 GB), 1.49 GB with two at once.
+- **Memory plan and `mem=<GB>`.** At the start the encoder reads the physical memory once, decides from the track length whether each pair of layers is coded at once or one after the other, prints the plan (`memory plan: …`) and follows it. Two at once only on 64-bit builds, with `PARTTHREADS` not 1, and when it fits the budget (half the physical memory by default; `mem=<GB>` sets it) and the available memory. The output does not depend on the plan.
+- `PARTTHREADS=1` now makes the whole encoder single-threaded.
+- **Fail-safety in threads.** An error inside any worker thread (out of memory, a failed write) is handed to the main thread and handled exactly as before: no output, no `.part` file, the temporary folder removed (24 forced-failure cases, layers at once and one after the other).
+- The opt-in `TIERSTAT` statistics now count per stream.
+
 ## 2026-10-24
 
 This release changes the encoder and the tools and adds a decoder library and a player component. The container format and the decoding process are unchanged.

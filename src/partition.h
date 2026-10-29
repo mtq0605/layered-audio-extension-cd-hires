@@ -21,54 +21,80 @@
 #include <functional>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <exception>
 #include <cstdlib>
 #include "partition_format.h"
+#if defined(_MSC_VER)
+#include <intrin.h>   // _BitScanReverse
+#endif
 
 namespace part {
-inline int& ruleRef() { static int r = 0; return r; }   // rule used by the encoder for the layer being coded (set by lossy_v2)
+// per thread: the encoder codes several layers at once; run() hands both settings on to its worker threads
+inline int& ruleRef() { static thread_local int r = 0; return r; }   // rule used by the encoder for the layer being coded (set by lossy_v2)
 inline int shiftOf(int E, int tier) { return shiftOfR(E, tier, ruleRef()); }
 // Quantiser dead zone (encoder only) and reconstruction offset (encoder + decoder)
 inline double deadzone() { return 0.30; }   // quantiser dead zone (encoder only)
-inline bool& zeroSignOpt() { static bool b = false; return b; }
+inline bool& zeroSignOpt() { static thread_local bool b = false; return b; }
 
+inline int bitLength(uint32_t v) {   // number of bits of v (0 for 0)
+#if defined(_MSC_VER)
+    unsigned long i; return _BitScanReverse(&i, v) ? (int)i + 1 : 0;
+#else
+    return v ? 32 - __builtin_clz(v) : 0;
+#endif
+}
 // ---- encoder search
 struct Leaf { long m0, m1; int c0, c1, tier, E, zl; };
 struct Share { double dTot = 0, dKept = 0, cTot = 0, cKept = 0; };
-struct Result { std::vector<Leaf> leaves; std::vector<int32_t> stream; std::vector<int32_t> Q, Qn; double bits = 0; Share cnt, en; double zsum = 0; long zcnt = 0; };   // Q and Qn: reconstructed coefficient planes
+struct Result { std::vector<Leaf> leaves; std::vector<int32_t> stream; std::vector<int32_t> Q; int k0 = 0, bw = 0; double bits = 0; Share cnt, en; double zsum = 0; long zcnt = 0; };   // Q: reconstructed coefficients of this plane's bins only: Q[m * bw + k - k0] (the former second copy Qn always held the same values)
 struct Costs { double bl[4][33]; double tierBits = 1.6, expBits = 4.0, zlBits = 2.0; };
 
 // one DP pass for given penalties (bits per demoted D / C unit; unit = one cell (wmode 0) or the mean energy of a D/C cell (wmode 1))
-inline Result run(const Plane& P, const std::vector<char>& cellA, const std::vector<int>& cellE, const std::vector<int>& lab,
-                  const std::vector<char>& noZL, bool equal, const Costs& cost, double lamD, double lamC, int wmode, double TH = -1) {
-    if (TH < 0) TH = deadzone();
-    Result R; R.Q.assign((size_t)P.K * P.N, 0); R.Qn.assign((size_t)P.K * P.N, 0);
-    // energy normalisation: mean energy of D cells and of C cells over the whole plane
+// energy normalisation: mean energy of D cells and of C cells over the whole plane (depends only on the plane and the tags)
+struct MeanE { double eD = 1, eC = 1; };
+inline MeanE meanEnergies(const Plane& P, const std::vector<char>& cellA, const std::vector<int>& lab) {
     double eD = 0, eC = 0; long nD = 0, nC = 0;
     for (long m = 0; m < P.K; m++) for (int c = 0; c < P.nc; c++) { size_t cid = (size_t)m * P.nc + c; if (cellA[cid] || lab[cid] < 2) continue; int kb; int nb = cellBins(P, c, kb); double e = 0;
         for (int j = 0; j < nb; j++) { double v = (*P.X)[(size_t)m * P.N + kb + j]; e += v * v; } if (lab[cid] == 3) { eD += e; nD++; } else { eC += e; nC++; } }
-    eD = nD ? eD / nD : 1; eC = nC ? eC / nC : 1;
+    MeanE r; r.eD = nD ? eD / nD : 1; r.eC = nC ? eC / nC : 1; return r; }
+inline Result run(const Plane& P, const std::vector<char>& cellA, const std::vector<int>& cellE, const std::vector<int>& lab,
+                  const std::vector<char>& noZL, bool equal, const Costs& cost, double lamD, double lamC, int wmode, double TH = -1, bool full = true,
+                  const MeanE* mean = nullptr) {
+    // full = false (the share search): only bits and shares are computed; no stream, leaves or planes (same tree, same shares)
+    // mean: the plane's mean energies when the caller already has them (the share search runs with the same plane and tags many times)
+    if (TH < 0) TH = deadzone();
+    Result R; if (full) { R.k0 = P.k0; R.bw = P.k1 - P.k0; R.Q.assign((size_t)P.K * R.bw, 0); }
+    const MeanE me = mean ? *mean : meanEnergies(P, cellA, lab); const double eD = me.eD, eC = me.eC;
     const int RF = ROOTF, RT = ROOTT, D1 = RF + 1, D2 = RT + 1;
     auto ri = [&](int f0, int f1, int t0, int t1) { return (((size_t)f0 * D1 + f1) * D2 + t0) * D2 + t1; };
     // roots are independent: processed in parallel (pure computation, no global state); outputs are joined in root order
     struct RootOut { std::vector<int32_t> stream; std::vector<Leaf> leaves; double bits = 0; Share cnt, en; double zsum = 0; long zcnt = 0; };
     const long nRT = (P.K + RT - 1) / RT, nRF = (P.nc + RF - 1) / RF, nRoots = nRT * nRF; std::vector<RootOut> outs(nRoots);
     std::atomic<long> nextRoot(0);
-    auto worker = [&]() {
+    const int ruleNow = ruleRef(); const bool zsNow = zeroSignOpt();
+    std::vector<int> cutTab[(ROOTF > ROOTT ? ROOTF : ROOTT) + 1]; for (int w = 0; w <= (ROOTF > ROOTT ? ROOTF : ROOTT); w++) cutTab[w] = cuts(w, equal);   // the cut positions per width, made once (not per block)
+    // code length of one quantised value per tier, by (q > 0 or zero sign) and bit length: the same sum, term for term, as written out before
+    double term[2][33][4]; for (int z = 0; z < 2; z++) for (int b = 0; b <= 32; b++) for (int tr = 1; tr <= 3; tr++) term[z][b][tr] = cost.bl[tr][b] + (b >= 2 ? b - 1 : 0) + z;
+    auto worker = [&]() { ruleRef() = ruleNow; zeroSignOpt() = zsNow;
     std::vector<double> best(D1 * D1 * D2 * D2), bbits(best.size()); std::vector<int> choice(best.size()), Emax(best.size()), ltier(best.size());
+    std::vector<double> pc, pwD, pwC; std::vector<int> pn, pa;   // per-block tables, allocated once per thread
     for (long rix; (rix = nextRoot++) < nRoots;) { const long M0 = (rix / nRF) * RT; const int C0 = (int)(rix % nRF) * RF; RootOut& O = outs[rix];
         const int rf = std::min(RF, P.nc - C0), rt = (int)std::min<long>(RT, P.K - M0);
         int sHi = 0; for (int f = 0; f < rf; f++) for (int t = 0; t < rt; t++) sHi = std::max(sHi, cellE[(size_t)(M0 + t) * P.nc + C0 + f]);
         const int NS = sHi + 1, W = rf + 1, H = rt + 1;
-        std::vector<double> pc((size_t)4 * NS * W * H, 0.0), pwD((size_t)W * H, 0.0), pwC((size_t)W * H, 0.0); std::vector<int> pn((size_t)W * H, 0), pa((size_t)W * H, 0);
+        pc.assign((size_t)4 * NS * W * H, 0.0); pwD.assign((size_t)W * H, 0.0); pwC.assign((size_t)W * H, 0.0); pn.assign((size_t)W * H, 0); pa.assign((size_t)W * H, 0);   // buffers reused per block
         auto I = [&](int f, int t) { return (size_t)f * H + t; };
         for (int f = 0; f < rf; f++) for (int t = 0; t < rt; t++) {
             size_t cid = (size_t)(M0 + t) * P.nc + C0 + f; int kb; int nb = cellBins(P, C0 + f, kb); const int32_t* x = &(*P.X)[(size_t)(M0 + t) * P.N + kb];
             bool a = cellA[cid]; int e = cellE[cid]; double en = 0; for (int j = 0; j < nb; j++) en += (double)x[j] * x[j];
+            double ax[CW]; for (int j = 0; j < nb; j++) ax[j] = std::fabs((double)x[j]);
             for (int s = 0; s < NS; s++) { double c[4] = {0, 0, 0, 0};   // the quantiser output per step is shared by the three tiers: computed once,
-                if (s > e) { for (int tr = 1; tr <= 3; tr++) c[tr] = nb * (cost.bl[tr][0] + (zeroSignOpt() ? 1 : 0)); }   // each tier keeps its own sum in the same order
-                else { double st = std::ldexp(1.0, s);
-                    for (int j = 0; j < nb; j++) { double q = std::floor(std::fabs((double)x[j]) / st + 0.5 - TH); if (q < 0) q = 0; uint32_t qa = (uint32_t)q; int b = 0; while (qa >> b) b++;
-                        for (int tr = 1; tr <= 3; tr++) c[tr] += cost.bl[tr][std::min(b, 32)] + (b >= 2 ? b - 1 : 0) + ((q > 0 || zeroSignOpt()) ? 1 : 0); } }
+                if (s > e) { for (int tr = 1; tr <= 3; tr++) c[tr] = nb * (cost.bl[tr][0] + (zsNow ? 1 : 0)); }   // each tier keeps its own sum in the same order
+                else { const double inv = std::ldexp(1.0, -s);   // |x| x 2^-s = |x| / 2^s exactly (power of two)
+                    for (int j = 0; j < nb; j++) { double q = std::floor(ax[j] * inv + 0.5 - TH); if (q < 0) q = 0; const int b = bitLength((uint32_t)q);
+                        const double* tm = term[q > 0 || zsNow ? 1 : 0][std::min(b, 32)];
+                        for (int tr = 1; tr <= 3; tr++) c[tr] += tm[tr]; } }
                 for (int tr = 1; tr <= 3; tr++) pc[((size_t)tr * NS + s) * W * H + I(f + 1, t + 1)] = c[tr]; }
             if (!a && lab[cid] == 3) pwD[I(f + 1, t + 1)] = wmode == 2 ? 0.5 * (1.0 + en / eD) : (wmode ? en / eD : 1.0);
             if (!a && lab[cid] == 2) pwC[I(f + 1, t + 1)] = wmode == 2 ? 0.5 * (1.0 + en / eC) : (wmode ? en / eC : 1.0);
@@ -82,7 +108,7 @@ inline Result run(const Plane& P, const std::vector<char>& cellA, const std::vec
             int E; if (w > 1) E = std::max(Emax[ri(f0, f1 - 1, t0, t1)], Emax[ri(f1 - 1, f1, t0, t1)]); else if (h > 1) E = std::max(Emax[ri(f0, f1, t0, t1 - 1)], Emax[ri(f0, f1, t1 - 1, t1)]);
             else E = cellE[(size_t)(M0 + t0) * P.nc + C0 + f0];
             Emax[id] = E;
-            auto cf = cuts(w, equal), ct = cuts(h, equal); bool canSplit = !cf.empty() || !ct.empty();
+            const auto& cf = cutTab[w]; const auto& ct = cutTab[h]; bool canSplit = !cf.empty() || !ct.empty();
             double splitFlag = canSplit ? 1.0 : 0.0, dirBit = (!cf.empty() && !ct.empty()) ? 1.0 : 0.0;
             int nonA = box(pn.data(), f0, f1, t0, t1), nA = box(pa.data(), f0, f1, t0, t1);
             double leaf = 1e300, leafBits = 0; int lt = 0;
@@ -94,19 +120,27 @@ inline Result run(const Plane& P, const std::vector<char>& cellA, const std::vec
                     double pen = (tr < 3 ? lamD * wD : 0) + (tr < 2 ? lamC * wC : 0);
                     if (b + pen < leaf) { leaf = b + pen; leafBits = b; lt = tr; } } }
             double bst = leaf, bb = leafBits; int ch = -1;
-            for (size_t i = 0; i < cf.size(); i++) { int p = cf[i]; double sb = splitFlag + dirBit + posBits(cf.size()); double c = sb + best[ri(f0, f0 + p, t0, t1)] + best[ri(f0 + p, f1, t0, t1)]; if (c < bst) { bst = c; ch = p; bb = sb + bbits[ri(f0, f0 + p, t0, t1)] + bbits[ri(f0 + p, f1, t0, t1)]; } }
-            for (size_t i = 0; i < ct.size(); i++) { int p = ct[i]; double sb = splitFlag + dirBit + posBits(ct.size()); double c = sb + best[ri(f0, f1, t0, t0 + p)] + best[ri(f0, f1, t0 + p, t1)]; if (c < bst) { bst = c; ch = 1000 + p; bb = sb + bbits[ri(f0, f1, t0, t0 + p)] + bbits[ri(f0, f1, t0 + p, t1)]; } }
+            const double sbF = splitFlag + dirBit + posBits(cf.size()), sbT = splitFlag + dirBit + posBits(ct.size());   // the same for every cut of this block
+            for (size_t i = 0; i < cf.size(); i++) { int p = cf[i]; const double sb = sbF; double c = sb + best[ri(f0, f0 + p, t0, t1)] + best[ri(f0 + p, f1, t0, t1)]; if (c < bst) { bst = c; ch = p; bb = sb + bbits[ri(f0, f0 + p, t0, t1)] + bbits[ri(f0 + p, f1, t0, t1)]; } }
+            for (size_t i = 0; i < ct.size(); i++) { int p = ct[i]; const double sb = sbT; double c = sb + best[ri(f0, f1, t0, t0 + p)] + best[ri(f0, f1, t0 + p, t1)]; if (c < bst) { bst = c; ch = 1000 + p; bb = sb + bbits[ri(f0, f1, t0, t0 + p)] + bbits[ri(f0, f1, t0 + p, t1)]; } }
             best[id] = bst; bbits[id] = bb; choice[id] = ch; ltier[id] = lt; }
         O.bits += bbits[ri(0, rf, 0, rt)];
         std::function<void(int, int, int, int)> emit = [&](int f0, int f1, int t0, int t1) {
-            size_t id = ri(f0, f1, t0, t1); int w = f1 - f0, h = t1 - t0; auto cf = cuts(w, equal), ct = cuts(h, equal);
+            size_t id = ri(f0, f1, t0, t1); int w = f1 - f0, h = t1 - t0; const auto& cf = cutTab[w]; const auto& ct = cutTab[h];
             bool canSplit = !cf.empty() || !ct.empty(); int ch = choice[id];
-            if (canSplit) O.stream.push_back(ch >= 0 ? 1 : 0);
-            if (ch >= 0) { int dir = ch >= 1000, p = ch % 1000; if (!cf.empty() && !ct.empty()) O.stream.push_back(dir);
-                const auto& cc = dir ? ct : cf; O.stream.push_back((int32_t)(std::find(cc.begin(), cc.end(), p) - cc.begin()));
+            if (canSplit && full) O.stream.push_back(ch >= 0 ? 1 : 0);
+            if (ch >= 0) { int dir = ch >= 1000, p = ch % 1000; if (!cf.empty() && !ct.empty() && full) O.stream.push_back(dir);
+                const auto& cc = dir ? ct : cf; if (full) O.stream.push_back((int32_t)(std::find(cc.begin(), cc.end(), p) - cc.begin()));
                 if (!dir) { emit(f0, f0 + p, t0, t1); emit(f0 + p, f1, t0, t1); } else { emit(f0, f1, t0, t0 + p); emit(f0, f1, t0 + p, t1); }
                 return; }
             Leaf lf{M0 + t0, M0 + t1, C0 + f0, C0 + f1, ltier[id], Emax[id], 0};
+            if (!full) {   // the share search: the shares of this leaf only (same order and arithmetic as below)
+                if (!lf.tier) return;
+                for (long m = lf.m0; m < lf.m1; m++) for (int c = lf.c0; c < lf.c1; c++) { int kb; int nb = cellBins(P, c, kb); size_t cid = (size_t)m * P.nc + c;
+                    double ce = 0; for (int j = 0; j < nb; j++) { double v = (*P.X)[(size_t)m * P.N + kb + j]; ce += v * v; }
+                    if (!cellA[cid] && lab[cid] == 3) { O.cnt.dTot++; O.en.dTot += ce; if (lf.tier == 3) { O.cnt.dKept++; O.en.dKept += ce; } }
+                    if (!cellA[cid] && lab[cid] == 2) { O.cnt.cTot++; O.en.cTot += ce; if (lf.tier >= 2) { O.cnt.cKept++; O.en.cKept += ce; } } }
+                return; }
             O.stream.push_back(lf.tier);
             if (!lf.tier) { O.leaves.push_back(lf); return; }
             int s = shiftOf(lf.E, lf.tier); double st = std::ldexp(1.0, s); size_t qpos = O.stream.size();
@@ -119,16 +153,21 @@ inline Result run(const Plane& P, const std::vector<char>& cellA, const std::vec
                 double ce = 0; for (int j = 0; j < nb; j++) { double v = (*P.X)[(size_t)m * P.N + kb + j]; ce += v * v; }
                 if (!cellA[cid] && lab[cid] == 3) { O.cnt.dTot++; O.en.dTot += ce; if (lf.tier == 3) { O.cnt.dKept++; O.en.dKept += ce; } }
                 if (!cellA[cid] && lab[cid] == 2) { O.cnt.cTot++; O.en.cTot += ce; if (lf.tier >= 2) { O.cnt.cKept++; O.en.cKept += ce; } }
-                for (int j = 0; j < nb; j++) { size_t ix = (size_t)m * P.N + kb + j; double v = (*P.X)[ix]; double q = std::floor(std::fabs(v) / st + 0.5 - TH); if (q < 0) q = 0;
-                    int32_t qi = (int32_t)q * (v < 0 ? -1 : 1); O.stream.push_back(qi); R.Q[ix] = R.Qn[ix] = (int32_t)std::llround(recon(qi, st));
-                    if (!qi && lf.zl) { int zs = v < 0; O.stream.push_back(zs); R.Q[ix] = R.Qn[ix] = (int32_t)std::llround((zs ? -1.0 : 1.0) * ZC[lf.zl] * st); }
+                for (int j = 0; j < nb; j++) { size_t ix = (size_t)m * P.N + kb + j, qx = (size_t)m * R.bw + (size_t)(kb + j - P.k0); double v = (*P.X)[ix]; double q = std::floor(std::fabs(v) / st + 0.5 - TH); if (q < 0) q = 0;
+                    int32_t qi = (int32_t)q * (v < 0 ? -1 : 1); O.stream.push_back(qi); R.Q[qx] = (int32_t)std::llround(recon(qi, st));
+                    if (!qi && lf.zl) { int zs = v < 0; O.stream.push_back(zs); R.Q[qx] = (int32_t)std::llround((zs ? -1.0 : 1.0) * ZC[lf.zl] * st); }
                 }
             }
             O.stream[qpos + 1] = lf.zl;   // the leaf's zero-level index (0 unless the zs option chose a level)
             O.leaves.push_back(lf); };
         emit(0, rf, 0, rt); } };
     int nth = getenv("PARTTHREADS") ? std::max(1, atoi(getenv("PARTTHREADS"))) : (int)std::max(1u, std::thread::hardware_concurrency());
-    std::vector<std::thread> pool; for (int i = 1; i < nth; i++) pool.emplace_back(worker); worker(); for (auto& th : pool) th.join();
+    // an exception in any worker (out of memory) stops the other workers and is re-thrown here after all have joined; if fewer threads can be
+    // started, the started ones take all roots (the result does not depend on the number of threads)
+    std::exception_ptr err; std::mutex errMx;
+    auto safe = [&]() { try { worker(); } catch (...) { std::lock_guard<std::mutex> g(errMx); if (!err) err = std::current_exception(); nextRoot = nRoots; } };
+    std::vector<std::thread> pool; try { for (int i = 1; i < nth; i++) pool.emplace_back(safe); } catch (...) {}
+    safe(); for (auto& th : pool) th.join(); if (err) std::rethrow_exception(err);
     for (auto& O : outs) { R.stream.insert(R.stream.end(), O.stream.begin(), O.stream.end()); R.leaves.insert(R.leaves.end(), O.leaves.begin(), O.leaves.end()); R.bits += O.bits;
         R.zsum += O.zsum; R.zcnt += O.zcnt; R.cnt.dTot += O.cnt.dTot; R.cnt.dKept += O.cnt.dKept; R.cnt.cTot += O.cnt.cTot; R.cnt.cKept += O.cnt.cKept;
         R.en.dTot += O.en.dTot; R.en.dKept += O.en.dKept; R.en.cTot += O.en.cTot; R.en.cKept += O.en.cKept; }
@@ -143,18 +182,18 @@ inline double shareC(const Result& r, int wm) { auto f = [](const Share& s) { re
 // Raising lambda D only moves blocks up to tier D, which keeps every C cell in them at C or higher, so one round suffices.
 inline Result runTarget(const Plane& P, const std::vector<char>& cellA, const std::vector<int>& cellE, const std::vector<int>& lab,
                         const std::vector<char>& noZL, bool equal, const Costs& cost, const Mode& md, int wm, double* lamOut = nullptr) {
-    const double HARD = 1e9;
+    const double HARD = 1e9; const MeanE me = meanEnergies(P, cellA, lab);   // the same for every pass of the search
     double lamD = 0, lamC = md.cShare >= 1.0 ? HARD : 0;
     auto solve = [&](bool forD) {
         double target = forD ? md.dShare : md.cShare; if (!forD && md.cShare >= 1.0) return;
-        Result r0 = run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm);
+        Result r0 = run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm, -1, false, &me);
         if ((forD ? shareD(r0, wm) : shareC(r0, wm)) >= target) return;
         double lo = 1e-3, hi = 1e4;
         for (int it = 0; it < 7; it++) { double mid = std::sqrt(lo * hi); (forD ? lamD : lamC) = mid;
-            Result r = run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm);
+            Result r = run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm, -1, false, &me);
             if ((forD ? shareD(r, wm) : shareC(r, wm)) >= target) hi = mid; else lo = mid; }
         (forD ? lamD : lamC) = hi; };
     solve(false); solve(true);
     if (lamOut) { lamOut[0] = lamD; lamOut[1] = lamC; }
-    return run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm); }
+    return run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm, -1, true, &me); }
 }   // namespace part

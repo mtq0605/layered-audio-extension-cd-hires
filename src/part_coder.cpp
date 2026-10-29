@@ -20,6 +20,7 @@
 using namespace std;
 
 int main(int argc, char** argv) {
+    for (int t = 0; t < 4; t++) { g_tierBytes[t] = 0; g_tierCoef[t] = 0; }   // TIERSTAT: the numbers of this stream (layers may run in two threads)
     vector<int32_t> dump = encio::readAll<int32_t>(argv[1]);   // magic, K, N, k0, k1, rate, L, cw, mode, equal, tokens, then the tokens
     if (dump.size() < 11 || dump[0] != 0x50415254 || dump[10] < 0 || dump.size() != 11 + (size_t)dump[10]) { fprintf(stderr, "not a partition dump\n"); return 2; }
     const int32_t* hd = dump.data();

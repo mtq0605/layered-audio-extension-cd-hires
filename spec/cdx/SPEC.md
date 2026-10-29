@@ -283,7 +283,7 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 | 0 | 4 | bytes | identifier | ASCII `LTVT` (4C 54 56 54) |
 | 4 | 2 | uint16 | version | 1 |
 | 6 | 2 | uint16 | length | 80, the size of the whole trailer record in bytes |
-| 8 | 2 | uint16 | extension block type | 1 = body of the `LAE ` chunk of LAEY container v5; 2 = reserved for LAES; other values reserved |
+| 8 | 2 | uint16 | extension block type | 1 = body of the `LAE ` chunk of LAEY container v5 (begins with the magic `LAE1`); 2 = LAES extension block (begins with the magic `LAE2`); other values reserved |
 | 10 | 2 | uint16 | track number | On CD: the TOC audio track number, 1–98. Outside CD: if the track is also released on CD, its track number in the CD TOC; otherwise its track number within the album (≥ 1); 1 for a single |
 | 12 | 4 | uint32 | sample rate | Sample rate of the CD layer. On CD MUST be 44100; outside CD, 44100 or 48000. For extension block type 1, MUST equal base in the extension block |
 | 16 | 4 | uint32 | ncd | Number of samples of the CD layer, 1 ≤ ncd < 2^28. For extension block type 1, MUST equal nb − 2·pb of the extension block |
@@ -396,7 +396,7 @@ Example 3 (all zero): 3 samples (0, 0) give lead0 = tail0 = 3 and S1 = S2 = 0 (d
 1. The file length is ≥ 88, and the last 80 bytes begin with `LTVT` ("no trailer record"; see [R14]).
 2. The CRC-32 matches ("record corrupted").
 3. The version is 1, and the length is 80 ("unknown record version").
-4. The extension block type is 1 ("unknown extension block type"; if the type is 2, "LAES extension block, not supported by this reader").
+4. The extension block type is 1 and the extension block begins with `LAE1` ("unknown extension block type"; if the type is 2 and the block begins with `LAE2`, "LAES extension block, not supported by this reader"; a type that does not match the magic, "extension block does not match its trailer type").
 5. Track number, sample rate, ncd, S1, S2, lead0 and tail0 are within the ranges specified in 3.2 ("invalid record field").
 
 The extension block itself is checked by the decoder: CRC and V1–V13 ([SPEC] 4.3). The reader MAY check the CRC of the extension block in advance and, if it does not match, report "extension layer corrupted".

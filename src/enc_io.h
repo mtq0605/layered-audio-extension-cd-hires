@@ -35,6 +35,12 @@ inline void writeAll(const char* p, const void* d, size_t elem, size_t n) {
     FILE* f = open(p, "wb"); bool ok = !testFail(p) && (n == 0 || fwrite(d, elem, n, f) == n); ok = (fclose(f) == 0) && ok;
     if (!ok) { remove(p); fail(std::string("write failed (disk full?): ") + p); } }
 template <class T> void writeVec(const char* p, const std::vector<T>& v) { writeAll(p, v.data(), sizeof(T), v.size()); }
+// a coefficient plane held for bins [k0, k0 + bw) only (q[m * bw + k]), written as the full K x N plane with zeros outside, frame by frame
+inline void writeBandPlane(const char* p, const int32_t* q, long K, int N, int k0, int bw) {
+    FILE* f = open(p, "wb"); bool ok = !testFail(p); std::vector<int32_t> row((size_t)N, 0);
+    for (long m = 0; ok && m < K; m++) { if (bw > 0) memcpy(&row[(size_t)k0], q + (size_t)m * bw, (size_t)bw * 4); ok = fwrite(row.data(), 4, (size_t)N, f) == (size_t)N; }
+    ok = (fclose(f) == 0) && ok;
+    if (!ok) { remove(p); fail(std::string("write failed (disk full?): ") + p); } }
 inline void writeText(const char* p, const std::string& s) { writeAll(p, s.data(), 1, s.size()); }
 inline std::string readText(const char* p) { std::vector<char> v = readAll<char>(p); return std::string(v.begin(), v.end()); }
 // element count as the modules' index type; refuses counts the index type cannot hold

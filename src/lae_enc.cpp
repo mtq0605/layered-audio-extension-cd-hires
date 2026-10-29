@@ -6,7 +6,7 @@
 //   output: WAV whose audio is the CD layer (16 bit at 44.1/48 kHz, plays everywhere) + a "LAE " chunk with
 //           the depth layer (L, R) and the frequency layer (M, S), each range-coded with partition levels
 // usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2 (scheme), default s1] [zs] [cd=<CD.wav>] [energy] [equal]
-//                [cdcheck] [cdalign=<offset>] [cdaccept] [bits=24]
+//                [cdcheck] [cdalign=<offset>] [cdaccept] [bits=24] [mem=<GB>]
 //        lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdaccept]   the CD's split markers onto the master (cd_plan.cpp)
 //   mode = share of the scanned D (and C) content kept at its tier (see the MODES table in partition_format.h); energy = measure the
 //   share by energy instead of cell count; equal = halving cuts only. The frequency layer is stored per octave (independent streams).
@@ -19,6 +19,8 @@
 //   <= -40 dB encodes, anything larger stops and asks (cdaccept continues; a console asks); a CD that does not fit is never encoded.
 //   cdcheck = the same without encoding (rc 0). cdaccept = continue after a remaining difference beyond -40 dB.
 //   bits=24: a 32-bit master is encoded from its top 24 bits (without it the encoder asks on a console, or stops otherwise).
+//   mem=<GB>: memory budget for coding two layers at once (default: half the physical memory); above it they are coded one after the
+//   other. The output file does not depend on it.
 // The encoder decodes every layer again and refuses to write the file unless the decoded coefficient planes are identical.
 // Fail-safe: every file operation is checked, every module result is checked, the output is first written as <out>.part, read back
 // and verified, decoded end to end, and only then renamed to <out>. On any failure, including an internal error, an out-of-memory
@@ -42,12 +44,15 @@
 #include <memory>
 #include <new>
 #include <thread>
+#include <atomic>
 #include <climits>
 #include <filesystem>
 #ifdef _WIN32
 #include <io.h>      // _isatty
 extern "C" __declspec(dllimport) void* __stdcall GetStdHandle(unsigned long);   // kernel32, declared here to keep <windows.h> macros out of the modules
 extern "C" __declspec(dllimport) int __stdcall GetConsoleMode(void*, unsigned long*);
+struct LaeMemStatus { unsigned long len, load; unsigned long long totalPhys, availPhys, totalPage, availPage, totalVirt, availVirt, availExt; };   // MEMORYSTATUSEX
+extern "C" __declspec(dllimport) int __stdcall GlobalMemoryStatusEx(LaeMemStatus*);
 #else
 #include <cstdlib>   // setenv / unsetenv
 #include <unistd.h>  // isatty, _exit
@@ -62,6 +67,20 @@ extern "C" __declspec(dllimport) int __stdcall GetConsoleMode(void*, unsigned lo
 #include "fft.h"
 #include "mdct_tb.h"   // global, shared by the lossy and decoder modules (both namespaces use ::mdct)
 #include "frac_delay.h"   // global: the v6 phase delay, shared by the route split, the alignment and the decoder (::lae_fd)
+// ---- per-thread module settings and output: two layers (L and R, M and S) are coded at once, each in its own thread. A layer thread
+// keeps its own copy of the variables a layer sets (env() below) and its own printed text, which is shown after the pair in the usual
+// order, so the log reads as if the layers ran one after the other. Outside a layer thread both go to the process as before.
+namespace encenv {
+static thread_local std::map<std::string, std::string>* over = nullptr;
+static thread_local std::string* out = nullptr;
+static const char* get(const char* k) { if (over) { auto it = over->find(k); if (it != over->end()) return it->second.empty() ? nullptr : it->second.c_str(); } return std::getenv(k); }
+static int print(const char* f, ...) { va_list a; va_start(a, f); int n;
+    if (out) { va_list b; va_copy(b, a); n = vsnprintf(nullptr, 0, f, b); va_end(b); if (n > 0) { std::string s((size_t)n + 1, '\0'); vsnprintf(&s[0], s.size(), f, a); s.resize((size_t)n); *out += s; } }
+    else n = vprintf(f, a);
+    va_end(a); return n; }
+}
+#define LAE_LAYER_MODULE_IO static const char* getenv(const char* k) { return encenv::get(k); } \
+    template <class... A> static int printf(const char* f, A... a) { return encenv::print(f, a...); }
 namespace m_pad {
 #include "pad_mirror.cpp"
 }
@@ -72,9 +91,11 @@ namespace m_routes {
 #include "routes.cpp"
 }
 namespace m_lossy {
+LAE_LAYER_MODULE_IO
 #include "lossy_v2.cpp"
 }
 namespace m_part {
+LAE_LAYER_MODULE_IO
 #include "part_coder.cpp"
 }
 namespace m_align {
@@ -105,19 +126,29 @@ static void onSignal(int) { emergency("interrupted"); fflush(stdout); _exit(130)
 // runs one module; a checked-I/O failure, an exhausted memory or any other exception inside it becomes a non-zero result with the reason printed
 static int call(int (*fn)(int, char**), std::vector<std::string> a) {
     std::vector<char*> v; for (auto& s : a) v.push_back(&s[0]); v.push_back(nullptr);
-    try { return fn((int)a.size(), v.data()); }
-    catch (const encio::Fail& e) { printf("ENCODER STOPPED in module %s: %s\n", a[0].c_str(), e.what()); return 90; }
-    catch (const std::bad_alloc&) { printf("ENCODER STOPPED in module %s: out of memory\n", a[0].c_str()); return 91; }
-    catch (const std::exception& e) { printf("ENCODER STOPPED in module %s: %s\n", a[0].c_str(), e.what()); return 92; }
-    catch (...) { printf("ENCODER STOPPED in module %s: internal error\n", a[0].c_str()); return 93; } }
+    try { return fn((int)a.size(), v.data()); }   // the messages go to the layer's own text when the module runs in a layer thread
+    catch (const encio::Fail& e) { encenv::print("ENCODER STOPPED in module %s: %s\n", a[0].c_str(), e.what()); return 90; }
+    catch (const std::bad_alloc&) { encenv::print("ENCODER STOPPED in module %s: out of memory\n", a[0].c_str()); return 91; }
+    catch (const std::exception& e) { encenv::print("ENCODER STOPPED in module %s: %s\n", a[0].c_str(), e.what()); return 92; }
+    catch (...) { encenv::print("ENCODER STOPPED in module %s: internal error\n", a[0].c_str()); return 93; } }
 // sets a variable for the next module; an empty value removes it (modules test getenv() != nullptr)
 #ifdef _WIN32
-static void env(const char* k, const std::string& v) { _putenv_s(k, v.c_str()); }
+static void env(const char* k, const std::string& v) { if (encenv::over) (*encenv::over)[k] = v; else _putenv_s(k, v.c_str()); }
 static bool interactive() {   // a person at a console on both ends: input from the console and output to it (not a pipe, a file or NUL)
     unsigned long m; return _isatty(_fileno(stdin)) && _isatty(_fileno(stdout)) && GetConsoleMode(GetStdHandle((unsigned long)-10), &m) && GetConsoleMode(GetStdHandle((unsigned long)-11), &m); }
 #else
-static void env(const char* k, const std::string& v) { if (v.empty()) unsetenv(k); else setenv(k, v.c_str(), 1); }
+static void env(const char* k, const std::string& v) { if (encenv::over) (*encenv::over)[k] = v; else if (v.empty()) unsetenv(k); else setenv(k, v.c_str(), 1); }
 static bool interactive() { return isatty(fileno(stdin)) && isatty(fileno(stdout)); }
+#endif
+// physical memory: total and available in bytes (0 if unknown: the layers then run one after the other)
+#ifdef _WIN32
+static void physMemory(unsigned long long& total, unsigned long long& avail) { LaeMemStatus m{}; m.len = sizeof m; if (GlobalMemoryStatusEx(&m)) { total = m.totalPhys; avail = m.availPhys; } else total = avail = 0; }
+#else
+static void physMemory(unsigned long long& total, unsigned long long& avail) {   // Linux: MemTotal / MemAvailable (page cache counted); other systems: unknown
+    total = avail = 0; FILE* f = fopen("/proc/meminfo", "r"); if (!f) return; char line[256];
+    while (fgets(line, sizeof line, f)) { unsigned long long kb = 0;
+        if (sscanf(line, "MemTotal: %llu kB", &kb) == 1) total = kb * 1024; else if (sscanf(line, "MemAvailable: %llu kB", &kb) == 1) avail = kb * 1024; }
+    fclose(f); }
 #endif
 // module variables come from this program only: anything inherited from the calling environment is removed (the encoder and the planner)
 static void clearModuleEnv() {
@@ -142,20 +173,21 @@ namespace m_plan {
 }
 
 static int encode(int argc, char** argv) {
-    if (argc < 3) { printf("usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2, default s1] [zs] [cd=<independent CD.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [bits=24]\n"); return 1; }
+    if (argc < 3) { printf("usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2, default s1] [zs] [cd=<independent CD.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [bits=24] [mem=<GB>]\n"); return 1; }
     auto T0 = std::chrono::steady_clock::now();
     const std::string outPath = argv[2], partPath = outPath + ".part", tmp = outPath + ".tmp";
     encrun::out = outPath; encrun::part = partPath; encrun::tmp = tmp; encrun::hadOld = exists(outPath);
     auto oldNote = []() { encrun::oldNote(); };
     if (!mdct::selftestOK() || !alignhash::md5SelfTest() || encio::testFail("selftest")) { printf("encoder self-test FAILED: this build does not compute the IMDCT in the IEEE-754 order the format requires, or its MD5 is wrong (see docs/BUILD.md); nothing encoded\n"); return 4; }
     const char* modeName = argc > 3 ? argv[3] : "3"; int mi = part::modeIndex(modeName); if (mi < 0) { printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }
-    bool equal = false, zsOpt = false, cdCheck = false, cdAccept = false, bits24 = false, manual = false; int wm = 0, scheme = 1; const char* cdPath = nullptr; long long manualT = 0;
+    bool equal = false, zsOpt = false, cdCheck = false, cdAccept = false, bits24 = false, manual = false; int wm = 0, scheme = 1; const char* cdPath = nullptr; long long manualT = 0; unsigned long long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once (default: half the physical memory)
     std::string manualText; int manualSg = 1; long long manualI = 0, manualF = 0, manualFs = 1, manualPlace = 0, manualPhi = 0;   // cdalign=<o>: o = sg * (I + F / Fs) master samples
     double manualMove = 0;   // the fraction (master samples, |f| <= 1/2) the master is moved by when it is placed at manualT
     for (int i = 4; i < argc; i++) { const char* a = argv[i];
         if (!strcmp(a, "equal")) equal = true; else if (!strcmp(a, "energy")) wm = 1; else if (!strcmp(a, "s2")) scheme = 2; else if (!strcmp(a, "s1")) scheme = 1;
         else if (!strcmp(a, "zs")) zsOpt = true; else if (!strncmp(a, "cd=", 3) && a[3]) cdPath = a + 3; else if (!strcmp(a, "cdcheck")) cdCheck = true;
         else if (!strcmp(a, "cdaccept")) cdAccept = true; else if (!strcmp(a, "bits=24")) bits24 = true;
+        else if (!strncmp(a, "mem=", 4)) { const double g = atof(a + 4); if (!(g > 0) || g > 1e6) { printf("mem=%s: give the memory budget in GB (for example mem=8)\n", a + 4); return 1; } memBudget = (unsigned long long)(g * 1073741824.0); }
         else if (!strcmp(a, "cdalign=none")) { printf("cdalign=none was removed (2026-10-22): every CD is checked. A small remaining difference can be accepted with cdaccept, a known offset given with cdalign=<offset>; nothing encoded\n"); return 1; }
         else if (!strncmp(a, "cdalign=", 8)) {   // master samples, whole or with a fraction (v6): digits, optionally '.' and up to 9 digits
             const char* v = a + 8; const char* p = v; int sg = 1; if (*p == '-' || *p == '+') { sg = *p == '-' ? -1 : 1; p++; }
@@ -165,7 +197,7 @@ static int encode(int argc, char** argv) {
             if (!ni || !ok || *p || I > 2000000000LL) { printf(strchr(v, ',') ? "cdalign=%s: write the fraction with a point (for example cdalign=3.5)\n"
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
-        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept bits=24)\n", a); return 1; } }
+        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept bits=24 mem=<GB>)\n", a); return 1; } }
     if ((cdCheck || cdAccept || manual) && !cdPath) { printf("cdcheck, cdalign and cdaccept need cd=<CD.wav>\n"); return 1; }
     if (mi >= part::MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
     if (exists(partPath)) { printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath.c_str()); return 1; }
@@ -229,7 +261,9 @@ static int encode(int argc, char** argv) {
         env("DITHERFLAGS", T("dither.flags")); env("BASE24", T("b24.s32"));
         if (call(m_base::main, {"base", T("m.raw"), std::to_string(w.rate), std::to_string((int)base), T("b16.s16")})) { printf("CD layer derivation failed\n"); oldNote(); return false; } env("BASE24", "");
         return true; };
+    auto stamp = [&](const char* w) { if (getenv("TIMING")) printf("[enc %.1f s] %s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count(), w); };
     if (!derive()) return 2;
+    stamp("padding + CD layer derived");
     // independent CD: the fraction of a master sample is measured in units of 2^-22 CD sample (U1 per master sample) and applied to the master
     // itself when it is placed (2026-10-23); the file stays v5 and the decoder is unchanged
     const int64_t U1 = lae_fd::unitsPerMaster(stages);
@@ -376,28 +410,64 @@ static int encode(int argc, char** argv) {
         encio::writeVec(T("b16.s16").c_str(), b);
         std::vector<uint8_t> df = slurp(T("dither.flags")); std::fill(df.begin(), df.end(), 0); encio::writeVec(T("dither.flags").c_str(), df);
         printf("independent CD: %s (%ld samples) used as the CD layer\n", cdPath, have); }
+    // the master is final here (m0.raw / m.raw hold it): its samples are not needed in memory any more, only its length (memory)
+    if ((long long)(w.s.size() / 2) != Lm) encio::fail("internal error: master length");
+    std::vector<int32_t>().swap(w.s);
     env("CDEXT", cdPath ? "1" : "");   // cut-off detection by coherence for an independent CD (routes.cpp)
     env("CUTOFFOUT", T("cutoff.txt"));
     if (call(m_routes::main, {"routes", T("m.raw"), std::to_string(w.rate), T("b16.s16"), T("b24.s32"), T("T.s32"), T("F.s32")})) { printf("route split failed\n"); oldNote(); return 2; } env("CUTOFFOUT", "");
-    double fc = atof(encio::readText(T("cutoff.txt").c_str()).c_str());
+    stamp("route split"); double fc = atof(encio::readText(T("cutoff.txt").c_str()).c_str());
     env("PART", modeName); env("PARTEQ", equal ? "1" : ""); env("PARTW", wm ? "1" : "0");
     // one layer = one encoder run (possibly several octave segments) + a self-check of every segment's stream
-    bool ok = true;
+    std::atomic<bool> ok(true);   // shared by the two layer threads of a pair
     auto layer = [&](const char* in, int rate, const char* ch, const std::string& tag) {
+        if (encio::testFail(("layerthrow:" + tag).c_str())) encio::fail("forced by the test hook in layer " + tag);   // test: an exception outside the modules
         env("CHSEL", ch); env("DUMP", T(tag + ".lae")); env("PLANE", T(tag + ".plane")); env("SEGCOUNT", T(tag + ".seg"));
         int rc = call(m_lossy::main, {"lossy", T(in), std::to_string(rate)}); env("SEGCOUNT", ""); std::vector<std::vector<uint8_t>> out;
-        if (rc) { ok = false; printf("layer %s: coding failed (code %d)\n", tag.c_str(), rc); return out; }
-        int nseg = atoi(encio::readText(T(tag + ".seg").c_str()).c_str()); if (nseg < 1 || nseg > 8) { ok = false; printf("layer %s: bad segment count\n", tag.c_str()); return out; }
+        if (rc) { ok = false; encenv::print("layer %s: coding failed (code %d)\n", tag.c_str(), rc); return out; }
+        int nseg = atoi(encio::readText(T(tag + ".seg").c_str()).c_str()); if (nseg < 1 || nseg > 8) { ok = false; encenv::print("layer %s: bad segment count\n", tag.c_str()); return out; }
         for (int i = 0; i < nseg; i++) { std::string suf = nseg > 1 ? "." + std::to_string(i) : "";
             env("PARTBYTES", T(tag + ".bin" + suf));
             if (call(m_part::main, {"part", T(tag + ".lae" + suf), T(tag + ".plane" + suf)})) ok = false;
             env("PARTBYTES", ""); if (!ok) return out; out.push_back(slurp(T(tag + ".bin" + suf))); }
         return out; };
+    typedef std::vector<std::vector<uint8_t>> Streams;
+    // two layers of the same kind at once (L and R, M and S): the second runs in its own thread with its own module variables and printed text.
+    // Same arithmetic as one after the other, so the streams are byte-identical.
+    // memory plan (2026-10-29): made once at the start from the track length and the physical memory read then; the whole encode follows it.
+    // Two layers of a pair at once need about 2 x (80 bytes per layer sample + 64 MB) (measured: about 70 bytes); budget = mem=<GB>, default half
+    // the physical memory; never two at once on 32-bit builds (address space) or with PARTTHREADS=1. The output does not depend on the plan.
+    struct PairPlan { bool both = false; unsigned long long need = 0; };
+    unsigned long long memTotal = 0, memAvail = 0; physMemory(memTotal, memAvail);
+    const unsigned long long memUse = memBudget > 0 ? memBudget : memTotal / 2;
+    const char* ptEnv = getenv("PARTTHREADS"); const bool oneThread = ptEnv && atoi(ptEnv) == 1;
+    auto planFor = [&](long long samples) { PairPlan p; p.need = 2 * (80ull * (unsigned long long)samples + (64ull << 20));
+        p.both = sizeof(void*) >= 8 && !oneThread && !getenv("LAE_TESTSEQUENTIAL") && p.need <= memUse && p.need <= memAvail; return p; };
+    const PairPlan planD = planFor((Lm + 2 * P) >> stages), planF = planFor(Lm + 2 * P);
+    printf("memory plan: %.2f min at %d Hz; depth layers %s (two at once about %.0f MB), frequency layers %s (two at once about %.0f MB); budget %.0f MB, available %.0f MB\n",
+           Lm / (60.0 * w.rate), w.rate, planD.both ? "two at once" : "coded one after the other", planD.need / 1e6, planF.both ? "two at once" : "coded one after the other", planF.need / 1e6,
+           memUse / 1e6, memAvail / 1e6);
+    auto layerPair = [&](const char* in, int rate, const char* c1, const std::string& t1, const char* c2, const std::string& t2, Streams& o1, Streams& o2, bool both) {
+        auto sequential = [&]() { o1 = layer(in, rate, c1, t1); if (ok) o2 = layer(in, rate, c2, t2); };
+        if (!both) { sequential(); return; }
+        std::map<std::string, std::string> e1, e2; std::string s1, s2; std::exception_ptr x1, x2;
+        // one layer on this thread; an exception is kept and re-thrown on the main thread after both have finished, so the encoder stops
+        // exactly as it does when the layers run one after the other (nothing written, work folder removed)
+        auto one = [&](std::map<std::string, std::string>& e, std::string& s, const char* c, const std::string& t, Streams& o, std::exception_ptr& x) {
+            struct Reset { ~Reset() { encenv::over = nullptr; encenv::out = nullptr; } } reset;
+            encenv::over = &e; encenv::out = &s;
+            try { o = layer(in, rate, c, t); } catch (...) { x = std::current_exception(); ok = false; } };
+        std::thread th;
+        try { th = std::thread([&]() { one(e2, s2, c2, t2, o2, x2); }); }
+        catch (...) { sequential(); return; }   // no thread could be started: one after the other
+        one(e1, s1, c1, t1, o1, x1); th.join();
+        fputs(s1.c_str(), stdout); fputs(s2.c_str(), stdout);
+        if (x1) std::rethrow_exception(x1); if (x2) std::rethrow_exception(x2); };
     env("FULLBAND", "1"); env("MASTERREF", T("b24.s32")); env("DEPTHADAPT", "1");
-    auto dL = layer("T.s32", (int)base, "L", "dL"), dR = layer("T.s32", (int)base, "R", "dR");
+    Streams dL, dR; layerPair("T.s32", (int)base, "L", "dL", "R", "dR", dL, dR, planD.both); stamp("depth layers");
     env("FULLBAND", ""); env("MASTERREF", ""); env("DEPTHADAPT", "");
     char kf[32]; snprintf(kf, sizeof kf, "%.6f", (fc - 1000.0) / (base / 2)); env("K0FRAC", kf); env("OCTSPLIT", "1");
-    std::vector<std::vector<uint8_t>> fM, fS; if (ok) { fM = layer("F.s32", w.rate, "M", "fM"); fS = layer("F.s32", w.rate, "S", "fS"); } env("K0FRAC", ""); env("OCTSPLIT", "");
+    Streams fM, fS; if (ok) layerPair("F.s32", w.rate, "M", "fM", "S", "fS", fM, fS, planF.both); env("K0FRAC", ""); env("OCTSPLIT", ""); stamp("frequency layers");
     if (!ok || dL.size() != 1 || dR.size() != 1 || fM.empty() || fM.size() != fS.size()) { printf("ENCODER SELF-CHECK FAILED: a decoded layer differs from the encoder's plane or a layer could not be coded; nothing written\n"); oldNote(); return 2; }
     // CD layer: padded base trimmed by P >> stages at each end; the trimmed edges go into the LAE chunk (the decoder needs them)
     std::vector<uint8_t> b16 = slurp(T("b16.s16")); long nb = (long)b16.size() / 4, pb = P >> stages;
@@ -411,7 +481,7 @@ static int encode(int argc, char** argv) {
     auto writeFile = [&]() { std::vector<uint8_t> lae; auto put32 = [&](int32_t v) { lae.insert(lae.end(), (uint8_t*)&v, (uint8_t*)&v + 4); };
         auto putb = [&](const void* p, size_t n) { lae.insert(lae.end(), (const uint8_t*)p, (const uint8_t*)p + n); };
         auto putS = [&](const std::vector<uint8_t>& s) { put32((int32_t)s.size()); putb(s.data(), s.size()); };
-        put32(0x3145414C); put32(5); put32(w.rate); put32((int32_t)base); put32(stages); put32((int32_t)(w.s.size() / 2)); put32(P);
+        put32(0x3145414C); put32(5); put32(w.rate); put32((int32_t)base); put32(stages); put32((int32_t)Lm); put32(P);
         put32((int32_t)fc); put32(mi); put32(equal ? 1 : 0); put32(wm); put32((int32_t)nb); put32((int32_t)pb);
         putb(edge.data(), edge.size() * 2); put32((int32_t)dfl.size()); putb(dfl.data(), dfl.size());
         putS(dL[0]); putS(dR[0]); put32((int32_t)fM.size()); for (auto& s : fM) putS(s); for (auto& s : fS) putS(s);
@@ -422,7 +492,7 @@ static int encode(int argc, char** argv) {
         wavio::Wav v; if (!wavio::read(partPath.c_str(), v) || v.rate != (int)base || v.bits != 16 || v.ch != 2 || v.pcm16 != cd || v.lae != lae || encio::testFail("partverify")) {
             printf("read-back check FAILED: %s does not hold what was written (disk full or failing?)\n", partPath.c_str()); return (size_t)0; }
         return lae.size(); };
-    size_t chunk = writeFile(); if (!chunk) { oldNote(); return 2; }
+    size_t chunk = writeFile(); if (!chunk) { oldNote(); return 2; } stamp("file written");
     long nclip = -1;
     {   // leak compensation (v5, always on): decode the final frequency layer, let the depth layer cancel its leak into the CD band
         g_streamErr = false; std::error_code ec; std::filesystem::remove(T("leak.s32"), ec);
@@ -432,9 +502,10 @@ static int encode(int argc, char** argv) {
                                                                                 g_streamErr ? ", decoded values out of range" : "", forced ? ", forced by the test hook" : ""); oldNote(); return 2; }
         char fcs[32]; snprintf(fcs, sizeof fcs, "%.0f", fc); env("LEAKIN", T("leak.s32"));
         rc = call(m_routes::main, {"routes", T("m.raw"), std::to_string(w.rate), T("b16.s16"), T("b24.s32"), T("T.s32"), T("F2.s32"), fcs}); env("LEAKIN", "");
+        stamp("leak decoded + route split again");
         if (rc || encio::testFail("routes2")) { printf("leak compensation FAILED in the route split: nothing written\n"); oldNote(); return 2; }
         env("FULLBAND", "1"); env("MASTERREF", T("b24.s32")); env("DEPTHADAPT", "1");
-        dL = layer("T.s32", (int)base, "L", "dL"); if (ok) dR = layer("T.s32", (int)base, "R", "dR");
+        dL.clear(); dR.clear(); layerPair("T.s32", (int)base, "L", "dL", "R", "dR", dL, dR, planD.both);
         env("FULLBAND", ""); env("MASTERREF", ""); env("DEPTHADAPT", "");
         if (!ok || dL.size() != 1 || dR.size() != 1) { printf("ENCODER SELF-CHECK FAILED after leak compensation; nothing written\n"); oldNote(); return 2; }
         chunk = writeFile(); if (!chunk) { oldNote(); return 2; }
@@ -445,7 +516,7 @@ static int encode(int argc, char** argv) {
     { g_streamErr = false; std::error_code ec; std::filesystem::remove(T("clip.bin"), ec);
       env("CLIPMAP", T("clip.bin")); int rc = call(m_dec::main, {"dec", partPath, T("check.wav"), "full"}); env("CLIPMAP", "");
       if (rc || encio::testFail("finaldecode")) { printf("end-to-end check FAILED: the decoder could not decode the final file (code %d): nothing written\n", rc); oldNote(); return 2; }
-      const long long wantWav = 44 + (long long)(w.s.size() / 2) * 6 + (((long long)(w.s.size() / 2) * 6) & 1), clipB = fileSize(T("clip.bin"));
+      const long long wantWav = 44 + Lm * 6 + ((Lm * 6) & 1), clipB = fileSize(T("clip.bin"));
       if (fileSize(T("check.wav")) == wantWav && clipB >= 0 && !encio::testFail("clipdecode")) nclip = (long)(clipB / 4);
       if (nclip >= 0) printf("samples beyond full scale before the decoder's hard limiter: %ld\n", nclip);
       else printf("samples beyond full scale before the decoder's hard limiter: not measured (the check files are incomplete)\n"); }

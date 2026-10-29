@@ -101,6 +101,10 @@ The conformance vectors and their hashes are listed in [tests/vectors/MANIFEST.m
   - The number of threads defaults to the number of cores reported by the system (`std::thread::hardware_concurrency`).
   - The environment variable `PARTTHREADS` sets it explicitly.
   - The thread count does not affect the result: 1 and 16 threads produce byte-identical streams.
+  - Since 2026-10-29 the route split's filters are also divided across threads, and the two layers of a pair (depth L and R, frequency M and S, and L and R again after leak compensation) can be coded at the same time. Every output value is computed with the same operations in the same order, so the output is byte-identical.
+  - Memory plan: at the start the encoder reads the physical memory once and decides from the track length whether each pair runs at once or one after the other (`memory plan: …`). Two at once only on 64-bit builds, with `PARTTHREADS` not 1, and when about 2 × (80 bytes per layer sample + 64 MB) fits both the budget (`mem=<GB>`, default half the physical memory) and the available memory. Linux reads `/proc/meminfo` (MemAvailable); where the memory cannot be read, the layers run one after the other.
+  - `PARTTHREADS=1` makes the whole encoder single-threaded.
+  - An error in any thread (out of memory, a failed write) is handed to the main thread and handled as before: no output is written and the temporary folder is removed.
 - **Decoder.** The decoder is single-threaded.
 
 ## 5. Speed and memory
@@ -110,7 +114,17 @@ The following values were measured during development (2026-10-16) on Windows x6
 | | Time | Peak memory |
 |---|---|---|
 | Decoding (24-bit route, streaming) | 2.8 s (about 14x real time) | 38 MB |
-| Encoding (mode 3, 16 threads) | 113 s (about 0.35x real time) | 1.35 GB |
+| Encoding (mode 3, 16 threads; encoder of 2026-10-16) | 113 s (about 0.35x real time) | 1.35 GB |
+
+Encoder of 2026-10-29 (Windows x64, 32 threads, 352.8 kHz stereo 60 s, mode 3, s1; output byte-identical to the 2026-10-24 encoder):
+
+| Encoder | Time | Peak memory |
+|---|---|---|
+| 2026-10-24 | 177 s | 1.83 GB |
+| 2026-10-29, layers one after the other | 59 s | 1.06 GB |
+| 2026-10-29, two layers of a pair at once | 43 s | 1.49 GB |
+
+Time and memory grow linearly with length (measured at 10, 20, 40 and 60 s). Most of the time saved comes from the partition search, which used to allocate a cut list for every rectangle; with many threads those heap allocations waited on each other. Memory: one reconstructed plane instead of two identical copies, each octave segment holds only its own bins, and signals are freed as soon as they are no longer needed.
 
 **Decoder.** The decoder is streaming, and its memory does not grow with track length, apart from the input file, which is currently read whole. It:
 
@@ -118,4 +132,4 @@ The following values were measured during development (2026-10-16) on Windows x6
 - overlap-adds the inverse MDCT frame by frame;
 - pulls every resampling stage through short sliding windows.
 
-**Encoder.** The encoder processes a whole track, because the mode proportions are measured over the whole track. Its memory grows linearly with the length. A streaming encoder is future work.
+**Encoder.** The encoder processes a whole track, because the mode proportions are measured over the whole track. Its memory grows linearly with the length. A block-wise encoder, whose memory does not grow with length and whose output is identical to the whole-track encoder, is future work.

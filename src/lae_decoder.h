@@ -128,6 +128,8 @@ struct Decoder {
         if (mode != "full" && mode != "16" && mode != "cd24") return fail(1, "route must be full, 16 or cd24");
         if (lae.empty()) return fail(1, "no LAE chunk: plain CD audio");
         if (lae.size() < 8) return fail(3, "corrupt LAE chunk");
+        // the chunk's first 4 bytes name the format: "LAE1" = LAEY (lossy, this decoder), "LAE2" = LAES (lossless, decoded by laes)
+        if (!memcmp(lae.data(), "LAE2", 4)) return fail(1, "this is an LAES file (lossless, extension LAE2): decode it with laes; this decoder reads LAEY (extension LAE1)");
         { uint32_t stored; memcpy(&stored, lae.data() + lae.size() - 4, 4); if (crc32(lae.data(), lae.size() - 4) != stored) return fail(3, "LAE chunk damaged (CRC mismatch): refusing to decode; the CD audio itself still plays"); }
         Rd r{lae.data(), lae.size() - 4};
         if (r.i32v() != 0x3145414C || r.i32v() != 5) return fail(1, "unknown LAE chunk version (this decoder reads v5)");

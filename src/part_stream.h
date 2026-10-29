@@ -48,7 +48,7 @@ template <class C> static void codeU(C& c, UModel& m, uint32_t& v, bool enc) {
     uint32_t rest = 0; int nr = len - 2;
     if constexpr (is_same<C, Enc>::value) { rest = v & ((1u << nr) - 1); if (nr) c.direct(rest, nr); } else { if (nr) rest = c.direct(nr); v = (1u << (len - 1)) | ((uint32_t)top << nr) | rest; }
 }
-static double g_tierBytes[4]; static long g_tierCoef[4];   // statistics: bytes and coefficients per block tier (encoder side)
+static thread_local double g_tierBytes[4]; static thread_local long g_tierCoef[4];   // statistics: bytes and coefficients per block tier (encoder side; per thread)
 static thread_local bool g_streamErr = false;   // decoder: set when a decoded symbol is out of range (corrupt stream); values are clamped, memory is never overrun; per thread (a thread decodes one stream at a time)
 // CRC-32 (IEEE 802.3 polynomial, reflected, the common public-domain table algorithm) for the LAE chunk integrity check
 inline uint32_t crc32(const uint8_t* p, size_t n) { struct Table { uint32_t t[256]; Table() {

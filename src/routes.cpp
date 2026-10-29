@@ -14,6 +14,7 @@
 #include <cmath>
 #include <vector>
 #include <thread>
+#include <exception>
 #include <complex>
 #include "fft.h"
 #include <algorithm>
@@ -21,14 +22,33 @@
 #include "enc_io.h"
 using namespace std; using namespace lae;
 static const int32_t* tab(int s, int& half) { switch (s) { case 0: half = kHalfLen0; return kHalf0; case 1: half = kHalfLen1; return kHalf1; case 2: half = kHalfLen2; return kHalf2; default: half = kHalfLen3; return kHalf3; } }
+// runs f(0) here and f(1) in a second thread (the two channels); an exception in either is re-thrown here after both have finished
+template <class F> static void twoWay(F f) {
+    std::exception_ptr x1; std::thread t; bool started = false; const char* pt = getenv("PARTTHREADS");   // PARTTHREADS=1: no second thread
+    if (!(pt && atoi(pt) == 1)) try { t = std::thread([&]() { try { f(1); } catch (...) { x1 = std::current_exception(); } }); started = true; } catch (...) {}
+    std::exception_ptr x0; try { f(0); } catch (...) { x0 = std::current_exception(); }
+    if (started) t.join(); else { try { f(1); } catch (...) { x1 = std::current_exception(); } }
+    if (x0) std::rethrow_exception(x0); if (x1) std::rethrow_exception(x1); }
+// splits the sample range [0, n) across threads; every output sample depends only on the input, so the result is the same as one loop.
+// Threads: half of PARTTHREADS (or of the logical processors), since the two channels run at once. A chunk whose thread cannot be started
+// runs here; an exception in any chunk is re-thrown here after all have finished.
+template <class F> static void parFor(long n, F f) {
+    const char* pt = getenv("PARTTHREADS"); unsigned hc = pt ? (unsigned)std::max(1, atoi(pt)) : std::thread::hardware_concurrency();
+    int th = (int)std::max(1u, hc / 2); if (th <= 1 || n < 65536) { f(0L, n); return; }
+    std::vector<std::thread> pool; std::vector<std::exception_ptr> xs(th); long step = (n + th - 1) / th; std::vector<int> inline_;
+    for (int k = 1; k < th; k++) { long a = k * step, b = std::min(n, a + step); if (a >= b) continue;
+        try { pool.emplace_back([&f, &xs, k, a, b]() { try { f(a, b); } catch (...) { xs[k] = std::current_exception(); } }); } catch (...) { inline_.push_back(k); } }
+    try { f(0L, std::min(n, step)); } catch (...) { xs[0] = std::current_exception(); }
+    for (int k : inline_) { long a = k * step, b = std::min(n, a + step); try { f(a, b); } catch (...) { xs[k] = std::current_exception(); } }
+    for (auto& t : pool) t.join(); for (auto& x : xs) if (x) std::rethrow_exception(x); }
 static vector<double> up2(const vector<double>& x, int s) {   // same tables as the decoder's up-conversion, evaluated in double (encoder-side target only)
     int half; const int32_t* h = tab(s, half); long n = (long)x.size(); vector<double> y(2 * n);
-    for (long i = 0; i < 2 * n; i++) {
+    parFor(2 * n, [&](long i0, long i1) { for (long i = i0; i < i1; i++) {
         if (i % 2 == 0) { y[i] = x[i / 2]; continue; }
         double a = 0; for (int j = 1, t = 0; j <= half; j += 2, t++) { long p = (i - j) / 2, q = (i + j) / 2; double hv = 2.0 * h[t] / 2147483648.0;
             long pp = p < 0 ? -p : p, qq = q < n ? q : 2 * (n - 1) - q; pp = min(max(pp, 0L), n - 1); qq = min(max(qq, 0L), n - 1);
             if (i - j < 0) pp = min(max((j - i) / 2, 0L), n - 1); a += hv * x[pp] + hv * x[qq]; }
-        y[i] = a; }
+        y[i] = a; } });
     return y; }
 using fftlib::fft;
 int main(int argc, char** argv) {
@@ -45,7 +65,8 @@ int main(int argc, char** argv) {
           double d = (!df.empty() && df[c * nbk + i / 4096]) ? (u1 + u2 - 4096) / 16.0 : 0.0; v[c][i] = 256.0 * b16[i * 2 + c] - d; } }
     // cut-off: first frequency >= 15 kHz where the CD path's transfer (cross-spectrum, robust to the CD's own noise) drops below -0.1 dB
     double fc = argc > 7 ? atof(argv[7]) : 0;
-    vector<double> uv[2]; { auto upc = [&](int c) { uv[c] = v[c]; for (int s = 0; s < stages; s++) uv[c] = up2(uv[c], s); uv[c].resize(L, 0.0); }; std::thread t1(upc, 1); upc(0); t1.join(); }
+    // the CD path at the master rate: needed only to find the cut-off (not when it is given, as in the second split after leak compensation)
+    vector<double> uv[2]; if (fc <= 0) { auto upc = [&](int c) { uv[c] = v[c]; for (int s = 0; s < stages; s++) uv[c] = up2(uv[c], s); uv[c].resize(L, 0.0); }; twoWay(upc); }
     if (fc <= 0) { const int M = 16384; vector<double> sxy(M / 2, 0), sxx(M / 2, 0), syy(M / 2, 0), sxyi(M / 2, 0);
         for (long st0 = 0; st0 + M <= L; st0 += M) for (int c = 0; c < 2; c++) { vector<complex<double>> a(M), b(M);
             for (int i = 0; i < M; i++) { double w = 0.5 - 0.5 * cos(2 * M_PI * i / M); a[i] = (mr[(st0 + i) * 2 + c] >> 8) * w; b[i] = uv[c][st0 + i] * w; }
@@ -63,6 +84,7 @@ int main(int argc, char** argv) {
                 if (xx < 1e-9 * mxx * 17) continue; if (h * h >= 0.98 * xx * yy) { fm = (k + 1) * rate / M; break; } }
             printf("CD cut-off by magnitude coherence (diagnostic only): %.0f Hz\n", fm);
             if (fabs(fm - fc) > 500 || fc <= 15000) printf("WARNING: the cut-off of the independent CD looks wrong (%.0f Hz, magnitude coherence %.0f Hz): CD and master may be offset in time\n", fc, fm); } }
+    for (auto& u : uv) vector<double>().swap(u);   // not needed any more (memory)
     printf("CD cut-off: %.0f Hz\n", fc);
     if (getenv("CUTOFFOUT")) { char t[64]; snprintf(t, sizeof t, "%.0f\n", fc); encio::writeText(getenv("CUTOFFOUT"), t); }
     // T = lowpass_fc(base24 - v), windowed-sinc (Kaiser beta 9, 511 taps, zero phase) at the base rate
@@ -80,12 +102,12 @@ int main(int argc, char** argv) {
             { auto I0 = [](double x) { double s = 1, t = 1; for (int k = 1; k < 30; k++) { t *= (x / 2) / k; s += t * t; } return s; }; b0 = I0(9.0);
               for (int k = -NL; k <= NL; k++) { double rr = (double)k / NL; double w = I0(9.0 * sqrt(max(0.0, 1 - rr * rr))) / b0; hl[k + NL] = (k == 0 ? xl : sin(M_PI * xl * k) / (M_PI * k)) * w; } }
             for (long i = 0; i < Lb && i < (long)leak.size() / 2; i++) lk[i] = leak[i * 2 + c] / 16.0;
-            for (long i = 0; i < Lb; i++) { double a = 0; for (int k = -NL; k <= NL; k++) { long j = i + k; j = j < 0 ? -j : (j >= Lb ? 2 * (Lb - 1) - j : j); a += hl[k + NL] * lk[j]; } r[i] -= a; } }
-        for (long i = 0; i < Lb; i++) { if (full) { T[i] = llround(r[i]); continue; } double a = 0; for (int k = -NT; k <= NT; k++) { long j = i + k; j = j < 0 ? -j : (j >= Lb ? 2 * (Lb - 1) - j : j); a += h[k + NT] * r[j]; } T[i] = llround(a); }
+            parFor(Lb, [&](long i0, long i1) { for (long i = i0; i < i1; i++) { double a = 0; for (int k = -NL; k <= NL; k++) { long j = i + k; j = j < 0 ? -j : (j >= Lb ? 2 * (Lb - 1) - j : j); a += hl[k + NL] * lk[j]; } r[i] -= a; } }); }
+        parFor(Lb, [&](long i0, long i1) { for (long i = i0; i < i1; i++) { if (full) { T[i] = llround(r[i]); continue; } double a = 0; for (int k = -NT; k <= NT; k++) { long j = i + k; j = j < 0 ? -j : (j >= Lb ? 2 * (Lb - 1) - j : j); a += h[k + NT] * r[j]; } T[i] = llround(a); } });
         for (long i = 0; i < Lb; i++) Tout[i * 2 + c] = (int32_t)max(-8388608.0, min(8388607.0, T[i])) * 256;
         vector<double> u = v[c]; for (long i = 0; i < Lb; i++) u[i] += T[i]; for (int s = 0; s < stages; s++) u = up2(u, s); u.resize(L, 0.0);
         for (long i = 0; i < L; i++) { long long d = (long long)(mr[i * 2 + c] >> 8) - llround(u[i]); d = max(-8388608LL, min(8388607LL, d)); Fout[i * 2 + c] = (int32_t)(d * 256); } };
-    { std::thread t1(chanTF, 1); chanTF(0); t1.join(); }   // same arithmetic per channel as a sequential loop: output byte-identical
+    twoWay(chanTF);   // same arithmetic per channel as a sequential loop: output byte-identical
     encio::writeVec(argv[5], Tout);
     encio::writeVec(argv[6], Fout);
     return 0; }

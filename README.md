@@ -1584,7 +1584,7 @@ Notes on the encoder:
 - **Disk space (measured 2026-10-30).** The work folders are on the drive of the output file and are removed at the end; keep this much free space there, plus the output itself:
   - `lae_enc`: the work folder `<output>.tmp` reached 13.2 GB for a 10.16-minute 352.8 kHz 32-bit master (about 1.3 GB per minute at 352.8 kHz, half that at 176.4 kHz). With `cd=` about 15 % more (estimated; that master's CD has 3.3 s less sound at the end, so the encoder refused it as designed and nothing was measured to the end).
   - `laes enc`: the work folder `<output>.laes.tmp` reached 38.6 GB for the same 10 minutes with four masters (about 3.8 GB per minute), the same with `--mem=20` and `--mem=2`.
-  - The encoder checks the free space before it starts and stops cleanly if the disk becomes full.
+  - `lae_enc` checks the free space before it starts; if the disk becomes full during a run, both tools stop cleanly and leave no output file.
 - **Length.** The limit is that of the v5 container: about 94 minutes at 352.8 kHz, 173 minutes at 192 kHz, with or without `cd=`.
 - **Failure handling.** Every file operation is checked. On a full disc, an internal error, lack of memory or an interruption, the encoder stops with the reason, writes no output file and deletes its temporary files. The output is first written as `<output>.part` and renamed only after it has been read back and verified; an existing file of the same name is left unchanged if the run fails. The free disk space is checked before the run starts.
 

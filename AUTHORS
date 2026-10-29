@@ -50,6 +50,7 @@ src/part_blk.cpp     | mtq0605 | original | -
 src/laes_codec_enc.h | mtq0605 | original | -
 src/laes_file_enc.h  | mtq0605 | original | -
 src/laes_flac_enc.h  | mtq0605 | original (FLAC writer from RFC 9639; no libFLAC code) | -
+src/laes_stream_enc.h | mtq0605 | original | -
 src/laes_tool.cpp    | mtq0605 | original | -
 src/laes_selftest.h  | mtq0605 | original | -
 

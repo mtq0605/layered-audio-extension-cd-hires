@@ -39,8 +39,9 @@ The container format and the decoding process of LAEY are unchanged. The encoder
 - **Tool `laes`** (`src/laes_tool.cpp`): `enc` (WAV or FLAC form), `dec` with `--list` / `--pick` (every master and rate level, and a 16-bit version derived on request, marked lossy), `verify`, `align` (the automatic search of `lae_enc`, the position stored as T), `selftest`.
 - **Planner:** `lae_enc plan … laes` cuts an album master at the CD's track boundaries without moving it, each track with its own T.
 - **`lae_cdx`** packs and reads LAES extension files (type 2): every master must decode and match its SHA-256.
-- **Licences:** as LAEY: the decoder side (`laes_math.h`, `laes_lift.h`, `laes_codec.h`, `laes_file.h`, `laes_flac.h`) Apache-2.0; the encoder side (`laes_codec_enc.h`, `laes_file_enc.h`, `laes_flac_enc.h`, `laes_tool.cpp`, `laes_selftest.h`) GPL-3.0-or-later or the commercial licence.
+- **Licences:** as LAEY: the decoder side (`laes_math.h`, `laes_lift.h`, `laes_codec.h`, `laes_file.h`, `laes_flac.h`, `laes_stream.h`) Apache-2.0; the encoder side (`laes_codec_enc.h`, `laes_file_enc.h`, `laes_flac_enc.h`, `laes_stream_enc.h`, `laes_tool.cpp`, `laes_selftest.h`) GPL-3.0-or-later or the commercial licence.
 - **Tests:** `laes selftest` (synthetic signals: round trips over both carriers, all word lengths, both rate families, all storage values; damage and parser tests). Measured on 10-second excerpts: 16-, 24- and 32-bit masters of one mix with all rate levels take 99.6–99.8 % of a FLAC of the 32-bit master alone.
+- **Memory:** `laes` works block-wise (output byte-identical): a 10-minute track with four masters (32 / 24 / 16 bit at 352.8 kHz, 24 bit at 176.4 kHz) and an independent CD as core encodes with 2.9 GB peak memory and decodes with 2.2 GB (the whole-track version needed about 57 GB). Memory limit `--mem=<GB>` (default min(1/2, max(1/4, physical memory − 28 GB))); a work folder holds the candidates. A WAV output beyond 4 GB is refused (use the FLAC form). Numbers in [docs/BUILD.md](docs/BUILD.md), Section 5.
 - Not yet: LAES playback in the foobar2000 component, files beyond 4 GB, streaming decoding.
 
 ## 2026-10-24

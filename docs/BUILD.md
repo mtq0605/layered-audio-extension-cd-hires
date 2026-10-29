@@ -154,3 +154,18 @@ For the whole-track encoders above, time and memory grew linearly with length (m
 Memory does not grow with length apart from the per-cell records (3 bytes per cell). Large intermediate data go to the work folder (about 105 bytes per master frame). With `cd=`, the master is read through file windows as well, and placement, the digital silence around the move, the move and the cut of that silence are written file to file; the alignment search itself correlates over the whole track at the CD rate (about 2.4 GB for 10 minutes). The option `resume` continues an interrupted run from its last finished step (with `cd=`, after the alignment, which is done again).
 
 **Decoder input.** The decoder reads the CD audio of its input file in place (one copy, 2 bytes per CD sample).
+
+**LAE Lossless (`laes`, block-wise, 2026-10-30).** `laes enc`, `dec`, `verify` and `align` work on pieces of the base level (all rate levels of a piece at once); the output is byte-identical to the whole-track `laes` of 2026-10-29. Each storage candidate is written to a work folder (`<output>.laes.tmp`, removed at the end; `KEEPTMP=1` keeps it) and only the smallest is kept; the WAV and FLAC files are written and read back piece by piece. The memory limit is `--mem=<GB>`; by default it is min(1/2, max(1/4, physical memory − 28 GB)): 8 GB on a 32 GB machine, 20 GB on 48 GB, 32 GB on 64 GB. A WAV output beyond 4 GB is refused; use the FLAC form.
+
+Measured on Windows x64 (32 threads, 32 GB):
+
+| Content | Step | Time | Peak memory |
+|---|---|---|---|
+| 60 s, four masters (32 / 24 / 16 bit at 352.8 kHz, 24 bit at 176.4 kHz) | encode, whole-track `laes` | 256 s | 5,743 MB |
+| | encode, block-wise | 236 s | 1,017 MB (`--mem=1`: 373 MB) |
+| | decode, whole-track / block-wise | | 4,704 MB / 773 MB |
+| 10:09 (Grand), core = an independent CD, the same four masters | encode, FLAC form | 1,661 s | 2,860 MB |
+| | encode, WAV form | 1,166 s | 2,859 MB |
+| | decode and verify | about 175 s | 2,239 MB |
+
+The work folder needs about 40–50 GB for the 10-minute, four-master case.

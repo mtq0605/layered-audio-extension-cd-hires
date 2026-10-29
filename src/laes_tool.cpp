@@ -31,6 +31,7 @@
 #include <filesystem>
 #include "laes_file_enc.h"
 #include "laes_flac_enc.h"
+#include "laes_stream_enc.h"   // block-wise enc / dec / verify / align (2026-10-30)
 #ifdef _WIN32
 static const char* kLaeEnc = "lae_enc.exe"; static const char* kQ = "\"";   // cmd.exe needs the whole command line quoted once more
 #else   // POSIX names of the same calls
@@ -104,7 +105,7 @@ static std::string laeEncPath(int argc, char** argv) { std::string e = arg(argc,
 // moves the master and stores T = offset / 2^stages (base samples, same sign) exactly as measured, fraction included.
 // err = LAEY's pooled residual after the fraction (its phase line), the alignment error the -60 / -54 dB bands apply to.
 struct AutoT { bool found = false; double T = 0, err = 0, resid = 0; std::string search, notes, why; };
-static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::string& mPath, const Pcm& m, const std::string& enc) {
+static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::string& mPath, const laess::Prep& m, const std::string& enc) {   // m: read and its levels made (block-wise, 2026-10-30)
     AutoT A; int st = 0; while ((cd.rate << st) < m.rate && st < 4) st++;
     if ((cd.rate << st) != m.rate || st > 3) { A.why = "master rate must be the core rate times 1, 2, 4 or 8"; return A; }
     if (st == 0) { A.why = "LAEY's search needs a master at 2, 4 or 8 times the core rate; give T by hand (master.wav@T)"; return A; }
@@ -124,13 +125,13 @@ static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::stri
     if (!have[0] && !have[1]) { A.why = "LAEY's search found no position; give T by hand. " + A.notes; return A; }
     const int k = have[0] && have[1] ? (pooled[1] < pooled[0] ? 1 : 0) : (have[0] ? 0 : 1); A.found = true; A.T = T[k]; A.search = nm[k]; A.err = pooled[k] <= 0 ? pooled[k] : 0;
     // own check: the master's base level against the core moved by T, worst of three blocks (head / middle / tail, up to 5 s each)
-    const int w = unusedBits(m), up = (m.bits - 16) - w; V base[2]; for (int c = 0; c < 2; c++) { V x(m.frames()); for (long i = 0; i < m.frames(); i++) x[i] = m.c[c][i] >> w; for (int s = st; s > 0; s--) { V lo, d; laesfast::fwd(x, lo, d); x = lo; } base[c] = x; }
-    const int64_t nb = (int64_t)base[0].size(), bl = std::max<int64_t>(1, std::min<int64_t>(nb / 3, 5 * (int64_t)cd.rate)), b0[3] = {0, (nb - bl) / 2, nb - bl};
+    const int w = m.w, up = (m.bits - 16) - w; std::unique_ptr<laess::Sig> base[2] = {laess::levelOf(m, 0, 0), laess::levelOf(m, 1, 0)};   // the base level (samples >> w)
+    const int64_t nb = base[0]->n, bl = std::max<int64_t>(1, std::min<int64_t>(nb / 3, 5 * (int64_t)cd.rate)), b0[3] = {0, (nb - bl) / 2, nb - bl};
     int64_t wh = (int64_t)std::floor(A.T); uint32_t fr = (uint32_t)std::llround((A.T - std::floor(A.T)) * 4294967296.0); if (fr == 0 && A.T != std::floor(A.T)) wh++;
     const auto h = refTaps(fr); A.resid = -200;
-    for (int b = 0; b < 3; b++) { double eb = 0, er = 0; for (int c = 0; c < 2; c++) { const int64_t n = (int64_t)cd.c[c].size();
+    for (int b = 0; b < 3; b++) { double eb = 0, er = 0; for (int c = 0; c < 2; c++) { const int64_t n = (int64_t)cd.c[c].size(); V bv((size_t)bl); base[c]->get(b0[b], b0[b] + bl, bv.data());
             for (int64_t i = b0[b]; i < b0[b] + bl; i++) { Acc a; for (int q = -127; q <= 128; q++) a.mac(h[q + 127], cd.c[c][mir(i + wh + q, n)]); const int s = 31 - up;
-                const double r = (double)(s > 0 ? a.shr(s) : (int64_t)a.lo << (-s)), x = (double)base[c][i]; eb += x * x; er += (x - r) * (x - r); } }
+                const double r = (double)(s > 0 ? a.shr(s) : (int64_t)a.lo << (-s)), x = (double)bv[(size_t)(i - b0[b])]; eb += x * x; er += (x - r) * (x - r); } }
         if (eb > 0 && er > 0) A.resid = std::max(A.resid, 10 * std::log10(er / eb)); }
     if (A.err == 0) A.err = A.resid;   // LAEY gave no phase line: use the own check
     return A; }
@@ -143,11 +144,27 @@ static bool acceptAlign(const AutoT& A, const std::string& mPath, bool acceptFla
     if (acceptFlag) { printf("  accepted (--accept)\n"); return true; }
     printf("  use this alignment? [y/N] "); fflush(stdout); char a[16] = {0}; if (!fgets(a, sizeof a, stdin)) { printf("(no answer)\n"); return false; }
     const char* p = a; while (*p && !isalpha((unsigned char)*p)) p++; return *p == 'y' || *p == 'Y'; }   // skips a byte-order mark or spaces
+// physical memory in bytes (0 if unknown), for the default memory limit
+#ifdef _WIN32
+struct LaesMemStatus { unsigned long len, load; unsigned long long totalPhys, availPhys, totalPage, availPage, totalVirt, availVirt, availExt; };   // MEMORYSTATUSEX
+extern "C" __declspec(dllimport) int __stdcall GlobalMemoryStatusEx(LaesMemStatus*);
+static unsigned long long physMemory() { LaesMemStatus m{}; m.len = sizeof m; return GlobalMemoryStatusEx(&m) ? m.totalPhys : 0; }
+#else
+static unsigned long long physMemory() { FILE* f = fopen("/proc/meminfo", "r"); if (!f) return 0; char line[256]; unsigned long long t = 0;
+    while (fgets(line, sizeof line, f)) { unsigned long long kb = 0; if (sscanf(line, "MemTotal: %llu kB", &kb) == 1) t = kb * 1024; } fclose(f); return t; }
+#endif
 #include "laes_selftest.h"
 int main(int argc, char** argv) {
     if (argc < 2) { printf("laes enc | dec | verify | align | selftest | excerpt | mkcd  (see the source header)\n"); return 1; }
     const std::string cmd = argv[1];
     if (cmd == "selftest") return selftest::run() ? 2 : 0;
+    if (cmd == "reduce" && argc >= 5) {   // laes reduce <in.wav> <out.wav> <bits>: a shorter word length with TPDF dither (+-1 LSB of the result), fixed seed
+        Pcm p; std::string e = readWav(argv[2], p); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } const int bits = atoi(argv[4]);
+        if ((bits != 16 && bits != 24) || bits >= p.bits) { printf("reduce: <bits> must be 16 or 24 and below the input's %d\n", p.bits); return 1; }
+        const int s = p.bits - bits; const int64_t mx = (1LL << (bits - 1)) - 1, mn = -mx - 1; Pcm q; q.rate = p.rate; q.bits = bits; Rng r(4321);
+        for (int c = 0; c < 2; c++) { q.c[c].resize(p.c[c].size()); for (size_t i = 0; i < p.c[c].size(); i++) {
+                const int64_t r1 = (int64_t)(r.next() >> (64 - s)), r2 = (int64_t)(r.next() >> (64 - s)); q.c[c][i] = std::max(mn, std::min(mx, (p.c[c][i] + r1 - r2 + (1LL << (s - 1))) >> s)); } }
+        return writeAll(argv[3], wavBytes(q, nullptr)) ? 0 : 2; }
     if (cmd == "excerpt" && argc >= 7) { Pcm p; std::string e = readWav(argv[2], p); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         long s0 = (long)(atof(argv[4]) * p.rate), L = (long)(atof(argv[5]) * p.rate); int bits = atoi(argv[6]); if (s0 < 0 || s0 + L > p.frames()) { printf("excerpt outside the file\n"); return 2; }
         Pcm q; q.rate = p.rate; q.bits = bits; Rng r(12345); for (int c = 0; c < 2; c++) { q.c[c].assign(p.c[c].begin() + s0, p.c[c].begin() + s0 + L);
@@ -163,111 +180,201 @@ int main(int argc, char** argv) {
             for (long i = 0; i < n; i++) { double a = 0; for (int q = -127; q <= 128; q++) { long j = i + ti + q; a += h[q + 127] * (j >= 0 && j < n ? (double)x[j] : 0); }
                 cd.c[c][i] = std::fabs(a * gain / sc) < 0.5 && noise == 0 ? 0 : std::max<int64_t>(-32768, std::min<int64_t>(32767, (int64_t)std::floor(a * gain / sc + noise * 1.732 * (r.uni() + r.uni() + r.uni() + r.uni()) + r.uni() + r.uni() + 0.5))); } }
         return writeAll(argv[3], wavBytes(cd, nullptr)) ? 0 : 2; }
+    // ---- block-wise commands (2026-10-30): masters, levels, layers and the payload live in a work folder next to the output; memory holds
+    // a few pieces (and the core). Piece length from the memory limit (--mem=<GB>, or by default min(1/2, max(1/4, all - 28 GB)) of the
+    // physical memory); the files written do not depend on it.
+    auto workDir = [&](const std::string& out) { const std::string wd = out + ".laes.tmp"; std::error_code ec;
+        if (fs::exists(wd, ec) && !fs::exists(wd + "/laes.tmp", ec)) laess::fail(wd + " exists and is not a laes work folder: remove it or choose another output name");
+        fs::remove_all(wd, ec); fs::create_directories(wd, ec); if (ec || !fs::exists(wd)) laess::fail("cannot create the work folder " + wd);
+        { laess::Out o(wd + "/laes.tmp"); const char* t = "laes work folder (removed at the end of each run)\n"; o.put(t, strlen(t)); o.close(); } return wd; };
+    struct Gone { std::string p; ~Gone() { if (!p.empty() && !getenv("KEEPTMP")) { std::error_code ec; fs::remove_all(p, ec); } } };
+    auto pieceFor = [&](int maxStages) -> int64_t {   // base-level samples per piece, a multiple of 4096
+        if (const char* e = getenv("LAES_PIECE")) return std::max<int64_t>(4096, atoll(e) / 4096 * 4096);   // test hook
+        unsigned long long total = physMemory(); const std::string mm = arg(argc, argv, "--mem"); const unsigned long long G28 = 28ull << 30;
+        unsigned long long budget = !mm.empty() ? (unsigned long long)(atof(mm.c_str()) * 1073741824.0) : std::min(total / 2, std::max(total / 4, total > G28 ? total - G28 : 0ull));
+        if (budget < (512ull << 20)) budget = 512ull << 20;
+        const unsigned long long top = budget / 160;   // about 80 bytes per top-level sample of a piece (lifting windows), twice for the candidates' reference
+        return std::max<int64_t>(4096, (int64_t)((top >> maxStages) / 4096 * 4096)); };
+    const int threads = laesfast::defaultThreads();
     if (cmd == "align" && argc >= 4) {   // check only: prints T and the band; nothing is moved or written
-        Pcm cd, m; std::string e = readWav(argv[2], cd); if (e.empty()) e = readWav(argv[3], m); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+        Pcm cd; std::string e = readWav(argv[2], cd); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         if (cd.bits != 16 || (cd.rate != 44100 && cd.rate != 48000)) { printf("the core must be 16-bit at 44100 or 48000 Hz\n"); return 2; }
-        const AutoT A = autoAlign(argv[2], cd, argv[3], m, laeEncPath(argc, argv)); if (!A.found) { printf("%s\n", A.why.c_str()); return 2; }
-        const bool ok = acceptAlign(A, argv[3], flag(argc, argv, "--accept"));
-        printf("ALIGN_LAES T=%.10f err=%.1f resid=%.1f band=%s accepted=%d\n", A.T, A.err, A.resid, A.err <= -60 ? "ok" : A.err <= -54 ? "check" : "large", ok ? 1 : 0);
-        if (ok) printf("use %s@%.10f (or %s@auto in enc)\n", argv[3], A.T, argv[3]); return ok ? 0 : 2; }
-    if (cmd == "enc" && argc >= 4) {
+        try { const std::string wd = (fs::temp_directory_path() / ("laes_align_" + std::to_string((unsigned long long)std::hash<std::string>()(argv[3])))).string(); Gone g{workDir(wd)}; laess::Prep m;
+            e = laess::prepRead(argv[3], g.p + "/m", m); if (e.empty()) { int st = 0; while ((cd.rate << st) < m.rate && st < 4) st++; e = laess::prepLevels(m, cd.rate, g.p + "/m", pieceFor(st), threads); }
+            if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+            const AutoT A = autoAlign(argv[2], cd, argv[3], m, laeEncPath(argc, argv)); if (!A.found) { printf("%s\n", A.why.c_str()); return 2; }
+            const bool ok = acceptAlign(A, argv[3], flag(argc, argv, "--accept"));
+            printf("ALIGN_LAES T=%.10f err=%.1f resid=%.1f band=%s accepted=%d\n", A.T, A.err, A.resid, A.err <= -60 ? "ok" : A.err <= -54 ? "check" : "large", ok ? 1 : 0);
+            if (ok) printf("use %s@%.10f (or %s@auto in enc)\n", argv[3], A.T, argv[3]); return ok ? 0 : 2; }
+        catch (const std::exception& x) { printf("stopped: %s\n", x.what()); return 2; } }
+    if (cmd == "enc" && argc >= 4) try {
         const std::string out = argv[2], corePath = arg(argc, argv, "--core"); const bool derive = flag(argc, argv, "--derive-core");
-        std::vector<MasterIn> ms; std::vector<double> Ts; std::vector<std::string> paths; std::vector<bool> autoT;
+        std::vector<std::string> paths; std::vector<double> Ts; std::vector<bool> autoT; std::vector<laess::WavInfo> wis;
         for (int i = 3; i < argc; i++) { if (argv[i][0] == '-') continue; std::string a = argv[i]; double T = 0; bool au = false; size_t at = a.rfind('@');
             if (at != std::string::npos && at > 2) { au = a.substr(at + 1) == "auto"; T = au ? 0 : atof(a.substr(at + 1).c_str()); a = a.substr(0, at); }
-            MasterIn m; std::string e = readWav(a, m.m); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } ms.push_back(m); Ts.push_back(T); paths.push_back(a); autoT.push_back(au); }
-        if (ms.empty()) { printf("no master given\n"); return 1; }
+            laess::WavInfo wi; std::string e = laess::probeWav(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } paths.push_back(a); Ts.push_back(T); autoT.push_back(au); wis.push_back(wi); }
+        if (paths.empty()) { printf("no master given\n"); return 1; }
         {   // file order: more bits first, then higher rate (a master can only refer to earlier ones; a shorter word refers to a longer one cheaply)
-            std::vector<size_t> ord(ms.size()); for (size_t i = 0; i < ord.size(); i++) ord[i] = i;
-            std::stable_sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { return ms[a].m.bits != ms[b].m.bits ? ms[a].m.bits > ms[b].m.bits : ms[a].m.rate > ms[b].m.rate; });
-            std::vector<MasterIn> m2; std::vector<double> t2; std::vector<std::string> p2; std::vector<bool> a2;
-            for (size_t k = 0; k < ord.size(); k++) { m2.push_back(ms[ord[k]]); t2.push_back(Ts[ord[k]]); p2.push_back(paths[ord[k]]); a2.push_back(autoT[ord[k]]); }
-            ms.swap(m2); Ts.swap(t2); paths.swap(p2); autoT.swap(a2); }
-        size_t coreSrc = SIZE_MAX; const int base = ms[0].m.rate % 44100 == 0 ? 44100 : 48000; Pcm core; const bool asFlac = out.size() > 5 && !_stricmp(out.c_str() + out.size() - 5, ".flac");
-        const std::string cbArg = arg(argc, argv, "--core-bits"); int maxBits = 0; for (auto& m : ms) maxBits = std::max(maxBits, m.m.bits);
+            std::vector<size_t> ord(paths.size()); for (size_t i = 0; i < ord.size(); i++) ord[i] = i;
+            std::stable_sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { return wis[a].bits != wis[b].bits ? wis[a].bits > wis[b].bits : wis[a].rate > wis[b].rate; });
+            std::vector<std::string> p2; std::vector<double> t2; std::vector<bool> a2; std::vector<laess::WavInfo> w2;
+            for (size_t k = 0; k < ord.size(); k++) { p2.push_back(paths[ord[k]]); t2.push_back(Ts[ord[k]]); a2.push_back(autoT[ord[k]]); w2.push_back(wis[ord[k]]); }
+            paths.swap(p2); Ts.swap(t2); autoT.swap(a2); wis.swap(w2); }
+        const int base = wis[0].rate % 44100 == 0 ? 44100 : 48000; const bool asFlac = out.size() > 5 && !_stricmp(out.c_str() + out.size() - 5, ".flac");
+        const std::string cbArg = arg(argc, argv, "--core-bits"); int maxBits = 0, maxSt = 0; for (auto& w : wis) { maxBits = std::max(maxBits, w.bits); int st = 0; while ((base << st) < w.rate && st < 4) st++; maxSt = std::max(maxSt, st); }
         const int coreBits = !cbArg.empty() ? atoi(cbArg.c_str()) : (asFlac ? std::min(maxBits, 24) : 16);
         if (coreBits != 16 && coreBits != 24 && coreBits != 32) { printf("--core-bits must be 16, 24 or 32\n"); return 1; }
+        if (corePath.empty() && !derive) { printf("give --core=<core.wav> or --derive-core\n"); return 1; }
+        Gone g{workDir(out)}; const int64_t piece = pieceFor(maxSt);
+        std::vector<laess::Prep> pm(paths.size());
+        for (size_t i = 0; i < paths.size(); i++) { const std::string stem = g.p + "/m" + std::to_string(i); std::string e = laess::prepRead(paths[i], stem, pm[i]);
+            if (e.empty()) e = laess::prepLevels(pm[i], base, stem, piece, threads); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+        size_t coreSrc = SIZE_MAX; Pcm core;
         if (!corePath.empty()) { std::string e = readWav(corePath, core); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } if (core.rate != base) { printf("the core must be at %d Hz\n", base); return 2; } }
-        else if (derive) { bool dith; core = deriveCore(ms, base, coreBits, coreSrc, dith); printf("core: %d-bit base level of %s%s\n", coreBits, paths[coreSrc].c_str(), dith ? " (TPDF-dithered)" : ""); }
-        else { printf("give --core=<core.wav> or --derive-core\n"); return 1; }
-        for (size_t i = 0; i < ms.size(); i++) if (autoT[i]) {   // master.wav@auto: T from LAEY's search against the given core
+        else { bool dith; std::vector<laess::Prep*> pp; for (auto& m : pm) pp.push_back(&m); core = laess::deriveCoreS(pp, base, coreBits, coreSrc, dith, 20261028); printf("core: %d-bit base level of %s%s\n", coreBits, paths[coreSrc].c_str(), dith ? " (TPDF-dithered)" : ""); }
+        for (size_t i = 0; i < paths.size(); i++) if (autoT[i]) {   // master.wav@auto: T from LAEY's search against the given core
             if (corePath.empty() || core.bits != 16) { printf("@auto needs --core=<cd.wav>, a 16-bit CD / DVD (a derived core is at T = 0)\n"); return 1; }
-            const AutoT A = autoAlign(corePath, core, paths[i], ms[i].m, laeEncPath(argc, argv)); if (!A.found) { printf("%s: %s; nothing written\n", paths[i].c_str(), A.why.c_str()); return 2; }
+            const AutoT A = autoAlign(corePath, core, paths[i], pm[i], laeEncPath(argc, argv)); if (!A.found) { printf("%s: %s; nothing written\n", paths[i].c_str(), A.why.c_str()); return 2; }
             if (!acceptAlign(A, paths[i], flag(argc, argv, "--accept"))) { printf("alignment not accepted; nothing written\n"); return 2; } Ts[i] = A.T; }
-        for (size_t i = 0; i < ms.size(); i++) { ms[i].storage = -1; setT(ms[i], Ts[i]); }   // T relative to the core; the encoder chooses storage and tier per master
-        // file order, tried two ways, the smaller kept: (a) more bits first; (b) the master the core was derived from first (its base level
-        // is the core, so it costs little), then the others more bits first - the longer words then only add what is new in them
-        std::vector<std::vector<size_t>> orders(1, std::vector<size_t>(ms.size())); for (size_t i = 0; i < ms.size(); i++) orders[0][i] = i;
-        if (coreSrc != SIZE_MAX && coreSrc != 0) { std::vector<size_t> b(1, coreSrc); for (size_t i = 0; i < ms.size(); i++) if (i != coreSrc) b.push_back(i); orders.push_back(b); }
-        std::vector<MasterInfo> info; std::string err; std::vector<uint8_t> body; std::vector<size_t> pick;
-        for (auto& ord : orders) { std::vector<MasterIn> m2; for (size_t k : ord) m2.push_back(ms[k]); std::vector<MasterInfo> i2; std::vector<uint8_t> b2 = encodeLaes(core, base, m2, i2, err, asFlac ? 1 : 0);
-            if (!err.empty()) { printf("%s\n", err.c_str()); return 2; } if (body.empty() || b2.size() < body.size()) { body.swap(b2); info = i2; pick = ord; } }
-        { std::vector<MasterIn> m2; std::vector<std::string> p2; for (size_t k : pick) { m2.push_back(ms[k]); p2.push_back(paths[k]); } ms.swap(m2); paths.swap(p2); }
+        std::vector<laess::MasterSel> sel(paths.size()); for (size_t i = 0; i < paths.size(); i++) { MasterIn t; setT(t, Ts[i]); sel[i].storage = -1; sel[i].whole = t.whole; sel[i].frac = t.frac; }
+        // file order, tried two ways, the smaller kept: (a) more bits first; (b) the master the core was derived from first, then the others more bits first
+        std::vector<std::vector<size_t>> orders(1, std::vector<size_t>(paths.size())); for (size_t i = 0; i < paths.size(); i++) orders[0][i] = i;
+        if (coreSrc != SIZE_MAX && coreSrc != 0) { std::vector<size_t> b(1, coreSrc); for (size_t i = 0; i < paths.size(); i++) if (i != coreSrc) b.push_back(i); orders.push_back(b); }
+        std::vector<MasterInfo> info; std::string bodyPath; long long bodySize = -1; std::vector<size_t> pick;
+        for (size_t oi = 0; oi < orders.size(); oi++) { const auto& ord = orders[oi]; std::vector<const laess::Prep*> m2; std::vector<laess::MasterSel> s2; for (size_t k : ord) { m2.push_back(&pm[k]); s2.push_back(sel[k]); }
+            std::vector<MasterInfo> i2; const std::string bp = g.p + "/body" + std::to_string(oi); const std::string err = laess::encodeLaesS(core, base, m2, s2, i2, bp, g.p + "/o" + std::to_string(oi), asFlac ? 1 : 0, piece, threads);
+            if (!err.empty()) { printf("%s\n", err.c_str()); return 2; } const long long sz = (long long)fs::file_size(bp);
+            if (bodySize < 0 || sz < bodySize) { if (!bodyPath.empty()) fs::remove(bodyPath); bodyPath = bp; bodySize = sz; info = i2; pick = ord; } else fs::remove(bp); }
+        { std::vector<std::string> p2; std::vector<laess::Prep> q2; for (size_t k : pick) { p2.push_back(paths[k]); q2.push_back(pm[k]); } paths.swap(p2); pm.swap(q2); }
         printf("file order:"); for (size_t k = 0; k < paths.size(); k++) printf(" %zu = %s;", k + 1, paths[k].c_str()); printf("%s\n", orders.size() > 1 ? " (the smaller of two orders)" : "");
-        // self-check before writing: decode the block exactly as a player would
-        std::vector<Pcm> dec; std::vector<MasterInfo> di; std::vector<bool> ok; std::string de = decodeLaes(body, core, base, dec, di, ok);
-        if (!de.empty()) { printf("self-check failed: %s; nothing written\n", de.c_str()); return 2; }
-        for (size_t i = 0; i < ms.size(); i++) if (!ok[i] || dec[i].c[0] != ms[i].m.c[0] || dec[i].c[1] != ms[i].m.c[1]) { printf("self-check failed for master %zu; nothing written\n", i + 1); return 2; }
-        if (asFlac) {   // FLAC form; read back with the reader before writing: core, MD5 and LAES block must come back unchanged
-            const std::vector<uint8_t> fl = laesflac::writeFlac(core.c, base, core.bits, body); laesflac::Info fi; V rc[2]; std::vector<uint8_t> rb; bool md5ok;
-            const std::string fe = laesflac::readFlac(fl, fi, rc, rb, md5ok);
-            if (!fe.empty() || !md5ok || rc[0] != core.c[0] || rc[1] != core.c[1] || rb != body) { printf("FLAC self-check failed%s%s; nothing written\n", fe.empty() ? "" : ": ", fe.c_str()); return 2; }
-            if (!writeAll(out, fl)) { printf("cannot write %s\n", out.c_str()); return 2; } }
-        else if (!writeAll(out, wavBytes(core, &body))) { printf("cannot write %s\n", out.c_str()); return 2; }
-        double secs = (double)core.frames() / base; printf("%s: %s form, core %d Hz %d-bit, %zu master(s), LAES block %.1f kb/s (file %.1f MB, %.1f kb/s)\n", out.c_str(), asFlac ? "FLAC" : "WAV", base, core.bits, ms.size(),
-                                                         body.size() * 8 / secs / 1000, (double)fs::file_size(out) / 1e6, (double)fs::file_size(out) * 8 / secs / 1000);
+        // self-check before writing: decode the block exactly as a player would, and compare every master with its input
+        { std::vector<laess::DecMaster> dec; const std::string de = laess::decodeLaesS(bodyPath, core, base, g.p, dec, piece, threads);
+          if (!de.empty()) { printf("self-check failed: %s; nothing written\n", de.c_str()); return 2; }
+          for (size_t i = 0; i < pm.size(); i++) { bool same = dec[i].shaOk && dec[i].I.frames == pm[i].frames;
+              if (same) { laess::FileSig t0(dec[i].top[0]), t1(dec[i].top[1]); laess::In raw(pm[i].raw); const int64_t P = 1 << 20; V a, b; std::vector<int32_t> r;
+                  for (int64_t s = 0; s < t0.n && same; s += P) { const int64_t e = std::min(t0.n, s + P); a.resize((size_t)(e - s)); b.resize((size_t)(e - s)); t0.get(s, e, a.data()); t1.get(s, e, b.data());
+                      r.resize((size_t)(e - s) * 2); raw.read(s * 8, r.data(), r.size() * 4);
+                      for (int64_t k = 0; k < e - s && same; k++) same = (int64_t)r[(size_t)k * 2] == (a[(size_t)k] << dec[i].I.w) && (int64_t)r[(size_t)k * 2 + 1] == (b[(size_t)k] << dec[i].I.w); } }
+              if (!same) { printf("self-check failed for master %zu; nothing written\n", i + 1); return 2; } } }
+        if (asFlac) {   // FLAC form, then read back: core, MD5 and LAES block must come back unchanged
+            const std::vector<uint8_t> fl0 = laesflac::writeFlac(core.c, base, core.bits, std::vector<uint8_t>());   // "fLaC", STREAMINFO, the audio frames
+            const size_t pieceA = (1u << 24) - 1 - 4; const long long napp = bodySize == 0 ? 0 : (bodySize + (long long)pieceA - 1) / (long long)pieceA;
+            { laess::Out o(out + ".part"); laess::In body(bodyPath); std::vector<uint8_t> h(fl0.begin(), fl0.begin() + 42); if (napp) h[4] = 0x00; o.put(h.data(), h.size());   // STREAMINFO is not the last block
+              std::vector<uint8_t> b; for (long long i = 0; i < napp; i++) { const long long a = i * (long long)pieceA, len = std::min<long long>((long long)pieceA, bodySize - a);
+                  const uint32_t L = (uint32_t)(len + 4); const uint8_t bh[8] = {(uint8_t)((i + 1 == napp ? 0x80 : 0) | 2), (uint8_t)(L >> 16), (uint8_t)(L >> 8), (uint8_t)L, 'L', 'A', 'E', '2'}; o.put(bh, 8);
+                  b.resize((size_t)len); body.read(a, b.data(), b.size()); o.put(b.data(), b.size()); }
+              o.put(fl0.data() + 42, fl0.size() - 42); o.close(); }
+            {   // read back: the APPLICATION blocks against the payload, the rest through the FLAC reader
+                laess::In f(out + ".part"), body(bodyPath); long long p = 4; std::vector<uint8_t> meta(fl0.begin(), fl0.begin() + 42), b, c; long long got = 0; bool ok = true, last = false;
+                while (!last && ok) { uint8_t bh[4]; f.read(p, bh, 4); last = bh[0] & 0x80; const int type = bh[0] & 0x7F; const long long len = bh[1] << 16 | bh[2] << 8 | bh[3]; p += 4;
+                    if (type == 2) { if (len < 4) { ok = false; break; } b.resize((size_t)len - 4); f.read(p + 4, b.data(), b.size()); c.resize(b.size()); body.read(got, c.data(), c.size()); ok = b == c; got += (long long)b.size(); }
+                    p += len; }
+                std::vector<uint8_t> rest((size_t)(f.n - p)); f.read(p, rest.data(), rest.size()); meta[4] = 0x80; meta.insert(meta.end(), rest.begin(), rest.end());
+                laesflac::Info fi; V rc[2]; std::vector<uint8_t> rb; bool md5ok = false; const std::string fe = ok && got == bodySize ? laesflac::readFlac(meta, fi, rc, rb, md5ok) : "LAES block differs";
+                if (!fe.empty() || !md5ok || rc[0] != core.c[0] || rc[1] != core.c[1] || !rb.empty()) { fs::remove(out + ".part"); printf("FLAC self-check failed%s%s; nothing written\n", fe.empty() ? "" : ": ", fe.c_str()); return 2; } } }
+        else {   // WAV form: the core, then the "LAE " chunk with the payload
+            const int by = core.bits / 8; const long long n = core.frames(), db = n * 2 * by; const bool ext = core.bits > 16; const uint32_t fmtLen = ext ? 40 : 16; const long long extra = bodySize ? 8 + bodySize + (bodySize & 1) : 0;
+            if (4 + 8 + fmtLen + 8 + db + (db & 1) + extra > 0xFFFFFFFFLL) { printf("the file would exceed the 4 GB limit of WAV (use the FLAC form, out.flac); nothing written\n"); return 2; }
+            Pcm hdr; hdr.rate = core.rate; hdr.bits = core.bits; std::vector<uint8_t> lae; std::vector<uint8_t> h = wavBytes(hdr, nullptr);   // header of an empty file: sizes patched below
+            auto p32 = [&](size_t at, uint32_t v) { for (int i = 0; i < 4; i++) h[at + i] = (uint8_t)(v >> (8 * i)); }; p32(4, (uint32_t)(4 + 8 + fmtLen + 8 + db + (db & 1) + extra)); p32(h.size() - 4, (uint32_t)db);
+            laess::Out o(out + ".part"); o.put(h.data(), h.size()); std::vector<uint8_t> b; const long long P = 1 << 18;
+            for (long long a = 0; a < n; a += P) { const long long e = std::min(n, a + P); b.clear(); for (long long i = a; i < e; i++) for (int c = 0; c < 2; c++) { const uint32_t v = (uint32_t)(int32_t)core.c[c][(size_t)i]; for (int k = 0; k < by; k++) b.push_back((uint8_t)(v >> (8 * k))); } o.put(b.data(), b.size()); }
+            if (db & 1) { const uint8_t z = 0; o.put(&z, 1); }
+            if (bodySize) { const uint8_t ch[8] = {'L', 'A', 'E', ' ', (uint8_t)bodySize, (uint8_t)(bodySize >> 8), (uint8_t)(bodySize >> 16), (uint8_t)(bodySize >> 24)}; o.put(ch, 8);
+                laess::In body(bodyPath); for (long long a = 0; a < bodySize; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, bodySize - a)); body.read(a, b.data(), b.size()); o.put(b.data(), b.size()); }
+                if (bodySize & 1) { const uint8_t z = 0; o.put(&z, 1); } }
+            o.close(); }
+        { std::error_code ec; fs::remove(out, ec); fs::rename(out + ".part", out, ec); if (ec) { printf("cannot write %s\n", out.c_str()); return 2; } }
+        double secs = (double)core.frames() / base; printf("%s: %s form, core %d Hz %d-bit, %zu master(s), LAES block %.1f kb/s (file %.1f MB, %.1f kb/s)\n", out.c_str(), asFlac ? "FLAC" : "WAV", base, core.bits, pm.size(),
+                                                         bodySize * 8 / secs / 1000, (double)fs::file_size(out) / 1e6, (double)fs::file_size(out) * 8 / secs / 1000);
         for (size_t i = 0; i < info.size(); i++) { const std::string tier = info[i].refTier == 0 ? "the core" : "master " + std::to_string(info[i].refTier);
             const std::string how = info[i].storage == 1 ? "full" : info[i].storage == 0 ? "difference to " + tier + " at the base level"
                                   : "difference to " + tier + " at " + std::to_string(base << std::min(info[i].stages, info[info[i].refTier - 1].stages)) + " Hz";
             printf("  master %zu: %d Hz %d-bit, %s, layers %.1f kb/s\n", i + 1, info[i].rate, info[i].bits, how.c_str(), info[i].layerBits / secs / 1000); }
         return 0; }
-    if ((cmd == "dec" || cmd == "verify") && argc >= 4) {
-        Pcm core; std::vector<uint8_t> body; std::vector<uint8_t> raw; if (!readAll(argv[2], raw)) { printf("cannot read %s\n", argv[2]); return 2; }
-        if (raw.size() >= 4 && !memcmp(raw.data(), "fLaC", 4)) { laesflac::Info fi; bool md5ok; std::string e = laesflac::readFlac(raw, fi, core.c, body, md5ok); raw.clear();
-            if (!e.empty()) { printf("%s: %s\n", argv[2], e.c_str()); return 2; } core.rate = fi.rate; core.bits = fi.bps;
-            printf("FLAC core: %d Hz %d-bit, %ld frames, MD5 %s\n", core.rate, core.bits, core.frames(), md5ok ? "ok" : "MISMATCH"); if (!md5ok) return 2; }
-        else { raw.clear(); std::string e = readWav(argv[2], core, &body); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+    catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[2]) + ".part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
+    if ((cmd == "dec" || cmd == "verify") && argc >= 4) try {
+        Gone g{workDir(std::string(argv[2]) + (cmd == "dec" ? ".dec" : ".verify"))}; const std::string bodyPath = g.p + "/body.bin"; Pcm core; long long bodySize = 0;
+        { laess::In in(argv[2]); uint8_t mg[4] = {0}; if (in.n >= 4) in.read(0, mg, 4);
+          if (!memcmp(mg, "fLaC", 4)) {   // metadata: STREAMINFO kept, the "LAE2" APPLICATION blocks into the payload file; the audio through the FLAC reader
+              long long p = 4; bool last = false; std::vector<uint8_t> meta = {'f', 'L', 'a', 'C'}, b; laess::Out bo(bodyPath);
+              while (!last) { if (p + 4 > in.n) { printf("%s: metadata truncated\n", argv[2]); return 2; } uint8_t bh[4]; in.read(p, bh, 4); last = bh[0] & 0x80; const int type = bh[0] & 0x7F; const long long len = bh[1] << 16 | bh[2] << 8 | bh[3];
+                  if (p + 4 + len > in.n) { printf("%s: metadata truncated\n", argv[2]); return 2; }
+                  if (type == 0 || (type != 2)) { b.resize((size_t)len + 4); in.read(p, b.data(), b.size()); if (type == 0) meta.insert(meta.end(), b.begin(), b.end()); }
+                  else { b.resize((size_t)len); in.read(p + 4, b.data(), b.size()); if (len >= 4 && !memcmp(b.data(), "LAE2", 4)) { bo.put(b.data() + 4, b.size() - 4); bodySize += len - 4; } }
+                  p += 4 + len; }
+              bo.close(); if (meta.size() > 4) meta[4] |= 0x80; std::vector<uint8_t> rest((size_t)(in.n - p)); in.read(p, rest.data(), rest.size()); meta.insert(meta.end(), rest.begin(), rest.end());
+              laesflac::Info fi; bool md5ok; std::vector<uint8_t> app; std::string e = laesflac::readFlac(meta, fi, core.c, app, md5ok);
+              if (!e.empty()) { printf("%s: %s\n", argv[2], e.c_str()); return 2; } core.rate = fi.rate; core.bits = fi.bps;
+              printf("FLAC core: %d Hz %d-bit, %ld frames, MD5 %s\n", core.rate, core.bits, core.frames(), md5ok ? "ok" : "MISMATCH"); if (!md5ok) return 2; }
+          else { laess::WavInfo wi; long long lo = -1, ll = 0; std::string e = laess::probeWav(argv[2], wi, &lo, &ll); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+              core.rate = wi.rate; core.bits = wi.bits; std::vector<int32_t> x; laess::wavFrames(in, wi, 0, wi.frames, x); for (int c = 0; c < 2; c++) { core.c[c].resize((size_t)wi.frames); for (long i = 0; i < wi.frames; i++) core.c[c][(size_t)i] = x[(size_t)i * 2 + c]; }
+              laess::Out bo(bodyPath); std::vector<uint8_t> b; if (lo >= 0) for (long long a = 0; a < ll; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, ll - a)); in.read(lo + a, b.data(), b.size()); bo.put(b.data(), b.size()); }
+              bo.close(); bodySize = lo >= 0 ? ll : 0; } }
         // the extension's first 4 bytes name the format: "LAE2" = LAES (lossless, this tool), "LAE1" = LAEY (lossy, decoded by lae_dec)
-        if (body.size() >= 4 && !memcmp(body.data(), "LAE1", 4)) { printf("%s: this is an LAEY file (lossy, extension LAE1): decode it with lae_dec; laes reads LAES (extension LAE2)\n", argv[2]); return 2; }
-        if (!isLaes(body)) { printf("%s: no LAES extension (LAE2) found\n", argv[2]); return 2; }
+        uint8_t mg[4] = {0}; if (bodySize >= 4) { laess::In b(bodyPath); b.read(0, mg, 4); }
+        if (bodySize >= 4 && !memcmp(mg, "LAE1", 4)) { printf("%s: this is an LAEY file (lossy, extension LAE1): decode it with lae_dec; laes reads LAES (extension LAE2)\n", argv[2]); return 2; }
+        if (bodySize < 8 || memcmp(mg, "LAE2", 4)) { printf("%s: no LAES extension (LAE2) found\n", argv[2]); return 2; }
         printf("format: LAES (lossless, extension LAE2)\n");
-        std::vector<Pcm> dec; std::vector<MasterInfo> info; std::vector<bool> ok; std::string de = decodeLaes(body, core, core.rate, dec, info, ok);
+        int maxSt = 0; for (int s = 1; s <= 3; s++) maxSt = s;   // pieces sized for the highest rate a master can have
+        const int64_t piece = pieceFor(maxSt); std::vector<laess::DecMaster> dec; std::string de = laess::decodeLaesS(bodyPath, core, core.rate, g.p, dec, piece, threads);
         if (!de.empty()) { printf("%s: %s (the core is still playable)\n", argv[2], de.c_str()); return 2; }
-        bool all = true; for (size_t i = 0; i < dec.size(); i++) { printf("master %zu: %d Hz %d-bit, %ld frames, SHA-256 %s\n", i + 1, info[i].rate, info[i].bits, info[i].frames, ok[i] ? "ok" : "MISMATCH"); all &= ok[i]; }
+        bool all = true; for (size_t i = 0; i < dec.size(); i++) { printf("master %zu: %d Hz %d-bit, %ld frames, SHA-256 %s\n", i + 1, dec[i].I.rate, dec[i].I.bits, dec[i].I.frames, dec[i].shaOk ? "ok" : "MISMATCH"); all &= dec[i].shaOk; }
+        // a choice's samples: the core (memory), a master (top level << w) or a rate level (level << w, limited to the word length)
+        struct Src { int kind = 0; size_t m = 0; int k = 0; int rate = 0, bits = 0; long long n = 0; };
+        auto readSrc = [&](const Src& s, int c, long long a, long long b, V& out) { out.resize((size_t)(b - a));
+            if (s.kind == 0) { std::copy(core.c[c].begin() + a, core.c[c].begin() + b, out.begin()); return; }
+            const laess::DecMaster& D = dec[s.m]; std::unique_ptr<laess::Sig> sg = laess::levelOf(D, c, s.kind == 1 ? D.I.stages : s.k); sg->get(a, b, out.data()); const int w = D.I.w;
+            if (s.kind == 1) { for (auto& v : out) v <<= w; return; }
+            const int64_t mx = (1LL << (s.bits - 1)) - 1, mn = -(1LL << (s.bits - 1)); for (auto& v : out) v = std::max(mn, std::min(mx, v << w)); };
         if (cmd == "dec") {
             // every choice the file offers: the core, each master, each master's rate levels (lossless), and a 16-bit version derived
             // from the longest-word choice at each rate that has no 16-bit choice of its own (a new master: lossy against its source)
-            struct Choice { std::string name, what; Pcm p; bool derived = false; };
-            std::vector<Choice> ch; ch.push_back({"core", "the core (lossless)", core});
-            for (size_t i = 0; i < dec.size(); i++) { const std::string mk = "master_" + std::to_string(i + 1);
-                if (!ok[i]) { printf("master %zu: SHA-256 mismatch: not offered (nor its rate levels)\n", i + 1); continue; }   // never presented as that master
-                ch.push_back({mk + "_" + std::to_string(info[i].rate) + "_" + std::to_string(info[i].bits), "master " + std::to_string(i + 1) + " (lossless)", dec[i]});
-                Pcm lv = dec[i]; const int w = info[i].w; for (int c = 0; c < 2; c++) for (auto& v : lv.c[c]) v >>= w;
-                for (int k = info[i].stages; k > 0; k--) { Pcm lo; lo.rate = lv.rate / 2; lo.bits = lv.bits; for (int c = 0; c < 2; c++) { V d2; laesfast::fwd(lv.c[c], lo.c[c], d2); } lv = lo;
-                    Pcm outp = lv; const int64_t mx = (1LL << (lv.bits - 1)) - 1, mn = -(1LL << (lv.bits - 1)); for (int c = 0; c < 2; c++) for (auto& v : outp.c[c]) v = std::max(mn, std::min(mx, v << w));   // PCM output limit
-                    ch.push_back({mk + "_level_" + std::to_string(lv.rate) + "_" + std::to_string(lv.bits), "rate level of master " + std::to_string(i + 1) + " (lossless)", outp}); } }
-            { std::vector<int> rates; for (auto& c : ch) if (std::find(rates.begin(), rates.end(), c.p.rate) == rates.end()) rates.push_back(c.p.rate);
-              for (int r : rates) { int best = -1; bool has16 = false; for (size_t j = 0; j < ch.size(); j++) if (ch[j].p.rate == r) { has16 |= ch[j].p.bits == 16; if (best < 0 || ch[j].p.bits > ch[best].p.bits) best = (int)j; }
-                  if (has16 || best < 0 || ch[best].p.bits <= 16) continue;
-                  const Choice& sc = ch[best]; Choice dv; dv.derived = true; dv.p = derive16(sc.p);
-                  dv.name = "derived16_" + std::to_string(r) + "_from_" + sc.name + "_LOSSY"; dv.what = "16-bit version derived from " + sc.name + ": a new master, LOSSY against its " + std::to_string(sc.p.bits) + "-bit source";
+            struct Choice { std::string name, what; Src s; bool derived = false; int from = -1; };
+            std::vector<Choice> ch; { Src s; s.rate = core.rate; s.bits = core.bits; s.n = core.frames(); ch.push_back({"core", "the core (lossless)", s}); }
+            for (size_t i = 0; i < dec.size(); i++) { const std::string mk = "master_" + std::to_string(i + 1); const MasterInfo& I = dec[i].I;
+                if (!dec[i].shaOk) { printf("master %zu: SHA-256 mismatch: not offered (nor its rate levels)\n", i + 1); continue; }
+                { Src s; s.kind = 1; s.m = i; s.rate = I.rate; s.bits = I.bits; s.n = I.frames; ch.push_back({mk + "_" + std::to_string(I.rate) + "_" + std::to_string(I.bits), "master " + std::to_string(i + 1) + " (lossless)", s}); }
+                for (int k = I.stages - 1; k >= 0; k--) { Src s; s.kind = 2; s.m = i; s.k = k; s.rate = I.rate >> (I.stages - k); s.bits = I.bits; s.n = levLen(I.frames, I.stages - k);
+                    ch.push_back({mk + "_level_" + std::to_string(s.rate) + "_" + std::to_string(s.bits), "rate level of master " + std::to_string(i + 1) + " (lossless)", s}); } }
+            { std::vector<int> rates; for (auto& c : ch) if (std::find(rates.begin(), rates.end(), c.s.rate) == rates.end()) rates.push_back(c.s.rate);
+              for (int r : rates) { int best = -1; bool has16 = false; for (size_t j = 0; j < ch.size(); j++) if (ch[j].s.rate == r) { has16 |= ch[j].s.bits == 16; if (best < 0 || ch[j].s.bits > ch[best].s.bits) best = (int)j; }
+                  if (has16 || best < 0 || ch[best].s.bits <= 16) continue;
+                  const Choice& sc = ch[(size_t)best]; Choice dv; dv.derived = true; dv.s = sc.s; dv.s.bits = 16; dv.from = best;
+                  dv.name = "derived16_" + std::to_string(r) + "_from_" + sc.name + "_LOSSY"; dv.what = "16-bit version derived from " + sc.name + ": a new master, LOSSY against its " + std::to_string(sc.s.bits) + "-bit source";
                   ch.push_back(dv); } }
             if (flag(argc, argv, "--list")) { printf("choices (use --pick=<n>[,<n>...] or --pick=<rate>:<bits>):\n");
-                for (size_t j = 0; j < ch.size(); j++) printf("  %2zu  %6d Hz %2d-bit  %s\n", j + 1, ch[j].p.rate, ch[j].p.bits, ch[j].what.c_str()); return all ? 0 : 2; }
+                for (size_t j = 0; j < ch.size(); j++) printf("  %2zu  %6d Hz %2d-bit  %s\n", j + 1, ch[j].s.rate, ch[j].s.bits, ch[j].what.c_str()); return all ? 0 : 2; }
             std::vector<size_t> pick; const std::string pk = arg(argc, argv, "--pick");
-            if (pk.empty()) { pick.push_back(0); for (size_t j = 1; j < ch.size(); j++) if (!ch[j].derived && (ch[j].what.rfind("master", 0) == 0 || flag(argc, argv, "--levels"))) pick.push_back(j); }   // as before
+            if (pk.empty()) { pick.push_back(0); for (size_t j = 1; j < ch.size(); j++) if (!ch[j].derived && (ch[j].what.rfind("master", 0) == 0 || flag(argc, argv, "--levels"))) pick.push_back(j); }
             else { size_t a = 0; for (;;) { const size_t b = pk.find(',', a); const std::string t = pk.substr(a, b == std::string::npos ? std::string::npos : b - a); const size_t col = t.find(':'); bool found = false;
                     if (col == std::string::npos) { const size_t j = (size_t)atoi(t.c_str()); if (j >= 1 && j <= ch.size()) { pick.push_back(j - 1); found = true; } }
-                    else { const int r = atoi(t.c_str()), bb = atoi(t.c_str() + col + 1); for (size_t j = 0; j < ch.size() && !found; j++) if (ch[j].p.rate == r && ch[j].p.bits == bb) { pick.push_back(j); found = true; } }
+                    else { const int r = atoi(t.c_str()), bb = atoi(t.c_str() + col + 1); for (size_t j = 0; j < ch.size() && !found; j++) if (ch[j].s.rate == r && ch[j].s.bits == bb) { pick.push_back(j); found = true; } }
                     if (!found) { printf("--pick: '%s' is not one of the choices (see --list)\n", t.c_str()); return 2; } if (b == std::string::npos) break; a = b + 1; } }
             fs::create_directories(argv[3]); const std::string d = std::string(argv[3]) + "\\";
-            for (size_t j : pick) { all &= writeAll(d + ch[j].name + ".wav", wavBytes(ch[j].p, nullptr));
-                printf("%s.wav: %d Hz %d-bit, %s\n", ch[j].name.c_str(), ch[j].p.rate, ch[j].p.bits, ch[j].what.c_str()); }
+            for (size_t j : pick) { const Choice& C = ch[j]; const Src& S = C.derived ? ch[(size_t)C.from].s : C.s; const int by = C.s.bits / 8; const long long n = C.s.n, db = n * 2 * by;
+                Pcm hdr; hdr.rate = C.s.rate; hdr.bits = C.s.bits; std::vector<uint8_t> h = wavBytes(hdr, nullptr); const uint32_t fmtLen = C.s.bits > 16 ? 40 : 16;
+                for (int i = 0; i < 4; i++) { h[4 + i] = (uint8_t)((uint32_t)(4 + 8 + fmtLen + 8 + db + (db & 1)) >> (8 * i)); h[h.size() - 4 + i] = (uint8_t)((uint32_t)db >> (8 * i)); }
+                bool okw = true; try { laess::Out o(d + C.name + ".wav"); o.put(h.data(), h.size()); V x0, x1; std::vector<uint8_t> b; const long long P = 1 << 18;
+                    uint64_t stc[2] = {20261029ull + 0x9E3779B97F4A7C15ull * 1, 20261029ull + 0x9E3779B97F4A7C15ull * 2}; const int sft = C.derived ? S.bits - 16 : 0;   // derive16: one stream per channel
+                    for (long long a = 0; a < n; a += P) { const long long e = std::min(n, a + P); readSrc(S, 0, a, e, x0); readSrc(S, 1, a, e, x1); b.clear();
+                        for (long long i = a; i < e; i++) for (int c = 0; c < 2; c++) { int64_t v = (c ? x1 : x0)[(size_t)(i - a)];
+                            if (C.derived) { uint64_t& st = stc[c]; auto nx = [&]() { st ^= st << 13; st ^= st >> 7; st ^= st << 17; return st >> (64 - sft); }; const int64_t r1 = (int64_t)nx(), r2 = (int64_t)nx();
+                                v = std::max<int64_t>(-32768, std::min<int64_t>(32767, (v + r1 - r2 + (1LL << (sft - 1))) >> sft)); }
+                            const uint32_t u = (uint32_t)(int32_t)v; for (int k = 0; k < by; k++) b.push_back((uint8_t)(u >> (8 * k))); }
+                        o.put(b.data(), b.size()); }
+                    if (db & 1) { const uint8_t z = 0; o.put(&z, 1); } o.close(); } catch (const std::exception&) { okw = false; }
+                all &= okw; printf("%s.wav: %d Hz %d-bit, %s\n", C.name.c_str(), C.s.rate, C.s.bits, C.what.c_str()); }
             printf("written to %s\n", argv[3]); }
         else { std::vector<bool> used(dec.size(), false);   // each given file must equal one decoded master (the file order may differ from the command line)
-            for (int i = 3; i < argc; i++) { if (argv[i][0] == '-') continue; Pcm ref; std::string re = readWav(argv[i], ref); int hit = -1;
-                for (size_t k = 0; k < dec.size() && hit < 0 && re.empty(); k++) if (!used[k] && ref.rate == dec[k].rate && ref.bits == dec[k].bits && ref.c[0] == dec[k].c[0] && ref.c[1] == dec[k].c[1]) hit = (int)k;
-                if (hit >= 0) { used[hit] = true; printf("master %d vs %s: IDENTICAL\n", hit + 1, argv[i]); } else { printf("%s: DIFFERENT (no decoded master equals it)\n", argv[i]); all = false; } }
+            for (int i = 3; i < argc; i++) { if (argv[i][0] == '-') continue; laess::WavInfo wi; std::string re = laess::probeWav(argv[i], wi); int hit = -1;
+                for (size_t k = 0; k < dec.size() && hit < 0 && re.empty(); k++) { if (used[k] || wi.rate != dec[k].I.rate || wi.bits != dec[k].I.bits || wi.frames != dec[k].I.frames) continue;
+                    Src s; s.kind = 1; s.m = k; laess::In in(argv[i]); bool same = true; std::vector<int32_t> r; V x0, x1; const long long P = 1 << 20;
+                    for (long long a = 0; a < wi.frames && same; a += P) { const long long e = std::min<long long>(wi.frames, a + P); laess::wavFrames(in, wi, a, e, r); readSrc(s, 0, a, e, x0); readSrc(s, 1, a, e, x1);
+                        for (long long q = 0; q < e - a && same; q++) same = r[(size_t)q * 2] == x0[(size_t)q] && r[(size_t)q * 2 + 1] == x1[(size_t)q]; }
+                    if (same) hit = (int)k; }
+                if (hit >= 0) { used[(size_t)hit] = true; printf("master %d vs %s: IDENTICAL\n", hit + 1, argv[i]); } else { printf("%s: DIFFERENT (no decoded master equals it)\n", argv[i]); all = false; } }
             for (size_t k = 0; k < dec.size(); k++) if (!used[k] && argc > 3) printf("master %zu: not compared\n", k + 1); }
         return all ? 0 : 2; }
+    catch (const std::exception& x) { printf("stopped: %s\n", x.what()); return 2; }
     printf("bad arguments\n"); return 1; }

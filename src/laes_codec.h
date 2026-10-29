@@ -42,7 +42,8 @@ const int kMaxW = 62, kMaxWFixed = 58, kMaxWLpc = 44;
 inline int widthOf(int64_t v) { int w = 1; while (w < 64 && !(v >= -(1LL << (w - 1)) && v < (1LL << (w - 1)))) w++; return w; }
 inline uint64_t zz(int64_t v) { return v >= 0 ? (uint64_t)v << 1 : (((uint64_t)(-(v + 1))) << 1) | 1; }
 inline int64_t unzz(uint64_t u) { return (u & 1) ? -(int64_t)(u >> 1) - 1 : (int64_t)(u >> 1); }
-inline void getResidual(BitR& rd, int64_t* r, long n) { int po = (int)rd.get(4); if (n < 1 || po > 8 || (1L << po) > n) { rd.fail = true; return; } long parts = 1L << po, len = n / parts;
+// R: BitR, or any reader with get / getS / fail (laes_stream.h, 2026-10-30)
+template <class R> inline void getResidual(R& rd, int64_t* r, long n) { int po = (int)rd.get(4); if (n < 1 || po > 8 || (1L << po) > n) { rd.fail = true; return; } long parts = 1L << po, len = n / parts;
     for (long q = 0; q < parts && !rd.fail; q++) { long a = q * len, e = (q == parts - 1) ? n : a + len; int k = (int)rd.get(6);
         if (k == 63) { int rw = (int)rd.get(6); if (rw < 1 || rw > 63) { rd.fail = true; return; } for (long i = a; i < e; i++) r[i] = rd.getS(rw); }
         else for (long i = a; i < e && !rd.fail; i++) { uint64_t qv = 0; const uint64_t qmax = k ? (~0ull >> k) : ~0ull;   // u = q * 2^k + low must fit 64 bits
@@ -57,7 +58,7 @@ inline int64_t lpcPred(const int64_t* x, long i, const std::vector<int64_t>& c, 
 inline int64_t lpcPred64(const int64_t* x, long i, const int64_t* c, int o, int shift) { int64_t a = 0; for (int j = 0; j < o; j++) a += c[j] * x[i - 1 - j]; return a >> shift; }
 inline bool lpcFits64(const std::vector<int64_t>& c, uint64_t maxAbsX) { double s = 0; for (int64_t v : c) s += std::fabs((double)v); return s * (double)maxAbsX < 4.0e18; }   // 2^62 = 4.61e18
 inline uint64_t absMax(const int64_t* x, long n) { uint64_t m = 0; for (long i = 0; i < n; i++) { const uint64_t a = x[i] < 0 ? (uint64_t)(-(x[i] + 1)) + 1 : (uint64_t)x[i]; m = std::max(m, a); } return m; }
-inline bool decodeBlock(BitR& rd, int64_t* x, long n) {   // returns false on any value outside the normative ranges or a short buffer
+template <class R> inline bool decodeBlock(R& rd, int64_t* x, long n) {   // returns false on any value outside the normative ranges or a short buffer
     int type = (int)rd.get(2), W = (int)rd.get(6); if (rd.fail || W < 1 || W > kMaxW) return false;
     if (type == 0) { int64_t v = rd.getS(W); for (long i = 0; i < n; i++) x[i] = v; return !rd.fail; }
     if (type == 1) { for (long i = 0; i < n && !rd.fail; i++) x[i] = rd.getS(W); return !rd.fail; }

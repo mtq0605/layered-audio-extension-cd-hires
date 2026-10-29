@@ -2,7 +2,7 @@
 
 This file records the notable changes to LAE (Layered Audio Extension), its lossy tier LAE Lossy (LAEY) and its lossless tier LAE Lossless (LAES), newest first.
 
-## Unreleased (prepared 2026-10-29)
+## 2026-10-30 (v5-2026-10-30)
 
 The container format and the decoding process of LAEY are unchanged. The encoder writes byte-identical files, faster, block by block and with much less memory.
 

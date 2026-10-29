@@ -6,10 +6,11 @@
 
 | 版本 | 日期 | 内容 | 文件 | 下载 |
 |---|---|---|---|---|
-| **v5-2026-10-24**（当前） | 2026-10-24 | 容器版本 5。新增独立 CD 对齐、整盘规划器、CD-Extra 封装（`lae_cdx`）、解码库 `liblae` 和 foobar2000 组件。解码不变。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-24) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-24.zip) |
+| **v5-2026-10-30**（当前） | 2026-10-30 | LAEY：容器版本 5，解码不变；编码器快 3–4 倍，改为分块编码（输出逐字节相同，内存大大减少）。新增无损层级 LAE Lossless（LAES，`LAE2`）：独立规范、工具 `laes`，WAV、FLAC 和 CD-Extra 三种载体。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-30) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-30.zip) |
+| v5-2026-10-24 | 2026-10-24 | 容器版本 5。新增独立 CD 对齐、整盘规划器、CD-Extra 封装（`lae_cdx`）、解码库 `liblae` 和 foobar2000 组件。解码不变。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-24) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-24.zip) |
 | v5-2026-10-18 | 2026-10-18 | 容器版本 5，首次公开发布：规范、参考编码器和解码器、16 个一致性向量。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-18) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-18.zip) |
 
-两个版本都使用容器版本 5，解码过程相同：任一版本的文件都能用任一版本的解码器播放。全部改动见 [CHANGELOG.md](CHANGELOG.md)。
+所有版本都使用 LAEY 容器版本 5，解码过程相同：任一版本的 LAEY 文件都能用任一版本的解码器播放。LAES 文件（从 v5-2026-10-30 起）用 `laes` 读取；它的 FLAC 形式中的核心在任何 FLAC 播放器里都能播放。全部改动见 [CHANGELOG.md](CHANGELOG.md)。
 
 **状态：**本文是容器版本 5 的工作论文，也是代码仓库首页。该格式系列名为 **LAE**（**Layered Audio Extension**，分层音频扩展）。本文介绍有损等级 **LAE Lossy**（简称 **LAEY**）。无损等级 **LAE Lossless**（简称 **LAES**）的规范性规范见 [spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)（供公开评审的草案，2026-10-29），参考工具为 `laes`；早先的设计文档（[spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)）已被取代。
 

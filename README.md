@@ -11,7 +11,7 @@
 
 Both versions use container version 5 and the same decoding process: files of either version play with the decoder of either version. All changes: [CHANGELOG.md](CHANGELOG.md).
 
-**Status:** this is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), a design document is published ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)); its normative specification is not yet written.
+**Status:** this is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), the normative specification is [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (draft for public review, 2026-10-29) and the reference tool is `laes`; the earlier design document ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)) is superseded.
 
 This revision of the repository adds the following: alignment of an independent CD in the encoder; a whole-disc planner; the CD-Extra encapsulation tool `lae_cdx`; a decoder library with a C interface; and a foobar2000 component. The container remains version 5. The bitstream, the decoding process and the lossy specification are unchanged.
 
@@ -25,12 +25,14 @@ The encapsulation of the extension on CD-Extra, in separate files and in streams
 - Conformance vectors: [tests/vectors/MANIFEST.md](tests/vectors/MANIFEST.md)
 - Measurement data: [data/](data/), described in [data/README.md](data/README.md)
 - CD-Extra and file encapsulation (draft): [spec/cdx/SPEC.md](spec/cdx/SPEC.md)
+- LAE Lossless (LAES) specification (draft): [spec/lossless/SPEC.md](spec/lossless/SPEC.md)
 - foobar2000 component: [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md)
 - Licences: [LICENSE](LICENSE). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Patent pledge: [PATENTS.md](PATENTS.md). Commercial encoder licence: [COMMERCIAL.md](COMMERCIAL.md)
 
 **Identifiers and files:**
 
-- The executables are `lae_enc`, `lae_dec` and `lae_cdx`.
+- The executables are `lae_enc`, `lae_dec` and `lae_cdx`. The LAE Lossless tool is `laes` (encoder, decoder, alignment, self-test).
+- An LAES file's `LAE ` chunk (WAV form) begins with the magic `LAE2`; the FLAC form carries the same payload in APPLICATION blocks with ID `LAE2` ([spec/lossless/SPEC.md](spec/lossless/SPEC.md)).
 - The decoder library is `src/lae_decoder.h`. Its C interface is `liblae` (`src/lae_api.h`).
 - The foobar2000 component is `foo_input_lae`.
 - The RIFF chunk ID is `LAE ` (with a trailing space). The chunk begins with the magic `LAE1`.
@@ -1808,7 +1810,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
 
 ### 17.1 Format and tiers
 
-- **LAE Lossless (LAES).** With all layers present, the lossless tier is to reconstruct the master bit for bit; the normative specification is not yet written. Directions decided since the design document of 2026-10-18 ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md), under review): LAES uses the same alignment, encapsulation and reading chain as LAEY, with its own extension block type (2, reserved); a CD-Extra holds only its subset "CD + 24 bit at 44.1 kHz", and the full lossless tier is distributed on BD or as files; a FLAC-compatible form is under design (not decided).
+- **LAE Lossless (LAES).** Specified in [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (draft, 2026-10-29); reference tool `laes`. Every master (16, 24 or 32 bit, at the base rate × 1, 2, 4 or 8) and each of its rate levels is reconstructed bit for bit. The carriers are a WAV file, a FLAC file (APPLICATION blocks with ID `LAE2`) and CD-Extra (extension block type 2). How many masters fit on a CD-Extra depends on the album length. Future work: LAES playback in the foobar2000 component, files beyond 4 GB and streaming decoding.
 - **Containers.** The WAV container and CD-Extra packaging are implemented. The encapsulation specification is a draft; it is to be revised after the measurements of a real burn (Section 17.3). The `.lae` file layout remains unspecified.
 - **Channels.** Only stereo is supported.
 

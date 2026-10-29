@@ -21,6 +21,10 @@ jobs:
         if: always()
         shell: bash
         run: sh tests/check_encoder_linux.sh
+      - name: LAE Lossless - laes and lae_cdx self-tests
+        if: always()
+        shell: bash
+        run: sh tests/check_laes_linux.sh
   linux-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
@@ -34,3 +38,7 @@ jobs:
         if: always()
         shell: bash
         run: sh tests/check_encoder_linux.sh
+      - name: LAE Lossless - laes and lae_cdx self-tests
+        if: always()
+        shell: bash
+        run: sh tests/check_laes_linux.sh

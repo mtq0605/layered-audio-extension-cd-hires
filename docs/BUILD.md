@@ -12,6 +12,7 @@ All code is standard C++17 and uses no third-party libraries.
 - The encoder is built from `src/lae_enc.cpp`.
 - The decoder is built from `src/lae_dec.cpp`.
 - The CD-Extra tool `lae_cdx` is built from `src/lae_cdx.cpp`.
+- The LAE Lossless tool `laes` (encoder, decoder, alignment, self-test) is built from `src/laes_tool.cpp`. LAES computes its reference taps in IEEE-754 double precision in source order ([spec/lossless/SPEC.md](../spec/lossless/SPEC.md), Section 2.2): build `laes` and `lae_cdx` with `/fp:strict` (MSVC) or `-ffp-contract=off` (GCC / Clang).
 - The decoder library `liblae` is built from `src/lae_api.cpp`.
 - The foobar2000 component is built with `plugins/foo_input_lae/build_fb2k.cmd` ([plugins/foo_input_lae/README.md](../plugins/foo_input_lae/README.md)).
 - The encoder uses `std::filesystem`. On systems other than Windows, it uses `setenv`/`unsetenv`.
@@ -41,12 +42,15 @@ Example (Linux, decoder and encoder):
 ```sh
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_dec src/lae_dec.cpp
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_enc src/lae_enc.cpp
+g++ -O2 -std=c++17 -ffp-contract=off -pthread -o laes src/laes_tool.cpp && ./laes selftest
 ```
 
-Example (Windows, `lae_cdx`, the same flags as the encoder):
+Example (Windows, `lae_cdx` and `laes`; `/fp:strict` for the LAES reference taps):
 
 ```bat
-cl /nologo /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /bigobj src\lae_cdx.cpp
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /bigobj src\lae_cdx.cpp
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_CRT_SECURE_NO_WARNINGS src\laes_tool.cpp /Fe:laes.exe
+laes selftest
 ```
 
 `liblae` is compiled from `src/lae_api.cpp` with `/fp:precise`; the verified flags are in `plugins/foo_input_lae/build_fb2k.cmd`.

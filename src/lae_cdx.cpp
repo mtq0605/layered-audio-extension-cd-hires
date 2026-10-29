@@ -33,6 +33,7 @@
 #include <stdexcept>
 #include "wavio.h"
 #include "lae_decoder.h"   // P2: every input v5 file must pass the decoder's own checks
+#include "laes_file.h"     // LAE Lossless blocks (extension type 2)
 #include "lae_cdx_read.h"
 namespace fs = std::filesystem;
 using namespace std;
@@ -57,7 +58,7 @@ static vector<string> positional(int argc, char** argv, int from) { vector<strin
 static string nowUtc() { time_t t = time(nullptr); tm g; gmtime_s(&g, &t); char b[16]; strftime(b, sizeof b, "%Y%m%d%H%M%S", &g); return b; }
 
 // ---- one track's v5 file (F1): CD layer + LAE chunk body
-struct V5 { string name; int rate = 0; vector<int16_t> cd; vector<uint8_t> block; bool canonical = true; long long ncd() const { return (long long)cd.size() / 2; } };
+struct V5 { string name; int rate = 0; vector<int16_t> cd; vector<uint8_t> block; bool canonical = true; uint16_t type = 1; long long ncd() const { return (long long)cd.size() / 2; } };   // type 1 = LAEY, 2 = LAES
 static vector<uint8_t> canonV5(int rate, const vector<int16_t>& cd, const vector<uint8_t>& block) {   // = wavio::writeCD byte for byte (F1)
     size_t db = cd.size() * 2, extra = block.empty() ? 0 : 8 + block.size() + (block.size() & 1); vector<uint8_t> o; wavio::hdr(o, rate, 2, 16, db, extra);
     const uint8_t* c = (const uint8_t*)cd.data(); o.insert(o.end(), c, c + db); if (db & 1) o.push_back(0);
@@ -73,11 +74,17 @@ static string loadV5(const fs::path& p, V5& v) {
     if (lae.size() < 60) return "no LAE chunk (not an LAE v5 file)";
     if (rate != 44100 && rate != 48000) return "CD layer at " + to_string(rate) + " Hz: 44100 or 48000 expected (P1)";
     if (pcm.size() / 2 >= (1u << 28)) return "longer than 2^28 CD frames (P7)";
+    if (laes::isLaes(lae)) {   // LAE Lossless block (type 2): every master must decode and match its SHA-256 (P2 for LAES)
+        laes::Pcm core; core.rate = rate; core.bits = 16; for (int c = 0; c < 2; c++) { core.c[c].resize(pcm.size() / 2); for (size_t i = 0; i < pcm.size() / 2; i++) core.c[c][i] = pcm[i * 2 + c]; }
+        vector<laes::Pcm> dec; vector<laes::MasterInfo> info; vector<bool> ok; string de = laes::decodeLaes(lae, core, rate, dec, info, ok);
+        if (!de.empty()) return "the LAES decoder refuses this file (P2): " + de;
+        for (size_t i = 0; i < ok.size(); i++) if (!ok[i]) return "LAES master " + to_string(i + 1) + " does not match its SHA-256 (P2)";
+        v.name = u8(p.filename()); v.rate = rate; v.cd.swap(pcm); v.block.swap(lae); v.type = 2; v.canonical = canonOf(v) == b; return ""; }
     { Decoder D; int code = 0; string de = D.openRef(pcm, lae, "full", 0, &code); if (!de.empty()) return "the decoder refuses this file (P2): " + de;
       if (D.base != rate) return "the LAE base rate " + to_string(D.base) + " Hz differs from the WAV sample rate " + to_string(rate) + " Hz (P2, X2)"; }   // the decoder itself does not compare them
     v.name = u8(p.filename()); v.rate = rate; v.cd.swap(pcm); v.block.swap(lae); v.canonical = canonOf(v) == b; return ""; }
 static vector<uint8_t> laxOf(const V5& v, uint16_t track) {
-    cdx::Trailer t = cdx::compute(v.cd.data(), (uint32_t)v.ncd(), (uint32_t)v.rate, track); vector<uint8_t> o = v.block; auto tr = cdx::serialize(t); o.insert(o.end(), tr.begin(), tr.end()); return o; }
+    cdx::Trailer t = cdx::compute(v.cd.data(), (uint32_t)v.ncd(), (uint32_t)v.rate, track, v.type); vector<uint8_t> o = v.block; auto tr = cdx::serialize(t); o.insert(o.end(), tr.begin(), tr.end()); return o; }
 
 // ---- the CD-Extra image (2.2, 2.3, 5.4)
 struct Image { vector<V5> t; vector<long long> p, z; long long A2 = 0, N2 = 0, total = 0, cap = CAPDEF; vector<int16_t> audio; vector<vector<uint8_t>> lax; set<int> noext;
@@ -509,7 +516,8 @@ static int runTests(const string& dirArg) {
     damaged("C12", "extension block: one byte flipped", [](Ext& q) { q.bytes[1000] ^= 0x10; cdxr::check(q, true); }, "extension layer damaged");
     damaged("C12", "extension file cut short", [](Ext& q) { q.bytes.resize(q.bytes.size() - 37); cdxr::check(q, true); }, "no trailer");
     damaged("C12", "trailer track number 5 (TOC has 2 tracks)", [](Ext& q) { retrailer(q, [](vector<uint8_t>& t) { t[10] = 5; }); }, "track number not in the TOC");
-    damaged("C13", "extension block type 2", [](Ext& q) { retrailer(q, [](vector<uint8_t>& t) { t[8] = 2; }); }, "LAES extension block");
+    damaged("C13", "LAE Lossy block labelled type 2 (LAES)", [](Ext& q) { retrailer(q, [](vector<uint8_t>& t) { t[8] = 2; }); }, "does not match its trailer type");
+    damaged("C13", "extension block type 3", [](Ext& q) { retrailer(q, [](vector<uint8_t>& t) { t[8] = 3; }); }, "unknown extension block type");
     damaged("C13", "trailer version 2", [](Ext& q) { retrailer(q, [](vector<uint8_t>& t) { t[4] = 2; }); }, "unknown trailer version");
     damaged("C13", "lead0 = ncd + 1", [](Ext& q) { retrailer(q, [](vector<uint8_t>& t) { uint32_t n; memcpy(&n, &t[16], 4); n++; memcpy(&t[52], &n, 4); }); }, "invalid trailer field");
     damaged("C13", "track 99 on a CD (X2: 1-98 on a CD)", [](Ext& q) { retrailer(q, [](vector<uint8_t>& t) { t[10] = 99; }); }, "invalid trailer field");

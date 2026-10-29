@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
 // The CD's split markers onto the master (2026-10-22; spec L14, P8-P11).
-//   lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdalign=<one position per piece>] [cdaccept]
+//   lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdalign=<one position per piece>] [cdaccept] [laes]
+//   laes = LAE Lossless output (2026-10-29): the same plan and checks, but the master is not moved: slices cut from it as it is (16 / 24 / 32
+//   bit, every bit), each piece with its T for laes enc; the cut piece is checked with its fraction (-60 / -54 dB bands, confirmation as cdaccept).
 // Order (2026-10-23): join, check (silence, coverage) on the master as it is, align (both searches;
 // pieces the CD splits from continuous master form a group with one whole offset and one fraction), the user confirms every position
 // (without cdalign= nothing is written: both searches are reported), the master is moved group by group with its real neighbouring
@@ -48,18 +50,22 @@ static std::string readPublisher(const std::string& cue, Pub& P) {
 static int planMain(int argc, char** argv) {
     // lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdaccept]
     clearModuleEnv();   // e.g. an inherited DITHERFLAGS would make the base module write a file outside outdir
-    std::vector<std::string> args; bool accept = false; std::string alignArg;
-    for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "cdaccept")) accept = true; else if (!strncmp(argv[i], "cdalign=", 8)) alignArg = argv[i] + 8; else args.push_back(argv[i]); }
-    if (args.size() < 3) { printf("usage: lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdalign=<one position per piece>] [cdaccept]\n"); return 1; }
+    std::vector<std::string> args; bool accept = false, laes = false; std::string alignArg;
+    for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "cdaccept")) accept = true; else if (!strcmp(argv[i], "laes")) laes = true; else if (!strncmp(argv[i], "cdalign=", 8)) alignArg = argv[i] + 8; else args.push_back(argv[i]); }
+    if (args.size() < 3) { printf("usage: lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdalign=<one position per piece>] [cdaccept] [laes]\n"); return 1; }
     const std::string cueArg = args[args.size() - 2], outArg = args.back(); const std::vector<std::string> mfiles(args.begin(), args.end() - 2);
     const fsp::path out(outArg); std::error_code ec;
     if (fsp::exists(out, ec) && !fsp::is_empty(out, ec)) { printf("%s is not empty: the slices go into a new or empty folder; nothing written\n", outArg.c_str()); return 1; }
     // the master: one file, or several joined sample by sample in the given order (their own split points are not used)
-    wavio::Wav w; std::vector<long long> fileStart;
-    for (size_t f = 0; f < mfiles.size(); f++) { wavio::Wav part; if (!wavio::read(mfiles[f].c_str(), part) || part.ch != 2 || (part.bits != 16 && part.bits != 24)) { printf("%s: the master must be a 16- or 24-bit stereo PCM WAV\n", mfiles[f].c_str()); return 1; }
+    // laes: LAE Lossless output. The master is never moved: the slices are cut from it as it is (16 / 24 / 32 bit, every bit kept)
+    // and each piece's position goes into T (base samples) for laes enc, instead of moving the master by the fraction.
+    wavio::Wav w; std::vector<long long> fileStart; std::vector<int32_t> full; int fullBits = 0;   // full: the joined master as plain integers, all bits
+    for (size_t f = 0; f < mfiles.size(); f++) { wavio::Wav part; if (!wavio::read(mfiles[f].c_str(), part) || part.ch != 2 || (part.bits != 16 && part.bits != 24 && (!laes || part.bits != 32))) { printf("%s: the master must be a 16- or 24-bit%s stereo PCM WAV\n", mfiles[f].c_str(), laes ? " (or 32-bit)" : ""); return 1; }
         if (f == 0) w.rate = part.rate; else if (part.rate != w.rate) { printf("%s is at %d Hz, %s at %d Hz: the master files must have one rate\n", mfiles[f].c_str(), part.rate, mfiles[0].c_str(), w.rate); return 1; }
-        if (part.s.size() & 1) { part.s.pop_back(); printf("plan: %s ends with half a sample frame (a cut-off data chunk): dropped\n", mfiles[f].c_str()); }   // else every later file's channels would swap
-        fileStart.push_back((long long)w.s.size() / 2); w.s.insert(w.s.end(), part.s.begin(), part.s.end()); }
+        if (f == 0) fullBits = part.bits; else if (laes && part.bits != fullBits) { printf("%s is %d-bit, %s %d-bit: for laes the master files must have one bit depth\n", mfiles[f].c_str(), part.bits, mfiles[0].c_str(), fullBits); return 1; }
+        if (part.s.size() & 1) { part.s.pop_back(); if (!part.raw32.empty()) part.raw32.pop_back(); printf("plan: %s ends with half a sample frame (a cut-off data chunk): dropped\n", mfiles[f].c_str()); }   // else every later file's channels would swap
+        fileStart.push_back((long long)w.s.size() / 2); w.s.insert(w.s.end(), part.s.begin(), part.s.end());
+        for (size_t i = 0; i < part.s.size(); i++) full.push_back(part.bits == 32 ? part.raw32[i] : part.s[i] >> (32 - part.bits)); }
     w.ch = 2; w.bits = 24;
     int stages = 0; while ((44100 << stages) < w.rate) stages++;
     if ((44100 << stages) != w.rate || stages < 1 || stages > 3) { printf("master at %d Hz: a CD-Extra needs 88.2, 176.4 or 352.8 kHz (44.1 kHz family)\n", w.rate); return 1; }
@@ -82,7 +88,7 @@ static int planMain(int argc, char** argv) {
     auto cdOf = [&](size_t k) { std::vector<int16_t> c((size_t)nk[k] * 2); for (long long j = 0; j < nk[k]; j++) { c[(size_t)j * 2] = pub.d.L(pub.p[k] + j); c[(size_t)j * 2 + 1] = pub.d.R(pub.p[k] + j); } return c; };
     auto zero = [](const std::vector<int16_t>& c, long long a, long long b) { for (long long j = std::max(0LL, a); j < std::min<long long>((long long)c.size() / 2, b); j++) if (c[(size_t)j * 2] || c[(size_t)j * 2 + 1]) return j; return -1LL; };
     auto sec = [&](long long m) { return m / (double)w.rate; };
-    auto nzM = [&](long long i) { return i >= 0 && i < Lm && (w.s[(size_t)i * 2] || w.s[(size_t)i * 2 + 1]); };
+    auto nzM = [&](long long i) { return i >= 0 && i < Lm && (full[(size_t)i * 2] || full[(size_t)i * 2 + 1]); };   // all bits (a 32-bit master's low byte counts)
     long long a0 = -1, z1 = -1; for (long long i = 0; i < Lm && a0 < 0; i++) if (nzM(i)) a0 = i; for (long long i = Lm - 1; i >= 0 && z1 < 0; i--) if (nzM(i)) z1 = i;
     if (a0 < 0) { printf("the master is digital silence throughout; nothing written\n"); return 1; }
     // ---- 1. where each CD piece lies in the master: the encoder's search (cd_align.cpp) on a window around the piece's place on the CD's
@@ -234,7 +240,9 @@ static int planMain(int argc, char** argv) {
         printf("plan: %s join without a gap at the CD's split points but were given different fractions (%+.7f, %+.7f): pieces the CD splits from continuous master share one; nothing written\n", gname(g).c_str(), fr[g[0]], fr[k]); return 1; }
     // ---- the move, before cutting: each group by its own fraction, from the joined master with its real neighbouring samples; outside the
     // groups the master is digital silence (checked above) or less than one CD sample of a neighbour's sound, which stays as it is
-    std::vector<int32_t> Z = w.s; long long lostS = 0, lostE = 0; long nclipAll = 0; const long long Wd = 72; std::vector<std::string> spill;
+    std::vector<std::string> spill; std::vector<int32_t> Z;
+    if (!laes) {   // laes: no move; the fraction becomes T
+    Z = w.s; long long lostS = 0, lostE = 0; long nclipAll = 0; const long long Wd = 72;
     auto gRange = [&](const std::vector<size_t>& g, long long& a, long long& b) { a = std::max(0LL, sl[g.front()].S); b = std::min(Lm, sl[g.back()].S + sl[g.back()].len); };
     for (auto& g : G) { long long a, b; gRange(g, a, b); if (fr[g[0]] != 0 && b > a) std::fill(Z.begin() + (ptrdiff_t)a * 2, Z.begin() + (ptrdiff_t)b * 2, 0); }
     for (auto& g : G) { long long a, b; gRange(g, a, b); const double mvv = -fr[g[0]]; if (mvv == 0 || b <= a) continue;
@@ -258,6 +266,7 @@ static int planMain(int argc, char** argv) {
         if (lostS) spill.insert(spill.begin(), fmt("%lld sample values (left and right counted separately) before the first piece: to keep them, add at least %s at the start and move every split point by the same amount", lostS, add.c_str()));
         if (lostE) spill.push_back(fmt("%lld sample values (left and right counted separately) after the last piece: to keep them, add at least %s at the end", lostE, add.c_str()));
         for (auto& s : spill) printf("plan: NOTE: the move carries %s; then run the planner again (or leave it: these samples are not in any slice)\n", s.c_str()); }
+    }   // !laes
     // 4. the encoder's own checks on every exact slice, as the encoder will see it: the CD frames next to the master's sound (cdOnly's
     // rule: non-zero only where the derived base is non-zero) and the three-block check at offset 0. The slices are already moved: a slice
     // that does not pass stops the planner (or, between -40 and beyond -33 dB, needs the confirmation, as in the encoder)
@@ -269,6 +278,14 @@ static int planMain(int argc, char** argv) {
                 printf("plan: piece %02zu: CD frame %lld (%.6f s of the piece) has sound where the master has none and its derived base is zero (not the derivation filter's transition): content only the CD has (not supported in this step); nothing written\n",
                        k + 1, j - sl[k].lead, (j - sl[k].lead) / 44100.0); return 1; }
         const long long zero0 = 0; m_align::Report r = m_align::run(sl[k].c, nc, bk, (long)bk.size() / 2, pb, sl[k].m, (long)sl[k].len, 44100, stages, 0, "", 0, -1, &zero0);
+        if (laes) {   // the cut piece is not moved: the check is the fraction measured on it and the error left after it (-60 / -54 dB bands)
+            if (!r.found) { printf("plan: piece %02zu: the check of the cut piece finds no position: %s; nothing written\n", k + 1, r.why.c_str()); return 1; }
+            std::string pl; const double meas = -(double)m_align::measurePhase(sl[k].c, sl[k].m, sl[k].len, stages, w.rate, 0, r, pl) / U1; const size_t pp = pl.find("pooled residual ");
+            const double e = pp == std::string::npos ? 0.0 : atof(pl.c_str() + pp + 16);
+            printf("plan: piece %02zu: check of the cut piece (not moved): fraction measured %+.7f master samples, confirmed %+.7f; alignment error after the fraction %.1f dB\n", k + 1, meas, fr[k], e);
+            if (pp == std::string::npos || e > -60) { needsAccept[k] = true; anyAsk = true; if (pp == std::string::npos || e > -54) anyLarge = true;
+                printf("plan: piece %02zu needs your confirmation: alignment error %.1f dB (%s -54 dB)\n", k + 1, e, e <= -54 ? "between -60 and" : "worse than"); }
+            continue; }
         printf("plan: piece %02zu: check of the cut piece: %s\n", k + 1, r.alignLine.c_str());
         if (!r.found || r.band == m_align::BAND_STOP) { printf("plan: piece %02zu: the encoder's check of the cut piece does not pass: %s%s; nothing written\n", k + 1, r.why.c_str(), r.hint.empty() ? "" : ("; " + r.hint).c_str()); return 1; }
         if (r.band != m_align::BAND_OK || r.mapDiff) { needsAccept[k] = true; anyAsk = true; if (r.band == m_align::BAND_CONFIRM_LARGE) anyLarge = true; printf("plan: piece %02zu needs your confirmation: %s\n", k + 1, r.why.c_str()); } }
@@ -286,6 +303,27 @@ static int planMain(int argc, char** argv) {
                             mfiles[f - 1].c_str(), mfiles[f].c_str(), sec(fb), bk + 1, best, m_align::detail::dur(sec(best)).c_str()); } }
         if (!moved) printf("plan: the master files' own split points are the CD's positions\n"); }
     // 5. the slices on disk
+    if (laes) {   // the same cuts from the master as it is, every bit; T = where CD frame 0 lies relative to the slice, in base samples:
+        // slice sample i = master(A + i - lead*up), CD frame j (lead frame included) = master time x + (j - lead)*up, so base(u) = core(u + T) with T = (A - x) / up
+        std::vector<Slice> sf; src = &full; if (build(sf, false)) return 1;
+        std::string t = "LAE plan alignment report (LAES: the master is not moved)\npublisher disc: " + cueArg + "\nmaster:"; for (auto& f : mfiles) t += " " + f; t += "\n";
+        std::string cmds;
+        for (size_t k = 0; k < n; k++) { const Slice& s = sf[k]; const double Tk = silentCd[k] ? 0.0 : fr[k] / (double)up;
+            char nm[64]; snprintf(nm, sizeof nm, "TRACK%02zu.master.wav", k + 1); const fsp::path pm = out / nm; snprintf(nm, sizeof nm, "TRACK%02zu.cd.wav", k + 1); const fsp::path pc = out / nm;
+            const int bps = fullBits / 8; const size_t db = s.m.size() * bps; std::vector<uint8_t> o; wavio::hdr(o, w.rate, 2, fullBits, db, 0);
+            for (int32_t v : s.m) for (int b = 0; b < bps; b++) o.push_back((uint8_t)((uint32_t)v >> (8 * b))); if (db & 1) o.push_back(0);
+            FILE* f = fopen(pm.string().c_str(), "wb"); const bool ok = f && fwrite(o.data(), 1, o.size(), f) == o.size(); if (f && fclose(f)) { printf("cannot write %s\n", pm.u8string().c_str()); return 2; }
+            if (!ok || !wavio::writeCD(pc.string().c_str(), 44100, s.c, {})) { printf("cannot write the slices of piece %02zu\n", k + 1); return 2; }
+            char tx[64]; snprintf(tx, sizeof tx, "%.10f", Tk);
+            printf("plan: piece %02zu: master %s, %lld samples (%d bit, not moved), CD %lld frames%s; T = %s base samples%s\n", k + 1, silentCd[k] ? "digital silence" : fmt("%.6f-%.6f s", sec(s.S), sec(s.S + s.len)).c_str(), s.len, fullBits, nk[k] + s.lead,
+                   s.lead ? " (one digital-silence frame in front, in the pregap)" : "", tx, needsAccept[k] ? " (confirmed by you)" : "");
+            t += fmt("piece %02zu: CD frame 0 = master sample %+.7f; slice from master sample %lld; T = %s base samples\n", k + 1, silentCd[k] ? 0.0 : (double)A[k] - fr[k], s.S, tx);
+            cmds += fmt("  laes enc TRACK%02zu.laes.wav --core=TRACK%02zu.cd.wav TRACK%02zu.master.wav@%s\n", k + 1, k + 1, k + 1, tx); }
+        const fsp::path pr = out / "plan.align.txt"; FILE* f = fopen(pr.string().c_str(), "wb"); const bool ok = f && fwrite(t.data(), 1, t.size(), f) == t.size(); if (f) fclose(f);
+        printf(ok ? "plan: alignment report %s\n" : "plan: WARNING: the alignment report %s could not be written\n", pr.u8string().c_str());
+        printf("plan OK (laes): %zu pieces written to %s, the master not moved. Encode each (other masters of the piece: plan them the same way and add them with their own @T):\n%s"
+               "then lae_cdx image <dir> TRACK*.laes.wav layout=%s\n", n, outArg.c_str(), cmds.c_str(), cueArg.c_str());
+        return 0; }
     for (size_t k = 0; k < n; k++) { const Slice& s = sl[k]; std::vector<int32_t> m24(s.m.size()); long long nz = 0;
         for (size_t i = 0; i < s.m.size(); i++) m24[i] = s.m[i] >> 8; for (long long i = 0; i < s.len; i++) if (s.m[(size_t)i * 2] || s.m[(size_t)i * 2 + 1]) nz++;
         char nm[64]; snprintf(nm, sizeof nm, "TRACK%02zu.master.wav", k + 1); const fsp::path pm = out / nm; snprintf(nm, sizeof nm, "TRACK%02zu.cd.wav", k + 1); const fsp::path pc = out / nm;

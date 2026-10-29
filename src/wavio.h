@@ -9,7 +9,7 @@
 #include <vector>
 #include <string>
 namespace wavio {
-struct Wav { int rate = 0, ch = 0, bits = 0; std::vector<int32_t> s; std::vector<int16_t> pcm16; std::vector<uint8_t> lae; };
+struct Wav { int rate = 0, ch = 0, bits = 0; std::vector<int32_t> s; std::vector<int16_t> pcm16; std::vector<uint8_t> lae; std::vector<int32_t> raw32; };   // raw32: a 32-bit file's samples with all 32 bits
 inline bool read(const char* path, Wav& w) {
     FILE* f = fopen(path, "rb"); if (!f) return false; std::vector<uint8_t> b;
 #ifdef _WIN32
@@ -29,11 +29,11 @@ inline bool read(const char* path, Wav& w) {
         else if (!memcmp(id, "LAE ", 4)) w.lae.assign(b.begin() + body, b.begin() + body + n);
         p = body + n + (n & 1); }
     if (fmt != 1 || !data || (w.bits != 16 && w.bits != 24 && w.bits != 32)) return false;
-    int bps = w.bits / 8; size_t n = dlen / bps; w.s.resize(n); if (w.bits == 16) w.pcm16.resize(n);
+    int bps = w.bits / 8; size_t n = dlen / bps; w.s.resize(n); if (w.bits == 16) w.pcm16.resize(n); if (w.bits == 32) w.raw32.resize(n);
     for (size_t i = 0; i < n; i++) { const uint8_t* q = data + i * bps; int32_t v;
         if (bps == 2) { v = (int16_t)(q[0] | q[1] << 8); w.pcm16[i] = (int16_t)v; v = (int32_t)((uint32_t)v << 16); }
         else if (bps == 3) v = (int32_t)((uint32_t)q[0] << 8 | (uint32_t)q[1] << 16 | (uint32_t)q[2] << 24);
-        else v = (int32_t)((uint32_t)q[0] | (uint32_t)q[1] << 8 | (uint32_t)q[2] << 16 | (uint32_t)q[3] << 24) & ~0xFF;   // 32-bit: keep the top 24 bits
+        else { w.raw32[i] = (int32_t)((uint32_t)q[0] | (uint32_t)q[1] << 8 | (uint32_t)q[2] << 16 | (uint32_t)q[3] << 24); v = w.raw32[i] & ~0xFF; }   // 32-bit: keep the top 24 bits
         w.s[i] = v; }
     return true; }
 inline bool fits32(unsigned long long dataBytes, unsigned long long extra) { return 4 + 24 + 8 + dataBytes + 1 + extra <= 0xFFFFFFFFull; }   // RIFF sizes are 32-bit

@@ -12,7 +12,7 @@
 
 ## Original author and copyright holder
 
-mtq0605 | @mtq0605 | design of the LAE format, LAE Lossy (LAEY) specification, LAE Lossless (LAES) design, decoder, encoder, tools, tests, documentation | 2026
+mtq0605 | @mtq0605 | design of the LAE format, LAE Lossy (LAEY) specification, LAE Lossless (LAES) specification, decoder, encoder, tools, tests, documentation | 2026
 
 # "mtq0605" is the author's GitHub name, used as a pseudonym.
 
@@ -40,6 +40,11 @@ src/partition.h      | mtq0605 | original | -
 src/cd_align.cpp     | mtq0605 | original | -
 src/cd_plan.cpp      | mtq0605 | original | -
 src/enc_io.h         | mtq0605 | original | -
+src/laes_codec_enc.h | mtq0605 | original | -
+src/laes_file_enc.h  | mtq0605 | original | -
+src/laes_flac_enc.h  | mtq0605 | original (FLAC writer from RFC 9639; no libFLAC code) | -
+src/laes_tool.cpp    | mtq0605 | original | -
+src/laes_selftest.h  | mtq0605 | original | -
 
 ## Use of AI tools
 

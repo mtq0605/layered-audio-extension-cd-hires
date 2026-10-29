@@ -5,7 +5,7 @@
 
 **English** | [中文](DESIGN.zh.md)
 
-**Status:** design document published ([spec/lossless/DESIGN.md](DESIGN.md), this document), under review; normative specification not yet written.
+**Status:** superseded. The normative specification is [SPEC.md](SPEC.md) (2026-10-29); where the two differ, SPEC.md applies. This document is kept as the dated design disclosure of 2026-10-18.
 **Licence of this document:** CC BY 4.0. Copyright (c) 2026 mtq0605.
 
 **Review.** This document is under review. The following directions were decided after 2026-10-18 and take precedence over the text below. All other statements of this document are under review.

@@ -1,6 +1,6 @@
 # Changelog
 
-This file records the notable changes to LAE (Layered Audio Extension) and its lossy tier LAE Lossy (LAEY), newest first.
+This file records the notable changes to LAE (Layered Audio Extension), its lossy tier LAE Lossy (LAEY) and its lossless tier LAE Lossless (LAES), newest first.
 
 ## Unreleased (prepared 2026-10-29)
 
@@ -10,7 +10,7 @@ The container format and the decoding process of LAEY are unchanged. The encoder
 
 - The first 4 bytes of the `LAE ` chunk name the format: `LAE1` = LAEY (container version 5, unchanged), `LAE2` = LAES, the lossless tier (its own specification). `spec/lossy/SPEC.md` and `spec/cdx/SPEC.md` say so.
 - `lae_dec` reports the format it finds. For `LAE2` it says that the file is an LAES file and names the tool to use, instead of the former "unknown LAE chunk version". Its success line ends with `format LAEY (extension LAE1)`.
-- `lae_cdx` checks that an extension block of trailer type 1 begins with `LAE1` ("extension block does not match its trailer type"). Type 2 (LAES, `LAE2`) is still reported as not supported by this reader.
+- `lae_cdx` checks that an extension block of trailer type 1 begins with `LAE1` and one of type 2 with `LAE2` ("extension block does not match its trailer type"). Type 2 is now read and packed (see LAE Lossless below).
 
 ### Encoder
 
@@ -23,6 +23,18 @@ The container format and the decoding process of LAEY are unchanged. The encoder
 - `PARTTHREADS=1` now makes the whole encoder single-threaded.
 - **Fail-safety in threads.** An error inside any worker thread (out of memory, a failed write) is handed to the main thread and handled exactly as before: no output, no `.part` file, the temporary folder removed (24 forced-failure cases, layers at once and one after the other).
 - The opt-in `TIERSTAT` statistics now count per stream.
+
+### LAE Lossless (LAES): first release
+
+- **Specification:** [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (English) and [spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md) (Chinese), payload version 1, draft for public review. The design document of 2026-10-18 is superseded.
+- **What it stores:** a core (16, 24 or 32 bit at 44.1 or 48 kHz) that every player plays, and 1 to 16 independent masters (16, 24 or 32 bit, at the base rate × 1, 2, 4 or 8). Every master and each of its rate levels is reconstructed bit for bit and checked by SHA-256. A master is stored against the core or an earlier master (at the base level or at the highest level both have), or in full; masters are never moved, their time position is stored.
+- **Carriers:** WAV file (`LAE ` chunk, magic `LAE2`), FLAC file (core in the audio frames, payload in APPLICATION blocks with ID `LAE2`; the ID is provisional until registered), CD-Extra (extension block type 2).
+- **Tool `laes`** (`src/laes_tool.cpp`): `enc` (WAV or FLAC form), `dec` with `--list` / `--pick` (every master and rate level, and a 16-bit version derived on request, marked lossy), `verify`, `align` (the automatic search of `lae_enc`, the position stored as T), `selftest`.
+- **Planner:** `lae_enc plan … laes` cuts an album master at the CD's track boundaries without moving it, each track with its own T.
+- **`lae_cdx`** packs and reads LAES extension files (type 2): every master must decode and match its SHA-256.
+- **Licences:** as LAEY: the decoder side (`laes_math.h`, `laes_lift.h`, `laes_codec.h`, `laes_file.h`, `laes_flac.h`) Apache-2.0; the encoder side (`laes_codec_enc.h`, `laes_file_enc.h`, `laes_flac_enc.h`, `laes_tool.cpp`, `laes_selftest.h`) GPL-3.0-or-later or the commercial licence.
+- **Tests:** `laes selftest` (synthetic signals: round trips over both carriers, all word lengths, both rate families, all storage values; damage and parser tests). Measured on 10-second excerpts: 16-, 24- and 32-bit masters of one mix with all rate levels take 99.6–99.8 % of a FLAC of the 32-bit master alone.
+- Not yet: LAES playback in the foobar2000 component, files beyond 4 GB, streaming decoding.
 
 ## 2026-10-24
 

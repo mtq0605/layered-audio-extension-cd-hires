@@ -11,7 +11,7 @@
 
 两个版本都使用容器版本 5，解码过程相同：任一版本的文件都能用任一版本的解码器播放。全部改动见 [CHANGELOG.md](CHANGELOG.md)。
 
-**状态：**本文是容器版本 5 的工作论文，也是代码仓库首页。该格式系列名为 **LAE**（**Layered Audio Extension**，分层音频扩展）。本文介绍有损等级 **LAE Lossy**（简称 **LAEY**）。无损等级 **LAE Lossless**（简称 **LAES**）已有设计文档（[spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)）；其规范性规范尚未编写。
+**状态：**本文是容器版本 5 的工作论文，也是代码仓库首页。该格式系列名为 **LAE**（**Layered Audio Extension**，分层音频扩展）。本文介绍有损等级 **LAE Lossy**（简称 **LAEY**）。无损等级 **LAE Lossless**（简称 **LAES**）的规范性规范见 [spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)（供公开评审的草案，2026-10-29），参考工具为 `laes`；早先的设计文档（[spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)）已被取代。
 
 本次仓库修订新增以下内容：
 
@@ -33,12 +33,14 @@
 - 一致性测试向量：[tests/vectors/MANIFEST.md](tests/vectors/MANIFEST.md)
 - 测量数据：[data/](data/)，说明见 [data/README.md](data/README.md)
 - CD-Extra 与文件封装（草案）：[spec/cdx/SPEC.md](spec/cdx/SPEC.md)
+- LAE Lossless（LAES）规范（草案）：[spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)
 - foobar2000 组件：[plugins/foo_input_lae/README.zh.md](plugins/foo_input_lae/README.zh.md)
 - 许可证：[LICENSE](LICENSE)。贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md)。专利承诺：[PATENTS.md](PATENTS.md)。商业编码器许可证：[COMMERCIAL.md](COMMERCIAL.md)
 
 **标识符和文件：**
 
-- 可执行文件为 `lae_enc`、`lae_dec` 和 `lae_cdx`。
+- 可执行文件为 `lae_enc`、`lae_dec` 和 `lae_cdx`；LAE Lossless 的工具为 `laes`（编码、解码、对齐、自检）。
+- LAES 文件的 `LAE ` 块（WAV 形式）以魔数 `LAE2` 开头；FLAC 形式把同一载荷放在 ID 为 `LAE2` 的 APPLICATION 块里（[spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)）。
 - 解码器库为 `src/lae_decoder.h`。其 C 接口为 `liblae`（`src/lae_api.h`）。
 - foobar2000 组件为 `foo_input_lae`。
 - RIFF 块 ID 为 `LAE `（末尾带一个空格）。该块以魔数 `LAE1` 开头。
@@ -1837,7 +1839,7 @@ SPEC.md 中定义的比特流对容器版本 5 已冻结。
 
 ### 17.1 格式与等级
 
-- **LAE Lossless（LAES）。**存在全部层时，无损等级将逐位精确地重建母带；规范性规范尚未编写。2026-10-18 设计文档（[spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)，复核中）之后已定的方向：LAES 与 LAEY 使用同一条对齐、封装和读取链，扩展块类型为 2（已保留）；CD-Extra 只放得下其中"CD + 24 位 / 44.1 kHz"的子集，完整无损版以 BD 或文件发行；与 FLAC 兼容的封装形式在设计中（未定）。
+- **LAE Lossless（LAES）。**已规定于 [spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)（草案，2026-10-29），参考工具 `laes`。每个母带（16 / 24 / 32 位，基础采样率的 1、2、4、8 倍）及其各采样率级别都逐位还原；载体为 WAV 文件、FLAC 文件（ID `LAE2` 的 APPLICATION 块）和 CD-Extra（扩展块类型 2）。CD-Extra 上能放多少母带取决于专辑时长。以后的工作：foobar2000 组件播放 LAES、超过 4 GB 的文件和流式解码。
 - **容器。**WAV 容器和 CD-Extra 封装均已实现。封装规范为草案，将在完成真实刻录的测量之后修订（第 17.3 节）。`.lae` 文件布局仍未规定。
 - **声道。**目前仅支持立体声。
 

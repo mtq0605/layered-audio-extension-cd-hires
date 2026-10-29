@@ -151,6 +151,6 @@ For the whole-track encoders above, time and memory grew linearly with length (m
 - the scans add up whole-track summaries (floors, tone and transient events, mean energies, code-length statistics, shares), the plan (tags, lambdas) is made from them, and then every block is coded by the plan;
 - the range coder and its self-check work one row of root blocks at a time, and the output file is written and read back piece by piece.
 
-Memory does not grow with length apart from the per-cell records (3 bytes per cell). Large intermediate data go to the work folder (about 105 bytes per master frame). With `cd=`, the alignment still holds the whole master in memory. The option `resume` continues an interrupted run from its last finished step (not with `cd=`).
+Memory does not grow with length apart from the per-cell records (3 bytes per cell). Large intermediate data go to the work folder (about 105 bytes per master frame). With `cd=`, the master is read through file windows as well, and placement, the digital silence around the move, the move and the cut of that silence are written file to file; the alignment search itself correlates over the whole track at the CD rate (about 2.4 GB for 10 minutes). The option `resume` continues an interrupted run from its last finished step (with `cd=`, after the alignment, which is done again).
 
 **Decoder input.** The decoder reads the CD audio of its input file in place (one copy, 2 bytes per CD sample).

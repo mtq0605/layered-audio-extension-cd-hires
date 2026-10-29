@@ -64,8 +64,8 @@ inline std::vector<double> dec2(const std::vector<double>& x) { const std::vecto
 // whiten: the search's cross-correlation is whitened (GCC-PHAT, every bin of the band at unit magnitude) or plain (the band's cross-spectrum as
 // it is, normalised per window by the two windows' energies). Whitening is not always better, so the encoder runs the
 // search both ways; each result is judged only by its own waveform check below, the two are never compared or chosen between here.
-inline Report run(const std::vector<int16_t>& cd, long ncd, const std::vector<int32_t>& b24, long nb, long pb,
-                  const std::vector<int32_t>& master, long Lm, int base, int stages, long long hintAt = 0, const char* follows = "; automatic placement follows",
+template <class M> inline Report run(const std::vector<int16_t>& cd, long ncd, const std::vector<int32_t>& b24, long nb, long pb,
+                  const M& master, long Lm, int base, int stages, long long hintAt = 0, const char* follows = "; automatic placement follows",
                   long lagCentre = 0, long rangeCd = -1, const long long* fixedT = nullptr, bool whiten = true) {
     using namespace detail; const Th th; Report R; auto say = [&](const std::string& s) { R.lines.push_back(s); };
     const long need = nb - 2 * pb; const bool lengthOk = ncd == need; const int up = 1 << stages;
@@ -345,7 +345,7 @@ inline Report run(const std::vector<int16_t>& cd, long ncd, const std::vector<in
 // Zeros added to the master must meet digital silence on the CD (cdOnly(), once the CD layer has been derived again from M').
 struct Place { bool ok = false; long long t = 0, shift = 0, Lm = 0, Lm2 = 0, dropLead = 0, dropTail = 0, padLead = 0, padTail = 0, a0 = -1, z1 = -1; long ncd2 = 0; int cdLead = 0;
                std::string why; std::vector<std::string> lines; };
-inline Place place(const std::vector<int32_t>& master, long long Lm, long ncd, int stages, long long t, int rate) {
+template <class M> inline Place place(const M& master, long long Lm, long ncd, int stages, long long t, int rate) {
     using namespace detail; Place p; p.t = t; p.Lm = Lm; const long long up = 1LL << stages;
     auto sec = [&](long long i) { return i / (double)rate; };
     p.lines.push_back(fmt("placement: master moved by %+lld master samples (%+.2f CD samples, %s; %s)", t, t / (double)up, dur(t / (double)rate).c_str(),
@@ -401,7 +401,7 @@ template <class Get> inline int64_t advanced(const int32_t* h, int64_t a, long n
 inline std::vector<int32_t> advance(const std::vector<int32_t>& m, long long Lm, int64_t a, int stages) {
     if (a == 0) return m; int32_t h[lae_fd::TAPS]; advanceTaps(a, stages, h); std::vector<int32_t> z(m.size());
     for (int c = 0; c < 2; c++) for (long long i = 0; i < Lm; i++) {
-        const int64_t v = advanced(h, a, (long)i, [&](long j) { j = j < 0 ? -j : (j >= (long)Lm ? (long)(2 * (Lm - 1)) - j : j); j = std::max(0L, std::min((long)Lm - 1, j)); return (int64_t)(m[(size_t)j * 2 + c] >> 4); });
+        const int64_t v = advanced(h, a, (long)i, [&](long j) { j = j < 0 ? -j : (j >= (long)Lm ? (long)(2 * (Lm - 1) - j) : j); j = std::max(0L, std::min((long)Lm - 1, j)); return (int64_t)(m[(size_t)j * 2 + c] >> 4); });
         z[(size_t)i * 2 + c] = (int32_t)std::max<int64_t>(INT32_MIN, std::min<int64_t>(INT32_MAX, v * 16)); }
     return z; }
 // The master moved by the fraction (design A, 2026-10-23: the fraction is applied to the MASTER at alignment, the file stays v5 and the
@@ -420,12 +420,33 @@ inline std::vector<int32_t> moveMaster(const std::vector<int32_t>& m, long long 
         for (int q = -kH + 1; q <= kH; q++) { const long long j = i0 + q; if (j < 0 || j >= Lm) continue; s += (double)(m[(size_t)j * 2 + c] >> 8) * k[q + kH - 1]; }
         long long v = std::llround(s); if (v > 8388607) { v = 8388607; nclip++; } if (v < -8388608) { v = -8388608; nclip++; } z[(size_t)i * 2 + c] = (int32_t)(v * 256); }
     return z; }
+// The same two steps on a master held in a raw file (the encoder, 2026-10-29): read through blkio::View, written piece by piece to out;
+// every output sample is computed exactly as by applyPlace() / moveMaster() above.
+inline void applyPlaceFile(const blkio::View& m, const Place& p, const std::string& out) {
+    const long long t = p.shift, n = p.Lm, n2 = p.Lm2, s0 = std::max(0LL, -t), s1 = std::min(n, n2 - t);   // master samples [s0, s1) are kept, at s + t
+    blkio::Writer w(out.c_str()); std::vector<int32_t> buf; const long long BS = 1LL << 18;
+    for (long long a = 0; a < n2; a += BS) { const long long b = std::min(n2, a + BS); buf.assign((size_t)(b - a) * 2, 0);
+        for (long long i = a; i < b; i++) { const long long s = i - t; if (s >= s0 && s < s1) { buf[(size_t)(i - a) * 2] = m[(size_t)s * 2]; buf[(size_t)(i - a) * 2 + 1] = m[(size_t)s * 2 + 1]; } }
+        w.put(buf); }
+    w.finish(); }
+inline void moveMasterFile(const blkio::View& m, long long Lm, double f, const std::string& out, long& nclip) {
+    nclip = 0; const int kH = 64; const long long sh = (long long)std::floor(f); const double fr = f - (double)sh;
+    double k[2 * kH]; for (int q = -kH + 1; q <= kH; q++) k[q + kH - 1] = moveKern(fr - q);
+    blkio::Writer w(out.c_str()); std::vector<int32_t> z, x; const long long BS = 1LL << 18;
+    for (long long a = 0; a < Lm; a += BS) { const long long b = std::min(Lm, a + BS); z.assign((size_t)(b - a) * 2, 0);
+        const long long xa = std::max(0LL, a + sh - kH + 1), xb = std::min(Lm, b + sh + kH);   // the input samples this piece reads (inside the master)
+        x.assign((size_t)std::max(0LL, xb - xa) * 2, 0); for (long long j = xa; j < xb; j++) { x[(size_t)(j - xa) * 2] = m[(size_t)j * 2]; x[(size_t)(j - xa) * 2 + 1] = m[(size_t)j * 2 + 1]; }
+        for (int c = 0; c < 2; c++) for (long long i = a; i < b; i++) { const long long i0 = i + sh; double s = 0;
+            for (int q = -kH + 1; q <= kH; q++) { const long long j = i0 + q; if (j < 0 || j >= Lm) continue; s += (double)(x[(size_t)(j - xa) * 2 + c] >> 8) * k[q + kH - 1]; }
+            long long v = std::llround(s); if (v > 8388607) { v = 8388607; nclip++; } if (v < -8388608) { v = -8388608; nclip++; } z[(size_t)(i - a) * 2 + c] = (int32_t)(v * 256); }
+        w.put(z); }
+    w.finish(); }
 // The piece's phase, measured once at the whole offset t that run() found or was given: the advance a (phi units) with the least pooled
 // residual over run()'s usable check blocks, in run()'s channel order, through the encoder's own derivation, one least-squares gain per
 // channel (as the check). A fixed descent: start at the check's pooled fraction, then steps of U/8, U/16, ... 1 unit, each comparing
 // a - step, a and a + step; candidates beyond half a master sample either way are not taken (the whole offset is run()'s, or the user's).
 // Only the position is used; nothing is stored here. The caller turns a into the placement (t, or t + 1 for a < 0) and phi.
-inline int64_t measurePhase(const std::vector<int16_t>& cd, const std::vector<int32_t>& master, long long Lm, int stages, int rate, long long t, const Report& R, std::string& line) {
+template <class M> inline int64_t measurePhase(const std::vector<int16_t>& cd, const M& master, long long Lm, int stages, int rate, long long t, const Report& R, std::string& line) {
     using namespace detail; const long long up = 1LL << stages; const int64_t U = lae_fd::unitsPerMaster(stages); const long long margin = 2048;
     if (R.blocks.empty()) { line = "phase: not measured (no check block with sound on both sides): phase number 0"; return 0; }   // digital silence (both_silent)
     const int ph = (int)((((-t) % up) + up) % up); const long long q = (t + ph) / up; const int map = R.chanMap; int used = 0;
@@ -434,7 +455,7 @@ inline int64_t measurePhase(const std::vector<int16_t>& cd, const std::vector<in
         for (auto& bl : R.blocks) { const long long ja = bl.first, jb = bl.second, uLo = ja - q, sM = uLo * up + ph - margin, wM = (jb - ja) * up + 2 * margin;
             if (sM < 0 || sM + wM > Lm) continue;   // as run(): the window inside the master (the delay's 16 samples beyond it are mirrored; they
             used++;                                  // reach only the margin, never the block; review 2026-10-22: requiring them inside lost short pieces' only block at 88.2/96 kHz)
-            auto mir = [&](long j) { j = j < 0 ? -j : (j >= (long)Lm ? (long)(2 * (Lm - 1)) - j : j); return std::max(0L, std::min((long)Lm - 1, j)); };
+            auto mir = [&](long j) { j = j < 0 ? -j : (j >= (long)Lm ? (long)(2 * (Lm - 1) - j) : j); return std::max(0L, std::min((long)Lm - 1, j)); };
             for (int c = 0; c < 2; c++) { const int mc = map ? 1 - c : c; std::vector<int32_t> s((size_t)wM);
                 for (long long i = 0; i < wM; i++) s[(size_t)i] = (int32_t)advanced(h, a, (long)(sM + i), [&](long j) { return (int64_t)(master[(size_t)mir(j) * 2 + mc] >> 4); });
                 for (int st = stages - 1; st >= 0; st--) s = m_base::decimate(s, st);

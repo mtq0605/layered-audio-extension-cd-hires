@@ -46,4 +46,19 @@ inline void cover(long a, long b, long n, long& lo, long& hi) { lo = n; hi = -1;
 // values of one array over the index window [base, base + d.size())
 template <class T> struct Win { long base = 0; std::vector<T> d;
     T at(long j) const { const long k = j - base; if (k < 0 || k >= (long)d.size()) encio::fail("block-wise encoder: window index outside the block (internal error)"); return d[(size_t)k]; } };
+// read-only view of a raw interleaved stereo int32 file (a master) as if it were the vector of its samples: s[i] is sample i (frame i / 2,
+// channel i % 2); a window of frames around the last access is held in memory. data() gives the view itself, for code written for vectors.
+struct View { std::string path; long long frames = 0; mutable FILE* f = nullptr; mutable long long wb = 0; mutable std::vector<int32_t> w;
+    static const long long W = 1LL << 20;   // frames per window (8 MB)
+    explicit View(const std::string& p) : path(p) { f = encio::open(p.c_str(), "rb"); long long n = encio::size(f);
+        if (n < 0 || n % 8) { fclose(f); f = nullptr; encio::fail("cannot read the size of " + p); } frames = n / 8; }
+    ~View() { if (f) fclose(f); }
+    View(const View&) = delete; View& operator=(const View&) = delete;
+    size_t size() const { return (size_t)frames * 2; }
+    const View& data() const { return *this; }
+    int32_t operator[](size_t i) const { const long long fr = (long long)(i / 2);
+        if (fr < wb || fr >= wb + (long long)w.size() / 2) { if (fr >= frames) encio::fail("internal error: master sample beyond its end: " + path);
+            wb = std::max(0LL, fr - W / 2); const long long e = std::min(frames, wb + W); w.resize((size_t)(e - wb) * 2);
+            if (!seek(f, wb * 8) || fread(w.data(), 8, (size_t)(e - wb), f) != (size_t)(e - wb)) encio::fail("read failed: " + path); }
+        return w[i - (size_t)wb * 2]; } };
 }

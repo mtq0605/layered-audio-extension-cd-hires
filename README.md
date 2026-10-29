@@ -1558,7 +1558,7 @@ lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [
 
 | Argument | Meaning |
 |---|---|
-| `master.wav` | Stereo integer PCM, 16/24/32 bit (32-bit input: Section 3.1), as WAV, RF64 or Sony Wave64 (RF64 and Wave64 not with `cd=`). Rates 88.2/176.4/352.8 kHz (44.1 kHz family) or 96/192/384 kHz (48 kHz family). |
+| `master.wav` | Stereo integer PCM, 16/24/32 bit (32-bit input: Section 3.1), as WAV, RF64 or Sony Wave64. Rates 88.2/176.4/352.8 kHz (44.1 kHz family) or 96/192/384 kHz (48 kHz family). |
 | `mode` | `max`, `1`, `3` (default), `5`, `keep`, `keep20` (Section 11.1). The mode is a positional argument: it must be given whenever any later argument is used. |
 | `s1` / `s2` | Scheme 1, high quality (default) / scheme 2, high compression. The CD band is the same in both; they differ only in the frequency layer. |
 | `zs` | Optional zero level (Section 8.4); off by default |
@@ -1570,7 +1570,7 @@ lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [
 | `energy` | Measure retention proportions by energy (modes `max`, `keep` and `keep20` use their own metric) |
 | `equal` | Use equal (halving) cuts only |
 | `mem=<GB>` | Memory budget for coding the two layers of a pair at the same time (see the memory plan below) |
-| `resume` | Continue an interrupted run (not with `cd=`): the finished steps are kept in the work folder `<output>.tmp` and are not repeated when the same master is encoded again with the same options and `resume`; otherwise the run starts from the beginning. The output is the same as that of an uninterrupted run. |
+| `resume` | Continue an interrupted run: the finished steps are kept in the work folder `<output>.tmp` and are not repeated when the same master is encoded again with the same options and `resume`; otherwise the run starts from the beginning. With `cd=`, the alignment is done again (it gives the same result) and the steps after it continue. The output is the same as that of an uninterrupted run. |
 
 Notes on the encoder:
 
@@ -1581,7 +1581,7 @@ Notes on the encoder:
 - The encoder uses as many threads as there are logical cores. The environment variable `PARTTHREADS` overrides this; `PARTTHREADS=1` makes the whole encoder single-threaded. The thread count does not affect the result.
 - **Memory plan.** At the start the encoder reads the physical memory once and, from the track length, decides whether the two layers of a pair (depth L and R, frequency M and S) are coded at the same time or one after the other; it prints the plan (`memory plan: …`) and follows it for the whole encode. Two at once is chosen only on 64-bit builds and only when it fits the budget, which is half the physical memory by default and can be set with `mem=<GB>`. The output file does not depend on the plan.
 - **Block-wise encoding (2026-10-29).** The encoder reads the master and codes the track block by block (about 32 s per block); the decisions that depend on the whole track (floors, tone and transient marks, mean energies, code-length statistics, mode proportions) are added up from all blocks before any block is coded. The output is byte-identical to the former whole-track encoder. Memory does not grow with the track length apart from small per-cell records (3 bytes per cell): a 10-minute 352.8 kHz master needs about 0.5 GB. Large intermediate data go to the work folder on disk (about 105 bytes per master frame).
-- **Length.** The limit is that of the v5 container: about 94 minutes at 352.8 kHz, 173 minutes at 192 kHz. With `cd=`, the master is still held in memory for the alignment, and the Windows build then accepts masters up to about 12.7 minutes at 352.8 kHz (about 23 minutes at 192 kHz, about 46 minutes at 96 kHz; Section 17.2).
+- **Length.** The limit is that of the v5 container: about 94 minutes at 352.8 kHz, 173 minutes at 192 kHz, with or without `cd=`.
 - **Failure handling.** Every file operation is checked. On a full disc, an internal error, lack of memory or an interruption, the encoder stops with the reason, writes no output file and deletes its temporary files. The output is first written as `<output>.part` and renamed only after it has been read back and verified; an existing file of the same name is left unchanged if the run fails. The free disk space is checked before the run starts.
 
 Encoder performance, measured during development:
@@ -1819,7 +1819,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
 
 ### 17.2 Encoder
 
-- **Memory with an independent CD.** The encoder is block-wise (2026-10-29), but with `cd=` the alignment still holds the whole master in memory (about 1.7 GB per 10 minutes at 352.8 kHz, more while it is placed and moved), and the Windows build accepts such masters only up to about 12.7 minutes at 352.8 kHz (about 23 minutes at 192 kHz, about 46 minutes at 96 kHz). The whole-disc planner also holds the whole master in memory. `resume` is not available with `cd=`.
+- **Memory with an independent CD.** With `cd=`, the master is read through windows of its file like any other master, but the alignment search correlates the CD with the derived base layer over the whole track at the CD rate (its algorithm needs the whole track). This part grows with the length of the CD: about 2.4 GB for 10 minutes (`cdcheck` of a 10-minute master against its CD: 2.36 GB, formerly 7.5 GB). The whole-disc planner holds the whole master in memory.
 - **Limits of the alignment search.** The search can fail on short or narrowband material, and the encoder then stops. Examples are a 2 s excerpt of one sustained tone, a 2–3 s passage dominated by one low tone, and content entirely above about 1.2 kHz, which lies outside the band of level 0. The user then gives the position by hand with `cdalign=`.
   - Strictly periodic synthetic signals (tones, sawtooth waves, loops) surrounded by digital silence can be matched one whole period away. This is why every position is confirmed by the user (Section 4.3).
   - When the sound is longer than about 3.6 minutes, level 0 of the search uses a lower sampling rate; an improvement is planned.

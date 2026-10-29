@@ -207,7 +207,6 @@ static int encode(int argc, char** argv) {
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
         else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept bits=24 mem=<GB> resume)\n", a); return 1; } }
-    if (resume && cdPath) { printf("resume works without cd= only; nothing encoded\n"); return 1; }
     encrun::keepTmp = resume;
     if ((cdCheck || cdAccept || manual) && !cdPath) { printf("cdcheck, cdalign and cdaccept need cd=<CD.wav>\n"); return 1; }
     if (mi >= part::MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
@@ -220,13 +219,13 @@ static int encode(int argc, char** argv) {
     if (mi == part::MODE_KEEP20 && !cdCheck) printf("NOTE keep20: the depth layer is coded at 20 bit instead of 18 bit. The CD band gets about 13 dB closer to the master\n"
                                         "  (about -124 instead of -111 dBFS error), which is very unlikely to be audible at normal listening levels; the file grows by about\n"
                                         "  84 MB per hour of music (44.1 kHz family; about 94 MB for 48 kHz), i.e. about 9 minutes less music per CD-Extra disc.\n");   // as the layer module forces it (keep: cells AND energy; max: energy), so the header and the report say what was used
-    // block-wise without an independent CD: only the header is read here; the samples go straight to m0.raw once the work folder exists
-    const bool streamIn = !cdPath; wavin::Info wi;
-    wavio::Wav w; if (streamIn ? !(wavin::probe(argv[1], wi) && wi.ch == 2) : (!wavio::read(argv[1], w) || w.ch != 2)) { printf("need a stereo integer PCM WAV\n"); oldNote(); return 1; }
-    if (streamIn) { w.rate = wi.rate; w.ch = wi.ch; w.bits = wi.bits; }
+    // only the header is read here; the samples go straight to m0.raw once the work folder exists (the master is never held whole in memory)
+    wavin::Info wi;
+    wavio::Wav w; if (!(wavin::probe(argv[1], wi) && wi.ch == 2)) { printf("need a stereo integer PCM WAV\n"); oldNote(); return 1; }
+    w.rate = wi.rate; w.ch = wi.ch; w.bits = wi.bits;
     std::string note32;
     if (w.bits == 32) {   // LAE v5 carries at most 24 bit: say what reducing the master would drop, then end or continue as the user chooses
-        long long lost = streamIn ? wavin::low8(argv[1], wi) : low8Count(argv[1]);
+        long long lost = wavin::low8(argv[1], wi);
         if (lost == 0) note32 = "input 32 bit with 24-bit content (nothing dropped)";
         else {
             printf("NOTE: the master is a 32-bit file. LAE v5 carries at most 24 bit, so the lowest 8 bits would be dropped (%s).\n",
@@ -246,32 +245,30 @@ static int encode(int argc, char** argv) {
         manualT = manualPhi * 2 > Ux ? manualPlace - 1 : manualPlace;   // the whole offset nearest to o: where the first check runs and the master is placed
         manualMove = (double)(manualT - manualPlace) + (double)manualPhi / (double)Ux; }   // and the fraction it is moved by: o = manualT - manualMove
     const int P = 4096;   // mirror padding at the master rate (decoder trims it)
-    long long Lm = streamIn ? wi.dataBytes / (wi.bits / 8) / 2 : (long long)(w.s.size() / 2);   // changes only when the master is placed on an independent CD's time line
-    const bool idx32 = sizeof(long) < 8 && !streamIn;   // the whole-track modules (and the CD alignment) index with long; the block-wise path uses 64-bit positions
-    auto lengthOk = [&](const char* what) {   // length limits: the v5 header (decoder check: Lm <= 2,000,000,000 - 2P) and, on builds with a 32-bit 'long', the index range of the modules
+    long long Lm = wi.dataBytes / (wi.bits / 8) / 2;   // changes only when the master is placed on an independent CD's time line
+    auto lengthOk = [&](const char* what) {   // length limit: the v5 header (decoder check: Lm <= 2,000,000,000 - 2P); every module indexes the master with 64-bit positions
         if (Lm < (long long)w.rate) { printf("%s is shorter than 1 second: not supported\n", what); oldNote(); return false; }
         long long maxFrames = 2000000000LL - 2LL * P; const char* who = "the v5 format"; const char* hint = "";
-        if (idx32) { long long m32 = 0x7FFFFFFFLL / 8 - 2LL * P; if (m32 < maxFrames) { maxFrames = m32; who = "this encoder build (Windows)"; hint = " (longer tracks need the planned streaming encoder)"; } }
         if (const char* t = getenv("LAE_TESTMAXFRAMES")) { long long v = atoll(t); if (v > 0) maxFrames = std::min(maxFrames, v); }   // test hook: can only lower the limit
         if (Lm > maxFrames) { printf("%s is %.2f minutes long; at %d Hz %s allows at most %.2f minutes%s: nothing encoded\n", what, Lm / (60.0 * w.rate), w.rate, who, maxFrames / (60.0 * w.rate), hint); oldNote(); return false; }
         return true; };
     if (!lengthOk("the master")) return 1;
     auto fitsLength = [&](long long n) { long long mf = 2000000000LL - 2LL * P;   // the limits of lengthOk, without its messages
-        if (idx32) mf = std::min(mf, 0x7FFFFFFFLL / 8 - 2LL * P); if (const char* e = getenv("LAE_TESTMAXFRAMES")) { long long v = atoll(e); if (v > 0) mf = std::min(mf, v); }
+        if (const char* e = getenv("LAE_TESTMAXFRAMES")) { long long v = atoll(e); if (v > 0) mf = std::min(mf, v); }
         return n >= (long long)w.rate && n <= mf; };
     { std::error_code ec; bool made = std::filesystem::create_directories(tmp, ec); if (ec || !exists(tmp)) { printf("cannot create the work folder %s: nothing encoded\n", tmp.c_str()); oldNote(); return 2; }
       if (made || exists(marker)) encrun::tmpMine = true; encio::writeText(marker.c_str(), "lae_enc work folder (removed at the end of each run)\n"); }
     auto T = [&](const std::string& n) { return (std::filesystem::path(tmp) / n).string(); };
     struct Guard { ~Guard() { encrun::cleanup(); } } guard;   // removes the work folder always, the .part on failure
     auto spaceOk = [&](unsigned long long reuse = 0) {   // free space for the intermediates (about 65-85 bytes per padded master frame, measured; about 20 for cdcheck) + the output; reuse = work files about to be overwritten
-        std::error_code ec; auto sp = std::filesystem::space(tmp, ec); const double perFrame = cdCheck ? 20.0 : 105.0; if (!ec) sp.available += reuse;   // including the coefficient and plane files of two layers at once
+        std::error_code ec; auto sp = std::filesystem::space(tmp, ec); const double perFrame = cdCheck ? 45.0 : (cdPath ? 121.0 : 105.0); if (!ec) sp.available += reuse;   // including the coefficient and plane files of two layers at once; cd=: the master kept once more for the second search and a new copy while it is placed
         unsigned long long needB = (unsigned long long)((Lm + 2 * P) * perFrame) + (64ull << 20), hardB = (unsigned long long)((Lm + 2 * P) * perFrame * 0.7);
         if ((!ec && sp.available < hardB) || encio::testFail("diskspace")) { printf("not enough free disk space next to %s: about %.0f MB needed, %.0f MB free: nothing encoded\n", outPath.c_str(), needB / 1e6, ec ? 0.0 : sp.available / 1e6); oldNote(); return false; }
         if (!ec && sp.available < needB) printf("WARNING: free disk space is tight (%.0f MB free, about %.0f MB needed); every write is checked, so a full disk stops the run cleanly\n", sp.available / 1e6, needB / 1e6);
         return true; };
     if (!spaceOk()) return 2;
-    std::string masterMd5;   // block-wise input: MD5 of the master's data bytes, computed once while reading
-    if (streamIn) { long long fr = 0, l8 = 0; wavin::toRaw(argv[1], wi, T("m0.raw").c_str(), fr, l8, masterMd5);
+    std::string masterMd5;   // MD5 of the master's data bytes, computed once while reading
+    { long long fr = 0, l8 = 0; wavin::toRaw(argv[1], wi, T("m0.raw").c_str(), fr, l8, masterMd5);
         if (fr != Lm) encio::fail("internal error: master length"); }
     // resume (block-wise, without cd=): every finished step is noted in resume.txt in the work folder, together with a key made of this
     // encoder build, the options, the block length and the master's MD5. A run with the same key continues after the last finished step;
@@ -280,6 +277,7 @@ static int encode(int argc, char** argv) {
     if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | units ") + (getenv("LAE_BLOCKUNITS") ? getenv("LAE_BLOCKUNITS") : "") + " | options";
         for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume")) key += std::string(" ") + argv[i];
         key += " | master " + masterMd5;
+        if (cdPath) { wavio::Wav cw; key += " | CD " + (wavio::readCD(cdPath, cw) ? alignhash::cdMd5(cw.pcm16.data(), cw.pcm16.size() / 2) : std::string("unreadable")); }   // cd=: the alignment runs again every time; the steps after it continue
         std::string old; if (exists(manifest)) old = encio::readText(manifest.c_str());
         const std::string head = "key " + key + "\n";
         if (!old.empty() && old.compare(0, head.size(), head) == 0) { size_t p = head.size();
@@ -291,21 +289,20 @@ static int encode(int argc, char** argv) {
     auto markDone = [&](const std::string& s) { if (!resume) return; std::lock_guard<std::mutex> g(stepMu); doneSteps.insert(s);
         FILE* f = fopen(manifest.c_str(), "ab"); bool okw = f && fprintf(f, "done %s\n", s.c_str()) > 0; if (f && fclose(f)) okw = false;
         if (!okw) encio::fail("cannot write " + manifest); };
-    auto derive = [&]() {   // padded master and the derived CD layer (16 bit), 24-bit base and dither flags, all from w.s (block-wise input: from m0.raw)
-        if (!streamIn) encio::writeVec(T("m0.raw").c_str(), w.s);
+    auto derive = [&]() {   // padded master and the derived CD layer (16 bit), 24-bit base and dither flags, all from m0.raw
         if (call(m_padblk::main, {"pad", T("m0.raw"), T("m.raw"), std::to_string(P)})) { printf("padding failed\n"); oldNote(); return false; }
         env("DITHERFLAGS", T("dither.flags")); env("BASE24", T("b24.s32"));
         if (call(m_baseblk::main, {"base", T("m.raw"), std::to_string(w.rate), std::to_string((int)base), T("b16.s16")})) { printf("CD layer derivation failed\n"); oldNote(); return false; } env("BASE24", "");
         return true; };
     auto stamp = [&](const char* w) { if (getenv("TIMING")) printf("[enc %.1f s] %s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count(), w); };
-    if (isDone("derive")) printf("resume: CD layer derivation already done\n"); else { if (!derive()) return 2; markDone("derive"); }
+    if (!cdPath && isDone("derive")) printf("resume: CD layer derivation already done\n"); else { if (!derive()) return 2; if (!cdPath) markDone("derive"); }   // cd=: the alignment may place and move the master and derive again
     stamp("padding + CD layer derived");
     // independent CD: the fraction of a master sample is measured in units of 2^-22 CD sample (U1 per master sample) and applied to the master
     // itself when it is placed (2026-10-23); the file stays v5 and the decoder is unchanged
     const int64_t U1 = lae_fd::unitsPerMaster(stages);
     std::string alignNote, alignReport;   // alignReport: the text of <out>.align.txt (the actual move), written only beside the finished file
     if (cdPath) {   // independent CD: it becomes the CD layer bit for bit; the extension codes master - CD. No dither of ours to regenerate.
-        wavio::Wav c; if (!wavio::read(cdPath, c) || c.bits != 16 || c.ch != 2 || c.rate != (int)base) { printf("independent CD must be a 16-bit stereo WAV at %d Hz\n", (int)base); oldNote(); return 1; }
+        wavio::Wav c; if (!wavio::readCD(cdPath, c) || c.bits != 16 || c.ch != 2 || c.rate != (int)base) { printf("independent CD must be a 16-bit stereo WAV at %d Hz\n", (int)base); oldNote(); return 1; }
         std::vector<uint8_t> b = slurp(T("b16.s16")); long nb0 = (long)b.size() / 4, pb0 = P >> stages, need = nb0 - 2 * pb0, have = (long)c.pcm16.size() / 2;
         auto lengthMsg = [&]() { printf("independent CD has %ld samples, the master needs %ld at %d Hz: the lengths do not match; nothing encoded\n", have, need, (int)base); };
         {   // alignment (design D and A, 2026-10-22 / 10-23): with cdalign=<offset> the position is the user's: check in three blocks, place the
@@ -315,6 +312,17 @@ static int encode(int argc, char** argv) {
             // the user gives the position by hand. The two results are never compared or chosen between
             using m_align::detail::fmt;
             std::vector<int32_t> b24 = encio::readAll<int32_t>(T("b24.s32").c_str());
+            // the master is m0.raw in the work folder, read through blkio::View windows; every step that changes it (placement, the digital
+            // silence around the move, the move, the cut of that silence) writes m0.new piece by piece, which then replaces m0.raw
+            const std::string mFile = T("m0.raw"), mNew = T("m0.new");
+            auto masterReplace = [&]() { std::error_code ec; std::filesystem::rename(mNew, mFile, ec); if (ec) encio::fail("cannot replace " + mFile + ": " + ec.message()); };
+            auto masterRange = [&](long long a, long long b, long long padA, long long padB) {   // the new master: padA zero frames, frames [a, b) of the master, padB zero frames
+                { const blkio::View m(mFile); blkio::Writer wr(mNew.c_str()); std::vector<int32_t> z((size_t)1 << 19, 0), x; const long long BS = 1LL << 18;
+                  for (long long k = 0; k < padA; k += BS) wr.put(z.data(), (size_t)(std::min(BS, padA - k) * 2));
+                  for (long long i = a; i < b; i += BS) { const long long e = std::min(b, i + BS); x.resize((size_t)(e - i) * 2); for (long long j = i; j < e; j++) { x[(size_t)(j - i) * 2] = m[(size_t)j * 2]; x[(size_t)(j - i) * 2 + 1] = m[(size_t)j * 2 + 1]; } wr.put(x); }
+                  for (long long k = 0; k < padB; k += BS) wr.put(z.data(), (size_t)(std::min(BS, padB - k) * 2));
+                  wr.finish(); }
+                masterReplace(); };
             auto offText = [&](long long tp, double mv) { return fmt("%+.7f", (double)tp - mv); };   // o = whole offset - the master's move (7 decimals: finer than 1/524288)
             // one attempt at one position (the checks of the hand-given path). sch: "" by hand, else the search's name (output prefix, nothing kept).
             // kind: 0 aligned, 1 asks (-40..-33 dB or beyond), 2 stops (the reason in why), 3 fatal (derivation, disk); rep / placed: the final check
@@ -331,7 +339,7 @@ static int encode(int argc, char** argv) {
                 const bool placeNeeded = tPlace != 0 || have != need;
                 if (placeNeeded || mv != 0) {   // the CD's own samples are never changed: the master moves by whole master samples (a silent CD frame may go in front)
                     const long long t = tPlace; long nLead = 0, nTail = 0;
-                    m_align::Place q = m_align::place(w.s, Lm, have, stages, t, w.rate);
+                    m_align::Place q; { const blkio::View m(mFile); q = m_align::place(m, Lm, have, stages, t, w.rate); }
                     auto placeLine = [&](const char* result) { printf("PLACE mode=%s t=%lld drop_lead=%lld drop_tail=%lld pad_lead=%lld pad_tail=%lld cd_zero_lead=%d cd_only_lead=%ld cd_only_tail=%ld lm=%lld lm2=%lld result=%s%s\n",
                                                                       sch.empty() ? "manual" : "auto", q.t, q.dropLead, q.dropTail, q.padLead, q.padTail, q.cdLead, nLead, nTail, q.Lm, q.Lm2, result, key.c_str()); };
                     for (auto& l : q.lines) printf("%s%s\n", pre.c_str(), l.c_str());
@@ -343,19 +351,20 @@ static int encode(int argc, char** argv) {
                     if (!bad.empty()) { placeLine("stop"); A.why = bad; return A; }   // not possible here; no other offset is tried in its place
                     if (moved || mv != 0) {
                         unsigned long long reuse = 0; for (const char* f : {"m0.raw", "m.raw", "b16.s16", "b24.s32", "dither.flags"}) { long long s = fileSize(T(f)); if (s > 0) reuse += (unsigned long long)s; }   // derive() overwrites these
-                        if (moved) { m_align::applyPlace(w.s, q); Lm = q.Lm2; }   // M' replaces the master; the CD layer, base and dither flags are derived again from it
+                        if (moved) { { const blkio::View m(mFile); m_align::applyPlaceFile(m, q, mNew); } masterReplace(); Lm = q.Lm2; }   // M' replaces the master; the CD layer, base and dither flags are derived again from it
                         if (mv != 0) {   // the fraction (2026-10-23): digital silence at both ends first, so that what the move carries past the master's first /
                             // last sample is kept; afterwards only what is still digital silence is removed again: at most the added frames, never a frame of
                             // the given CD. Nothing about it is stored anywhere; decoders never discard a sample.
                             const long P = 128; const long long up1 = 1LL << stages, Pm = (long long)P * up1;
                             c.pcm16.insert(c.pcm16.begin(), 2 * (size_t)P, (int16_t)0); c.pcm16.insert(c.pcm16.end(), 2 * (size_t)P, (int16_t)0); have = (long)c.pcm16.size() / 2;
-                            { std::vector<int32_t> z((size_t)(Lm + 2 * Pm) * 2, 0); std::copy(w.s.begin(), w.s.begin() + (size_t)Lm * 2, z.begin() + (size_t)Pm * 2); w.s.swap(z); Lm += 2 * Pm; }
-                            long nclip = 0; w.s = m_align::moveMaster(w.s, Lm, mv, nclip);   // then the fraction: the placed master's waveform taken mv later
+                            masterRange(0, Lm, Pm, Pm); Lm += 2 * Pm;
+                            long nclip = 0; { const blkio::View m(mFile); m_align::moveMasterFile(m, Lm, mv, mNew, nclip); } masterReplace();   // then the fraction: the placed master's waveform taken mv later
                             if (nclip) printf("%sWARNING: %ld samples of the moved master exceed 24-bit full scale and are hard-clipped\n", pre.c_str(), nclip);
-                            auto silent = [&](long long a) { for (long long i = a; i < a + up1; i++) if (w.s[(size_t)i * 2] || w.s[(size_t)i * 2 + 1]) return false; return true; };
-                            long kL = 0, kT = 0; while (kL < P && silent((long long)kL * up1)) kL++; while (kT < P && silent(Lm - (long long)(kT + 1) * up1)) kT++;
+                            long kL = 0, kT = 0;
+                            { const blkio::View m(mFile); auto silent = [&](long long a) { for (long long i = a; i < a + up1; i++) if (m[(size_t)i * 2] || m[(size_t)i * 2 + 1]) return false; return true; };
+                              while (kL < P && silent((long long)kL * up1)) kL++; while (kT < P && silent(Lm - (long long)(kT + 1) * up1)) kT++; }
                             c.pcm16.erase(c.pcm16.end() - 2 * (size_t)kT, c.pcm16.end()); c.pcm16.erase(c.pcm16.begin(), c.pcm16.begin() + 2 * (size_t)kL); have = (long)c.pcm16.size() / 2;
-                            w.s.resize((size_t)(Lm - (long long)kT * up1) * 2); w.s.erase(w.s.begin(), w.s.begin() + (size_t)((long long)kL * up1) * 2); Lm -= (long long)(kL + kT) * up1;
+                            if (kL || kT) masterRange((long long)kL * up1, Lm - (long long)kT * up1, 0, 0); Lm -= (long long)(kL + kT) * up1;
                             padP = P; cutL = kL; cutT = kT;
                             printf("%sdigital silence: %ld CD frames added at each end before the move; removed again where still digital silence: start %ld, end %ld (kept: start %ld, end %ld)\n",
                                    pre.c_str(), P, kL, kT, P - kL, P - kT); }
@@ -369,7 +378,7 @@ static int encode(int argc, char** argv) {
                     if (!co.empty()) { A.why = co; return A; }
                     if (have != need) { A.why = fmt("the CD has %ld samples, the placed master needs %ld at %d Hz: the lengths do not match", have, need, (int)base); return A; }
                     const long long zero = 0;   // the placed (and moved) master, checked again at offset 0 (the same three blocks, through its own derivation)
-                    m_align::Report rep2 = m_align::run(c.pcm16, have, b24, nb0, pb0, w.s, (long)Lm, (int)base, stages, t, "", 0, -1, &zero);
+                    m_align::Report rep2; { const blkio::View m(mFile); rep2 = m_align::run(c.pcm16, have, b24, nb0, pb0, m, (long)Lm, (int)base, stages, t, "", 0, -1, &zero); }
                     for (auto& l : rep2.lines) printf("%sre-check: %s\n", pre.c_str(), l.c_str());
                     printf("ALIGN_RECHECK%s%s\n", rep2.alignLine.substr(5).c_str(), key.c_str());
                     if (mv != 0 && rep2.hint.rfind("still shifted", 0) == 0)   // the suggestion keeps the fraction
@@ -382,15 +391,17 @@ static int encode(int argc, char** argv) {
                 if (rep.band == m_align::BAND_STOP) { A.why = rep.why + (rep.hint.empty() ? "" : "; " + rep.hint); return A; }
                 A.kind = rep.band == m_align::BAND_OK ? 0 : 1; A.why = rep.why; return A; };
             if (!manual) {
-                const std::vector<int32_t> w0 = w.s; const long long Lm0 = Lm; const std::vector<int16_t> cd0 = c.pcm16; const long have0 = have;
+                { std::error_code ec; std::filesystem::copy_file(mFile, T("m0.orig"), std::filesystem::copy_options::overwrite_existing, ec); if (ec) encio::fail("cannot copy " + mFile + ": " + ec.message()); }   // the given master, for the second search
+                const long long Lm0 = Lm; const std::vector<int16_t> cd0 = c.pcm16; const long have0 = have;
                 std::string res[2], off[2]; const char* nm[2] = {"whitened", "plain"};
                 for (int k = 0; k < 2; k++) {
-                    if (k) { w.s = w0; Lm = Lm0; c.pcm16 = cd0; have = have0; if (!derive()) return 2;   // the second search starts from the given master again
+                    if (k) { { std::error_code ec; std::filesystem::copy_file(T("m0.orig"), mFile, std::filesystem::copy_options::overwrite_existing, ec); if (ec) encio::fail("cannot restore " + mFile + ": " + ec.message()); }
+                             Lm = Lm0; c.pcm16 = cd0; have = have0; if (!derive()) return 2;   // the second search starts from the given master again
                              b = slurp(T("b16.s16")); nb0 = (long)b.size() / 4; need = nb0 - 2 * pb0; b24 = encio::readAll<int32_t>(T("b24.s32").c_str()); }
-                    m_align::Report r = m_align::run(c.pcm16, have, b24, nb0, pb0, w.s, (long)Lm, (int)base, stages, 0, "", 0, -1, nullptr, k == 0);
+                    m_align::Report r; { const blkio::View m(mFile); r = m_align::run(c.pcm16, have, b24, nb0, pb0, m, (long)Lm, (int)base, stages, 0, "", 0, -1, nullptr, k == 0); }
                     for (auto& l : r.lines) printf("align (%s): %s\n", nm[k], l.c_str()); printf("%s search=%s\n", r.alignLine.c_str(), nm[k]);
                     long long tP = r.placeAt; double mvv = 0;   // the whole offset, and the fraction the master is moved by (|mvv| <= 1/2)
-                    if (r.found) { std::string phLine; const int64_t adv = m_align::measurePhase(c.pcm16, w.s, Lm, stages, w.rate, r.placeAt, r, phLine);
+                    if (r.found) { std::string phLine; int64_t adv = 0; { const blkio::View m(mFile); adv = m_align::measurePhase(c.pcm16, m, Lm, stages, w.rate, r.placeAt, r, phLine); }
                         printf("align (%s): %s\n", nm[k], phLine.c_str()); mvv = (double)adv / (double)U1; }
                     const Att A = attempt(r, nm[k], tP, mvv); if (A.kind == 3) return 2;
                     off[k] = r.found ? offText(tP, mvv) : std::string("-");
@@ -404,7 +415,7 @@ static int encode(int argc, char** argv) {
                        cdCheck ? "cdcheck: both searches checked, nothing encoded" : "nothing encoded", res[0].c_str(), res[1].c_str());
                 if (cdCheck) return 0; oldNote(); return 1; }
             // by hand
-            {   m_align::Report r = m_align::run(c.pcm16, have, b24, nb0, pb0, w.s, (long)Lm, (int)base, stages, 0, "; the placement given by hand follows", 0, -1, &manualT);
+            {   m_align::Report r; { const blkio::View m(mFile); r = m_align::run(c.pcm16, have, b24, nb0, pb0, m, (long)Lm, (int)base, stages, 0, "; the placement given by hand follows", 0, -1, &manualT); }
                 for (auto& l : r.lines) printf("align: %s\n", l.c_str()); printf("%s\n", r.alignLine.c_str());
                 printf("align: offset given by hand: cdalign=%s (checked first at the nearest whole offset %+lld)\n", manualText.c_str(), manualT);
                 printf("align: fraction given by hand: cdalign=%s is the whole offset %+lld with the master moved by %+.7f master samples; not measured\n",
@@ -446,9 +457,6 @@ static int encode(int argc, char** argv) {
         encio::writeVec(T("b16.s16").c_str(), b);
         std::vector<uint8_t> df = slurp(T("dither.flags")); std::fill(df.begin(), df.end(), 0); encio::writeVec(T("dither.flags").c_str(), df);
         printf("independent CD: %s (%ld samples) used as the CD layer\n", cdPath, have); }
-    // the master is final here (m0.raw / m.raw hold it): its samples are not needed in memory any more, only its length (memory)
-    if (!streamIn && (long long)(w.s.size() / 2) != Lm) encio::fail("internal error: master length");
-    std::vector<int32_t>().swap(w.s);
     env("CDEXT", cdPath ? "1" : "");   // cut-off detection by coherence for an independent CD (routes.cpp)
     env("CUTOFFOUT", T("cutoff.txt"));
     if (isDone("routes")) printf("resume: route split already done\n");

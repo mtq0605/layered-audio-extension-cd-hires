@@ -45,8 +45,9 @@ inline bool md5SelfTest() {   // the 7 values of the RFC 1321 test suite (the 62
         && h("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") == "d174ab98d277d9f5a5611c2c9f419d9f"
         && h("12345678901234567890123456789012345678901234567890123456789012345678901234567890") == "57edf4a22be3c955ac49da2e2107b67a"; }
 // digital-silence edges of an interleaved stereo signal: frames at the start / end whose two samples are exactly zero
-template <class T> void silenceEdges(const T* s, long frames, long& lead, long& tail) {
-    lead = 0; while (lead < frames && s[lead * 2] == 0 && s[lead * 2 + 1] == 0) lead++;
-    tail = 0; while (tail < frames - lead && s[(frames - 1 - tail) * 2] == 0 && s[(frames - 1 - tail) * 2 + 1] == 0) tail++; }
-template <class T> bool allZero(const T* s, long a, long b) { for (long i = a; i < b; i++) if (s[i * 2] || s[i * 2 + 1]) return false; return true; }
+// (S: a pointer, or any type with operator[] over the interleaved samples, such as the encoder's window reader of a master file)
+template <class S> void silenceEdges(const S& s, long frames, long& lead, long& tail) {
+    lead = 0; while (lead < frames && s[(size_t)lead * 2] == 0 && s[(size_t)lead * 2 + 1] == 0) lead++;
+    tail = 0; while (tail < frames - lead && s[(size_t)(frames - 1 - tail) * 2] == 0 && s[(size_t)(frames - 1 - tail) * 2 + 1] == 0) tail++; }
+template <class S> bool allZero(const S& s, long a, long b) { for (long i = a; i < b; i++) if (s[(size_t)i * 2] || s[(size_t)i * 2 + 1]) return false; return true; }
 }

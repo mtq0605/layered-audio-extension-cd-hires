@@ -28,6 +28,7 @@ The encoder-side sources in `src/` carry the SPDX expression
 - `routes_blk.cpp`
 - `lossy_blk.cpp`
 - `part_blk.cpp`
+- `laes_codec_enc.h`, `laes_file_enc.h`, `laes_flac_enc.h`, `laes_tool.cpp`, `laes_selftest.h` (the LAE Lossless encoder side)
 
 You may use them under the GNU GPL, version 3 or later. Alternatively, you
 may use them under a separate commercial licence agreement with the author,

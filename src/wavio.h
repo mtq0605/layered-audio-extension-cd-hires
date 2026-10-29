@@ -36,6 +36,30 @@ inline bool read(const char* path, Wav& w) {
         else { w.raw32[i] = (int32_t)((uint32_t)q[0] | (uint32_t)q[1] << 8 | (uint32_t)q[2] << 16 | (uint32_t)q[3] << 24); v = w.raw32[i] & ~0xFF; }   // 32-bit: keep the top 24 bits
         w.s[i] = v; }
     return true; }
+// a 16-bit file read for decoding (2026-10-29): the same pcm16, lae, rate, ch and bits as read(), without the int32 copy of the samples and
+// without holding the whole file twice (each chunk is read in place). Other sample sizes: read().
+inline bool readCD(const char* path, Wav& w) {
+    FILE* f = fopen(path, "rb"); if (!f) return false;
+#ifdef _WIN32
+    _fseeki64(f, 0, SEEK_END); long long sz = _ftelli64(f);
+    auto seekTo = [&](long long p) { return _fseeki64(f, p, SEEK_SET) == 0; };
+#else
+    fseeko(f, 0, SEEK_END); long long sz = (long long)ftello(f);
+    auto seekTo = [&](long long p) { return fseeko(f, (off_t)p, SEEK_SET) == 0; };
+#endif
+    auto at = [&](long long p, void* d, size_t n) { return p >= 0 && p + (long long)n <= sz && seekTo(p) && fread(d, 1, n, f) == n; };
+    uint8_t h[12]; if (sz < 12 || !at(0, h, 12) || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) { fclose(f); return false; }
+    long long p = 12, dpos = -1; size_t dlen = 0; int fmt = 0;
+    while (p + 8 <= sz) { uint8_t c[8]; if (!at(p, c, 8)) break; uint32_t n = (uint32_t)(c[4] | c[5] << 8 | c[6] << 16 | (uint32_t)c[7] << 24); const long long body = p + 8;
+        if ((long long)n > sz - body) n = (uint32_t)(sz - body);
+        if (!memcmp(c, "fmt ", 4)) { uint8_t b[26] = {0}; if (n < 16 || !at(body, b, n >= 26 ? 26 : 16)) { fclose(f); return false; }
+            fmt = b[0] | b[1] << 8; w.ch = b[2] | b[3] << 8; w.rate = (int)(b[4] | b[5] << 8 | b[6] << 16 | (uint32_t)b[7] << 24); w.bits = b[14] | b[15] << 8; if (fmt == 0xFFFE && n >= 26) fmt = b[24] | b[25] << 8; }
+        else if (!memcmp(c, "data", 4)) { dpos = body; dlen = n; }
+        else if (!memcmp(c, "LAE ", 4)) { w.lae.resize(n); if (n && !at(body, w.lae.data(), n)) { fclose(f); return false; } }
+        p = body + n + (n & 1); }
+    if (w.bits != 16 || fmt != 1 || dpos < 0) { fclose(f); w = Wav(); return read(path, w); }
+    w.pcm16.resize(dlen / 2); const bool ok = w.pcm16.empty() || at(dpos, w.pcm16.data(), w.pcm16.size() * 2);   // little-endian hosts (every supported platform)
+    fclose(f); return ok; }
 inline bool fits32(unsigned long long dataBytes, unsigned long long extra) { return 4 + 24 + 8 + dataBytes + 1 + extra <= 0xFFFFFFFFull; }   // RIFF sizes are 32-bit
 inline void hdr(std::vector<uint8_t>& o, int rate, int ch, int bits, size_t dataBytes, size_t extra) {
     auto p32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) o.push_back((uint8_t)(v >> (8 * i))); }; auto p16 = [&](int v) { o.push_back((uint8_t)v); o.push_back((uint8_t)(v >> 8)); };

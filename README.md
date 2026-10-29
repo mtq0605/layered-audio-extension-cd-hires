@@ -1528,7 +1528,7 @@ The component does not yet open CD-Extra rips directly; a rip is first restored 
 The code is standard C++17 and uses no third-party libraries. The encoder is built from `src/lae_enc.cpp` and the decoder from `src/lae_dec.cpp`.
 
 - **Decoder sources.** The decoder uses `src/lae_dec.cpp`, `src/lae_decoder.h`, `src/part_stream.h`, `src/partition_format.h`, `src/mdct_tb.h`, `src/mdct_tables.h`, `src/halfband.h` and `src/wavio.h` ([SPEC.md](spec/lossy/SPEC.md)).
-- **Encoder sources.** The encoder compiles the decoder into the same executable. It additionally uses `src/partition.h`, `src/fft.h`, `src/pad_mirror.cpp`, `src/base_layer.cpp`, `src/routes.cpp`, `src/lossy_v2.cpp` (which includes `src/tone_scan.cpp`), `src/part_coder.cpp` and `src/cd_align.cpp`.
+- **Encoder sources.** The encoder compiles the decoder into the same executable. It additionally uses `src/partition.h`, `src/fft.h`, the block-wise modules `src/blk_io.h`, `src/wav_in.h`, `src/pad_blk.cpp`, `src/base_blk.cpp`, `src/routes_blk.cpp`, `src/lossy_blk.cpp` and `src/part_blk.cpp`, and `src/base_layer.cpp` (its decimation, for the alignment) and `src/cd_align.cpp`. The former whole-track modules `src/pad_mirror.cpp`, `src/routes.cpp`, `src/lossy_v2.cpp` (with `src/tone_scan.cpp`) and `src/part_coder.cpp` stay in the repository as stand-alone programs and as the reference the block-wise modules are compared with; the encoder no longer uses them.
 - **Encapsulation tool sources.** `lae_cdx` is built from `src/lae_cdx.cpp` with `src/lae_cdx.h` (trailer and checksums), `src/lae_cdx_read.h` (reader core) and `src/iso9660.h` (ISO 9660 and Joliet).
 - **Decoder library.** `liblae` consists of `src/lae_api.h` and `src/lae_api.cpp`, built on `src/lae_decoder.h`. Define `LAE_API_BUILD` when building it as a DLL, and `LAE_STATIC` in both the host and the library when linking it statically.
 
@@ -1553,12 +1553,12 @@ All options, the verified builds and the check scripts are given in [docs/BUILD.
 ### 14.2 Encoding
 
 ```
-lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [bits=24] [mem=<GB>]
+lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [bits=24] [mem=<GB>] [resume]
 ```
 
 | Argument | Meaning |
 |---|---|
-| `master.wav` | Stereo integer PCM WAV, 16/24/32 bit (32-bit input: Section 3.1). Rates 88.2/176.4/352.8 kHz (44.1 kHz family) or 96/192/384 kHz (48 kHz family). |
+| `master.wav` | Stereo integer PCM, 16/24/32 bit (32-bit input: Section 3.1), as WAV, RF64 or Sony Wave64 (RF64 and Wave64 not with `cd=`). Rates 88.2/176.4/352.8 kHz (44.1 kHz family) or 96/192/384 kHz (48 kHz family). |
 | `mode` | `max`, `1`, `3` (default), `5`, `keep`, `keep20` (Section 11.1). The mode is a positional argument: it must be given whenever any later argument is used. |
 | `s1` / `s2` | Scheme 1, high quality (default) / scheme 2, high compression. The CD band is the same in both; they differ only in the frequency layer. |
 | `zs` | Optional zero level (Section 8.4); off by default |
@@ -1569,6 +1569,8 @@ lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [
 | `bits=24` | For a 32-bit master whose lowest 8 bits are not all zero: use the upper 24 bits without asking (Section 3.1) |
 | `energy` | Measure retention proportions by energy (modes `max`, `keep` and `keep20` use their own metric) |
 | `equal` | Use equal (halving) cuts only |
+| `mem=<GB>` | Memory budget for coding the two layers of a pair at the same time (see the memory plan below) |
+| `resume` | Continue an interrupted run (not with `cd=`): the finished steps are kept in the work folder `<output>.tmp` and are not repeated when the same master is encoded again with the same options and `resume`; otherwise the run starts from the beginning. The output is the same as that of an uninterrupted run. |
 
 Notes on the encoder:
 
@@ -1578,12 +1580,13 @@ Notes on the encoder:
 - The first 4 bytes of the `LAE ` chunk name the format: `LAE1` = LAEY (this tier), `LAE2` = LAES (the lossless tier, separate specification). `lae_dec` reports the format it finds: it decodes `LAE1` and, for `LAE2`, says that the file is an LAES file and names the tool to use.
 - The encoder uses as many threads as there are logical cores. The environment variable `PARTTHREADS` overrides this; `PARTTHREADS=1` makes the whole encoder single-threaded. The thread count does not affect the result.
 - **Memory plan.** At the start the encoder reads the physical memory once and, from the track length, decides whether the two layers of a pair (depth L and R, frequency M and S) are coded at the same time or one after the other; it prints the plan (`memory plan: …`) and follows it for the whole encode. Two at once is chosen only on 64-bit builds and only when it fits the budget, which is half the physical memory by default and can be set with `mem=<GB>`. The output file does not depend on the plan.
-- The encoder processes a whole track in memory. The Windows build currently accepts masters up to about 12.7 minutes at 352.8 kHz, about 23 minutes at 192 kHz and about 46 minutes at 96 kHz (a limit on the number of samples, independent of the bit depth), and stops with an explanation for longer masters (Section 17.2).
+- **Block-wise encoding (2026-10-29).** The encoder reads the master and codes the track block by block (about 32 s per block); the decisions that depend on the whole track (floors, tone and transient marks, mean energies, code-length statistics, mode proportions) are added up from all blocks before any block is coded. The output is byte-identical to the former whole-track encoder. Memory does not grow with the track length apart from small per-cell records (3 bytes per cell): a 10-minute 352.8 kHz master needs about 0.5 GB. Large intermediate data go to the work folder on disk (about 105 bytes per master frame).
+- **Length.** The limit is that of the v5 container: about 94 minutes at 352.8 kHz, 173 minutes at 192 kHz. With `cd=`, the master is still held in memory for the alignment, and the Windows build then accepts masters up to about 12.7 minutes at 352.8 kHz (about 23 minutes at 192 kHz, about 46 minutes at 96 kHz; Section 17.2).
 - **Failure handling.** Every file operation is checked. On a full disc, an internal error, lack of memory or an interruption, the encoder stops with the reason, writes no output file and deletes its temporary files. The output is first written as `<output>.part` and renamed only after it has been read back and verified; an existing file of the same name is left unchanged if the run fails. The free disk space is checked before the run starts.
 
 Encoder performance, measured during development:
 
-- **Current encoder (2026-10-29; [docs/BUILD.md](docs/BUILD.md), Section 5).** A 60 s stereo master at 352.8 kHz (mode 3, s1) on a 32-thread Windows x64 machine: 43 s with the two layers of a pair at once (peak memory 1.49 GB), 59 s one after the other (1.06 GB). The 2026-10-24 encoder took 177 s (1.83 GB) and wrote byte-identical files. Time and memory grow linearly with length.
+- **Current encoder (2026-10-29, block-wise; [docs/BUILD.md](docs/BUILD.md), Section 5).** On a 32-thread Windows x64 machine (mode 3, s1): a 10.16-minute 352.8 kHz 32-bit master (bits=24) took 492 s with a peak memory of 475 MB; the 2026-10-24 encoder needed about 12 GB for it and wrote a byte-identical file. A 60 s master at 352.8 kHz needs about 0.48 GB (2026-10-24 encoder: 177 s, 1.83 GB). Time grows linearly with length; memory almost not at all.
 - **Single job (2026-10-16; [docs/BUILD.md](docs/BUILD.md), Section 5).** On Windows x64, a 40 s stereo master at 352.8 kHz, encoded in mode 3 with 16 threads, took 113 s (about 0.35 × real time). Peak memory was 1.35 GB.
 - **Three parallel jobs at eight threads each (2026-10-17).** Encoding 40 s took:
   - 160–260 s at 352.8 kHz;
@@ -1816,7 +1819,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
 
 ### 17.2 Encoder
 
-- **Streaming encoder.** The encoder processes a whole track, because the mode proportions are track-wide statistics. Its memory grows linearly with length: about 1.06 GB per minute at 352.8 kHz when the layers are coded one after the other (2026-10-29; formerly about 1.8 GB). The Windows build accepts masters only up to about 12.7 minutes at 352.8 kHz (about 23 minutes at 192 kHz, about 46 minutes at 96 kHz). The whole-disc planner holds the whole master in memory. A block-wise encoder whose memory does not grow with length, with output identical to the whole-track encoder, is being designed.
+- **Memory with an independent CD.** The encoder is block-wise (2026-10-29), but with `cd=` the alignment still holds the whole master in memory (about 1.7 GB per 10 minutes at 352.8 kHz, more while it is placed and moved), and the Windows build accepts such masters only up to about 12.7 minutes at 352.8 kHz (about 23 minutes at 192 kHz, about 46 minutes at 96 kHz). The whole-disc planner also holds the whole master in memory. `resume` is not available with `cd=`.
 - **Limits of the alignment search.** The search can fail on short or narrowband material, and the encoder then stops. Examples are a 2 s excerpt of one sustained tone, a 2–3 s passage dominated by one low tone, and content entirely above about 1.2 kHz, which lies outside the band of level 0. The user then gives the position by hand with `cdalign=`.
   - Strictly periodic synthetic signals (tones, sawtooth waves, loops) surrounded by digital silence can be matched one whole period away. This is why every position is confirmed by the user (Section 4.3).
   - When the sound is longer than about 3.6 minutes, level 0 of the search uses a lower sampling rate; an improvement is planned.

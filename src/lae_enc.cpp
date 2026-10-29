@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <complex>
 #include <map>
+#include <numeric>
 #include <chrono>
 #include <string>
 #include <functional>
@@ -45,6 +46,8 @@
 #include <new>
 #include <thread>
 #include <atomic>
+#include <set>
+#include <mutex>
 #include <climits>
 #include <filesystem>
 #ifdef _WIN32
@@ -57,6 +60,8 @@ extern "C" __declspec(dllimport) int __stdcall GlobalMemoryStatusEx(LaeMemStatus
 #include <cstdlib>   // setenv / unsetenv
 #include <unistd.h>  // isatty, _exit
 #endif
+#include "wav_in.h"      // block-wise master reader (WAV, RF64, W64)
+#include "blk_io.h"      // block-wise reads / writes and filter windows (global, shared by the block-wise modules)
 #include "enc_io.h"      // checked I/O, shared by every module (global, like part_stream.h)
 #include "align_hash.h"
 #include "lae_cdx_read.h"   // the publisher's CUE for the independent-CD planner (cd_plan.cpp)
@@ -81,22 +86,25 @@ static int print(const char* f, ...) { va_list a; va_start(a, f); int n;
 }
 #define LAE_LAYER_MODULE_IO static const char* getenv(const char* k) { return encenv::get(k); } \
     template <class... A> static int printf(const char* f, A... a) { return encenv::print(f, a...); }
-namespace m_pad {
-#include "pad_mirror.cpp"
-}
-namespace m_base {
+namespace m_base {   // decimate() for the independent-CD alignment (cd_align.cpp); the CD layer itself is derived by base_blk.cpp
 #include "base_layer.cpp"
 }
-namespace m_routes {
-#include "routes.cpp"
+namespace m_padblk {   // the encoder modules (block-wise since 2026-10-29: memory of a few blocks, output identical to the earlier whole-track modules)
+#include "pad_blk.cpp"
 }
-namespace m_lossy {
-LAE_LAYER_MODULE_IO
-#include "lossy_v2.cpp"
+namespace m_baseblk {
+#include "base_blk.cpp"
 }
-namespace m_part {
+namespace m_routesblk {
+#include "routes_blk.cpp"
+}
+namespace m_lossyblk {   // layer coder
 LAE_LAYER_MODULE_IO
-#include "part_coder.cpp"
+#include "lossy_blk.cpp"
+}
+namespace m_partblk {   // range coder of a layer
+LAE_LAYER_MODULE_IO
+#include "part_blk.cpp"
 }
 namespace m_align {
 #include "cd_align.cpp"
@@ -109,13 +117,14 @@ namespace m_dec {
 // ---- run state for the emergency cleanup (terminate, exit() inside a module, Ctrl+C): what this run created and must remove
 namespace encrun {
 static std::string out, part, tmp; static bool hadOld = false, partMine = false, tmpMine = false, cleaned = false, finished = false;
+static bool keepTmp = false;   // resume: the work folder stays when the run does not finish, so the next run can continue from it
 static void closeAll() {
 #ifdef _WIN32
     _fcloseall();   // files a failed module left open would block their deletion on Windows
 #endif
 }
 static void cleanup() { if (cleaned) return; cleaned = true; closeAll(); std::error_code ec;   // the .part only while it is unfinished; the work folder always
-    if (partMine) std::filesystem::remove(part, ec); if (tmpMine && !getenv("KEEPTMP")) std::filesystem::remove_all(tmp, ec); }
+    if (partMine) std::filesystem::remove(part, ec); if (tmpMine && !getenv("KEEPTMP") && !keepTmp) std::filesystem::remove_all(tmp, ec); }
 static void oldNote() { if (hadOld) printf("note: the existing %s was NOT written by this run\n", out.c_str()); }
 static void emergency(const char* why) { if (finished) return; finished = true; printf("ENCODER STOPPED: %s; nothing written\n", why); oldNote(); fflush(stdout); cleanup(); }
 static void onTerminate() { emergency("internal error or out of memory (in a worker thread)"); fflush(stdout); _exit(2); }
@@ -180,13 +189,13 @@ static int encode(int argc, char** argv) {
     auto oldNote = []() { encrun::oldNote(); };
     if (!mdct::selftestOK() || !alignhash::md5SelfTest() || encio::testFail("selftest")) { printf("encoder self-test FAILED: this build does not compute the IMDCT in the IEEE-754 order the format requires, or its MD5 is wrong (see docs/BUILD.md); nothing encoded\n"); return 4; }
     const char* modeName = argc > 3 ? argv[3] : "3"; int mi = part::modeIndex(modeName); if (mi < 0) { printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }
-    bool equal = false, zsOpt = false, cdCheck = false, cdAccept = false, bits24 = false, manual = false; int wm = 0, scheme = 1; const char* cdPath = nullptr; long long manualT = 0; unsigned long long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once (default: half the physical memory)
+    bool equal = false, zsOpt = false, cdCheck = false, cdAccept = false, bits24 = false, manual = false, resume = false; int wm = 0, scheme = 1; const char* cdPath = nullptr; long long manualT = 0; unsigned long long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once (default: half the physical memory)
     std::string manualText; int manualSg = 1; long long manualI = 0, manualF = 0, manualFs = 1, manualPlace = 0, manualPhi = 0;   // cdalign=<o>: o = sg * (I + F / Fs) master samples
     double manualMove = 0;   // the fraction (master samples, |f| <= 1/2) the master is moved by when it is placed at manualT
     for (int i = 4; i < argc; i++) { const char* a = argv[i];
         if (!strcmp(a, "equal")) equal = true; else if (!strcmp(a, "energy")) wm = 1; else if (!strcmp(a, "s2")) scheme = 2; else if (!strcmp(a, "s1")) scheme = 1;
         else if (!strcmp(a, "zs")) zsOpt = true; else if (!strncmp(a, "cd=", 3) && a[3]) cdPath = a + 3; else if (!strcmp(a, "cdcheck")) cdCheck = true;
-        else if (!strcmp(a, "cdaccept")) cdAccept = true; else if (!strcmp(a, "bits=24")) bits24 = true;
+        else if (!strcmp(a, "cdaccept")) cdAccept = true; else if (!strcmp(a, "bits=24")) bits24 = true; else if (!strcmp(a, "resume")) resume = true;
         else if (!strncmp(a, "mem=", 4)) { const double g = atof(a + 4); if (!(g > 0) || g > 1e6) { printf("mem=%s: give the memory budget in GB (for example mem=8)\n", a + 4); return 1; } memBudget = (unsigned long long)(g * 1073741824.0); }
         else if (!strcmp(a, "cdalign=none")) { printf("cdalign=none was removed (2026-10-22): every CD is checked. A small remaining difference can be accepted with cdaccept, a known offset given with cdalign=<offset>; nothing encoded\n"); return 1; }
         else if (!strncmp(a, "cdalign=", 8)) {   // master samples, whole or with a fraction (v6): digits, optionally '.' and up to 9 digits
@@ -197,7 +206,9 @@ static int encode(int argc, char** argv) {
             if (!ni || !ok || *p || I > 2000000000LL) { printf(strchr(v, ',') ? "cdalign=%s: write the fraction with a point (for example cdalign=3.5)\n"
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
-        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept bits=24 mem=<GB>)\n", a); return 1; } }
+        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept bits=24 mem=<GB> resume)\n", a); return 1; } }
+    if (resume && cdPath) { printf("resume works without cd= only; nothing encoded\n"); return 1; }
+    encrun::keepTmp = resume;
     if ((cdCheck || cdAccept || manual) && !cdPath) { printf("cdcheck, cdalign and cdaccept need cd=<CD.wav>\n"); return 1; }
     if (mi >= part::MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
     if (exists(partPath)) { printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath.c_str()); return 1; }
@@ -209,10 +220,13 @@ static int encode(int argc, char** argv) {
     if (mi == part::MODE_KEEP20 && !cdCheck) printf("NOTE keep20: the depth layer is coded at 20 bit instead of 18 bit. The CD band gets about 13 dB closer to the master\n"
                                         "  (about -124 instead of -111 dBFS error), which is very unlikely to be audible at normal listening levels; the file grows by about\n"
                                         "  84 MB per hour of music (44.1 kHz family; about 94 MB for 48 kHz), i.e. about 9 minutes less music per CD-Extra disc.\n");   // as the layer module forces it (keep: cells AND energy; max: energy), so the header and the report say what was used
-    wavio::Wav w; if (!wavio::read(argv[1], w) || w.ch != 2) { printf("need a stereo integer PCM WAV\n"); oldNote(); return 1; }
+    // block-wise without an independent CD: only the header is read here; the samples go straight to m0.raw once the work folder exists
+    const bool streamIn = !cdPath; wavin::Info wi;
+    wavio::Wav w; if (streamIn ? !(wavin::probe(argv[1], wi) && wi.ch == 2) : (!wavio::read(argv[1], w) || w.ch != 2)) { printf("need a stereo integer PCM WAV\n"); oldNote(); return 1; }
+    if (streamIn) { w.rate = wi.rate; w.ch = wi.ch; w.bits = wi.bits; }
     std::string note32;
     if (w.bits == 32) {   // LAE v5 carries at most 24 bit: say what reducing the master would drop, then end or continue as the user chooses
-        long long lost = low8Count(argv[1]);
+        long long lost = streamIn ? wavin::low8(argv[1], wi) : low8Count(argv[1]);
         if (lost == 0) note32 = "input 32 bit with 24-bit content (nothing dropped)";
         else {
             printf("NOTE: the master is a 32-bit file. LAE v5 carries at most 24 bit, so the lowest 8 bits would be dropped (%s).\n",
@@ -232,37 +246,59 @@ static int encode(int argc, char** argv) {
         manualT = manualPhi * 2 > Ux ? manualPlace - 1 : manualPlace;   // the whole offset nearest to o: where the first check runs and the master is placed
         manualMove = (double)(manualT - manualPlace) + (double)manualPhi / (double)Ux; }   // and the fraction it is moved by: o = manualT - manualMove
     const int P = 4096;   // mirror padding at the master rate (decoder trims it)
-    long long Lm = (long long)(w.s.size() / 2);   // changes only when the master is placed on an independent CD's time line
+    long long Lm = streamIn ? wi.dataBytes / (wi.bits / 8) / 2 : (long long)(w.s.size() / 2);   // changes only when the master is placed on an independent CD's time line
+    const bool idx32 = sizeof(long) < 8 && !streamIn;   // the whole-track modules (and the CD alignment) index with long; the block-wise path uses 64-bit positions
     auto lengthOk = [&](const char* what) {   // length limits: the v5 header (decoder check: Lm <= 2,000,000,000 - 2P) and, on builds with a 32-bit 'long', the index range of the modules
         if (Lm < (long long)w.rate) { printf("%s is shorter than 1 second: not supported\n", what); oldNote(); return false; }
         long long maxFrames = 2000000000LL - 2LL * P; const char* who = "the v5 format"; const char* hint = "";
-        if (sizeof(long) < 8) { long long m32 = 0x7FFFFFFFLL / 8 - 2LL * P; if (m32 < maxFrames) { maxFrames = m32; who = "this encoder build (Windows)"; hint = " (longer tracks need the planned streaming encoder)"; } }
+        if (idx32) { long long m32 = 0x7FFFFFFFLL / 8 - 2LL * P; if (m32 < maxFrames) { maxFrames = m32; who = "this encoder build (Windows)"; hint = " (longer tracks need the planned streaming encoder)"; } }
         if (const char* t = getenv("LAE_TESTMAXFRAMES")) { long long v = atoll(t); if (v > 0) maxFrames = std::min(maxFrames, v); }   // test hook: can only lower the limit
         if (Lm > maxFrames) { printf("%s is %.2f minutes long; at %d Hz %s allows at most %.2f minutes%s: nothing encoded\n", what, Lm / (60.0 * w.rate), w.rate, who, maxFrames / (60.0 * w.rate), hint); oldNote(); return false; }
         return true; };
     if (!lengthOk("the master")) return 1;
     auto fitsLength = [&](long long n) { long long mf = 2000000000LL - 2LL * P;   // the limits of lengthOk, without its messages
-        if (sizeof(long) < 8) mf = std::min(mf, 0x7FFFFFFFLL / 8 - 2LL * P); if (const char* e = getenv("LAE_TESTMAXFRAMES")) { long long v = atoll(e); if (v > 0) mf = std::min(mf, v); }
+        if (idx32) mf = std::min(mf, 0x7FFFFFFFLL / 8 - 2LL * P); if (const char* e = getenv("LAE_TESTMAXFRAMES")) { long long v = atoll(e); if (v > 0) mf = std::min(mf, v); }
         return n >= (long long)w.rate && n <= mf; };
     { std::error_code ec; bool made = std::filesystem::create_directories(tmp, ec); if (ec || !exists(tmp)) { printf("cannot create the work folder %s: nothing encoded\n", tmp.c_str()); oldNote(); return 2; }
       if (made || exists(marker)) encrun::tmpMine = true; encio::writeText(marker.c_str(), "lae_enc work folder (removed at the end of each run)\n"); }
     auto T = [&](const std::string& n) { return (std::filesystem::path(tmp) / n).string(); };
     struct Guard { ~Guard() { encrun::cleanup(); } } guard;   // removes the work folder always, the .part on failure
     auto spaceOk = [&](unsigned long long reuse = 0) {   // free space for the intermediates (about 65-85 bytes per padded master frame, measured; about 20 for cdcheck) + the output; reuse = work files about to be overwritten
-        std::error_code ec; auto sp = std::filesystem::space(tmp, ec); const double perFrame = cdCheck ? 20.0 : 85.0; if (!ec) sp.available += reuse;
+        std::error_code ec; auto sp = std::filesystem::space(tmp, ec); const double perFrame = cdCheck ? 20.0 : 105.0; if (!ec) sp.available += reuse;   // including the coefficient and plane files of two layers at once
         unsigned long long needB = (unsigned long long)((Lm + 2 * P) * perFrame) + (64ull << 20), hardB = (unsigned long long)((Lm + 2 * P) * perFrame * 0.7);
         if ((!ec && sp.available < hardB) || encio::testFail("diskspace")) { printf("not enough free disk space next to %s: about %.0f MB needed, %.0f MB free: nothing encoded\n", outPath.c_str(), needB / 1e6, ec ? 0.0 : sp.available / 1e6); oldNote(); return false; }
         if (!ec && sp.available < needB) printf("WARNING: free disk space is tight (%.0f MB free, about %.0f MB needed); every write is checked, so a full disk stops the run cleanly\n", sp.available / 1e6, needB / 1e6);
         return true; };
     if (!spaceOk()) return 2;
-    auto derive = [&]() {   // padded master and the derived CD layer (16 bit), 24-bit base and dither flags, all from w.s
-        encio::writeVec(T("m0.raw").c_str(), w.s);
-        if (call(m_pad::main, {"pad", T("m0.raw"), T("m.raw"), std::to_string(P)})) { printf("padding failed\n"); oldNote(); return false; }
+    std::string masterMd5;   // block-wise input: MD5 of the master's data bytes, computed once while reading
+    if (streamIn) { long long fr = 0, l8 = 0; wavin::toRaw(argv[1], wi, T("m0.raw").c_str(), fr, l8, masterMd5);
+        if (fr != Lm) encio::fail("internal error: master length"); }
+    // resume (block-wise, without cd=): every finished step is noted in resume.txt in the work folder, together with a key made of this
+    // encoder build, the options, the block length and the master's MD5. A run with the same key continues after the last finished step;
+    // any other key starts from the beginning. The notes are read only by this encoder and never go into the LAE file.
+    std::set<std::string> doneSteps; std::mutex stepMu; const std::string manifest = T("resume.txt");
+    if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | units ") + (getenv("LAE_BLOCKUNITS") ? getenv("LAE_BLOCKUNITS") : "") + " | options";
+        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume")) key += std::string(" ") + argv[i];
+        key += " | master " + masterMd5;
+        std::string old; if (exists(manifest)) old = encio::readText(manifest.c_str());
+        const std::string head = "key " + key + "\n";
+        if (!old.empty() && old.compare(0, head.size(), head) == 0) { size_t p = head.size();
+            while (p < old.size()) { size_t e = old.find('\n', p); if (e == std::string::npos) break; if (old.compare(p, 5, "done ") == 0) doneSteps.insert(old.substr(p + 5, e - p - 5)); p = e + 1; }
+            printf("resume: continuing the earlier run (%zu step(s) already done)\n", doneSteps.size()); }
+        else { if (!old.empty()) printf("resume: the work folder belongs to another run (other master, options or encoder build): starting from the beginning\n");
+            encio::writeText(manifest.c_str(), head); } }
+    auto isDone = [&](const std::string& s) { std::lock_guard<std::mutex> g(stepMu); return doneSteps.count(s) > 0; };
+    auto markDone = [&](const std::string& s) { if (!resume) return; std::lock_guard<std::mutex> g(stepMu); doneSteps.insert(s);
+        FILE* f = fopen(manifest.c_str(), "ab"); bool okw = f && fprintf(f, "done %s\n", s.c_str()) > 0; if (f && fclose(f)) okw = false;
+        if (!okw) encio::fail("cannot write " + manifest); };
+    auto derive = [&]() {   // padded master and the derived CD layer (16 bit), 24-bit base and dither flags, all from w.s (block-wise input: from m0.raw)
+        if (!streamIn) encio::writeVec(T("m0.raw").c_str(), w.s);
+        if (call(m_padblk::main, {"pad", T("m0.raw"), T("m.raw"), std::to_string(P)})) { printf("padding failed\n"); oldNote(); return false; }
         env("DITHERFLAGS", T("dither.flags")); env("BASE24", T("b24.s32"));
-        if (call(m_base::main, {"base", T("m.raw"), std::to_string(w.rate), std::to_string((int)base), T("b16.s16")})) { printf("CD layer derivation failed\n"); oldNote(); return false; } env("BASE24", "");
+        if (call(m_baseblk::main, {"base", T("m.raw"), std::to_string(w.rate), std::to_string((int)base), T("b16.s16")})) { printf("CD layer derivation failed\n"); oldNote(); return false; } env("BASE24", "");
         return true; };
     auto stamp = [&](const char* w) { if (getenv("TIMING")) printf("[enc %.1f s] %s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count(), w); };
-    if (!derive()) return 2;
+    if (isDone("derive")) printf("resume: CD layer derivation already done\n"); else { if (!derive()) return 2; markDone("derive"); }
     stamp("padding + CD layer derived");
     // independent CD: the fraction of a master sample is measured in units of 2^-22 CD sample (U1 per master sample) and applied to the master
     // itself when it is placed (2026-10-23); the file stays v5 and the decoder is unchanged
@@ -411,37 +447,45 @@ static int encode(int argc, char** argv) {
         std::vector<uint8_t> df = slurp(T("dither.flags")); std::fill(df.begin(), df.end(), 0); encio::writeVec(T("dither.flags").c_str(), df);
         printf("independent CD: %s (%ld samples) used as the CD layer\n", cdPath, have); }
     // the master is final here (m0.raw / m.raw hold it): its samples are not needed in memory any more, only its length (memory)
-    if ((long long)(w.s.size() / 2) != Lm) encio::fail("internal error: master length");
+    if (!streamIn && (long long)(w.s.size() / 2) != Lm) encio::fail("internal error: master length");
     std::vector<int32_t>().swap(w.s);
     env("CDEXT", cdPath ? "1" : "");   // cut-off detection by coherence for an independent CD (routes.cpp)
     env("CUTOFFOUT", T("cutoff.txt"));
-    if (call(m_routes::main, {"routes", T("m.raw"), std::to_string(w.rate), T("b16.s16"), T("b24.s32"), T("T.s32"), T("F.s32")})) { printf("route split failed\n"); oldNote(); return 2; } env("CUTOFFOUT", "");
+    if (isDone("routes")) printf("resume: route split already done\n");
+    else { if (call(m_routesblk::main, {"routes", T("m.raw"), std::to_string(w.rate), T("b16.s16"), T("b24.s32"), T("T.s32"), T("F.s32")})) { printf("route split failed\n"); oldNote(); return 2; } markDone("routes"); }
+    env("CUTOFFOUT", "");
     stamp("route split"); double fc = atof(encio::readText(T("cutoff.txt").c_str()).c_str());
     env("PART", modeName); env("PARTEQ", equal ? "1" : ""); env("PARTW", wm ? "1" : "0");
     // one layer = one encoder run (possibly several octave segments) + a self-check of every segment's stream
     std::atomic<bool> ok(true);   // shared by the two layer threads of a pair
+    int depthPass = 1;   // resume: the depth layers are coded twice (before and after leak compensation), each pass is its own step
     auto layer = [&](const char* in, int rate, const char* ch, const std::string& tag) {
         if (encio::testFail(("layerthrow:" + tag).c_str())) encio::fail("forced by the test hook in layer " + tag);   // test: an exception outside the modules
+        const std::string step = "layer " + tag + (tag[0] == 'd' ? std::to_string(depthPass) : std::string());
+        if (isDone(step)) { std::vector<std::vector<uint8_t>> out; int nseg = atoi(encio::readText(T(tag + ".seg").c_str()).c_str());
+            if (nseg < 1 || nseg > 8) { ok = false; encenv::print("layer %s: bad segment count\n", tag.c_str()); return out; }
+            for (int i = 0; i < nseg; i++) out.push_back(slurp(T(tag + ".bin" + (nseg > 1 ? "." + std::to_string(i) : std::string()))));
+            encenv::print("resume: %s already coded\n", step.c_str()); return out; }
         env("CHSEL", ch); env("DUMP", T(tag + ".lae")); env("PLANE", T(tag + ".plane")); env("SEGCOUNT", T(tag + ".seg"));
-        int rc = call(m_lossy::main, {"lossy", T(in), std::to_string(rate)}); env("SEGCOUNT", ""); std::vector<std::vector<uint8_t>> out;
+        int rc = call(m_lossyblk::main, {"lossy", T(in), std::to_string(rate)}); env("SEGCOUNT", ""); std::vector<std::vector<uint8_t>> out;
         if (rc) { ok = false; encenv::print("layer %s: coding failed (code %d)\n", tag.c_str(), rc); return out; }
         int nseg = atoi(encio::readText(T(tag + ".seg").c_str()).c_str()); if (nseg < 1 || nseg > 8) { ok = false; encenv::print("layer %s: bad segment count\n", tag.c_str()); return out; }
         for (int i = 0; i < nseg; i++) { std::string suf = nseg > 1 ? "." + std::to_string(i) : "";
             env("PARTBYTES", T(tag + ".bin" + suf));
-            if (call(m_part::main, {"part", T(tag + ".lae" + suf), T(tag + ".plane" + suf)})) ok = false;
+            if (call(m_partblk::main, {"part", T(tag + ".lae" + suf), T(tag + ".plane" + suf)})) ok = false;
             env("PARTBYTES", ""); if (!ok) return out; out.push_back(slurp(T(tag + ".bin" + suf))); }
-        return out; };
+        markDone(step); return out; };
     typedef std::vector<std::vector<uint8_t>> Streams;
     // two layers of the same kind at once (L and R, M and S): the second runs in its own thread with its own module variables and printed text.
     // Same arithmetic as one after the other, so the streams are byte-identical.
     // memory plan (2026-10-29): made once at the start from the track length and the physical memory read then; the whole encode follows it.
-    // Two layers of a pair at once need about 2 x (80 bytes per layer sample + 64 MB) (measured: about 70 bytes); budget = mem=<GB>, default half
+    // Two layers of a pair at once need about 2 x (1 byte per layer sample + 128 MB) (block-wise; measured 2026-10-29); budget = mem=<GB>, default half
     // the physical memory; never two at once on 32-bit builds (address space) or with PARTTHREADS=1. The output does not depend on the plan.
     struct PairPlan { bool both = false; unsigned long long need = 0; };
     unsigned long long memTotal = 0, memAvail = 0; physMemory(memTotal, memAvail);
     const unsigned long long memUse = memBudget > 0 ? memBudget : memTotal / 2;
     const char* ptEnv = getenv("PARTTHREADS"); const bool oneThread = ptEnv && atoi(ptEnv) == 1;
-    auto planFor = [&](long long samples) { PairPlan p; p.need = 2 * (80ull * (unsigned long long)samples + (64ull << 20));
+    auto planFor = [&](long long samples) { PairPlan p; p.need = 2 * (1ull * (unsigned long long)samples + (128ull << 20));   // a few blocks + the cell records (3 bytes per cell) and the coded streams; measured: 10.16 min at 352.8 kHz, 475 MB in all
         p.both = sizeof(void*) >= 8 && !oneThread && !getenv("LAE_TESTSEQUENTIAL") && p.need <= memUse && p.need <= memAvail; return p; };
     const PairPlan planD = planFor((Lm + 2 * P) >> stages), planF = planFor(Lm + 2 * P);
     printf("memory plan: %.2f min at %d Hz; depth layers %s (two at once about %.0f MB), frequency layers %s (two at once about %.0f MB); budget %.0f MB, available %.0f MB\n",
@@ -464,48 +508,77 @@ static int encode(int argc, char** argv) {
         fputs(s1.c_str(), stdout); fputs(s2.c_str(), stdout);
         if (x1) std::rethrow_exception(x1); if (x2) std::rethrow_exception(x2); };
     env("FULLBAND", "1"); env("MASTERREF", T("b24.s32")); env("DEPTHADAPT", "1");
-    Streams dL, dR; layerPair("T.s32", (int)base, "L", "dL", "R", "dR", dL, dR, planD.both); stamp("depth layers");
+    // resume: once the leak step is done, the first depth pass is not needed any more (its only use is the file the leak is decoded from)
+    const bool skipD1 = isDone("leak"); Streams dL, dR; if (!skipD1) layerPair("T.s32", (int)base, "L", "dL", "R", "dR", dL, dR, planD.both); stamp("depth layers");
     env("FULLBAND", ""); env("MASTERREF", ""); env("DEPTHADAPT", "");
     char kf[32]; snprintf(kf, sizeof kf, "%.6f", (fc - 1000.0) / (base / 2)); env("K0FRAC", kf); env("OCTSPLIT", "1");
     Streams fM, fS; if (ok) layerPair("F.s32", w.rate, "M", "fM", "S", "fS", fM, fS, planF.both); env("K0FRAC", ""); env("OCTSPLIT", ""); stamp("frequency layers");
-    if (!ok || dL.size() != 1 || dR.size() != 1 || fM.empty() || fM.size() != fS.size()) { printf("ENCODER SELF-CHECK FAILED: a decoded layer differs from the encoder's plane or a layer could not be coded; nothing written\n"); oldNote(); return 2; }
-    // CD layer: padded base trimmed by P >> stages at each end; the trimmed edges go into the LAE chunk (the decoder needs them)
-    std::vector<uint8_t> b16 = slurp(T("b16.s16")); long nb = (long)b16.size() / 4, pb = P >> stages;
-    std::vector<int16_t> cd((nb - 2 * pb) * 2), edge(4 * pb); const int16_t* s16 = (const int16_t*)b16.data();
-    for (long i = 0; i < nb - 2 * pb; i++) { cd[i * 2] = s16[(i + pb) * 2]; cd[i * 2 + 1] = s16[(i + pb) * 2 + 1]; }
-    for (long i = 0; i < 2 * pb; i++) { edge[i] = s16[i]; edge[2 * pb + i] = s16[(nb - pb) * 2 + i]; }
+    if (!ok || (!skipD1 && (dL.size() != 1 || dR.size() != 1)) || fM.empty() || fM.size() != fS.size()) { printf("ENCODER SELF-CHECK FAILED: a decoded layer differs from the encoder's plane or a layer could not be coded; nothing written\n"); oldNote(); return 2; }
+    // CD layer: padded base trimmed by P >> stages at each end; the trimmed edges go into the LAE chunk (the decoder needs them).
+    // The CD samples are not held in memory: they are copied from b16.s16 piece by piece when the file is written and checked.
+    long nb, pb = P >> stages; std::vector<int16_t> edge(4 * pb);
+    { blkio::Reader<int16_t, 2> r(T("b16.s16").c_str()); nb = r.frames; std::vector<int16_t> x;
+      r.read(0, pb, x); std::copy(x.begin(), x.end(), edge.begin()); r.read(nb - pb, nb, x); std::copy(x.begin(), x.end(), edge.begin() + 2 * pb); }
+    const unsigned long long cdBytes = (unsigned long long)(nb - 2 * pb) * 4;
     std::vector<uint8_t> dfl = slurp(T("dither.flags"));
     // LAE chunk v5 (v5 = v4 + precision rule per stream, reconstruction offset 0.20, 6 modes; v4 = v3 + 16-bit backstop): header, base edges, dither flags, depth L, depth R, number of frequency segments, M segments, S segments
     // v6 = v5 + the phase number after pb (an independent CD whose position has a fraction of a master sample); phase number 0 is written as v5
-    // written to <out>.part and read back: the file on disk must hold exactly this CD layer and this chunk
-    auto writeFile = [&]() { std::vector<uint8_t> lae; auto put32 = [&](int32_t v) { lae.insert(lae.end(), (uint8_t*)&v, (uint8_t*)&v + 4); };
-        auto putb = [&](const void* p, size_t n) { lae.insert(lae.end(), (const uint8_t*)p, (const uint8_t*)p + n); };
+    // The chunk is a list of pieces pointing at the coded streams (no second copy); its CRC-32 is added up piece by piece.
+    typedef std::pair<const uint8_t*, size_t> Piece;
+    auto chunkPieces = [&](std::vector<std::vector<uint8_t>>& small, std::vector<Piece>& pc) {
+        small.clear(); pc.clear(); small.reserve(64);
+        auto put32 = [&](int32_t v) { small.emplace_back((uint8_t*)&v, (uint8_t*)&v + 4); pc.push_back({small.back().data(), 4}); };
+        auto putb = [&](const void* p, size_t n) { pc.push_back({(const uint8_t*)p, n}); };
         auto putS = [&](const std::vector<uint8_t>& s) { put32((int32_t)s.size()); putb(s.data(), s.size()); };
         put32(0x3145414C); put32(5); put32(w.rate); put32((int32_t)base); put32(stages); put32((int32_t)Lm); put32(P);
         put32((int32_t)fc); put32(mi); put32(equal ? 1 : 0); put32(wm); put32((int32_t)nb); put32((int32_t)pb);
         putb(edge.data(), edge.size() * 2); put32((int32_t)dfl.size()); putb(dfl.data(), dfl.size());
         putS(dL[0]); putS(dR[0]); put32((int32_t)fM.size()); for (auto& s : fM) putS(s); for (auto& s : fS) putS(s);
-        put32((int32_t)crc32(lae.data(), lae.size()));   // v3: CRC-32 of everything before it (integrity check, whole chunk)
-        if (!wavio::fits32((unsigned long long)cd.size() * 2, 8ULL + lae.size() + 1)) { printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return (size_t)0; }
+        uint32_t c = 0xFFFFFFFFu; static const struct Tab { uint32_t t[256]; Tab() { for (uint32_t i = 0; i < 256; i++) { uint32_t v = i; for (int k = 0; k < 8; k++) v = v & 1 ? 0xEDB88320u ^ (v >> 1) : v >> 1; t[i] = v; } } } tab;
+        for (auto& q : pc) for (size_t i = 0; i < q.second; i++) c = tab.t[(c ^ q.first[i]) & 0xFF] ^ (c >> 8);   // = crc32() of part_stream.h over the whole chunk
+        put32((int32_t)(c ^ 0xFFFFFFFFu));   // v3: CRC-32 of everything before it (integrity check, whole chunk)
+        size_t n = 0; for (auto& q : pc) n += q.second; return n; };
+    // the bytes of the output file (as wavio::writeCD writes them), handed to f piece by piece
+    auto fileBytes = [&](const std::vector<Piece>& pc, size_t laeN, const std::function<bool(const uint8_t*, size_t)>& f) {
+        std::vector<uint8_t> o; const size_t extra = laeN == 0 ? 0 : 8 + laeN + (laeN & 1); wavio::hdr(o, (int)base, 2, 16, (size_t)cdBytes, extra);
+        if (!f(o.data(), o.size())) return false;
+        blkio::Reader<int16_t, 2> r(T("b16.s16").c_str()); std::vector<int16_t> x; const long BS = 1L << 18;
+        for (long a = pb; a < nb - pb; a += BS) { r.read(a, std::min(nb - pb, a + BS), x); if (!f((const uint8_t*)x.data(), x.size() * 2)) return false; }
+        o.clear(); if (cdBytes & 1) o.push_back(0);
+        if (laeN) { o.insert(o.end(), {'L', 'A', 'E', ' '}); uint32_t n = (uint32_t)laeN; for (int i = 0; i < 4; i++) o.push_back((uint8_t)(n >> (8 * i))); }
+        if (!f(o.data(), o.size())) return false;
+        for (auto& q : pc) if (q.second && !f(q.first, q.second)) return false;
+        const uint8_t z = 0; return !(laeN & 1) || f(&z, 1); };
+    // written to <out>.part and read back: the file on disk must hold exactly this CD layer and this chunk
+    auto writeFile = [&]() { std::vector<std::vector<uint8_t>> small; std::vector<Piece> pc; const size_t laeN = chunkPieces(small, pc);
+        if (!wavio::fits32(cdBytes, 8ULL + laeN + 1)) { printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return (size_t)0; }
         encrun::partMine = true;
-        if (!wavio::writeCD(partPath.c_str(), (int)base, cd, lae) || encio::testFail("partwrite")) { printf("cannot write %s\n", partPath.c_str()); return (size_t)0; }
-        wavio::Wav v; if (!wavio::read(partPath.c_str(), v) || v.rate != (int)base || v.bits != 16 || v.ch != 2 || v.pcm16 != cd || v.lae != lae || encio::testFail("partverify")) {
-            printf("read-back check FAILED: %s does not hold what was written (disk full or failing?)\n", partPath.c_str()); return (size_t)0; }
-        return lae.size(); };
-    size_t chunk = writeFile(); if (!chunk) { oldNote(); return 2; } stamp("file written");
+        bool okw = false; { FILE* f = fopen(partPath.c_str(), "wb"); if (f) { okw = fileBytes(pc, laeN, [&](const uint8_t* p, size_t n) { return fwrite(p, 1, n, f) == n; }); okw = fclose(f) == 0 && okw; } }
+        if (!okw || encio::testFail("partwrite")) { printf("cannot write %s\n", partPath.c_str()); return (size_t)0; }
+        bool okr = false; { FILE* f = fopen(partPath.c_str(), "rb"); if (f) { std::vector<uint8_t> g; unsigned long long total = 0;
+            okr = fileBytes(pc, laeN, [&](const uint8_t* p, size_t n) { g.resize(n); total += n; return fread(g.data(), 1, n, f) == n && !memcmp(g.data(), p, n); });
+            okr = okr && encio::size(f) == (long long)total; fclose(f); } }
+        if (!okr || encio::testFail("partverify")) { printf("read-back check FAILED: %s does not hold what was written (disk full or failing?)\n", partPath.c_str()); return (size_t)0; }
+        return laeN; };
+    size_t chunk = 0; if (!skipD1) { chunk = writeFile(); if (!chunk) { oldNote(); return 2; } stamp("file written"); }
     long nclip = -1;
     {   // leak compensation (v5, always on): decode the final frequency layer, let the depth layer cancel its leak into the CD band
+      if (skipD1) printf("resume: leak decode already done\n");
+      else {
         g_streamErr = false; std::error_code ec; std::filesystem::remove(T("leak.s32"), ec);
         env("LEAKOUT", T("leak.s32")); int rc = call(m_dec::main, {"dec", partPath, T("check.wav"), "full"}); env("LEAKOUT", "");
         long long lsz = fileSize(T("leak.s32")); const bool forced = encio::testFail("leakdecode");
         if (rc || lsz != (long long)nb * 8 || g_streamErr || forced) { printf("leak compensation FAILED (decoder code %d, leak file %lld bytes, expected %lld%s%s): nothing written\n", rc, lsz, (long long)nb * 8,
                                                                                 g_streamErr ? ", decoded values out of range" : "", forced ? ", forced by the test hook" : ""); oldNote(); return 2; }
-        char fcs[32]; snprintf(fcs, sizeof fcs, "%.0f", fc); env("LEAKIN", T("leak.s32"));
-        rc = call(m_routes::main, {"routes", T("m.raw"), std::to_string(w.rate), T("b16.s16"), T("b24.s32"), T("T.s32"), T("F2.s32"), fcs}); env("LEAKIN", "");
-        stamp("leak decoded + route split again");
-        if (rc || encio::testFail("routes2")) { printf("leak compensation FAILED in the route split: nothing written\n"); oldNote(); return 2; }
+        markDone("leak"); }
+        if (isDone("routes2")) printf("resume: second route split already done\n");
+        else { char fcs[32]; snprintf(fcs, sizeof fcs, "%.0f", fc); env("LEAKIN", T("leak.s32"));
+          int rc = call(m_routesblk::main, {"routes", T("m.raw"), std::to_string(w.rate), T("b16.s16"), T("b24.s32"), T("T.s32"), T("F2.s32"), fcs}); env("LEAKIN", "");
+          stamp("leak decoded + route split again");
+          if (rc || encio::testFail("routes2")) { printf("leak compensation FAILED in the route split: nothing written\n"); oldNote(); return 2; }
+          markDone("routes2"); }
         env("FULLBAND", "1"); env("MASTERREF", T("b24.s32")); env("DEPTHADAPT", "1");
-        dL.clear(); dR.clear(); layerPair("T.s32", (int)base, "L", "dL", "R", "dR", dL, dR, planD.both);
+        depthPass = 2; dL.clear(); dR.clear(); layerPair("T.s32", (int)base, "L", "dL", "R", "dR", dL, dR, planD.both);
         env("FULLBAND", ""); env("MASTERREF", ""); env("DEPTHADAPT", "");
         if (!ok || dL.size() != 1 || dR.size() != 1) { printf("ENCODER SELF-CHECK FAILED after leak compensation; nothing written\n"); oldNote(); return 2; }
         chunk = writeFile(); if (!chunk) { oldNote(); return 2; }
@@ -524,14 +597,14 @@ static int encode(int argc, char** argv) {
     {   // only a complete, verified file gets the output name; a briefly locked target (scanner, indexer, player) is retried
         std::error_code ec; for (int k = 0; k < 20; k++) { ec.clear(); std::filesystem::rename(partPath, outPath, ec); if (!ec) break; std::this_thread::sleep_for(std::chrono::milliseconds(250)); }
         if (ec) { printf("cannot rename %s to %s: %s (the output may be open in another program)\n", partPath.c_str(), outPath.c_str(), ec.message().c_str()); oldNote(); return 2; }
-        encrun::partMine = false; }
+        encrun::partMine = false; encrun::keepTmp = false; }   // finished: the work folder goes, also after a resumed run
     if (!alignReport.empty()) { const std::string rp = outPath + ".align.txt"; FILE* f = fopen(rp.c_str(), "wb");
         bool ok = f && fwrite(alignReport.data(), 1, alignReport.size(), f) == alignReport.size(); if (f && fclose(f)) ok = false;
         printf(ok ? "alignment report: %s\n" : "WARNING: the alignment report %s could not be written (the LAE file itself is complete)\n", rp.c_str()); }
     size_t sd = dL[0].size() + dR[0].size(), sf = 0; for (auto& s : fM) sf += s.size(); for (auto& s : fS) sf += s.size();
     std::string extra; if (!note32.empty()) extra += " | " + note32; if (!alignNote.empty()) extra += " | " + alignNote;
     printf("LAE encode OK: %s | CD %d Hz cut-off %.0f Hz | scheme %d, mode %s (share by %s) %s | CD PCM %zu B, depth %zu B, frequency %zu B in %zu octave segment(s), chunk %zu B | beyond full scale before limiter %s | %.1f s%s\n",
-           argv[2], (int)base, fc, scheme, part::MODES[mi].name, wm == 2 ? "cells+energy" : (wm ? "energy" : "cells"), equal ? "equal" : "unequal", cd.size() * 2, sd, sf, fM.size(), chunk,
+           argv[2], (int)base, fc, scheme, part::MODES[mi].name, wm == 2 ? "cells+energy" : (wm ? "energy" : "cells"), equal ? "equal" : "unequal", (size_t)cdBytes, sd, sf, fM.size(), chunk,
            nclip >= 0 ? std::to_string(nclip).c_str() : "not measured", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count(), extra.c_str());
     return 0;
 }

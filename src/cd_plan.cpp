@@ -81,8 +81,8 @@ static int planMain(int argc, char** argv) {
     encrun::tmp = tmp.string(); encrun::tmpMine = true;   // also removed on Ctrl+C, exit() inside a module or terminate (the destructor does not run then)
     auto T = [&](const char* nm) { return (tmp / nm).string(); };
     encio::writeVec(T("m0.raw").c_str(), w.s);
-    if (call(m_pad::main, {"pad", T("m0.raw"), T("m.raw"), std::to_string(P)})) { printf("padding failed\n"); return 2; }
-    env("BASE24", T("b24.s32")); int rc = call(m_base::main, {"base", T("m.raw"), std::to_string(w.rate), "44100", T("b16.s16")}); env("BASE24", "");
+    if (call(m_padblk::main, {"pad", T("m0.raw"), T("m.raw"), std::to_string(P)})) { printf("padding failed\n"); return 2; }
+    env("BASE24", T("b24.s32")); int rc = call(m_baseblk::main, {"base", T("m.raw"), std::to_string(w.rate), "44100", T("b16.s16")}); env("BASE24", "");
     if (rc) { printf("base derivation failed\n"); return 2; }
     const std::vector<int32_t> b24 = encio::readAll<int32_t>(T("b24.s32").c_str()); const long nbAll = (long)b24.size() / 2;
     auto cdOf = [&](size_t k) { std::vector<int16_t> c((size_t)nk[k] * 2); for (long long j = 0; j < nk[k]; j++) { c[(size_t)j * 2] = pub.d.L(pub.p[k] + j); c[(size_t)j * 2 + 1] = pub.d.R(pub.p[k] + j); } return c; };
@@ -194,8 +194,8 @@ static int planMain(int argc, char** argv) {
         return 0; };
     auto deriveB24 = [&](const std::vector<int32_t>& m) {   // the encoder's own derivation of a slice (mirror padding at its edges)
         encio::writeVec(T("s0.raw").c_str(), m);
-        if (call(m_pad::main, {"pad", T("s0.raw"), T("s.raw"), std::to_string(P)})) return std::vector<int32_t>();
-        env("BASE24", T("sb24.s32")); const int r = call(m_base::main, {"base", T("s.raw"), std::to_string(w.rate), "44100", T("sb16.s16")}); env("BASE24", "");
+        if (call(m_padblk::main, {"pad", T("s0.raw"), T("s.raw"), std::to_string(P)})) return std::vector<int32_t>();
+        env("BASE24", T("sb24.s32")); const int r = call(m_baseblk::main, {"base", T("s.raw"), std::to_string(w.rate), "44100", T("sb16.s16")}); env("BASE24", "");
         return r ? std::vector<int32_t>() : encio::readAll<int32_t>(T("sb24.s32").c_str()); };
     // groups: consecutive sounding pieces whose master ranges touch at the CD's split point (no master sample, no silent piece between):
     // the CD splits continuous master material there, so the group has one whole offset and one fraction

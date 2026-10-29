@@ -4,7 +4,7 @@ This file records the notable changes to LAE (Layered Audio Extension), its loss
 
 ## Unreleased (prepared 2026-10-29)
 
-The container format and the decoding process of LAEY are unchanged. The encoder writes byte-identical files, faster and with less memory.
+The container format and the decoding process of LAEY are unchanged. The encoder writes byte-identical files, faster, block by block and with much less memory.
 
 ### Format names
 
@@ -20,6 +20,12 @@ The container format and the decoding process of LAEY are unchanged. The encoder
   - The route split's filters are divided across threads, and the two layers of a pair (depth L and R, frequency M and S) can be coded at the same time.
 - **Less memory, same output.** One reconstructed plane instead of two identical copies; each octave segment holds only its own bins; signals are freed as soon as they are no longer needed; the master's samples are freed once the CD layer is derived. 60 s at 352.8 kHz: 1.06 GB with the layers one after the other (formerly 1.83 GB), 1.49 GB with two at once.
 - **Memory plan and `mem=<GB>`.** At the start the encoder reads the physical memory once, decides from the track length whether each pair of layers is coded at once or one after the other, prints the plan (`memory plan: …`) and follows it. Two at once only on 64-bit builds, with `PARTTHREADS` not 1, and when it fits the budget (half the physical memory by default; `mem=<GB>` sets it) and the available memory. The output does not depend on the plan.
+- **Block-wise encoder, same output.** The encoder reads the master and codes the track block by block (about 32 s per block). The track-wide decisions (floors, tone and transient marks, mean energies, code-length statistics, mode proportions) are added up from all blocks first; then every block is coded by that plan. Every file is byte-identical to the whole-track encoder: all modes and options, all rates, short tracks, independent CD with whole and fractional placement, and a 10.16-minute 352.8 kHz 32-bit master (peak memory 475 MB instead of about 12 GB).
+  - Memory no longer grows with the track length apart from small per-cell records (3 bytes per cell). Large intermediate data go to the work folder on disk (about 105 bytes per master frame).
+  - The Windows limit of about 12.7 minutes at 352.8 kHz is gone (except with `cd=`, where the alignment still holds the whole master in memory). The limit is that of the v5 container, about 94 minutes at 352.8 kHz.
+  - Masters may be WAV, RF64 or Sony Wave64 (RF64 and Wave64 not with `cd=`).
+  - New option `resume`: an interrupted run (power cut, Ctrl+C, full disc) continues from its last finished step when it is started again with the same master, options and `resume`; the output is the same as that of an uninterrupted run. Not with `cd=`.
+  - The decoder reads the CD audio of its input in place, without the former 32-bit copy of every sample.
 - `PARTTHREADS=1` now makes the whole encoder single-threaded.
 - **Fail-safety in threads.** An error inside any worker thread (out of memory, a failed write) is handed to the main thread and handled exactly as before: no output, no `.part` file, the temporary folder removed (24 forced-failure cases, layers at once and one after the other).
 - The opt-in `TIERSTAT` statistics now count per stream.

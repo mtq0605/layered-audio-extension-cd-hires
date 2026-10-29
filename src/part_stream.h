@@ -70,7 +70,8 @@ template <class C> struct Walker {
         expZero(o.expZero), expSign(o.expSign), pos(o.pos), prevTier(o.prevTier), prevE(o.prevE) {}
     bool done() const { return M0 >= h.K; }
     int rowFrames() const { return (int)min<long>(part::ROOTT, h.K - M0); }
-    void row(C& c, vector<int32_t>& s, bool enc, vector<int32_t>& plane, long frame0) {
+    // S: the token store: a vector (whole stream), or any type with operator[] and push_back read / written in order (block-wise part coder)
+    template <class S> void row(C& c, S& s, bool enc, vector<int32_t>& plane, long frame0) {
     auto tok = [&](int32_t v) -> int32_t { if (enc) return s[pos++]; s.push_back(v); pos++; return v; };
     auto bits = [&](int32_t v, int n) -> int32_t { if constexpr (is_same<C, Enc>::value) { c.direct((uint32_t)v, n); return v; } else return (int32_t)c.direct(n); };
     auto tree = [&](uint16_t* pr, int v, int nb) { int node = 1; for (int b = nb - 1; b >= 0; b--) { int bit = enc ? (v >> b) & 1 : 0;

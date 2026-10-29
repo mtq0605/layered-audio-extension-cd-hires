@@ -106,7 +106,7 @@ The conformance vectors and their hashes are listed in [tests/vectors/MANIFEST.m
   - The environment variable `PARTTHREADS` sets it explicitly.
   - The thread count does not affect the result: 1 and 16 threads produce byte-identical streams.
   - Since 2026-10-29 the route split's filters are also divided across threads, and the two layers of a pair (depth L and R, frequency M and S, and L and R again after leak compensation) can be coded at the same time. Every output value is computed with the same operations in the same order, so the output is byte-identical.
-  - Memory plan: at the start the encoder reads the physical memory once and decides from the track length whether each pair runs at once or one after the other (`memory plan: …`). Two at once only on 64-bit builds, with `PARTTHREADS` not 1, and when about 2 × (80 bytes per layer sample + 64 MB) fits both the budget (`mem=<GB>`, default half the physical memory) and the available memory. Linux reads `/proc/meminfo` (MemAvailable); where the memory cannot be read, the layers run one after the other.
+  - Memory plan: at the start the encoder reads the physical memory once and decides from the track length whether each pair runs at once or one after the other (`memory plan: …`). Two at once only on 64-bit builds, with `PARTTHREADS` not 1, and when about 2 × (1 byte per layer sample + 128 MB) fits both the budget (`mem=<GB>`, default half the physical memory) and the available memory. Linux reads `/proc/meminfo` (MemAvailable); where the memory cannot be read, the layers run one after the other.
   - `PARTTHREADS=1` makes the whole encoder single-threaded.
   - An error in any thread (out of memory, a failed write) is handed to the main thread and handled as before: no output is written and the temporary folder is removed.
 - **Decoder.** The decoder is single-threaded.
@@ -128,7 +128,15 @@ Encoder of 2026-10-29 (Windows x64, 32 threads, 352.8 kHz stereo 60 s, mode 3, s
 | 2026-10-29, layers one after the other | 59 s | 1.06 GB |
 | 2026-10-29, two layers of a pair at once | 43 s | 1.49 GB |
 
-Time and memory grow linearly with length (measured at 10, 20, 40 and 60 s). Most of the time saved comes from the partition search, which used to allocate a cut list for every rectangle; with many threads those heap allocations waited on each other. Memory: one reconstructed plane instead of two identical copies, each octave segment holds only its own bins, and signals are freed as soon as they are no longer needed.
+Block-wise encoder of 2026-10-29 (same machine, mode 3, s1; output byte-identical to the whole-track encoder):
+
+| Master | Time | Peak memory |
+|---|---|---|
+| 352.8 kHz stereo 60 s | 127 s (machine under load from other runs) | 482 MB |
+| 352.8 kHz 32-bit stereo, 10.16 min (bits=24) | 492 s | 475 MB (whole-track encoder: 580 s with the layers one after the other, 12,039 MB) |
+| 352.8 kHz stereo, 13 min (beyond the former Windows limit) | 961 s | 733 MB (before the LAE chunk was written without a second copy of the streams) |
+
+For the whole-track encoders above, time and memory grew linearly with length (measured at 10, 20, 40 and 60 s). Most of the time saved comes from the partition search, which used to allocate a cut list for every rectangle; with many threads those heap allocations waited on each other. Memory: one reconstructed plane instead of two identical copies, each octave segment holds only its own bins, and signals are freed as soon as they are no longer needed.
 
 **Decoder.** The decoder is streaming, and its memory does not grow with track length, apart from the input file, which is currently read whole. It:
 
@@ -136,4 +144,13 @@ Time and memory grow linearly with length (measured at 10, 20, 40 and 60 s). Mos
 - overlap-adds the inverse MDCT frame by frame;
 - pulls every resampling stage through short sliding windows.
 
-**Encoder.** The encoder processes a whole track, because the mode proportions are measured over the whole track. Its memory grows linearly with the length. A block-wise encoder, whose memory does not grow with length and whose output is identical to the whole-track encoder, is future work.
+**Encoder (block-wise, 2026-10-29).** The mode proportions and the other track-wide decisions are measured over the whole track, but the track is read and coded block by block:
+
+- the master is read piece by piece (WAV, RF64, Sony Wave64);
+- the CD layer, the route split and the layer coder work on blocks of whole floor segments and whole root rows (about 32 s), each block read with the margins its filters need; every value is computed with the same operations in the same order as before, so the output is byte-identical;
+- the scans add up whole-track summaries (floors, tone and transient events, mean energies, code-length statistics, shares), the plan (tags, lambdas) is made from them, and then every block is coded by the plan;
+- the range coder and its self-check work one row of root blocks at a time, and the output file is written and read back piece by piece.
+
+Memory does not grow with length apart from the per-cell records (3 bytes per cell). Large intermediate data go to the work folder (about 105 bytes per master frame). With `cd=`, the alignment still holds the whole master in memory. The option `resume` continues an interrupted run from its last finished step (not with `cd=`).
+
+**Decoder input.** The decoder reads the CD audio of its input file in place (one copy, 2 bytes per CD sample).

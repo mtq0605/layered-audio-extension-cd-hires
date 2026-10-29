@@ -40,6 +40,13 @@ src/partition.h      | mtq0605 | original | -
 src/cd_align.cpp     | mtq0605 | original | -
 src/cd_plan.cpp      | mtq0605 | original | -
 src/enc_io.h         | mtq0605 | original | -
+src/blk_io.h         | mtq0605 | original | -
+src/wav_in.h         | mtq0605 | original (RF64 / Wave64 readers from the published format descriptions) | -
+src/pad_blk.cpp      | mtq0605 | original | -
+src/base_blk.cpp     | mtq0605 | original | -
+src/routes_blk.cpp   | mtq0605 | original | -
+src/lossy_blk.cpp    | mtq0605 | original | -
+src/part_blk.cpp     | mtq0605 | original | -
 src/laes_codec_enc.h | mtq0605 | original | -
 src/laes_file_enc.h  | mtq0605 | original | -
 src/laes_flac_enc.h  | mtq0605 | original (FLAC writer from RFC 9639; no libFLAC code) | -

@@ -60,7 +60,8 @@ inline MeanE meanEnergies(const Plane& P, const std::vector<char>& cellA, const 
     MeanE r; r.eD = nD ? eD / nD : 1; r.eC = nC ? eC / nC : 1; return r; }
 inline Result run(const Plane& P, const std::vector<char>& cellA, const std::vector<int>& cellE, const std::vector<int>& lab,
                   const std::vector<char>& noZL, bool equal, const Costs& cost, double lamD, double lamC, int wmode, double TH = -1, bool full = true,
-                  const MeanE* mean = nullptr) {
+                  const MeanE* mean = nullptr, const Result* seed = nullptr) {
+    // seed: totals of the blocks before this one (block-wise encoder): bits and shares keep adding in root order, as in one whole-track call
     // full = false (the share search): only bits and shares are computed; no stream, leaves or planes (same tree, same shares)
     // mean: the plane's mean energies when the caller already has them (the share search runs with the same plane and tags many times)
     if (TH < 0) TH = deadzone();
@@ -168,6 +169,7 @@ inline Result run(const Plane& P, const std::vector<char>& cellA, const std::vec
     auto safe = [&]() { try { worker(); } catch (...) { std::lock_guard<std::mutex> g(errMx); if (!err) err = std::current_exception(); nextRoot = nRoots; } };
     std::vector<std::thread> pool; try { for (int i = 1; i < nth; i++) pool.emplace_back(safe); } catch (...) {}
     safe(); for (auto& th : pool) th.join(); if (err) std::rethrow_exception(err);
+    if (seed) { R.bits = seed->bits; R.zsum = seed->zsum; R.zcnt = seed->zcnt; R.cnt = seed->cnt; R.en = seed->en; }
     for (auto& O : outs) { R.stream.insert(R.stream.end(), O.stream.begin(), O.stream.end()); R.leaves.insert(R.leaves.end(), O.leaves.begin(), O.leaves.end()); R.bits += O.bits;
         R.zsum += O.zsum; R.zcnt += O.zcnt; R.cnt.dTot += O.cnt.dTot; R.cnt.dKept += O.cnt.dKept; R.cnt.cTot += O.cnt.cTot; R.cnt.cKept += O.cnt.cKept;
         R.en.dTot += O.en.dTot; R.en.dKept += O.en.dKept; R.en.cTot += O.en.cTot; R.en.cKept += O.en.cKept; }

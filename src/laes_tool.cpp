@@ -163,7 +163,7 @@ int main(int argc, char** argv) {
         if ((bits != 16 && bits != 24) || bits >= p.bits) { printf("reduce: <bits> must be 16 or 24 and below the input's %d\n", p.bits); return 1; }
         const int s = p.bits - bits; const int64_t mx = (1LL << (bits - 1)) - 1, mn = -mx - 1; Pcm q; q.rate = p.rate; q.bits = bits; Rng r(4321);
         for (int c = 0; c < 2; c++) { q.c[c].resize(p.c[c].size()); for (size_t i = 0; i < p.c[c].size(); i++) {
-                const int64_t r1 = (int64_t)(r.next() >> (64 - s)), r2 = (int64_t)(r.next() >> (64 - s)); q.c[c][i] = std::max(mn, std::min(mx, (p.c[c][i] + r1 - r2 + (1LL << (s - 1))) >> s)); } }
+                const int64_t r1 = (int64_t)(r.next() >> (64 - s)), r2 = (int64_t)(r.next() >> (64 - s)); q.c[c][i] = std::max<int64_t>(mn, std::min<int64_t>(mx, (p.c[c][i] + r1 - r2 + (1LL << (s - 1))) >> s)); } }
         return writeAll(argv[3], wavBytes(q, nullptr)) ? 0 : 2; }
     if (cmd == "excerpt" && argc >= 7) { Pcm p; std::string e = readWav(argv[2], p); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         long s0 = (long)(atof(argv[4]) * p.rate), L = (long)(atof(argv[5]) * p.rate); int bits = atoi(argv[6]); if (s0 < 0 || s0 + L > p.frames()) { printf("excerpt outside the file\n"); return 2; }

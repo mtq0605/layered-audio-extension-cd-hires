@@ -55,7 +55,13 @@ static bool writeBytes(const fs::path& p, const void* d, size_t n) {
 static string msf(long long sectors) { char b[16]; snprintf(b, sizeof b, "%02lld:%02lld:%02lld", sectors / 4500, sectors / 75 % 60, sectors % 75); return b; }
 static string arg(int argc, char** argv, const char* key, const string& def) { string k = string(key) + "="; for (int i = 1; i < argc; i++) if (!strncmp(argv[i], k.c_str(), k.size())) return argv[i] + k.size(); return def; }
 static vector<string> positional(int argc, char** argv, int from) { vector<string> v; std::error_code ec; for (int i = from; i < argc; i++) if (!strchr(argv[i], '=') || fs::exists(argv[i], ec)) v.push_back(argv[i]); return v; }
-static string nowUtc() { time_t t = time(nullptr); tm g; gmtime_s(&g, &t); char b[16]; strftime(b, sizeof b, "%Y%m%d%H%M%S", &g); return b; }
+static string nowUtc() { time_t t = time(nullptr); tm g;
+#ifdef _WIN32
+    gmtime_s(&g, &t);
+#else
+    gmtime_r(&t, &g);
+#endif
+    char b[16]; strftime(b, sizeof b, "%Y%m%d%H%M%S", &g); return b; }
 
 // ---- one track's v5 file (F1): CD layer + LAE chunk body
 struct V5 { string name; int rate = 0; vector<int16_t> cd; vector<uint8_t> block; bool canonical = true; uint16_t type = 1; long long ncd() const { return (long long)cd.size() / 2; } };   // type 1 = LAEY, 2 = LAES

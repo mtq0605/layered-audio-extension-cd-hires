@@ -2,6 +2,10 @@
 
 This file records the notable changes to LAE (Layered Audio Extension), its lossy tier LAE Lossy (LAEY) and its lossless tier LAE Lossless (LAES), newest first.
 
+## Unreleased
+
+- **IANA registration (2026-10-31).** The FLAC application IDs `LAE1` (0x4C414531, LAE Lossy extension data) and `LAE2` (0x4C414532, LAE Lossless extension data) are registered in the IANA FLAC Application Metadata Block IDs registry (<https://www.iana.org/assignments/flac>). `spec/lossless/SPEC.md` Section 8 says so.
+
 ## 2026-10-30 (v5-2026-10-30)
 
 The container format and the decoding process of LAEY are unchanged. The encoder writes byte-identical files, faster, block by block and with much less memory.
@@ -35,7 +39,7 @@ The container format and the decoding process of LAEY are unchanged. The encoder
 
 - **Specification:** [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (English) and [spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md) (Chinese), payload version 1, draft for public review. The design document of 2026-10-18 is superseded.
 - **What it stores:** a core (16, 24 or 32 bit at 44.1 or 48 kHz) that every player plays, and 1 to 16 independent masters (16, 24 or 32 bit, at the base rate × 1, 2, 4 or 8). Every master and each of its rate levels is reconstructed bit for bit and checked by SHA-256. A master is stored against the core or an earlier master (at the base level or at the highest level both have), or in full; masters are never moved, their time position is stored.
-- **Carriers:** WAV file (`LAE ` chunk, magic `LAE2`), FLAC file (core in the audio frames, payload in APPLICATION blocks with ID `LAE2`; the ID is provisional until registered), CD-Extra (extension block type 2).
+- **Carriers:** WAV file (`LAE ` chunk, magic `LAE2`), FLAC file (core in the audio frames, payload in APPLICATION blocks with ID `LAE2`), CD-Extra (extension block type 2).
 - **Tool `laes`** (`src/laes_tool.cpp`): `enc` (WAV or FLAC form), `dec` with `--list` / `--pick` (every master and rate level, and a 16-bit version derived on request, marked lossy), `verify`, `align` (the automatic search of `lae_enc`, the position stored as T), `selftest`.
 - **Planner:** `lae_enc plan … laes` cuts an album master at the CD's track boundaries without moving it, each track with its own T.
 - **`lae_cdx`** packs and reads LAES extension files (type 2): every master must decode and match its SHA-256.

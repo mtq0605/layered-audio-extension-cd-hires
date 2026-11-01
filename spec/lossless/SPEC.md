@@ -367,7 +367,7 @@ An LAES FLAC file is a FLAC stream (RFC 9639):
 ```
 
 * STREAMINFO: 2 channels, the base rate, 16, 24 or 32 bits, the core's sample count (MUST NOT be 0) and the MD5 of the core (MUST be given and correct). A decoder that finds the MD5 missing or wrong MUST NOT use the payload: the core is not the one the payload was made for. Whether it still plays the core is up to the player.
-* The LAES payload (with its CRC-32, core mode 1) is split into pieces of at most 2^24 − 5 bytes. Each piece is the data of one APPLICATION block whose 4-byte ID is `LAE2` (0x4C 0x41 0x45 0x32). Writers place these blocks directly after STREAMINFO. A reader concatenates every APPLICATION block with ID `LAE2`, in file order, wherever it stands among the metadata blocks.
+* The LAES payload (with its CRC-32, core mode 1) is split into pieces of at most 2^24 − 5 bytes. Each piece is the data of one APPLICATION block whose 4-byte ID is `LAE2` (0x4C 0x41 0x45 0x32), registered by IANA in the FLAC Application Metadata Block IDs registry (RFC 9639, Section 12.2; 2026-10-31). Writers place these blocks directly after STREAMINFO. A reader concatenates every APPLICATION block with ID `LAE2`, in file order, wherever it stands among the metadata blocks.
 * The audio frames hold the core. Any valid FLAC coding of the core is allowed.
 * No SEEKTABLE and no CUESHEET block is written.
 

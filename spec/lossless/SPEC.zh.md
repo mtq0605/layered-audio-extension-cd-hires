@@ -367,7 +367,7 @@ LAES FLAC 文件是一个 FLAC 流（RFC 9639）：
 ```
 
 * STREAMINFO：2 声道，基础采样率，16、24 或 32 位，核心的样点数（不得为 0），核心的 MD5（必须给出且正确）。解码器发现 MD5 缺失或不符时不得使用载荷（核心不是载荷对应的那个）；是否仍播放核心由播放器决定。
-* LAES 载荷（含 CRC-32，核心方式 1）切成每段最多 2^24 − 5 字节，每段作为一个 APPLICATION 块的数据，块的 4 字节 ID 为 `LAE2`（0x4C 0x41 0x45 0x32）。写入方把这些块紧接着放在 STREAMINFO 之后；读取方把所有 ID 为 `LAE2` 的 APPLICATION 块按文件顺序拼起来，不论它们在元数据块中的位置。
+* LAES 载荷（含 CRC-32，核心方式 1）切成每段最多 2^24 − 5 字节，每段作为一个 APPLICATION 块的数据，块的 4 字节 ID 为 `LAE2`（0x4C 0x41 0x45 0x32），已在 IANA 的 FLAC Application Metadata Block IDs 登记表登记（RFC 9639 第 12.2 节；2026-10-31）。写入方把这些块紧接着放在 STREAMINFO 之后；读取方把所有 ID 为 `LAE2` 的 APPLICATION 块按文件顺序拼起来，不论它们在元数据块中的位置。
 * 音频帧存放核心。核心可以用任何合法的 FLAC 编码。
 * 不写 SEEKTABLE 和 CUESHEET 块。
 

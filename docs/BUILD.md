@@ -20,7 +20,7 @@ All code is standard C++17 and uses no third-party libraries.
 
 | Platform | Compiler | Options |
 |---|---|---|
-| Windows x64 | MSVC 2022 | `cl /O2 /EHsc /std:c++17 /D_USE_MATH_DEFINES src\lae_dec.cpp` (encoder: add `/bigobj`) |
+| Windows x64 | MSVC 2022 | `cl /O2 /EHsc /std:c++17 /D_USE_MATH_DEFINES src\lae_dec.cpp` (encoder: add `/bigobj /fp:strict`) |
 | Windows x86 (32-bit) | MSVC 2022 | as above; SSE2 is the MSVC 32-bit default |
 | Linux / macOS x86-64 | GCC / Clang | `-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread` |
 | Linux x86 (32-bit) | GCC / Clang | additionally `-msse2 -mfpmath=sse` (**required**) |
@@ -34,6 +34,8 @@ The output is bit-identical on every platform only if both of the following hold
 - every constant is taken from the exact hexadecimal literals of `src/mdct_tables.h`.
 
 **x87 builds are not supported.** The decoder's start-up self-test refuses them (Section 2).
+
+**The encoder is bit-identical on every platform too (2026-11-03).** Everything that decides its output (code lengths, detector windows and thresholds, filter taps, the FFT, the alignment) uses the functions of `src/lae_math.h` (`log2`, `sinpi`, `cospi`, `exp2`, `log10`) instead of the C library. They use only IEEE-754 `+ − × ÷`, `sqrt`, `floor`, `frexp` and `ldexp`, in a fixed order, the same way LAES does in `src/laes_math.h`. Equal tone frequencies are merged in the order they were found (`std::stable_sort`). Build the encoder with the same flags as the decoder (`/fp:strict` on MSVC, `-ffp-contract=off` on GCC / Clang, SSE2 on 32-bit x86): the x64 and the x86 build then write byte-identical files, and `tests/check_encoder_*` treat a different file as a failure. `tools/lae_math_check.cpp` measures the functions against the C library (at most 3 units in the last place for `log2`) and prints a checksum that must be the same on every platform. Before 2026-11-03 the C library's `log2` could differ in the last bit between platforms and change the choice between two partitions of equal cost; the decoded audio was the same.
 
 Section 3 lists the builds that have been verified. Other builds, including 32-bit ARM and macOS on ARM, have not been verified.
 
@@ -62,6 +64,7 @@ The repository also contains the following programs. Each file states its usage 
 - `tools/selftest_ref.cpp` prints the self-test fingerprint of a build (Section 2).
 - `tools/gen_halfband.cpp` and `tools/gen_mdct_tables.cpp` generate `src/halfband.h` and `src/mdct_tables.h`.
 - `tools/test_mdct_tb.cpp` is a test program for `src/mdct_tb.h`.
+- `tools/lae_math_check.cpp` checks the encoder's functions in `src/lae_math.h` against the C library and prints their platform checksum.
 - `src/gen_suite.cpp` generates the synthetic test signals.
 - `src/cut_wav.cpp` and `src/cmp_wav.cpp` are WAV utilities. `src/cmp_wav.cpp` computes the error measures of README Section 12.1.
 

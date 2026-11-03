@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cmath>
+#include "lae_math.h"   // log2 / sinpi / cospi identical on every platform (2026-11-03)
 #include <vector>
 #include <thread>
 #include <exception>
@@ -58,7 +59,7 @@ int main(int argc, char** argv) {
     double rate = atof(argv[2]);
     blkio::Reader<int32_t, 2> mr(argv[1]), b24(argv[4]); blkio::Reader<int16_t, 2> b16(argv[3]);
     const long L = mr.frames, Lb = b16.frames;
-    double baseRate = fmod(rate, 44100.0) == 0 ? 44100.0 : 48000.0; int stages = (int)round(log2(rate / baseRate));
+    double baseRate = fmod(rate, 44100.0) == 0 ? 44100.0 : 48000.0; int stages = (int)round(lmath::log2(rate / baseRate));
     // dither regeneration (same seeds and draw order as base_layer / decoder), stored as the integer before the division by 16
     vector<char> df; long nbk = 0; if (getenv("DITHERFLAGS")) { df = encio::readAll<char>(getenv("DITHERFLAGS")); nbk = encio::count(df.size()) / 2; }
     const std::string dvPath = std::string(argv[5]) + ".dv";
@@ -75,13 +76,14 @@ int main(int argc, char** argv) {
     const long Lu = Lb << stages;   // the up-converted signal; resized to L (zeros beyond)
     const int M = 16384; const long BM = 64L * M;   // master samples per block (whole cross-spectrum segments, a multiple of 2^stages)
     double fc = argc > 7 ? atof(argv[7]) : 0;
-    if (fc <= 0) { vector<double> sxy(M / 2, 0), sxx(M / 2, 0), syy(M / 2, 0), sxyi(M / 2, 0);
+    if (fc <= 0) { vector<double> sxy(M / 2, 0), sxx(M / 2, 0), syy(M / 2, 0), sxyi(M / 2, 0), hannM(M);
+        for (int i = 0; i < M; i++) hannM[(size_t)i] = 0.5 - 0.5 * lmath::cospi(2.0 * i / M);   // the Hann window, once
         for (long A = 0; A < L; A += BM) { const long B = min(L, A + BM); if (A + M > L) break;
             WinD uv[2]; auto upc = [&](int c) { uv[c].base = A; uv[c].d.assign((size_t)(B - A), 0.0); const long e = min(B, Lu); if (e <= A) return;
                 WinD w = upEval(stages, A, e, Lb, [&](long a, long b) { return vWin(a, b, c); }); std::copy(w.d.begin(), w.d.end(), uv[c].d.begin()); };
             twoWay(upc); vector<int32_t> m; mr.read(A, B, m);
             for (long st0 = A; st0 < B && st0 + M <= L; st0 += M) for (int c = 0; c < 2; c++) { vector<complex<double>> a(M), b(M);
-                for (int i = 0; i < M; i++) { double w = 0.5 - 0.5 * cos(2 * M_PI * i / M); a[i] = (m[(size_t)(st0 - A + i) * 2 + c] >> 8) * w; b[i] = uv[c].at(st0 + i) * w; }
+                for (int i = 0; i < M; i++) { const double w = hannM[(size_t)i]; a[i] = (m[(size_t)(st0 - A + i) * 2 + c] >> 8) * w; b[i] = uv[c].at(st0 + i) * w; }
                 fft(a); fft(b); for (int k = 0; k < M / 2; k++) { sxy[k] += real(b[k] * conj(a[k])); sxyi[k] += imag(b[k] * conj(a[k])); sxx[k] += norm(a[k]); syy[k] += norm(b[k]); } } }
         int k15 = (int)(15000.0 / (rate / M)), kN = (int)(baseRate / 2 / (rate / M)) - 9; double mxx = 0; for (int k = k15; k <= kN; k++) mxx = max(mxx, sxx[k]);
         fc = 15000;
@@ -97,12 +99,12 @@ int main(int argc, char** argv) {
     printf("CD cut-off: %.0f Hz\n", fc);
     if (getenv("CUTOFFOUT")) { char t[64]; snprintf(t, sizeof t, "%.0f\n", fc); encio::writeText(getenv("CUTOFFOUT"), t); }
     const int NT = 255; vector<double> h(2 * NT + 1); double bes0 = 0; { auto I0 = [](double x) { double s = 1, t = 1; for (int k = 1; k < 30; k++) { t *= (x / 2) / k; s += t * t; } return s; }; bes0 = I0(9.0);
-        for (int i = -NT; i <= NT; i++) { double r = (double)i / NT; double w = I0(9.0 * sqrt(max(0.0, 1 - r * r))) / bes0; double x = 2 * fc / baseRate; h[i + NT] = (i == 0 ? x : sin(M_PI * x * i) / (M_PI * i)) * w; } }
+        for (int i = -NT; i <= NT; i++) { double r = (double)i / NT; double w = I0(9.0 * sqrt(max(0.0, 1 - r * r))) / bes0; double x = 2 * fc / baseRate; h[i + NT] = (i == 0 ? x : lmath::sinpi(x * i) / (M_PI * i)) * w; } }
     bool full = fc >= baseRate / 2 - 1;
     std::unique_ptr<blkio::Reader<int32_t, 2>> leak; if (getenv("LEAKIN")) { leak.reset(new blkio::Reader<int32_t, 2>(getenv("LEAKIN"))); if (leak->frames == 0) encio::fail("leak compensation: empty leak file"); }
     const int NL = 1023; vector<double> hl(2 * NL + 1); double xl = 2 * (fc - 1150.0) / baseRate;
     { auto I0 = [](double x) { double s = 1, t = 1; for (int k = 1; k < 30; k++) { t *= (x / 2) / k; s += t * t; } return s; }; double b0 = I0(9.0);
-      for (int k = -NL; k <= NL; k++) { double rr = (double)k / NL; double w = I0(9.0 * sqrt(max(0.0, 1 - rr * rr))) / b0; hl[k + NL] = (k == 0 ? xl : sin(M_PI * xl * k) / (M_PI * k)) * w; } }
+      for (int k = -NL; k <= NL; k++) { double rr = (double)k / NL; double w = I0(9.0 * sqrt(max(0.0, 1 - rr * rr))) / b0; hl[k + NL] = (k == 0 ? xl : lmath::sinpi(xl * k) / (M_PI * k)) * w; } }
     auto mir = [&](long j) { return j < 0 ? -j : (j >= Lb ? 2 * (Lb - 1) - j : j); };
     // r = base24 - v, minus the leak's part below the frequency layer's start (as routes.cpp)
     auto rWin = [&](long a, long b, int c) { WinD w = vWin(a, b, c); vector<int32_t> x; b24.read(a, b, x);

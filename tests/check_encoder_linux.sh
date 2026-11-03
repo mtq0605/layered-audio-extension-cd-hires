@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Encoder on Linux: regenerates the four synthetic source clips of the conformance vectors, encodes them with the 4 vector
 # configurations and compares with tests/vectors/MANIFEST.md (encoded file and 24-bit decode). The decoder must match exactly;
-# the encoder is expected to match too, but uses the platform's libm (cos, log, pow) in its analysis, so a difference is reported,
-# then checked for a passing self-check and a valid decode.
+# the encoder must match too: since 2026-11-03 it uses no libm function in anything that decides its output (src/lae_math.h), so every
+# platform writes the same bytes; a different file is a failure.
 set -u
 cd "$(dirname "$0")/.."
 w=$(mktemp -d); bad=0; F="-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread"
@@ -25,7 +25,7 @@ sed '/^## Full SHA-256/,$d' tests/vectors/MANIFEST.md | grep '^| [a-z]' | while 
     ge=$(sha256sum "$w/e.lae.wav" | cut -c1-16 | tr a-f A-F)
     rm -f "$w/o.wav"; "$w/lae_dec" "$w/e.lae.wav" "$w/o.wav" full > /dev/null 2>&1; gd=$(sha256sum "$w/o.wav" 2>/dev/null | cut -c1-16 | tr a-f A-F)
     if [ "$ge" = "$enc" ]; then echo "encode $name: identical to MANIFEST (decode ${gd:-none} $( [ "$gd" = "$h24" ] && echo ok || { echo x >> "$w/bad"; echo DIFF; } ))"
-    else echo "encode $name: different file ($ge vs $enc), self-check passed, decode ${gd:-none}"; fi
+    else echo "encode $name: DIFFERENT FILE ($ge vs $enc), decode ${gd:-none}"; echo x >> "$w/bad"; fi
     rm -f "$w/e.lae.wav"
 done
 [ -f "$w/bad" ] && bad=1; rm -rf "$w"; exit $bad

@@ -34,7 +34,10 @@ using cplx = std::complex<double>;
 inline void ifft(std::vector<cplx>& a) { for (auto& v : a) v = std::conj(v); fftlib::fft(a); const double s = 1.0 / (double)a.size(); for (auto& v : a) v = std::conj(v) * s; }
 inline size_t pow2(size_t n) { size_t p = 1; while (p < n) p <<= 1; return p; }
 inline std::string fmt(const char* f, ...) { char b[1024]; va_list ap; va_start(ap, f); vsnprintf(b, sizeof b, f, ap); va_end(ap); return b; }
-inline double db10(double v) { return v > 0 ? 10.0 * std::log10(v) : -300.0; }
+inline double db10(double v) { return v > 0 ? 10.0 * lmath::log10(v) : -300.0; }
+// a * conj(b), written out (the same products and sums on every platform, 2026-11-03); |z| = sqrt(norm z) (sqrt is exactly rounded)
+inline cplx mulConj(const cplx& a, const cplx& b) { return cplx(a.real() * b.real() + a.imag() * b.imag(), a.imag() * b.real() - a.real() * b.imag()); }
+inline double absC(const cplx& z) { return std::sqrt(z.real() * z.real() + z.imag() * z.imag()); }
 inline std::string dur(double sec) { double a = std::fabs(sec); return a < 1e-3 ? fmt("%.1f us", sec * 1e6) : a < 1.0 ? fmt("%.2f ms", sec * 1e3) : fmt("%.3f s", sec); }
 inline long fdiv(long a, long b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }   // floor division
 // the user's limits (2026-10-21/22) and the check blocks (2026-10-22)
@@ -47,7 +50,7 @@ struct Th { double timingErrDb = -40, timingGainDb = 1, confirmDb = -33, matchRe
 // one fixed linear low-pass for each halving of the search pyramid (windowed sinc, Kaiser beta 8, 47 taps, cut-off 0.22 of the input rate)
 inline const std::vector<double>& lp2() { static const std::vector<double> h = [] { std::vector<double> v; const int K = 23; const double fc = 0.22, beta = 8.0;
         auto I0 = [](double z) { double s = 1, t = 1; for (int k = 1; k < 40; k++) { t *= (z / 2) / k; s += t * t; } return s; };
-        double b0 = I0(beta), sum = 0; for (int k = -K; k <= K; k++) { double w = I0(beta * std::sqrt(1.0 - (k * (double)k) / ((double)K * K))) / b0, s = k == 0 ? 2 * fc : std::sin(2 * M_PI * fc * k) / (M_PI * k); v.push_back(s * w); sum += s * w; }
+        double b0 = I0(beta), sum = 0; for (int k = -K; k <= K; k++) { double w = I0(beta * std::sqrt(1.0 - (k * (double)k) / ((double)K * K))) / b0, s = k == 0 ? 2 * fc : lmath::sinpi(2 * fc * k) / (M_PI * k); v.push_back(s * w); sum += s * w; }
         for (auto& q : v) q /= sum; return v; }(); return h; }
 inline std::vector<double> dec2(const std::vector<double>& x) { const std::vector<double>& h = lp2(); const long K = ((long)h.size() - 1) / 2, n = (long)x.size(), m = n / 2; std::vector<double> y((size_t)m);
     for (long i = 0; i < m; i++) { double a = 0; const long c = 2 * i; for (long k = -K; k <= K; k++) { const long j = c - k; if (j >= 0 && j < n) a += h[(size_t)(k + K)] * x[(size_t)j]; } y[(size_t)i] = a; }
@@ -86,7 +89,7 @@ template <class M> inline Report run(const std::vector<int16_t>& cd, long ncd, c
         if (alignhash::allZero(master.data(), (long)up - 1, Lm - (up - 1))) { R.found = true;   // sound only within less than one CD sample of BOTH edges: the two neighbouring pieces'
             return finish(lengthOk ? 1 : 2, "both_silent", fmt("the CD is digital silence throughout; the master has sound only in its first and last %d samples (less than one CD sample at each edge, the neighbouring pieces'): nothing to align", up - 1)); }
         return finish(2, "silent_cd", "the CD is digital silence throughout, but the master has content: this is not the CD of this master"); }
-    const double quietE = std::pow(8388608.0 * std::pow(10.0, th.quietDbfs / 20), 2);   // per-sample energy of a -60 dBFS rms signal
+    const double qa = 8388608.0 * lmath::exp10(th.quietDbfs / 20), quietE = qa * qa;   // per-sample energy of a -60 dBFS rms signal
     const long s0 = cdLead, s1 = ncd - cdTail;   // the CD's sound
     auto stopWith = [&](const char* tag, const std::string& why, const std::string& hint) { R.verdict = 2; R.band = BAND_STOP; R.tag = tag; R.why = why; R.hint = hint; say("result: " + why); };
     bool searchOk = true; long oCd = 0;   // the search's result at the CD rate (CD samples)
@@ -120,14 +123,14 @@ template <class M> inline Report run(const std::vector<int16_t>& cd, long ncd, c
                     // samples); at level 0 with a sudden start or a join in the master (the half's edge at the master's first sound won).
                     const long ramp = std::max(1L, cl / 8);
                     for (long i = 0; i < cl; i++) { const long j = ca + i; if (j >= 0 && j < n) { const long e = std::min(i, cl - 1 - i);
-                        const double tw = e >= ramp ? 1.0 : 0.5 - 0.5 * std::cos(M_PI * (e + 0.5) / ramp), v = (*X[c])[(size_t)j] * tw; Xf[c][(size_t)i] = v; ex += v * v; exc[c] += v * v; } }
+                        const double tw = e >= ramp ? 1.0 : 0.5 - 0.5 * lmath::cospi((e + 0.5) / ramp), v = (*X[c])[(size_t)j] * tw; Xf[c][(size_t)i] = v; ex += v * v; exc[c] += v * v; } }
                     for (long i = 0; i < ml; i++) { const long j = ma + i; if (j >= 0 && j < nr) { const double v = (*Y[c])[(size_t)j]; Yf[c][(size_t)i] = v; ey += v * v; eyc[c] += v * v; } }
                     fftlib::fft(Xf[c]); fftlib::fft(Yf[c]); }
                 if (ex <= 0 || ey <= 0 || k1 < k0) continue; used++;
                 const int pa[4] = {0, 1, 0, 1}, pm[4] = {0, 1, 1, 0};   // channel pairings LL RR LR RL, all into the one function
                 for (int p = 0; p < 4; p++) { std::vector<cplx> G(F, 0); const double en = std::sqrt(exc[pa[p]] * eyc[pm[p]]);   // plain: a correlation coefficient
                     if (!whiten && en <= 0) continue;
-                    for (int k = k0; k <= k1; k++) { const cplx g = Yf[pm[p]][(size_t)k] * std::conj(Xf[pa[p]][(size_t)k]); const double mg = std::abs(g);
+                    for (int k = k0; k <= k1; k++) { const cplx g = mulConj(Yf[pm[p]][(size_t)k], Xf[pa[p]][(size_t)k]); const double mg = absC(g);
                         if (mg > 0) { G[(size_t)k] = whiten ? g / mg : g / en; G[F - (size_t)k] = std::conj(G[(size_t)k]); } }
                     ifft(G);
                     for (long o = oc - Rl; o <= oc + Rl; o++) { const long s = ca - o - ma; P[(size_t)(o - oc + Rl)] += std::fabs(G[(size_t)(((s % (long)F) + (long)F) % (long)F)].real()); } } }
@@ -259,7 +262,7 @@ template <class M> inline Report run(const std::vector<int16_t>& cd, long ncd, c
                     bname[k], K.a / (double)base, K.b / (double)base, rd, std::max(tE, -99.0), gE,
                     mis ? ": DOES NOT MATCH here" : (drift ? "; drift check: the music fits better 2 CD samples away than at the piece's offset (drift, an edit or another take)"
                                                         : (sd < 0 ? "; drift check: not possible here (the master ends too close)" : "; drift check (2 CD samples either side): holds"))));
-            if (k == 1 || (diagN == 0 && k == 2) || (diagN == 0 && k == 0)) { for (int c = 0; c < 2; c++) { gainDb[c] = K.g[map][c][ti] != 0 ? 20 * std::log10(std::fabs(K.g[map][c][ti])) : -999; pol[c] = K.g[map][c][ti] >= 0 ? 1 : -1; } diagA = K.a; diagN = K.b - K.a; } }
+            if (k == 1 || (diagN == 0 && k == 2) || (diagN == 0 && k == 0)) { for (int c = 0; c < 2; c++) { gainDb[c] = K.g[map][c][ti] != 0 ? 20 * lmath::log10(std::fabs(K.g[map][c][ti])) : -999; pol[c] = K.g[map][c][ti] >= 0 ? 1 : -1; } diagA = K.a; diagN = K.b - K.a; } }
         R.mapDiff = map == 1 || pol[0] < 0 || pol[1] < 0; R.timingDb = worstT; R.residDb = worstR; R.band = band;
         R.frac = (double)(tb - t) + dFr; R.chanMap = map; for (auto& K : B3) if (K.use) R.blocks.push_back({K.a, K.b});
         if (R.mapDiff) say(fmt("channels: %s; polarity L %s, R %s", map ? "SWAPPED (CD left = master right)" : "in order", pol[0] > 0 ? "normal" : "INVERTED", pol[1] > 0 ? "normal" : "INVERTED")); }
@@ -274,18 +277,18 @@ template <class M> inline Report run(const std::vector<int16_t>& cd, long ncd, c
                 for (int st = stages - 1; st >= 0; st--) qq = m_base::decimate(qq, st);
                 diag[c].resize((size_t)diagN); for (long k = 0; k < diagN; k++) diag[c][(size_t)k] = (double)(((int64_t)qq[(size_t)(margin / up + k)] + 8) >> 4); }
             say(fmt("level: CD relative to the master's derived base: L %+.2f dB, R %+.2f dB", gainDb[0], gainDb[1]));
-            const int Ns = 8192; std::vector<double> hw(Ns); for (int k = 0; k < Ns; k++) hw[k] = 0.5 - 0.5 * std::cos(2 * M_PI * (k + 0.5) / Ns);
+            const int Ns = 8192; std::vector<double> hw(Ns); for (int k = 0; k < Ns; k++) hw[k] = 0.5 - 0.5 * lmath::cospi(2 * (k + 0.5) / Ns);
             std::vector<cplx> Sxr(Ns / 2, 0); std::vector<double> Sxx(Ns / 2, 0), Srr(Ns / 2, 0);
             for (long w0 = 0; w0 + Ns <= diagN; w0 += Ns / 2) for (int a = 0; a < 2; a++) { std::vector<cplx> X(Ns), Y(Ns); const std::vector<double>& rb = diag[map ? 1 - a : a];
                 for (int k = 0; k < Ns; k++) { X[k] = x[a][diagA + w0 + k] * hw[k]; Y[k] = pol[a] * rb[w0 + k] * hw[k]; } fftlib::fft(X); fftlib::fft(Y);
-                for (int k = 0; k < Ns / 2; k++) { Sxr[k] += X[k] * std::conj(Y[k]); Sxx[k] += std::norm(X[k]); Srr[k] += std::norm(Y[k]); } }
+                for (int k = 0; k < Ns / 2; k++) { Sxr[k] += mulConj(X[k], Y[k]); Sxx[k] += std::norm(X[k]); Srr[k] += std::norm(Y[k]); } }
             const double bands[] = {31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000};
             const int nbd = sizeof bands / sizeof bands[0]; std::vector<double> mag(nbd, 0), coh(nbd, 0); std::vector<bool> ok(nbd, false); double ref1k = 0;
-            for (int b = 0; b < nbd; b++) { int k0 = (int)std::ceil(bands[b] * std::pow(2.0, -1.0 / 6) * Ns / base), k1 = std::min((int)std::floor(bands[b] * std::pow(2.0, 1.0 / 6) * Ns / base), Ns / 2 - 1);
+            for (int b = 0; b < nbd; b++) { int k0 = (int)std::ceil(bands[b] * lmath::exp2(-1.0 / 6) * Ns / base), k1 = std::min((int)std::floor(bands[b] * lmath::exp2(1.0 / 6) * Ns / base), Ns / 2 - 1);
                 cplx sr = 0; double sx = 0, sy = 0; for (int k = std::max(k0, 1); k <= k1; k++) { sr += Sxr[k]; sx += Sxx[k]; sy += Srr[k]; }
-                if (sy > 0 && sx > 0) { ok[b] = true; mag[b] = 20 * std::log10(std::abs(sr) / sy + 1e-300); coh[b] = std::norm(sr) / (sx * sy); } if (bands[b] == 1000) ref1k = mag[b]; }
+                if (sy > 0 && sx > 0) { ok[b] = true; mag[b] = 20 * lmath::log10(absC(sr) / sy + 1e-300); coh[b] = std::norm(sr) / (sx * sy); } if (bands[b] == 1000) ref1k = mag[b]; }
             std::string eq; double meanEmphErr = 0, meanFlat = 0; int ne = 0;
-            auto emph = [](double f) { return 10 * std::log10((1 + std::pow(f / 3183.1, 2)) / (1 + std::pow(f / 10610.3, 2))); };
+            auto emph = [](double f) { const double a = f / 3183.1, b = f / 10610.3; return 10 * lmath::log10((1 + a * a) / (1 + b * b)); };
             for (int b = 0; b < nbd; b++) if (ok[b]) { double rel = mag[b] - ref1k; if (bands[b] <= 16000) eqDev = std::max(eqDev, std::fabs(rel));
                 if (bands[b] >= 2000 && bands[b] <= 16000) { meanEmphErr += std::fabs(rel - (emph(bands[b]) - emph(1000))); meanFlat += std::fabs(rel); ne++; }
                 if (bands[b] == 63 || bands[b] == 250 || bands[b] == 1000 || bands[b] == 4000 || bands[b] == 10000 || bands[b] == 16000) eq += fmt(" %g Hz %+.1f dB", bands[b], rel); }
@@ -435,7 +438,7 @@ inline std::vector<int32_t> advance(const std::vector<int32_t>& m, long long Lm,
 // cd_variant mfdelay (d = -f), so a test can rebuild Z independently.
 inline double moveKern(double u) { const int kH = 64; const double beta = 10.0; if (std::fabs(u) >= kH) return 0;
     auto I0 = [](double v) { double s = 1, t = 1; for (int k = 1; k < 60; k++) { t *= (v / (2 * k)) * (v / (2 * k)); s += t; if (t < 1e-17 * s) break; } return s; };
-    const double s = u == 0 ? 1.0 : std::sin(M_PI * u) / (M_PI * u), r = u / kH; return s * I0(beta * std::sqrt(1 - r * r)) / I0(beta); }
+    const double s = u == 0 ? 1.0 : lmath::sinpi(u) / (M_PI * u), r = u / kH; return s * I0(beta * std::sqrt(1 - r * r)) / I0(beta); }
 inline std::vector<int32_t> moveMaster(const std::vector<int32_t>& m, long long Lm, double f, long& nclip) {
     nclip = 0; if (f == 0) return m; const int kH = 64; const long long sh = (long long)std::floor(f); const double fr = f - (double)sh;   // i + f = (i + sh) + fr
     double k[2 * kH]; for (int q = -kH + 1; q <= kH; q++) k[q + kH - 1] = moveKern(fr - q);

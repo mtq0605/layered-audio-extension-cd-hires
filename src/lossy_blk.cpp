@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cmath>
+#include "lae_math.h"   // log2 / cospi / log10 identical on every platform (2026-11-03)
 #include <vector>
 #include <algorithm>
 #include <chrono>
@@ -87,7 +88,7 @@ struct SDet {
     void init(double r, long long L, bool fullband) { rate = r; NF = 1; while (NF < rate * 0.09) NF <<= 1;
         double nyq = rate / 2, base = fullband ? 0.0 : (rate >= 88200 ? (fmod(rate, 44100.0) == 0 ? 22050.0 : 24000.0) : nyq);
         b0 = (int)ceil(base / (rate / NF)) + 8; b1 = (int)floor(0.98 * nyq / (rate / NF)); w.assign(NF, 0); s2 = 0;
-        for (int i = 0; i < NF; i++) { w[i] = 0.5 - 0.5 * cos(2 * M_PI * i / NF); s2 += w[i] * w[i]; }
+        for (int i = 0; i < NF; i++) { w[i] = 0.5 - 0.5 * lmath::cospi(2.0 * i / NF); s2 += w[i] * w[i]; }
         nfr = (int)((size_t)(L - NF) / (size_t)(NF / 2)) + 1; hop = (NF / 2) / rate; nb = b1 - b0; }
     void row(const double* x, std::vector<float>& P) const { P.assign(nb, 0.f); std::vector<std::complex<double>> a(NF);   // x = samples [f hop, f hop + NF)
         for (int i = 0; i < NF; i++) a[i] = std::complex<double>(x[i] * w[i], 0); fftlib::fft(a);
@@ -113,7 +114,7 @@ struct SDetect {   // detect() of tone_scan.cpp on rows fed in order (optionally
             else if (hit) S.pk[b] = std::max(S.pk[b], avg[b]);
             else { close(S, b, wdx); } } }
     void close(Scale& S, int b, int wdx) { S.inRun[b] = 0; if (wdx - S.s[b] >= 2) { const double hop = D->hop;
-            S.ev[b].push_back({(b + D->b0) * D->rate / D->NF, S.s[b] * S.W * hop, wdx * S.W * hop + (D->NF / D->rate), 10 * log10(S.pk[b] / std::max(1e-30, 1.0)), S.W}); } }
+            S.ev[b].push_back({(b + D->b0) * D->rate / D->NF, S.s[b] * S.W * hop, wdx * S.W * hop + (D->NF / D->rate), 10 * lmath::log10(S.pk[b] / std::max(1e-30, 1.0)), S.W}); } }
     void feed(std::vector<float>&& p, std::vector<float>&& r) { P.push_back(std::move(p)); if (useRef) R.push_back(std::move(r));
         const long long have = base + (long long)P.size();
         for (auto& S : sc) while (S.next < S.nw && (long long)(S.next + 1) * S.W <= have) window(S, S.next++);
@@ -122,7 +123,7 @@ struct SDetect {   // detect() of tone_scan.cpp on rows fed in order (optionally
     std::vector<Ev> finish() { std::vector<Ev> ev;
         for (auto& S : sc) { if (S.nw < 2) continue; for (int b = 1; b < D->nb - 1; b++) if (S.inRun[b]) close(S, b, S.nw);
             for (int b = 0; b < D->nb; b++) ev.insert(ev.end(), S.ev[b].begin(), S.ev[b].end()); }
-        sort(ev.begin(), ev.end(), [](const Ev& a, const Ev& b) { return a.f < b.f; });   // merge as tone_scan.cpp
+        stable_sort(ev.begin(), ev.end(), [](const Ev& a, const Ev& b) { return a.f < b.f; });   // merge as tone_scan.cpp; stable (2026-11-03): equal frequencies keep the order they were found in (scale, then bin, then time) on every platform, as std::sort happened to keep them on MSVC
         vector<Ev> out; double df = 3 * D->rate / D->NF;
         for (auto& e : ev) { bool m = false;
             for (auto& o : out) if (fabs(o.f - e.f) <= df && e.t0 <= o.t1 && o.t0 <= e.t1) { o.t0 = min(o.t0, e.t0); o.t1 = max(o.t1, e.t1); o.W = min(o.W, e.W); m = true; break; }
@@ -204,7 +205,7 @@ int main(int argc, char** argv) {
         vector<int> E((size_t)((m1 - m0) * ng)); vector<char> cls((size_t)((m1 - m0) * ng));
         for (long long m = m0; m < m1; m++) for (int g = 0; g < ng; g++) {
             double mx = 0; for (int jj = 0; jj < gW[g]; jj++) mx = max(mx, fabs((double)Xat(m, gS[g] + jj)));
-            size_t id = (size_t)((m - m0) * ng + g); double fl = Fl[(size_t)g * nseg + m / seg]; E[id] = (int)ceil(log2(mx + 1));
+            size_t id = (size_t)((m - m0) * ng + g); double fl = Fl[(size_t)g * nseg + m / seg]; E[id] = (int)ceil(lmath::log2(mx + 1));
             if (fl <= 1.5 && mx <= 8.0 && !structMap[id]) { cls[id] = 0; continue; }
             cls[id] = 2; }
         for (int si = 0; si < nsg; si++) { Seg& S = segs[si];
@@ -213,12 +214,12 @@ int main(int argc, char** argv) {
                 int g = kb2g[kb]; size_t id = (size_t)((m - m0) * ng + g); double fl = Fl[(size_t)g * nseg + m / seg];
                 int g2 = kb2g[kb + nb - 1]; size_t id2 = (size_t)((m - m0) * ng + g2); bool st = structMap[id] || structMap[id2];
                 if (g2 != g) fl = min(fl, Fl[(size_t)g2 * nseg + m / seg]);
-                int e = (int)ceil(log2(mx + 1)); S.cE[cid] = (uint8_t)e; uint8_t f = (st || fullBand) ? 2 : 0;
+                int e = (int)ceil(lmath::log2(mx + 1)); S.cE[cid] = (uint8_t)e; uint8_t f = (st || fullBand) ? 2 : 0;
                 if (cls[id] == 0 && cls[id2] == 0) { S.fl[cid] = (uint8_t)(f | 1); S.lab[cid] = 0; continue; }
                 int need; bool nz = false;
-                if (fullBand && depthAdapt && !FlM.empty()) { need = e - (int)floor(log2(max(1.0, FlM[(size_t)g * nseg + m / seg]))); nz = need <= 2 && !st; }
+                if (fullBand && depthAdapt && !FlM.empty()) { need = e - (int)floor(lmath::log2(max(1.0, FlM[(size_t)g * nseg + m / seg]))); nz = need <= 2 && !st; }
                 else if (mx < 4.5 * fl && !st) { need = 0; nz = true; }
-                else need = (int)ceil(e - log2(C * fl));
+                else need = (int)ceil(e - lmath::log2(C * fl));
                 int t = 1; while (t < 3 && TIERS[t] < need) t++;
                 S.lab[cid] = (uint8_t)t; S.fl[cid] = (uint8_t)(f | (nz ? 4 : 0)); } } }
     meanScan();
@@ -253,7 +254,7 @@ int main(int argc, char** argv) {
     auto lamsD = [&]() { vector<double> v; for (auto& S : segs) v.push_back(S.lam[0]); return v; };
     auto lamsC = [&]() { vector<double> v; for (auto& S : segs) v.push_back(S.lam[1]); return v; };
     vector<part::Result> tot; vector<long> nl;
-    auto refine = [&](vector<vector<double>>& h) { for (int t = 1; t < 4; t++) { double tt = 0; for (double v : h[t]) tt += v; for (int b = 0; b <= 32; b++) cost.bl[t][b] = -log2(h[t][b] / tt); } };
+    auto refine = [&](vector<vector<double>>& h) { for (int t = 1; t < 4; t++) { double tt = 0; for (double v : h[t]) tt += v; for (int b = 0; b <= 32; b++) cost.bl[t][b] = -lmath::log2(h[t][b] / tt); } };
     for (int it = 0; it < 3; it++) {
         if (it == 0) { vector<vector<double>> h(4, vector<double>(33, 0.5)); dpScan(allSeg, lamsD(), lamsC(), true, &h, tot, nl, nullptr); refine(h); }
         dpScan(allSeg, lamsD(), lamsC(), true, nullptr, tot, nl, nullptr);

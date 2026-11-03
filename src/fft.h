@@ -3,7 +3,9 @@
 // Complex FFT (forward, unnormalised) for the encoder's analysis stages and the test tools; n must be a power of two.
 // A plan per size holds a bit-reversal table and one twiddle table exp(-2 pi i k / n), k < n/2.
 // The transform reorders the input from the table and then runs log2(n) passes of radix-2 butterflies,
-// taking every twiddle from the table with a stride. Plans are cached per thread.
+// taking every twiddle from the table with a stride. Plans are cached per thread. Identical on every platform (2026-11-03): the
+// twiddles come from lae_math.h (cospi / sinpi of -2k/n, exact argument) and the butterfly's product is written out (re = a c - b d,
+// im = a d + b c, in this order), not left to the library's complex multiplication.
 #pragma once
 #include <cstdint>
 #include <cmath>
@@ -11,13 +13,13 @@
 #include <vector>
 #include <map>
 #include <utility>
+#include "lae_math.h"
 namespace fftlib {
 struct Plan { size_t n = 0; std::vector<uint32_t> rev; std::vector<std::complex<double>> tw;
     explicit Plan(size_t size) : n(size), rev(size, 0), tw(size / 2) {
         int bits = 0; while (((size_t)1 << bits) < n) bits++;
         for (size_t i = 1; i < n; i++) rev[i] = (uint32_t)((rev[i >> 1] >> 1) | ((i & 1) << (bits - 1)));
-        const double PI = 3.14159265358979323846;
-        for (size_t k = 0; k < n / 2; k++) { double a = -2.0 * PI * (double)k / (double)n; tw[k] = std::complex<double>(std::cos(a), std::sin(a)); } } };
+        for (size_t k = 0; k < n / 2; k++) { const double t = -2.0 * (double)k / (double)n; tw[k] = std::complex<double>(lmath::cospi(t), lmath::sinpi(t)); } } };
 inline const Plan& planFor(size_t n) { thread_local std::map<size_t, Plan> cache;
     auto it = cache.find(n); if (it == cache.end()) it = cache.emplace(n, Plan(n)).first; return it->second; }
 inline void fft(std::vector<std::complex<double>>& a) {
@@ -27,5 +29,6 @@ inline void fft(std::vector<std::complex<double>>& a) {
         for (size_t blk = 0; blk < n; blk += 2 * half)
             for (size_t k = 0; k < half; k++) {
                 std::complex<double>& lo = a[blk + k]; std::complex<double>& hi = a[blk + half + k];
-                const std::complex<double> t = hi * p.tw[k * stride]; hi = lo - t; lo += t; } }
+                const std::complex<double>& w = p.tw[k * stride]; const double hr = hi.real(), hm = hi.imag(), wr = w.real(), wm = w.imag();
+                const std::complex<double> t(hr * wr - hm * wm, hr * wm + hm * wr); hi = lo - t; lo += t; } }
 }

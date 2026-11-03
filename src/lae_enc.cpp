@@ -72,6 +72,7 @@ extern "C" __declspec(dllimport) int __stdcall GlobalMemoryStatusEx(LaeMemStatus
 #include "part_stream.h"
 #include "partition.h"   // encoder search (global, like part_stream.h, so every module shares ::part)
 #include "wavio.h"
+#include "lae_math.h"   // the encoder's log2 / sinpi / cospi / exp2, identical on every platform (2026-11-03)
 #include "fft.h"
 #include "mdct_tb.h"   // global, shared by the lossy and decoder modules (both namespaces use ::mdct)
 #include "frac_delay.h"   // global: the v6 phase delay, shared by the route split, the alignment and the decoder (::lae_fd)
@@ -238,7 +239,7 @@ static int encode(int argc, char** argv) {
                 printf("  1 = end the task (nothing is written)\n  2 = encode with 24-bit output (the top 24 bits are kept)\n  choose 1 or 2: "); fflush(stdout);
                 char line[32] = {0}; if (!fgets(line, sizeof line, stdin) || line[0] != '2') { printf("task ended: nothing encoded\n"); oldNote(); return 1; } }
             note32 = "input 32 bit, encoded as 24 bit"; } }
-    const double base = fmod((double)w.rate, 44100.0) == 0 ? 44100.0 : 48000.0; int stages = (int)lround(log2(w.rate / base));
+    const double base = fmod((double)w.rate, 44100.0) == 0 ? 44100.0 : 48000.0; int stages = (int)lround(lmath::log2(w.rate / base));
     if (fabs(base * (1 << stages) - w.rate) > 0.5 || stages < 1 || stages > 3) { printf("rate %d is not 2/4/8 x 44.1 or 48 kHz\n", w.rate); oldNote(); return 1; }
     if (manual) {   // cdalign=<o>: parsed as o = manualPlace - manualPhi / U (U units per master sample), then the nearest whole offset and the fraction
         const long long Ux = lae_fd::unitsPerMaster(stages);

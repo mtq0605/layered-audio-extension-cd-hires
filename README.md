@@ -413,7 +413,12 @@ The encoder does not compare the two results and does not choose between them; t
 - **Whole samples.** The master is moved by whole master samples, and only across digital silence (all-zero samples).
 - **Length matching.** Whichever side is longer at the start plays first, and whichever side is longer at the end ends later. The shorter side receives digital silence. Neither side loses a non-silent sample.
 - **Sub-sample lead.** If the master's sound starts less than one CD sample before the CD's, one CD frame of digital silence is put in front of the CD layer. The CD's own samples are unchanged.
-- **Unmatched sound.** Sound that only one side has, of one CD sample or more, is not supported, and the encoder stops with the time range.
+- **Sound only the master has (2026-11-03).** If the master has sound, of one CD sample or more, before the CD starts or after it ends, the encoder reports where and how long, and nothing is encoded until the user chooses one of two options. A console asks; in scripts the option is required (`cdaccept` alone is not enough, because the two options give different results):
+  - `cdedge=pad`: digital silence is added to the CD layer at that end, as many CD frames as cover the master's sound. The master is kept whole and the CD's own samples are unchanged, but the CD layer in the LAE file, and on a disc made from it, is longer than the given CD by that silence.
+  - `cdedge=cut`: the master is cut where the CD starts or ends. Its sound beyond the CD is **not** kept in the LAE file; if the master still sounds at the cut, the high-resolution playback ends abruptly there. The CD layer is exactly the given CD.
+  - Either is one pad or one cut per piece at the one offset, with no fade and no mixing. Nothing about it is stored in the file; the alignment report (`<output>.align.txt`) records the choice and the amounts. The source files are only read; padding and cutting happen on the encoder's own copy.
+  - The automatic search reports the position as before and adds `edge=needed` to its `ALIGN_SUGGEST` line.
+- **Sound only the CD has.** Sound of one CD sample or more that only the CD has is not supported, and the encoder stops with the time range.
 
 **The move of the master.** After placement by the whole offset $t$, the encoder moves the master once by `move` master samples, $|\mathrm{move}| \le 0.5$.
 
@@ -1554,7 +1559,7 @@ All options, the verified builds and the check scripts are given in [docs/BUILD.
 ### 14.2 Encoding
 
 ```
-lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [bits=24] [mem=<GB>] [resume]
+lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [resume]
 ```
 
 | Argument | Meaning |
@@ -1567,6 +1572,8 @@ lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [
 | `cdalign=<offset>` | The confirmed offset in master samples; positive means that the CD starts later. A whole number, or up to 9 decimals with `.` as the decimal point (`cdalign=1,5` is rejected). The offset printed by the encoder yields the same file. |
 | `cdcheck` | Performs the alignment checks without encoding (exit code 0). Without `cdalign=`, it reports both searches; with `cdalign=`, its last line states "would encode", "would ask for confirmation" or "would not encode". |
 | `cdaccept` | Continue without asking when the remaining time difference lies beyond −40 dB (the confirmation bands of Section 4.3) |
+| `cdedge=pad` | Sound only the master has at the start or end: add digital silence to the CD layer there and keep the master whole (the CD layer is longer than the given CD) |
+| `cdedge=cut` | Sound only the master has at the start or end: cut the master to the CD; its sound beyond the CD is not kept (the CD layer is exactly the given CD) |
 | `bits=24` | For a 32-bit master whose lowest 8 bits are not all zero: use the upper 24 bits without asking (Section 3.1) |
 | `energy` | Measure retention proportions by energy (modes `max`, `keep` and `keep20` use their own metric) |
 | `equal` | Use equal (halving) cuts only |
@@ -1829,7 +1836,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - Strictly periodic synthetic signals (tones, sawtooth waves, loops) surrounded by digital silence can be matched one whole period away. This is why every position is confirmed by the user (Section 4.3).
   - When the sound is longer than about 3.6 minutes, level 0 of the search uses a lower sampling rate; an improvement is planned.
   - Beyond about 1 hour 55 minutes of sound, no search is performed, and the position must be given with `cdalign=`.
-- **Differing content.** A master and a CD whose non-silent content differs are not combined: sound that only one side has, of one CD sample or more, stops the encoder and the planner. Combining such material is future work.
+- **Differing content.** Sound that only the master has, at the start or the end, is encoded only after the user chooses `cdedge=pad` or `cdedge=cut` (see Placement). Sound that only the CD has stops the encoder. The planner (`lae_enc plan`) still stops on sound that only one side has. Combining other differing material is future work.
 - **Noise-removal export interface.** This interface is not yet implemented. It is to:
   - present waveform and spectrum views;
   - provide audition;

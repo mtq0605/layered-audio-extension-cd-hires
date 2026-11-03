@@ -340,12 +340,18 @@ template <class M> inline Report run(const std::vector<int16_t>& cd, long ncd, c
 //   - the master is moved by whole master samples (zeros added in front, or its own leading digital silence dropped);
 //   - when the master's sound starts less than one CD sample before the CD's, one CD frame of digital silence is added in front of the
 //     CD layer (the CD's own samples are never changed); at the end the format's spare samples keep up to 2^stages - 1 master samples.
-//     One CD sample or more of sound that only the master has, at either end, is not supported in this step (step 4).
+//     One CD sample or more of sound that only the master has, at either end (2026-11-03, the user: tell first, then let the user choose):
+//     edge = EDGE_STOP stops and reports it (onlyLead / onlyTail); EDGE_PAD puts as many CD frames of digital silence in front of / after the
+//     CD layer as cover the master's sound (the CD's samples unchanged, no master sample cut); EDGE_CUT cuts the master where the CD (with
+//     the format's spare samples at the end) begins and ends: the master's sound outside it is not kept (cutLead / cutTail samples).
+//     Either is one cut or one pad per piece at the one offset; no fade, no mixing; nothing about it is stored.
 // M'[i] = master[i - shift]; Lm2 is the length the (padded) CD needs: ncd2 * 2^stages ... ncd2 * 2^stages + 2^stages - 1.
 // Zeros added to the master must meet digital silence on the CD (cdOnly(), once the CD layer has been derived again from M').
+enum { EDGE_STOP = 0, EDGE_PAD = 1, EDGE_CUT = 2 };
 struct Place { bool ok = false; long long t = 0, shift = 0, Lm = 0, Lm2 = 0, dropLead = 0, dropTail = 0, padLead = 0, padTail = 0, a0 = -1, z1 = -1; long ncd2 = 0; int cdLead = 0;
+               long cdTail = 0; long long onlyLead = 0, onlyTail = 0, cutLead = 0, cutTail = 0;   // cdLead / cdTail: CD frames of digital silence added; only*: master samples of sound beyond the CD; cut*: of them, cut
                std::string why; std::vector<std::string> lines; };
-template <class M> inline Place place(const M& master, long long Lm, long ncd, int stages, long long t, int rate) {
+template <class M> inline Place place(const M& master, long long Lm, long ncd, int stages, long long t, int rate, int edge = EDGE_STOP) {
     using namespace detail; Place p; p.t = t; p.Lm = Lm; const long long up = 1LL << stages;
     auto sec = [&](long long i) { return i / (double)rate; };
     p.lines.push_back(fmt("placement: master moved by %+lld master samples (%+.2f CD samples, %s; %s)", t, t / (double)up, dur(t / (double)rate).c_str(),
@@ -355,23 +361,41 @@ template <class M> inline Place place(const M& master, long long Lm, long ncd, i
     p.a0 = a0; p.z1 = z1; if (a0 < 0) { p.why = "the master is digital silence throughout"; return p; }
     // start: the master's first sound at t + a0 (CD frame 0 at 0)
     const long long early = -(t + a0);   // > 0: the master's sound starts this many master samples before the CD's first sample
-    if (early >= up) { p.why = fmt("placement at %+lld: the master has sound %lld master samples (%s, one CD sample or more) before the CD starts, at %.6f-%.6f s of the master: content only the master has (not supported in this step)",
-                                   t, early, dur(early / (double)rate).c_str(), sec(a0), sec(a0 + early)); return p; }
-    if (early > 0) { p.cdLead = 1; p.lines.push_back(fmt("the master's sound starts %lld master samples (%s) before the CD's first sample: one CD frame of digital silence goes in front of the CD layer, so the master plays from its own first sound (the CD's samples are unchanged)",
-                                                          early, dur(early / (double)rate).c_str())); }
+    const long long late0 = t + z1 + 1 - (long long)ncd * up;   // > 0: the master's sound goes on this many master samples after the CD's last sample (before any frame is added)
+    if (early >= up) p.onlyLead = early; if (late0 >= up) p.onlyTail = late0;
+    const std::string leadTxt = p.onlyLead ? fmt("the master has sound %lld master samples (%s, one CD sample or more) before the CD starts, at %.6f-%.6f s of the master", early, dur(early / (double)rate).c_str(), sec(a0), sec(a0 + early)) : std::string(),
+                      tailTxt = p.onlyTail ? fmt("the master has sound %lld master samples (%s, one CD sample or more) after the CD ends, at %.6f-%.6f s of the master", late0, dur(late0 / (double)rate).c_str(), sec(z1 + 1 - late0), sec(z1 + 1)) : std::string();
+    if (edge == EDGE_STOP && (p.onlyLead || p.onlyTail)) {
+        p.why = fmt("placement at %+lld: ", t) + (p.onlyLead ? leadTxt : tailTxt) + (p.onlyLead && p.onlyTail ? "; and " + tailTxt : std::string())
+              + ": content only the master has (needs your choice: cdedge=pad adds digital silence to the CD layer, cdedge=cut cuts the master)"; return p; }
+    if (early >= up && edge == EDGE_CUT) {   // the master is cut where the CD begins: its sound before that is not kept
+        p.cutLead = early; p.lines.push_back(fmt("cdedge=cut: %s: CUT, the master starts where the CD starts (%s of the master's sound not kept; the CD's samples are unchanged)", leadTxt.c_str(), dur(early / (double)rate).c_str())); }
+    else if (early > 0) { p.cdLead = (int)((early + up - 1) / up);
+        if (early < up) p.lines.push_back(fmt("the master's sound starts %lld master samples (%s) before the CD's first sample: one CD frame of digital silence goes in front of the CD layer, so the master plays from its own first sound (the CD's samples are unchanged)",
+                                              early, dur(early / (double)rate).c_str()));
+        else p.lines.push_back(fmt("cdedge=pad: %s: %d CD frames (%s) of digital silence go in front of the CD layer, so the master plays from its own first sound (the CD's samples are unchanged; the CD layer is that much longer than the given CD)",
+                                   leadTxt.c_str(), p.cdLead, dur(p.cdLead / (double)(rate / up)).c_str())); }
     p.shift = t + p.cdLead * up;
     // end: the master's last sound at shift + z1; the CD covers positions up to ncd2 * up, and the format keeps up to 2^stages - 1 master
     // samples beyond that (a master length need not be a multiple of 2^stages), so a shorter overhang needs nothing added to the CD
-    const long ncd2 = ncd + p.cdLead; const long long hi = (long long)ncd2 * up + up - 1;
-    const long long late = p.shift + z1 + 1 - (long long)ncd2 * up;   // > 0: the master's sound goes on this many master samples after the CD's last sample
-    if (late >= up) { p.why = fmt("placement at %+lld: the master has sound %lld master samples (%s, one CD sample or more) after the CD ends, at %.6f-%.6f s of the master: content only the master has (not supported in this step)",
-                                  t, late, dur(late / (double)rate).c_str(), sec(z1 + 1 - late), sec(z1 + 1)); return p; }
-    if (late > 0) p.lines.push_back(fmt("the master's sound ends %lld master samples (%s) after the CD's last sample: kept, the master plays on that much longer", late, dur(late / (double)rate).c_str()));    const long long lo = (long long)ncd2 * up; p.ncd2 = ncd2;
-    p.Lm2 = p.shift + Lm <= hi ? std::max(p.shift + Lm, lo) : std::max(p.shift + z1 + 1, lo);   // past what the CD needs, the master's trailing silence is dropped
+    long long late = p.shift + z1 + 1 - (long long)(ncd + p.cdLead) * up;   // > 0: the master's sound goes on this many master samples after the CD's last sample
+    if (late >= up && edge == EDGE_PAD) { p.cdTail = (long)(late / up);
+        p.lines.push_back(fmt("cdedge=pad: %s: %ld CD frames (%s) of digital silence go after the CD layer, so the master plays to its own last sound (the CD's samples are unchanged; the CD layer is that much longer than the given CD)",
+                              tailTxt.c_str(), p.cdTail, dur(p.cdTail / (double)(rate / up)).c_str()));
+        late -= (long long)p.cdTail * up; }
+    const long ncd2 = ncd + p.cdLead + p.cdTail; const long long hi = (long long)ncd2 * up + up - 1;
+    if (late >= up) { p.cutTail = late - (up - 1);   // EDGE_CUT: the master is cut where the CD (with the format's spare samples) ends
+        p.lines.push_back(fmt("cdedge=cut: %s: CUT, the master ends where the CD ends (%s of the master's sound not kept; the CD's samples are unchanged)", tailTxt.c_str(), dur(p.cutTail / (double)rate).c_str())); }
+    else if (late > 0) p.lines.push_back(fmt("the master's sound ends %lld master samples (%s) after the CD's last sample: kept, the master plays on that much longer", late, dur(late / (double)rate).c_str()));
+    const long long lo = (long long)ncd2 * up; p.ncd2 = ncd2;
+    p.Lm2 = p.shift + Lm <= hi ? std::max(p.shift + Lm, lo) : (p.cutTail ? hi : std::max(p.shift + z1 + 1, lo));   // past what the CD needs, the master's trailing silence is dropped (cdedge=cut: its sound too)
     p.dropLead = std::max(0LL, -p.shift); p.dropTail = std::max(0LL, p.shift + Lm - p.Lm2); p.padLead = std::max(0LL, p.shift); p.padTail = std::max(0LL, p.Lm2 - (p.shift + Lm));
     if (p.dropLead + p.dropTail >= Lm || p.Lm2 - p.padLead - p.padTail <= 0) { p.why = fmt("placement at %+lld leaves no overlap between the CD and the master", t); return p; }
-    p.lines.push_back(fmt("master samples dropped (digital silence only): start %lld, end %lld; zeros added to the master: start %lld, end %lld; digital-silence frames added in front of the CD layer: %d",
-                          p.dropLead, p.dropTail, p.padLead, p.padTail, p.cdLead));
+    if (!p.cutLead && !p.cutTail && !p.cdTail)   // the former line, unchanged where nothing beyond the CD was cut or padded
+        p.lines.push_back(fmt("master samples dropped (digital silence only): start %lld, end %lld; zeros added to the master: start %lld, end %lld; digital-silence frames added in front of the CD layer: %d",
+                              p.dropLead, p.dropTail, p.padLead, p.padTail, p.cdLead));
+    else p.lines.push_back(fmt("master samples dropped: start %lld (of them %lld from the master's first sound on, cut), end %lld (of them %lld up to the master's last sound, cut); zeros added to the master: start %lld, end %lld; digital-silence frames added to the CD layer: start %d, end %ld",
+                               p.dropLead, p.cutLead, p.dropTail, p.cutTail, p.padLead, p.padTail, p.cdLead, p.cdTail));
     p.lines.push_back(fmt("placed master: %lld frames (was %lld) = %ld CD frames x %lld + %lld", p.Lm2, Lm, ncd2, up, p.Lm2 - lo));
     p.ok = true; return p; }// in place (no second copy of the master): m becomes M' with Lm2 frames
 inline void applyPlace(std::vector<int32_t>& m, const Place& p) {

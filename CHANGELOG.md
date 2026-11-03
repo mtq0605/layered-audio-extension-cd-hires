@@ -4,6 +4,10 @@ This file records the notable changes to LAE (Layered Audio Extension), its loss
 
 ## Unreleased
 
+- **Independent CD shorter than the master (2026-11-03).** When the master has sound, of one CD sample or more, before the CD starts or after it ends, `lae_enc` with `cd=` no longer only stops: it reports where and how long and lets the user choose. A console asks; in scripts the option is required.
+  - `cdedge=pad`: digital silence is added to the CD layer there; the master is kept whole; the CD's samples are unchanged, but the CD layer is longer than the given CD.
+  - `cdedge=cut`: the master is cut to the CD; its sound beyond the CD is not kept; the CD layer is exactly the given CD.
+  - Without a choice nothing is encoded. The automatic search adds `edge=needed` to `ALIGN_SUGGEST`. The alignment report records the choice. Encodes without such sound are byte-identical to before. Sound that only the CD has still stops the encoder, and the planner still stops on sound that only one side has.
 - **IANA registration (2026-10-31).** The FLAC application IDs `LAE1` (0x4C414531, LAE Lossy extension data) and `LAE2` (0x4C414532, LAE Lossless extension data) are registered in the IANA FLAC Application Metadata Block IDs registry (<https://www.iana.org/assignments/flac>). `spec/lossless/SPEC.md` Section 8 says so.
 
 ## 2026-10-30 (v5-2026-10-30)

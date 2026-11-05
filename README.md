@@ -1882,6 +1882,16 @@ The bitstream defined in SPEC.md is frozen for container version 5.
 - **Clipped CD content.** The 16-bit route cannot restore content that the CD layer had to clip (Section 12.3).
 - **Leakage outside the `full` route.** Frequency-layer leakage into the CD band is compensated only in the `full` route (Section 6.5).
 - **Synth at high rates.** The 24-bit-route CD-band error of the Synth signal at 176.4 and 352.8 kHz (−96 and −82 dBFS) is markedly worse than at 88.2 and 96 kHz. Its cause has not yet been analysed (Section 12.3).
+- **Quantisation error at the layer boundary (found 2026-11-05, not fixed).** Leakage compensation (Section 6.5) works up to 1150 Hz below the cut-off. From there to the cut-off, the frequency layer codes real content, which must not be subtracted twice. The frequency layer's own quantisation error in this strip therefore stays in the output.
+  - It shows only with strong ultrasonic content near the cut-off, as in synthetic test signals. Strong content makes the frequency layer's step large.
+  - Measured on a 352.8 kHz test master with ultrasonic test tones at about −24 dBFS (cut-off 20.48 kHz):
+    - the 1 kHz band 19–20 kHz carries −117 dBFS of error;
+    - the other 1 kHz bands of the CD band lie at −129 to −145 dBFS with `keep`, and at −140 to −154 dBFS with `keep20`;
+    - `keep20` and `g` do not change the strip.
+  - Over the whole 13-minute test master, the decoded CD-band error stays below the master's own CD-band level in 767 of 802 seconds. The other 35 seconds are test passages whose CD band is almost digital silence (−144 to −159 dBFS); there the error is −107 to −143 dBFS. No effect was found on music.
+  - A fix needs only the encoder: in this strip, subtract only the frequency layer's quantisation error, not its content. The format and all decoders would stay unchanged.
+  - We have not done it. We have no real recordings with such content, the gain on music is nil, and a changed encoder means new conformance vectors. Contributions are welcome.
+  - The Synth result above may have the same cause; this has not been checked.
 - **Samples carried by a move.** Where the move of the master carries samples to a place at which no piece takes master samples (the very start or end of the master, or a gap that only the master has), these samples are not kept. The planner reports where this happens and how many samples are concerned; the user may add at least 1 ms (44 CD frames) of digital silence at that place to both the master and the CD (Section 4.5).
 - **Hard-cut masters.** A master whose sound reaches its first or last sample keeps a few frames of digital silence at the ends of the CD layer after a fractional move (Section 4.3).
 - **Forward seeking.** A seek forward past the decoded part requires entropy decoding up to the target, because v5 defines no random-access points (Section 13.6).

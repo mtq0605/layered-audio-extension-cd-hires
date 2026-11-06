@@ -2,11 +2,11 @@
 
 [中文](THIRD_PARTY.zh.md)
 
-All source code in this repository was written for the LAE project. No third-party source code has been copied into it. The licences of the project's own files are listed in [REUSE.toml](REUSE.toml) and [LICENSE](LICENSE); the origin of each encoder file is recorded in [AUTHORS](AUTHORS).
+All source code in this repository was written for the LAE project. No third-party source code has been copied into it. The licences of the project's own files are listed in [REUSE.toml](REUSE.toml) and [LICENSE](LICENSE); the origin of each encoder file (the dual-licensed files) is recorded file by file in [AUTHORS](AUTHORS); every other file is the original work of the author.
 
 Some components are built against third-party SDKs or headers. These SDKs and headers are **not** part of this repository: the build scripts take their location as an argument. When a built binary of such a component is distributed, the notices below apply to that binary.
 
-## Command-line tools, reference decoders and encoders
+## Command-line tools: reference decoders, reference encoders and other tools
 
 | Dependency | Licence | Use |
 |---|---|---|
@@ -16,11 +16,11 @@ Some components are built against third-party SDKs or headers. These SDKs and he
 
 The following are independent implementations; no code is taken from the projects named:
 
-- the range coder (`src/part_stream.h`) is the project's own implementation; its bitstream equals that of an LZMA-style coder;
+- the range coder (`src/part_stream.h`) is the project's own implementation; it is a binary range coder of the kind used in the LZMA format (11-bit probabilities adapted by 1/32, a 32-bit range renormalised below 2^24); its bitstream is defined in [spec/lossy/SPEC.md](spec/lossy/SPEC.md);
 - the FFT and the DCT-IV (`src/fft.h`, `src/mdct_tb.h`) are the project's own code; the twiddle form follows the published literature;
 - the UTF-8 command-line handling on Windows (`src/win_utf8.h`) follows the approach of FLAC's `win_utf8_io`; no FLAC code is used.
 
-## Player plug-ins
+## Player plug-ins and LAE Noise Marker
 
 | Plug-in | Built against | Licence of that dependency | Effect on a distributed binary |
 |---|---|---|---|
@@ -28,7 +28,7 @@ The following are independent implementations; no code is taken from the project
 | VLC (`vlc_lae`) | VLC 3.0 SDK, `libvlccore` | LGPL-2.1-or-later | Dynamically linked; ship the LGPL notice and state where the VLC source is available |
 | Kodi (`kodi_audiodecoder_lae`) | `kodi-dev-kit` headers, Kodi 21.3 "Omega" | GPL-2.0-or-later | The add-on binary is a combined work and is distributed under GPL-3.0-or-later (Apache-2.0 is compatible with GPL version 3 but not with version 2); the plug-in's own source remains licensed under Apache-2.0 |
 | DirectShow (`dshow_lae`) | Windows SDK (`strmiids`, COM libraries) | Part of the Windows SDK | No further notice required |
-| LAE Noise Marker (`lae_noise_marker`) | Browser only (HTML and JavaScript) | — | No third-party code |
+| LAE Noise Marker (`lae_noise_marker`; not a player plug-in) | C++17 standard library (`lae_noise`); the panel runs in a browser (HTML and JavaScript) | — | No third-party code |
 
 ## Java library
 
@@ -40,4 +40,4 @@ Applications that embed the LAE library, such as a mobile player, are separate w
 
 ## Audio files in releases
 
-The demonstration audio and masters attached to releases are the author's own works. They are covered by the `AUDIO_LICENSE` file in each release, not by the licences of this repository.
+The demonstration audio and masters attached to releases are the own works of the author, mtq0605. They are covered by the `AUDIO_LICENSE` file in each release, not by the licences of this repository.

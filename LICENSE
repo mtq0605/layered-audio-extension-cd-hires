@@ -31,23 +31,49 @@ LICENCE LAYOUT
 What                                          Licence (SPDX expression)
 --------------------------------------------  ---------------------------------
 Specification and design texts:               CC-BY-4.0
-  spec/lossy/SPEC.md       LAE Lossy (LAEY)
-  spec/lossless/DESIGN.md  LAE Lossless
-                           (LAES), design
-                           document
+  spec/lossy/SPEC.md (LAE Lossy, LAEY);
+  spec/lossless/SPEC.md, OVERVIEW.md,
+  LAES_TOOL.md, DESIGN.md (LAE Lossless,
+  LAES); spec/cdx/SPEC.md (CD-Extra
+  encapsulation); spec/COMPATIBILITY.md;
+  plugins/lae_noise_marker/SPEC_LAENOISE.md
 Documentation:                                CC-BY-4.0
-  README.md, docs/ (including docs/BUILD.md)
-Decoder-side sources in src/:                 Apache-2.0
-  lae_dec.cpp, part_stream.h,
-  partition_format.h, mdct_tb.h,
-  mdct_tables.h, halfband.h, wavio.h,
-  fft.h, gen_suite.cpp, cut_wav.cpp,
-  cmp_wav.cpp
+  README.md, CHANGELOG.md, docs/ (including
+  docs/BUILD.md), SECURITY.md,
+  THIRD_PARTY.md, the README files and
+  images in plugins/ and java/
+Decoder-side and other sources in src/:       Apache-2.0
+  every file in src/ not listed as
+  encoder-side below, including lae_dec.cpp,
+  lae_decoder.h, lae_api.*, laes_api.cpp,
+  the LAES decoder (laes_codec.h,
+  laes_file.h, laes_flac.h, laes_lift.h,
+  laes_math.h, laes_play.h, laes_stream.h),
+  the encapsulation tool lae_cdx
+  (lae_cdx.*, lae_cdx_read.h, iso9660.h),
+  the noise tool lae_noise (lae_noise.cpp,
+  noise_*.h, noise_*.cpp), win_utf8.h
 Encoder-side sources in src/:                 GPL-3.0-or-later OR
   lae_enc.cpp, pad_mirror.cpp,                LicenseRef-LAE-Commercial
   base_layer.cpp, routes.cpp,
   lossy_v2.cpp, part_coder.cpp,
-  tone_scan.cpp, partition.h
+  tone_scan.cpp, partition.h,
+  cd_align.cpp, cd_plan.cpp, enc_io.h,
+  blk_io.h, wav_in.h, pad_blk.cpp,
+  base_blk.cpp, routes_blk.cpp,
+  lossy_blk.cpp, part_blk.cpp,
+  laes_codec_enc.h, laes_file_enc.h,
+  laes_flac_enc.h, laes_stream_enc.h,
+  laes_tags.h, laes_selftest.h,
+  laes_tool.cpp, laes_export.cpp
+Java library, java/src/com/lae/:
+  decoders and shared helpers                 Apache-2.0
+  the 27 encoder files, listed in AUTHORS     GPL-3.0-or-later OR
+                                              LicenseRef-LAE-Commercial
+Player plug-ins: plugins/ (sources, build     Apache-2.0
+  scripts and resource files). The built
+  Kodi add-on is distributed under
+  GPL-3.0-or-later; see THIRD_PARTY.md.
 Tools: tools/                                 Apache-2.0
 Test scripts in tests/                        Apache-2.0
 Conformance vectors, test data and the        CC0-1.0
@@ -56,7 +82,16 @@ Data: data/                                   CC0-1.0
 Build files and CI configuration (.github/)   Apache-2.0
 Project files: LICENSE, NOTICE, AUTHORS,      CC0-1.0
   PATENTS.md, COMMERCIAL.md,
-  CONTRIBUTING.md, REUSE.toml
+  CONTRIBUTING.md, REUSE.toml,
+  AUDIO_LICENSE.md (the text of the
+  audio licence)
+
+The Chinese versions of these texts (*.zh.md) have the licence of the
+English text.
+
+The demonstration audio and masters attached to releases are not in this
+repository and are not covered by any licence above. They are all rights
+reserved, under AUDIO_LICENSE.md.
 
 Contributions to any part of the repository are accepted under the Apache
 License 2.0, with a Developer Certificate of Origin sign-off. See
@@ -141,6 +176,8 @@ Each work is provided without warranty, as stated in its licence.
 
 Contact is through GitHub.
 
-- Open an issue in the LAE repository.
-- For private matters, use the repository's private vulnerability
-  reporting (Security tab).
+- Open an issue in the LAE repository for questions, proposals and
+  commercial licence enquiries (see COMMERCIAL.md). Do not put
+  confidential information in an issue; details are arranged afterwards.
+- Report security vulnerabilities privately through the repository's
+  private vulnerability reporting (Security tab); see SECURITY.md.

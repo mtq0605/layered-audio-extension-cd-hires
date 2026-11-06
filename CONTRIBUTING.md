@@ -52,7 +52,7 @@ are distributed under the following licences.
 | `README.md`, `README.zh.md`, `CHANGELOG.md`, `docs/`; the README files and images in `plugins/` | `CC-BY-4.0` |
 | Decoder-side sources in `src/`: `lae_dec.cpp`, `lae_decoder.h`, `lae_api.h`, `lae_api.cpp`, `part_stream.h`, `partition_format.h`, `mdct_tb.h`, `mdct_tables.h`, `halfband.h`, `wavio.h`, `fft.h`, `gen_suite.cpp`, `cut_wav.cpp`, `cmp_wav.cpp` | `Apache-2.0` |
 | Other sources in `src/`: `lae_cdx.cpp`, `lae_cdx.h`, `lae_cdx_read.h`, `iso9660.h`, `align_hash.h`, `frac_delay.h` | `Apache-2.0` |
-| Encoder-side sources in `src/`: `lae_enc.cpp`, `pad_mirror.cpp`, `base_layer.cpp`, `routes.cpp`, `lossy_v2.cpp`, `part_coder.cpp`, `tone_scan.cpp`, `partition.h`, `cd_align.cpp`, `cd_plan.cpp`, `enc_io.h` | `GPL-3.0-or-later OR LicenseRef-LAE-Commercial` |
+| Encoder-side sources in `src/` and the encoder files of the Java library (complete list in `COMMERCIAL.md`) | `GPL-3.0-or-later OR LicenseRef-LAE-Commercial` |
 | `tools/`, test scripts in `tests/`, build files, `.github/` | `Apache-2.0` |
 | foobar2000 component in `plugins/foo_input_lae/`: `foo_input_lae.cpp`, `build_fb2k.cmd` | `Apache-2.0` |
 | Conformance vectors, test data and the vector manifest in `tests/`; `data/` | `CC0-1.0` |
@@ -188,8 +188,9 @@ PR.
 
 Contact is through GitHub.
 
-- **General questions and proposals.** Open an issue in the LAE
-  repository.
-- **Security issues and other private matters.** Do not open a public
-  issue. Use the private vulnerability reporting of the repository (the
-  Security tab).
+- **General questions, proposals and commercial licence enquiries.** Open
+  an issue in the LAE repository. Do not put confidential information in
+  an issue; details are arranged afterwards (see `COMMERCIAL.md`).
+- **Security issues.** Do not open a public issue. Use the private
+  vulnerability reporting of the repository (the Security tab); see
+  `SECURITY.md`.

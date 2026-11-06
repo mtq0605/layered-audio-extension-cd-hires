@@ -4,7 +4,7 @@
 
 ## Scope
 
-This policy covers the code in this repository: the reference decoders and encoders, the command-line tools, the player plug-ins and the Java library. LAE files are untrusted input. A security issue exists if a decoder or plug-in, when given a crafted file, crashes, reads or writes out of bounds, hangs or allocates memory without limit.
+This policy covers the code in this repository: the reference decoders and reference encoders, the other command-line tools, the player plug-ins and the Java library. LAE files are untrusted input. A security issue exists if a decoder or plug-in, when given a crafted file, crashes, reads or writes out of bounds, hangs or allocates memory without limit.
 
 The format specifications are in scope where the defect lies in the specification itself, for example, a field whose stated limits allow unbounded memory use.
 
@@ -21,8 +21,8 @@ Include, where possible:
 
 ## Response
 
-This is a personal project maintained by one author. Reports are acknowledged as soon as practicable. A fix is developed in a private advisory, verified against the conformance vectors and published together with the advisory. Reporters are credited unless they ask not to be.
+This is a personal project maintained by one author. Reports are acknowledged as soon as practicable. A fix is developed in a private advisory, checked with the reported file or steps and against the conformance vectors, and published together with the advisory. Reporters are credited unless they ask not to be.
 
 ## Supported versions
 
-Only the latest release and the current `main` branch receive security fixes.
+Only the latest release of the repository (one row of the release table in [docs/VERSIONS.md](docs/VERSIONS.md), which names the version of every component) and the current `main` branch receive security fixes.

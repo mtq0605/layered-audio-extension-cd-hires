@@ -7,35 +7,46 @@ SPDX-License-Identifier: CC0-1.0
 
 ## Which files are dual-licensed
 
-The encoder-side sources in `src/` carry the SPDX expression
+The encoder-side sources carry the SPDX expression
 `GPL-3.0-or-later OR LicenseRef-LAE-Commercial`. These files are:
 
-- `lae_enc.cpp`
-- `pad_mirror.cpp`
-- `base_layer.cpp`
-- `routes.cpp`
-- `lossy_v2.cpp`
-- `part_coder.cpp`
-- `tone_scan.cpp`
-- `partition.h`
-- `cd_align.cpp`
-- `cd_plan.cpp`
-- `enc_io.h`
-- `blk_io.h`
-- `wav_in.h`
-- `pad_blk.cpp`
-- `base_blk.cpp`
-- `routes_blk.cpp`
-- `lossy_blk.cpp`
-- `part_blk.cpp`
-- `laes_codec_enc.h`, `laes_file_enc.h`, `laes_flac_enc.h`, `laes_stream_enc.h`, `laes_tool.cpp`, `laes_selftest.h` (the encoder side of LAE Lossless (LAES))
+- in `src/`:
+  - `lae_enc.cpp`
+  - `pad_mirror.cpp`
+  - `base_layer.cpp`
+  - `routes.cpp`
+  - `lossy_v2.cpp`
+  - `part_coder.cpp`
+  - `tone_scan.cpp`
+  - `partition.h`
+  - `cd_align.cpp`
+  - `cd_plan.cpp`
+  - `enc_io.h`
+  - `blk_io.h`
+  - `wav_in.h`
+  - `pad_blk.cpp`
+  - `base_blk.cpp`
+  - `routes_blk.cpp`
+  - `lossy_blk.cpp`
+  - `part_blk.cpp`
+  - `laes_codec_enc.h`, `laes_file_enc.h`, `laes_flac_enc.h`,
+    `laes_stream_enc.h`, `laes_tags.h`, `laes_selftest.h`, `laes_tool.cpp`
+    and `laes_export.cpp` (the encoder side of LAE Lossless (LAES),
+    including the tools `laes` and `laes_export`)
+- in `java/src/com/lae/`: the 27 encoder files of the Java library (the
+  ports of the files above and their helpers, in `laey/` and `laes/`).
+  Each of them names this expression in its SPDX header, and `AUTHORS`
+  lists them by name.
 
 You may use these files under the GNU GPL v3 or later. Alternatively, you
 may use them under a separate commercial licence agreement with the author,
 mtq0605.
 
-All other code, including the decoder side and the tools, is licensed under
-Apache-2.0 and never requires a commercial licence.
+Every other code file in the repository, including the decoder side, the
+other tools in `src/` and `tools/`, the player plug-ins and the decoder
+files of the Java library, is licensed under Apache-2.0 and never requires
+a commercial licence. The SPDX header of each file (or, for a file
+without one, `REUSE.toml`) is authoritative.
 
 **In short:** most people never need a commercial licence. Encoding audio
 with the encoder never requires one, whatever you do with the resulting
@@ -84,9 +95,11 @@ Typical cases:
   GPL v3 requires for "User Products". An example is a device with a locked
   bootloader.
 - **Unpublished modifications.** You want to distribute a modified encoder
-  without releasing your modifications.
-- **Contractual commitments.** You want commitments from the author, such
-  as warranty, indemnity or support, together with the licence.
+  without providing the source code of your modifications to its
+  recipients.
+
+A commercial licence is also available if you want commitments from the
+author, such as warranty, indemnity or support, together with the licence.
 
 If your design falls between these cases (for example, plug-in interfaces or
 shared-memory IPC), please ask; you will receive a written answer.
@@ -94,9 +107,15 @@ shared-memory IPC), please ask; you will receive a written answer.
 ## What the commercial licence covers
 
 - **Encoder-side sources.** The licence covers the encoder-side sources,
-  including contributions, which are accepted under the Apache License 2.0
-  (see `CONTRIBUTING.md`).
-- **Decoder-side files built into the encoder.** These remain licensed under
+  including contributions to them.
+- **Contributions.** Contributions are accepted under the Apache License
+  2.0, with a Developer Certificate of Origin sign-off on every commit (see
+  `CONTRIBUTING.md`). The Apache License 2.0 allows the author to include
+  them in the encoder under the GNU GPL and in its commercially licensed
+  version. Contributors keep their copyright, and their contributions
+  remain available under Apache-2.0.
+- **Decoder-side files built into the encoder.** These are not covered by
+  the commercial licence and need none: they remain licensed under
   Apache-2.0. You must keep their notices and pass on the `NOTICE` file.
 - **Credit to contributors.** Licensees must keep the copyright notices in
   any source code they receive.
@@ -111,14 +130,14 @@ The GNU GPL version of the encoder remains available to everyone.
 
 ## How to ask
 
-Enquiries are made through GitHub.
+Enquiries are made through a public GitHub issue.
 
 - **Open an issue** in the LAE repository with the title "Commercial licence
-  enquiry". Do not put confidential details in a public issue.
-- **For confidential details,** use the repository's private vulnerability
-  reporting (Security tab).
+  enquiry".
+- **Do not put confidential information in the issue.** Details are
+  arranged afterwards.
 
-Please include:
+Please include, as far as you can say in public:
 
 - your company or name;
 - the product;

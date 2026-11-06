@@ -9,7 +9,7 @@ A marking file identifies rectangles of time and frequency in one master. It hol
 - The file is plain ASCII text. Lines end with LF; a CR before the LF is ignored.
 - The file name extension is `.laenoise`.
 - `#` starts a comment that runs to the end of the line. Comments are for human readers only: a reader must not take any value from them.
-- Blank lines are allowed. A reader ignores lines that it does not recognise.
+- Blank lines are allowed. A line whose first word is not `LAENOISE`, `master`, `grid` or `pos` is ignored (Section 4).
 
 ## 2. Lines
 
@@ -41,15 +41,17 @@ The grid is that of the frequency layer of the LAE Lossy (LAEY) encoder, at the 
 
 ## 4. Rules for a valid file
 
-A reader accepts the file only if all of the following hold:
+A reader first removes comments, CRs and blank lines. It then accepts the file only if all of the following hold:
 
-1. The magic line, the `master` line and the `grid` line are all present.
-2. The grid is `mdct 512 cell 8`.
-3. `frames` equals the length of the master, and `rate` equals its sample rate.
-4. The SHA-256 equals that of the master's `data` chunk.
-5. Every `pos` line satisfies 0 ≤ m0 < m1 ≤ K and 0 ≤ c0 < c1 ≤ 64.
+1. The first line is exactly `LAENOISE 1`: the two words `LAENOISE` and `1` and nothing else. A file whose first line is anything else, for example `LAENOISE 12`, is not a marking file of version 1.
+2. The file has exactly one `master` line and exactly one `grid` line, and both come before the first `pos` line. A second `LAENOISE`, `master` or `grid` line is an error.
+3. A line whose first word is `master`, `grid` or `pos` has exactly the words of Section 2. The SHA-256 is 64 lower-case hexadecimal digits. `L`, `fs`, `m0`, `m1`, `c0` and `c1` are written as decimal digits only, without a sign, a decimal point or an exponent.
+4. The grid is `mdct 512 cell 8`.
+5. `frames` equals the length of the master, and `rate` equals its sample rate.
+6. The SHA-256 equals that of the master's `data` chunk.
+7. Every `pos` line satisfies 0 ≤ m0 < m1 ≤ K and 0 ≤ c0 < c1 ≤ 64.
 
-If any rule fails, the reader uses none of the file. Rectangles may overlap; the marked area is their union.
+A line whose first word is anything else is ignored; a later version may use such lines. If any rule fails, the reader uses none of the file. Rectangles may overlap; the marked area is their union.
 
 ## 5. Converting times and frequencies into cells
 

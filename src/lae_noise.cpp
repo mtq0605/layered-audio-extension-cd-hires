@@ -84,7 +84,7 @@ static int doMark(int argc, char** argv) {
 static int doShow(int argc, char** argv) {
     if (argc < 4) { printf("usage: lae_noise show <master.wav> <marks.laenoise>\n"); return 2; }
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
-    Marks mk; if (!readMarks(argv[3], mk)) { printf("cannot read the marking file %s\n", argv[3]); return 1; }
+    Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (!checkMarks(ws, mk)) return 1;
     printf("master OK (SHA-256, %lld frames, %.0f Hz); %zu positions\n", mk.frames, mk.rate, mk.pos.size());
     for (size_t i = 0; i < mk.pos.size(); i++) { const Pos& p = mk.pos[i];
@@ -94,7 +94,7 @@ static int doShow(int argc, char** argv) {
 static int doPreview(int argc, char** argv) {
     if (argc < 5) { printf("usage: lae_noise preview <master.wav> <marks.laenoise> <outdir> [context s] [longest preview per position s]\n"); return 2; }
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
-    Marks mk; if (!readMarks(argv[3], mk)) { printf("cannot read the marking file %s\n", argv[3]); return 1; }
+    Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (!checkMarks(ws, mk)) return 1;
     const string dir = argv[4]; std::error_code ec; std::filesystem::create_directories(dir, ec);
     const double ctx = argc > 5 ? atof(argv[5]) : 1.0; const long long L = ws.frames; const long K = mdct::frames((long)L);
@@ -140,7 +140,7 @@ static int doPreview(int argc, char** argv) {
 static int doPreviewAll(int argc, char** argv) {
     if (argc < 7) { printf("usage: lae_noise preview-all <master.wav> <marks.laenoise> <outdir> <t0 s> <t1 s>\n"); return 2; }
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
-    Marks mk; if (!readMarks(argv[3], mk)) { printf("cannot read the marking file %s\n", argv[3]); return 1; }
+    Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (!checkMarks(ws, mk)) return 1;
     const string dir = argv[4]; std::error_code ec; std::filesystem::create_directories(dir, ec);
     const long long L = ws.frames; const long K = mdct::frames((long)L);
@@ -173,7 +173,7 @@ static int doPreviewAll(int argc, char** argv) {
 static int doLevel(int argc, char** argv) {
     if (argc < 4) { printf("usage: lae_noise level <file.wav> <marks.laenoise> [reference.wav: measure file - reference]\n"); return 2; }
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
-    Marks mk; if (!readMarks(argv[3], mk)) { printf("cannot read the marking file %s\n", argv[3]); return 1; }
+    Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (mk.frames != ws.frames || fabs(mk.rate - ws.rate) > 0.5) { printf("length or rate differ from the marking file\n"); return 1; }
     WavStream wr; const bool ref = argc > 4; if (ref && (!wr.open(argv[4]) || wr.frames != ws.frames)) { printf("cannot read the reference %s, or its length differs\n", argv[4]); return 1; }
     const double fsPow = 0.5 * 70368744177664.0; double eAll = 0; long long nAll = 0; double cm[NM], cs[NM];

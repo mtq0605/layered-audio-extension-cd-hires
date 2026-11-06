@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
     const bool nzOn = (nzPath && *nzPath) || gMode; Source nsrc; std::vector<std::vector<std::pair<int, int>>> nzRows;   // per frame: the marked bins [k0, k1)
     if (nzOn) { const char* mp = getenv("NOISEM"); if (!mp || !*mp) encio::fail("noise= / g: NOISEM (the padded master) is not set"); nsrc.open(mp, sel == 'S' ? 2 : 3);
         if (nsrc.frames != L) encio::fail("noise= / g: the padded master and the layer differ in length"); }
-    if (nzPath && *nzPath) { nmk::Marks mk; if (!nmk::readMarks(nzPath, mk)) encio::fail(std::string("cannot read the marking file ") + nzPath);
+    if (nzPath && *nzPath) { nmk::Marks mk; std::string why; if (!nmk::readMarks(nzPath, mk, &why)) encio::fail(std::string("cannot read the marking file ") + nzPath + " (" + why + ")");
         const long off = getenv("NOISEPAD") ? atol(getenv("NOISEPAD")) / N : 0; nzRows.assign((size_t)K, {});   // frame m of the master = frame m + P / N here
         for (auto& p : mk.pos) for (long m = p.m0; m < p.m1; m++) { const long long mm = m + off; if (mm >= 0 && mm < K) nzRows[(size_t)mm].push_back({p.c0 * nmk::CW, p.c1 * nmk::CW}); } }
     auto marked = [&](long long m, int k) { if (nzRows.empty()) return false; for (auto& r : nzRows[(size_t)m]) if (k >= r.first && k < r.second) return true; return false; };

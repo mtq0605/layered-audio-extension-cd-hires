@@ -40,15 +40,45 @@ inline bool writeMarks(const char* path, const Marks& mk) {
         fprintf(f, "pos %ld %ld %d %d   # %zu: %.3f-%.3f s (%.2f s), %.1f-%.1f Hz%s%s\n", p.m0, p.m1, p.c0, p.c1, i + 1, frameT0(p.m0, mk.rate), frameT0(p.m1, mk.rate),
                 frameT0(p.m1, mk.rate) - frameT0(p.m0, mk.rate), colHz(p.c0, mk.rate), colHz(p.c1, mk.rate), i < mk.note.size() ? ", " : "", i < mk.note.size() ? mk.note[i].c_str() : ""); }
     return fclose(f) == 0; }
-inline bool readMarks(const char* path, Marks& mk) {
-    FILE* f = fopen(path, "r"); if (!f) return false; char line[1024]; bool magic = false;
-    while (fgets(line, sizeof line, f)) { char* h = strchr(line, '#'); if (h) *h = 0;
-        char sha[80]; long long fr; double rt; long m0, m1; int c0, c1, n, cw;
-        if (!strncmp(line, "LAENOISE 1", 10)) magic = true;
-        else if (sscanf(line, "master sha256 %79s frames %lld rate %lf", sha, &fr, &rt) == 3) { mk.sha = sha; mk.frames = fr; mk.rate = rt; }
-        else if (sscanf(line, "grid mdct %d cell %d", &n, &cw) == 2) { if (n != NM || cw != CW) { fclose(f); fprintf(stderr, "unsupported grid %d / %d\n", n, cw); return false; } }
-        else if (sscanf(line, "pos %ld %ld %d %d", &m0, &m1, &c0, &c1) == 4) mk.pos.push_back({m0, m1, c0, c1}); }
-    fclose(f); return magic && !mk.sha.empty(); }
+// Reading rules (SPEC_LAENOISE.md Section 4; strict since 2026-11-07, the same in NoiseMarks.java): a comment (# to the end of the
+// line), CR and blank lines are skipped. The first remaining line is exactly "LAENOISE 1". Then exactly one master line and exactly one
+// grid line, both before the first pos line. A line that begins with LAENOISE, master, grid or pos must have exactly its fields (a
+// second LAENOISE line is an error); any other line is ignored. why: the reason when the file is refused.
+inline bool readMarks(const char* path, Marks& mk, std::string* why = nullptr) {
+    auto bad = [&](long ln, const std::string& w) { if (why) *why = ln ? "line " + std::to_string(ln) + ": " + w : w; return false; };
+    FILE* f = fopen(path, "rb"); if (!f) return bad(0, "cannot open the file");
+    std::string all; { char b[65536]; size_t n; while ((n = fread(b, 1, sizeof b, f)) > 0) all.append(b, n); } fclose(f);
+    auto digits = [](const std::string& s, int maxLen) { if (s.empty() || (int)s.size() > maxLen) return false; for (char c : s) if (c < '0' || c > '9') return false; return true; };
+    bool magic = false, haveMaster = false, haveGrid = false; long ln = 0;
+    for (size_t p = 0; p < all.size();) { size_t e = all.find('\n', p); if (e == std::string::npos) e = all.size();
+        std::string line = all.substr(p, e - p); p = e + 1; ln++;
+        const size_t h = line.find('#'); if (h != std::string::npos) line.resize(h);
+        std::vector<std::string> t; for (size_t q = 0; q < line.size();) { while (q < line.size() && (line[q] == ' ' || line[q] == '\t' || line[q] == '\r')) q++;
+            size_t r = q; while (r < line.size() && line[r] != ' ' && line[r] != '\t' && line[r] != '\r') r++; if (r > q) t.push_back(line.substr(q, r - q)); q = r; }
+        if (t.empty()) continue;
+        if (!magic) { if (t.size() == 2 && t[0] == "LAENOISE" && t[1] == "1") { magic = true; continue; } return bad(ln, "the first line must be \"LAENOISE 1\" (not a marking file of version 1)"); }
+        if (t[0] == "LAENOISE") return bad(ln, "a second LAENOISE line");
+        if (t[0] == "master") {
+            if (haveMaster) return bad(ln, "a second master line");
+            if (!mk.pos.empty()) return bad(ln, "the master line must come before the pos lines");
+            if (t.size() != 7 || t[1] != "sha256" || t[3] != "frames" || t[5] != "rate") return bad(ln, "expected \"master sha256 <64 hex digits> frames <L> rate <fs>\"");
+            if (t[2].size() != 64) return bad(ln, "the SHA-256 must have 64 hex digits"); for (char c : t[2]) if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return bad(ln, "the SHA-256 must be lower-case hex digits");
+            if (!digits(t[4], 18) || !digits(t[6], 9)) return bad(ln, "frames and rate must be whole numbers");
+            mk.sha = t[2]; mk.frames = atoll(t[4].c_str()); mk.rate = (double)atoll(t[6].c_str()); haveMaster = true; }
+        else if (t[0] == "grid") {
+            if (haveGrid) return bad(ln, "a second grid line");
+            if (!mk.pos.empty()) return bad(ln, "the grid line must come before the pos lines");
+            if (t.size() != 5 || t[1] != "mdct" || t[3] != "cell" || !digits(t[2], 9) || !digits(t[4], 9)) return bad(ln, "expected \"grid mdct 512 cell 8\"");
+            if (atoi(t[2].c_str()) != NM || atoi(t[4].c_str()) != CW) return bad(ln, "unsupported grid mdct " + t[2] + " cell " + t[4] + " (version 1 has only mdct 512 cell 8)");
+            haveGrid = true; }
+        else if (t[0] == "pos") {
+            if (!haveMaster || !haveGrid) return bad(ln, "a pos line before the master and grid lines");
+            if (t.size() != 5 || !digits(t[1], 18) || !digits(t[2], 18) || !digits(t[3], 9) || !digits(t[4], 9)) return bad(ln, "expected \"pos <m0> <m1> <c0> <c1>\" with whole numbers");
+            mk.pos.push_back({(long)atoll(t[1].c_str()), (long)atoll(t[2].c_str()), atoi(t[3].c_str()), atoi(t[4].c_str())}); } }
+    if (!magic) return bad(0, "not a marking file (no \"LAENOISE 1\" line)");
+    if (!haveMaster) return bad(0, "no master line");
+    if (!haveGrid) return bad(0, "no grid line");
+    return true; }
 // the marking file must belong to this master, and every position must lie inside its grid
 inline bool checkMarks(WavStream& ws, const Marks& mk) {
     if (mk.frames != ws.frames || fabs(mk.rate - ws.rate) > 0.5) { printf("the marking file is for another master (length or rate differ): nothing done\n"); return false; }

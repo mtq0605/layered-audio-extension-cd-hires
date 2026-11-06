@@ -342,7 +342,7 @@ static int encode(int argc, char** argv) {
     if (!lengthOk("the master")) return 1;
     nmk::Marks noiseMk; const long long LmIn = Lm;   // noise=: the marking file belongs to this master (SHA-256, length, rate) and lies inside its grid
     if (noisePath) {
-        if (!nmk::readMarks(noisePath, noiseMk)) { printf("cannot read the marking file %s: nothing encoded\n", noisePath); oldNote(); return 1; }
+        { std::string why; if (!nmk::readMarks(noisePath, noiseMk, &why)) { printf("cannot read the marking file %s (%s): nothing encoded\n", noisePath, why.c_str()); oldNote(); return 1; } }
         if (noiseMk.frames != Lm || fabs(noiseMk.rate - w.rate) > 0.5) { printf("the marking file %s is for another master (length or rate differ): nothing encoded\n", noisePath); oldNote(); return 1; }
         WavStream nws; if (!nws.open(argv[1])) { printf("cannot read %s for the SHA-256 check of noise=: nothing encoded\n", argv[1]); oldNote(); return 1; }
         if (nmk::masterSha(nws) != noiseMk.sha) { printf("the marking file %s is for another master (SHA-256 differs): nothing encoded\n", noisePath); oldNote(); return 1; }

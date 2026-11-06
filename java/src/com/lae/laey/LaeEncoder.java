@@ -208,7 +208,7 @@ public final class LaeEncoder {
         if (!x.lengthOk("the master")) return 1;
         x.LmIn = x.Lm;   // noise=: the marking file belongs to this master (SHA-256, length, rate) and lies inside its grid
         if (x.noisePath != null) { final NoiseMarks.Marks mk = x.noiseMk;
-            if (!NoiseMarks.readMarks(x.noisePath, mk)) { env.printf("cannot read the marking file %s: nothing encoded\n", x.noisePath); x.oldNote(); return 1; }
+            String[] why = {""}; if (!NoiseMarks.readMarks(x.noisePath, mk, why)) { env.printf("cannot read the marking file %s (%s): nothing encoded\n", x.noisePath, why[0]); x.oldNote(); return 1; }
             if (mk.frames != x.Lm || Math.abs(mk.rate - wi.rate) > 0.5) { env.printf("the marking file %s is for another master (length or rate differ): nothing encoded\n", x.noisePath); x.oldNote(); return 1; }
             final String sha = NoiseMarks.masterSha(argv[1]); if (sha == null) { env.printf("cannot read %s for the SHA-256 check of noise=: nothing encoded\n", argv[1]); x.oldNote(); return 1; }
             if (!sha.equals(mk.sha)) { env.printf("the marking file %s is for another master (SHA-256 differs): nothing encoded\n", x.noisePath); x.oldNote(); return 1; }

@@ -268,7 +268,7 @@ final class LossyBlk {
         final boolean nzOn = nzPath != null || gMode; List<List<int[]>> nzRows = null;   // per frame: the marked bins [k0, k1)
         if (nzOn) { final String mp = env.get("NOISEM"); if (mp == null) throw EncIo.fail("noise= / g: NOISEM (the padded master) is not set"); nsrc.open(mp, sel == 'S' ? 2 : 3);
             if (nsrc.frames != L) throw EncIo.fail("noise= / g: the padded master and the layer differ in length"); }
-        if (nzPath != null) { NoiseMarks.Marks mk = new NoiseMarks.Marks(); if (!NoiseMarks.readMarks(nzPath, mk)) throw EncIo.fail("cannot read the marking file " + nzPath);
+        if (nzPath != null) { NoiseMarks.Marks mk = new NoiseMarks.Marks(); String[] why = {""}; if (!NoiseMarks.readMarks(nzPath, mk, why)) throw EncIo.fail("cannot read the marking file " + nzPath + " (" + why[0] + ")");
             final long off = env.get("NOISEPAD") != null ? Fmt.atoll(env.get("NOISEPAD")) / N : 0; nzRows = new ArrayList<List<int[]>>((int) K); for (long m = 0; m < K; m++) nzRows.add(new ArrayList<int[]>());   // frame m of the master = frame m + P / N here
             for (NoiseMarks.Pos p : mk.pos) for (long m = p.m0; m < p.m1; m++) { final long mm = m + off; if (mm >= 0 && mm < K) nzRows.get((int) mm).add(new int[] {p.c0 * NoiseMarks.CW, p.c1 * NoiseMarks.CW}); } }
         // the 24-bit rounding of the decoded output per coefficient of this plane (orthonormal MDCT, so white noise keeps its variance):

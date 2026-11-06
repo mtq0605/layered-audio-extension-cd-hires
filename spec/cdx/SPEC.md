@@ -92,7 +92,7 @@ This specification does not define:
 | TOC | Table of contents of the CD |
 | p_k | Absolute position of INDEX 01 of track k |
 | A2 | LBA (sector) of the start of the lead-out of session 1. The corresponding absolute position is A2 × 588 |
-| nominal position q_k | Absolute position of the first sample of the CD layer of track k; q_k = p_k ([L6]) |
+| nominal position q_k | Absolute position of the first sample of the CD layer of track k; q_k = p_k, except q_1 = −L in the exception of [L6] |
 | padding z_k | Digital silence after the CD layer of track k that pads the track to a whole sector, 0 ≤ z_k < 588 ([L7]) |
 | start guard | Digital silence before the CD layer of track 1: at least 5880 samples = 10 sectors = 0.133 s. It is provided by the pregap of track 1 ([L5]) |
 | offset o | The first sample of the CD layer of track k on the disc appears at position q_k + o of the disc stream. o > 0 means later in the disc stream. o combines the read offset and the write/pressing offset and may differ between tracks. The reader does not assume a uniform disc-wide offset |
@@ -139,7 +139,7 @@ absolute position  −150×588                 0 = p_1 = q_1               p_2 =
                    |<---- track 1 INDEX 00 ----->|<------ TOC track 1 ------->|<- track 2 … |<------ TOC track n ------>|
 ```
 
-With only one track (n = 1), TOC track 1 = CD layer + padding z_1.
+With only one track (n = 1), TOC track 1 = CD layer + padding z_1. In the exception of [L6], the CD layer of track 1 begins L frames earlier, at q_1 = −L, inside the pregap.
 
 **[L3]** Session 1 MUST be written in one pass (DAO/SAO). Apart from the content specified in this section, session 1 MUST NOT contain any other samples or gaps.
 
@@ -150,24 +150,26 @@ With only one track (n = 1), TOC track 1 = CD layer + padding z_1.
 - Hidden tracks are therefore not supported.
 - In independent-CD mode, if INDEX 00 of the publisher's track 1 contains non-silent content, the encapsulation tool stops ([P10]).
 
-**[L5]** Start guard: at least 5880 samples of digital silence MUST precede the CD layer of track 1. The pregap of track 1 ([L4]) satisfies this requirement; therefore zeros MUST NOT be added within track 1.
+**[L5]** Start guard: at least 5880 samples of digital silence MUST precede the CD layer of track 1. The pregap of track 1 ([L4]) satisfies this requirement; therefore zeros MUST NOT be added within track 1 (from its INDEX 01 onward). The leading frames of the exception of [L6] lie before INDEX 01, in the pregap, and leave at least 5880 samples of the pregap in front of the CD layer.
 
-**[L6]** The CD layer of every track begins at INDEX 01: q_k = p_k (k = 1 … n), and q_1 = 0.
+**[L6]** The CD layer of every track begins at INDEX 01: q_k = p_k (k = 1 … n), and q_1 = 0, except as follows.
 
-Exception (independent-CD mode): the master's sound may begin less than one CD sample earlier than the first sample of the publisher's track 1. In that case, one frame of digital silence is placed in front of the CD layer of track 1, and q_1 = −1. The digital silence present at the start of every encapsulation absorbs this difference:
+Exception (independent-CD mode, track 1 only): the CD layer of track 1 MAY begin with L frames of digital silence that lie in the pregap of track 1, in front of INDEX 01, where 0 ≤ L ≤ 82,320 (= 150 × 588 − 5880, so that the start guard of [L5] remains). Then q_1 = −L, and the CD layer of track 1 consists of these L frames followed by the publisher's samples from INDEX 01 of track 1 to INDEX 01 of track 2 (ncd_1 = p_2 − p_1 + L, with p_{n+1} = A2 × 588 as in [L7]). For every other track, the CD layer MUST begin exactly at INDEX 01. The encapsulation tool stops if L is outside this range or if any of the L frames is not digital silence.
 
-- the frame lies within the digital silence of the pregap of track 1, and [L4] and [L5] continue to hold;
-- session 1 remains sample-identical to the publisher's programme ([P11]);
-- a reader that searches by whole-track MD5 within W of the TOC position finds the CD layer at −1. If the pregap was not ripped, these positions are unknown and are read as 0.
+- The L frames lie within the digital silence of the pregap of track 1, so [L4] and [L5] continue to hold. They are not written into AUDIO.BIN; the burner writes the pregap as digital silence ([P12]).
+- Session 1 from LBA 0 remains sample-identical to the publisher's programme ([P11]).
+- A reader finds the CD layer of track 1 at −L: its trailer record has lead0 ≥ L, so coarse location from the information range gives −L ([R7]); for L ≤ W, fine location around p_1 also covers it. If the pregap was not ripped, these positions are unknown and are read as 0, which equals the silence.
+
+*Informative.* The whole-disc planner adds one such frame when the master's sound begins less than one CD sample earlier than the publisher's track 1 ([P9]); the encoder option `cdedge=pad` can add more frames of digital silence in front of the CD layer.
 
 **[L7]** Track-end padding: the CD layer of every track MUST lie entirely within that track as given in the TOC.
 
 - Let z_k = p_{k+1} − q_k − ncd_k (k = 1 … n), where p_{n+1} = A2 × 588. The condition 0 ≤ z_k < 588 MUST hold.
 - These z_k padding samples MUST be digital silence. There are at most 587 of them, i.e. 13.3 ms (derived).
 
-**[L8]** End: between the CD layer of the last track and the lead-out there is only the padding z_n of the last track ([L7]). A guard track MUST NOT be added, and no other silence MUST be added either. The end of the CD layer of the last track is given by its length ncd_n ([R6]).
+**[L8]** End: between the CD layer of the last track and the lead-out there is only the padding z_n of the last track ([L7]). A guard track MUST NOT be added, and other silence MUST NOT be added there either. The end of the CD layer of the last track is given by its length ncd_n ([R6]).
 
-**[L9]** Neither the pregap of track 1 nor the padding belongs to the CD layer of any track. They are not included in the v5 file or the extension file, and they do not change the decoded length.
+**[L9]** Neither the pregap of track 1 nor the padding belongs to the CD layer of any track, except the L leading frames of the exception of [L6], which belong to the CD layer of track 1. The rest of the pregap and the padding are not included in the v5 file or the extension file, and they do not change the decoded length.
 
 **[L10]** Every TOC audio track MUST consist of a whole number of sectors and MUST NOT be shorter than 300 sectors (4 s). The reader does not require ncd to be a multiple of 588.
 
@@ -593,7 +595,7 @@ The concrete placement algorithm is a matter of implementation. Automatic placem
 - INDEX 00 of track 1 of the publisher's CD contains non-silent content ([L4]).
 - The publisher's CD uses pre-emphasis ([L11]).
 
-**[P11]** The CD layer is the publisher's CD, unchanged by even a single sample. All samples of session 1 from LBA 0 to A2 MUST be sample-identical to the programme of the publisher's CD. The programme extends from INDEX 01 of track 1 to the end of the programme.
+**[P11]** The CD layer is the publisher's CD, unchanged by even a single sample. All samples of session 1 from LBA 0 to A2 MUST be sample-identical to the programme of the publisher's CD. The programme extends from INDEX 01 of track 1 to the end of the programme. The L leading frames of the exception of [L6] lie before LBA 0, in the pregap, and are not part of this range.
 
 ### 5.4 Image and Deliverables
 
@@ -813,7 +815,7 @@ The report MUST give the reason category. Reasons are decided by counts only, wi
 
 **[R16]** Measured offsets MAY be displayed. They MUST NOT be written into any output file, including v5 WAV files, high-resolution files, CUE files, reports and logs.
 
-**[R17]** No high-resolution data of a track MUST be output before the track has been accepted or rejected. Within a track, the reader MUST NOT switch between the CD and the extension layer.
+**[R17]** The reader MUST NOT output any high-resolution data of a track before the track has been accepted or rejected. Within a track, the reader MUST NOT switch between the CD and the extension layer.
 
 **[R18]** Location and verification use only the TOC and, from the trailer record, lead0, tail0, S1, S2 and the whole-track MD5. In particular:
 
@@ -929,7 +931,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 | C30 | Independent-CD mode: the publisher's CD marks a 2 s INDEX 00 before track 2 that contains music (the master contains it as well, and encapsulation succeeds); per-track rip with the gaps omitted | Track 1 falls back with reason "unknown samples"; the other tracks pass | L14 R4 R11 |
 | C31 | Disc X ripped and read at offset 0 and at offset +667 | All output files of the two runs are byte-identical, which shows that the offset has entered no file | R16 |
 | C32 | During the self-check: (a) a positive case is made to fail artificially; (b) the reader is made to accept a modified track artificially | (a) The image is void. (b) The image is void, and the process stops | P16 P17 |
-| C33 | Image inspection (disc X, disc S, I2). AUDIO.BIN: contains, sample by sample, only the CD layers and padding; the CD layer of track 1 starts at sample 0; only z_n zeros follow the CD layer of the last track; the length is a whole number of sectors. IMAGE.CUE: track 1 has INDEX 01 00:00:00 and no PREGAP; in derived mode, only INDEX 01 from track 2 onward; REM SESSION lines; the FILE line and MODE2 of the data track; no FLAGS PRE; no hashes. ISRC, CATALOG and CDTEXT lines contain only standard metadata. Data track: the mode byte in every sector header of DATA.BIN is 2; the track, including trailing zero sectors, is at least 300 sectors long; its start = A2 + 11,400. The deliverables are complete | All conform | L3 L4 L5 L6 L7 L8 L9 L11 L12 L13 D1 D3 D6 M1 P12 P13 P14 |
+| C33 | Image inspection (disc X, disc S, I2). AUDIO.BIN: contains, sample by sample, only the CD layers and padding; the CD layer of track 1 starts at sample 0 (in the exception of [L6], its first L frames of digital silence lie before the file, in the pregap); only z_n zeros follow the CD layer of the last track; the length is a whole number of sectors. IMAGE.CUE: track 1 has INDEX 01 00:00:00 and no PREGAP; in derived mode, only INDEX 01 from track 2 onward; REM SESSION lines; the FILE line and MODE2 of the data track; no FLAGS PRE; no hashes. ISRC, CATALOG and CDTEXT lines contain only standard metadata. Data track: the mode byte in every sector header of DATA.BIN is 2; the track, including trailing zero sectors, is at least 300 sectors long; its start = A2 + 11,400. The deliverables are complete | All conform | L3 L4 L5 L6 L7 L8 L9 L11 L12 L13 D1 D3 D6 M1 P12 P13 P14 |
 | C34 | Data session: both directory trees read with the built-in parser; a copy with start address 0 mounted on Windows | Files byte-identical; README.TXT present; only TRACKnn.LAX under /LAE/; no CUE, TOC copy, report, program or autorun.inf; README.TXT contains no hashes, positions, offsets or tables of lengths | L1 D1 D2 D4 D5 |
 | C35 | Unrecognised CUE construct; only the file order available | Stop; highlighted prominently in the report | R2 R3 |
 | C36 | Plug-in: the next track has not finished verification, or has failed | The whole track is played as CD; no switching within the track | R17 R20 |

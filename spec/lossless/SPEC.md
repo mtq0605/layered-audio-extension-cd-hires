@@ -5,7 +5,7 @@
 
 **English** | [中文](SPEC.zh.md)
 
-**Status:** draft for public review, 2026-10-29.
+**Status:** Stable, payload version 1, 2026-11-07.
 **Applies to:** LAE Lossless (short name LAES), the lossless tier of the LAE (Layered Audio Extension) format family, payload version 1.
 **Licence of this document:** CC BY 4.0. (c) 2026 mtq0605.
 
@@ -59,7 +59,7 @@ A conforming decoder:
 1. MUST check the payload as specified in Section 6.7 and the carrier as specified in Sections 7 to 9;
 2. MUST reproduce every master exactly as specified in Section 6.6;
 3. MUST compare each reconstructed master with its SHA-256 (Section 6.5) and MUST NOT present a master whose hash does not match as that master;
-4. MUST, when the payload is missing, damaged or fails a check, still play the core master unchanged ("core master only");
+4. MUST, when the payload is missing, damaged or fails a check, still play the core master unchanged ("core master only"), except in the FLAC form when the STREAMINFO MD5 of the core master is missing or wrong (Section 8): then the payload MUST NOT be used, and the reference tools refuse the file; a player MAY play the core master with a warning to the user, or refuse the file;
 5. MAY produce any of the outputs of Section 10.
 
 A conforming encoder writes payloads that a conforming decoder accepts and that reproduce the encoder's input masters bit for bit. The choices left to the encoder are listed in Section 11.
@@ -346,16 +346,24 @@ Reserved fields: writers MUST write 0, and readers MUST ignore them. The core ma
 
 ## 7. WAV form
 
-An LAES WAV file is a RIFF/WAVE file with the following chunks:
+An LAES WAV file is a RIFF/WAVE file (or, beyond 4 GiB, an RF64 file; see below) with the following chunks:
 
 * `fmt `: integer PCM (format tag 1, or 0xFFFE with the PCM sub-format), 2 channels, the base rate, 16, 24 or 32 bits;
 * `data`: the core master;
 * `LAE `: the LAES payload followed by its CRC-32 (Section 6), with core master mode 0;
 * `LIST` of type `INFO` and `id3 ` (an ID3v2 tag), both optional: tags and pictures. Writers place them after `fmt ` and before `data`. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking an output (Section 10).
 
-A file MUST contain exactly one `data` chunk and at most one `LAE ` chunk. A reader skips every chunk that it does not use. *Informative:* the reference decoder takes the last chunk of each type and clamps any chunk size that runs past the end of the file.
+A file MUST contain exactly one `data` chunk and at most one `LAE ` chunk: writers MUST NOT write more than one of each. A reader that finds more than one `data` or `LAE ` chunk uses the last one of each type, as the reference decoder does. A reader skips every chunk that it does not use. *Informative:* the reference decoder clamps any chunk size that runs past the end of the file.
 
-Any WAV player plays the core master (a 32-bit core master only in players that support 32-bit PCM). The first 4 bytes of the `LAE ` chunk identify the format: `LAE1` = LAE Lossy (LAEY), `LAE2` = LAE Lossless (LAES) (this specification). A reader SHOULD tell the user which format it found; an LAEY decoder that encounters `LAE2` reports an LAES file and does not decode it, and a player plays the core master. A WAV file whose single `data` chunk would exceed 4 GiB is outside the scope of version 1.
+Any WAV player plays the core master (a 32-bit core master only in players that support 32-bit PCM). The first 4 bytes of the `LAE ` chunk identify the format: `LAE1` = LAE Lossy (LAEY), `LAE2` = LAE Lossless (LAES) (this specification). A reader SHOULD tell the user which format it found; an LAEY decoder that encounters `LAE2` reports an LAES file and does not decode it, and a player plays the core master.
+
+**Files beyond 4 GiB (RF64).** A writer uses the RF64 form (EBU Tech 3306, ITU-R BS.2088) when the RIFF size of the file (the value of the RIFF size field: the file length minus 8) would exceed 0xFFFFFFFF; otherwise it uses the RIFF form. The RF64 form differs from the RIFF form only as follows:
+
+* bytes 0–3 are `RF64`, and the 32-bit size field at offset 4 is 0xFFFFFFFF;
+* the first chunk, at offset 12, is `ds64` with a body of 40 bytes: the RIFF size as a `uint64` (the file length minus 8), the size of the `data` body as a `uint64`, the number of core master frames as a `uint64`, a table length of 1 as a `uint32`, and one table entry: the chunk ID `LAE ` and the size of its body as a `uint64`;
+* the 32-bit size fields of the `data` and `LAE ` chunks are 0xFFFFFFFF; their sizes are those in `ds64`.
+
+A reader MUST accept the RF64 form, and also the same layout with `BW64` in bytes 0–3. In such a file, the first chunk MUST be `ds64` with a body of at least 28 bytes; a chunk whose 32-bit size field is 0xFFFFFFFF takes its size from `ds64`: the `data` size for `data`, and the table entry with the same chunk ID for any other chunk.
 
 ---
 
@@ -367,10 +375,10 @@ An LAES FLAC file is a FLAC stream (RFC 9639) with the following structure:
 "fLaC" | STREAMINFO | VORBIS_COMMENT, PICTURE (optional) | APPLICATION blocks with ID "LAE2" (1 or more) | other metadata blocks (optional) | audio frames = the core master
 ```
 
-* STREAMINFO: 2 channels, the base rate, 16, 24 or 32 bits, the sample count of the core master (MUST NOT be 0) and the MD5 of the core master (MUST be present and correct). A decoder that finds the MD5 missing or wrong MUST NOT use the payload: the core master is not the one for which the payload was made. Whether the decoder still plays the core master is up to the player.
+* STREAMINFO: 2 channels, the base rate, 16, 24 or 32 bits, the sample count of the core master (MUST NOT be 0) and the MD5 of the core master (MUST be present and correct). A decoder that finds the MD5 missing or wrong MUST NOT use the payload: the core master is not the one for which the payload was made. In that case, the reference tools refuse the file; a player MAY play the core master with a warning to the user, or refuse the file (Section 1.3, item 4).
 * The LAES payload (with its CRC-32; core master mode 1) is split into pieces of at most 2^24 − 5 bytes. Each piece is the data of one APPLICATION block whose 4-byte ID is `LAE2` (0x4C 0x41 0x45 0x32), registered by IANA in the FLAC Application Metadata Block IDs registry (RFC 9639, Section 12.2; 2026-10-31). Writers place these blocks after STREAMINFO and after the VORBIS_COMMENT and PICTURE blocks, if any, consecutively with no other block between them. A reader concatenates all APPLICATION blocks with ID `LAE2`, in file order, wherever they stand among the metadata blocks.
 * Tags and pictures (optional): at most one VORBIS_COMMENT block and any number of PICTURE blocks (RFC 9639, Sections 8.6 and 8.8). Writers place them before the `LAE2` blocks, so that a player reads them without skipping the payload. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking an output (Section 10).
-* The audio frames hold the core master. Any valid FLAC coding of the core master is allowed.
+* The audio frames hold the core master, coded with independent left and right channels: channel assignment 0b0001 in every frame header, with no inter-channel decorrelation. Within this channel assignment, any valid FLAC coding of the core master is allowed. Support for inter-channel decorrelation may be added in a later revision.
 * No SEEKTABLE or CUESHEET block is written.
 
 Every FLAC decoder that implements RFC 9639 in full plays the core master and skips the APPLICATION blocks (checked 2026-11-05 with libFLAC and FFmpeg). Decoders that implement only part of it may not do so: the built-in FLAC decoder of Windows (Media Foundation, also used by Explorer) does not decode 32-bit FLAC, and it does not recognise a file whose first audio frame starts more than about 4 MiB into the file, as is the case in an LAES FLAC file whose payload is larger than that. Tested decoders and workarounds are given in [COMPATIBILITY.md](../COMPATIBILITY.md).
@@ -399,7 +407,7 @@ The outputs that a decoder may offer for each file (Section 1.3, item 5) are:
 |---|---|---|
 | the core master | yes | as stored |
 | each master | yes | Section 6.6 |
-| each rate level of a master | yes | level k (Section 3.2), with samples `x_k << w`, written at the word length of the master; a value outside that word length is limited to it on output |
+| each rate level of a master | bit-exact by definition (level k, Section 3.2) within the word length of the master; a value beyond that word length is limited to it on output | level k (Section 3.2), with samples `x_k << w`, written at the word length of the master |
 | a derived 16-bit master | relative to its definition: **yes** (every decoder reproduces it bit for bit); relative to the master from which it is made: **no** (requantised to 16 bits with TPDF dither) | Section 10.1 |
 
 ### 10.1 Derived 16-bit version

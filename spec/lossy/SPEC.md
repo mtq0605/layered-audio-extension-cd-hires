@@ -32,7 +32,7 @@ The encoder's partition search is in `src/partition.h`. That file is not needed 
 The format family is called LAE. It has two tiers:
 
 * the lossy tier, LAE Lossy (LAEY), specified here;
-* the lossless tier, LAE Lossless (LAES): specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (draft for public review), which supersedes the design document [spec/lossless/DESIGN.md](../lossless/DESIGN.md).
+* the lossless tier, LAE Lossless (LAES): specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (stable, payload version 1), which supersedes the design document [spec/lossless/DESIGN.md](../lossless/DESIGN.md).
 
 The encapsulation of the extension on CD-Extra discs and in separate extension files is specified in [spec/cdx/SPEC.md](../cdx/SPEC.md) (draft).
 
@@ -66,7 +66,7 @@ A decoder can produce the following outputs. All of them are written as 24-bit t
 
 When an output rate below the master rate is selected, the frequency-layer streams that start at or above the output Nyquist frequency are skipped without being decoded (Section 5.4). The result is then brought down to the selected rate with the half-band decimators of Section 10.
 
-LAE Lossless (LAES), the lossless tier, is not specified here; it is specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (draft for public review).
+LAE Lossless (LAES), the lossless tier, is not specified here; it is specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (stable, payload version 1).
 
 ### 1.2 Decoding model (informative)
 
@@ -227,7 +227,7 @@ crc = crc XOR 0xFFFFFFFF
 where T[i] = i iterated 8 times through: c = (c AND 1) ? 0xEDB88320 XOR (c >> 1) : (c >> 1)
 ```
 
-A decoder MUST verify the CRC **before** interpreting any other byte of the chunk body. A single CRC covers the whole extension.
+A decoder MUST verify the CRC **before** interpreting any other byte of the chunk body. The only exception is the format identifier: a decoder MAY read the first 4 bytes of the chunk body (`LAE1` or `LAE2`) before the CRC check, to identify the format only (see the introduction); every other byte is interpreted only after the CRC has been verified. The reference decoder does this: it reports an `LAE2` chunk as an LAES file before the CRC check (`src/lae_decoder.h`). A single CRC covers the whole extension.
 
 In the rest of this document, the **payload** means bytes `0 ... n-5`, that is, the chunk body without the CRC. Offsets are relative to its start.
 
@@ -979,7 +979,8 @@ The CD layer is ordinary PCM and is never affected by an error in the extension.
 | Self-test failure (Section 13; the reference decoder runs it before reading the input) | MUST NOT decode | 4 |
 | Not a RIFF/WAVE file; no `data` chunk; not 16-bit two-channel integer PCM | Not an LAE Lossy file. MUST NOT decode | 1 |
 | No `LAE ` chunk, or an `LAE ` chunk with an empty body | Plain CD audio. No extension to decode | 1 |
-| `LAE ` chunk body < 8 bytes, or CRC mismatch | MUST refuse before parsing any field | 3 |
+| `LAE ` chunk body < 8 bytes, or CRC mismatch | MUST refuse before parsing any field (other than the format identifier, Section 3.3) | 3 |
+| First 4 bytes of the chunk body are `LAE2` (an LAES file; read before the CRC check, Section 3.3) | MUST NOT decode; reports an LAES file | 1 |
 | Magic or version not `LAE1` / 5 | MUST NOT decode (unknown version) | 1 |
 | Any of V3–V11 fails | MUST refuse | 3 |
 | V12 fails (dither flags) | MUST refuse | 3 |

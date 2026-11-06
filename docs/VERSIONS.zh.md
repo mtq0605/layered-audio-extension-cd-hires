@@ -23,10 +23,10 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 注册。
 | `laes`（LAES 工具） | 发布时的提交哈希 | LAES 有效载荷 v1 |
 | `lae_cdx`（CD-Extra 工具） | 发布时的提交哈希 | CDX v0 |
 | `lae_noise` 和噪声面板 | 发布时的提交哈希 | LAENOISE 1 |
-| foobar2000 组件 `foo_input_lae` | 0.19 | LAEY v5、LAES v1 |
-| Kodi 插件 `audiodecoder.lae` | 0.2.4 | LAEY v5、LAES v1 |
-| DirectShow 过滤器 `dshow_lae` | 0.2.3 | LAEY v5、LAES v1 |
-| VLC 模块 `vlc_lae` | 0.1.3 | LAEY v5、LAES v1 |
+| foobar2000 组件 `foo_input_lae` | 0.20 | LAEY v5、LAES v1 |
+| Kodi 插件 `audiodecoder.lae` | 0.2.5 | LAEY v5、LAES v1 |
+| DirectShow 过滤器 `dshow_lae` | 0.2.4 | LAEY v5、LAES v1 |
+| VLC 模块 `vlc_lae` | 0.1.4 | LAEY v5、LAES v1 |
 | Java 库（`java/`） | 发布时的提交哈希 | LAEY v5、LAES v1 |
 
 ## 兼容性
@@ -42,4 +42,4 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 注册。
 
 | 发布 | 仓库提交哈希 | LAEY | LAES | CDX | LAENOISE | foobar2000 | Kodi | DirectShow | VLC |
 |---|---|---|---|---|---|---|---|---|---|
-| *下一个* | *发布时填写* | v5 | v1 | v0 | 1 | 0.19 | 0.2.4 | 0.2.3 | 0.1.3 |
+| *下一个* | *发布时填写* | v5 | v1 | v0 | 1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |

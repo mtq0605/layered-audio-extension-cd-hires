@@ -5,13 +5,13 @@ SPDX-License-Identifier: CC0-1.0
 
 # File sizes by mode, scheme and sample rate
 
-Generated from [loop10_v5_release_candidate.csv](loop10_v5_release_candidate.csv) (see [README.md](README.md) for how it was measured).
+Generated from [loop10_v5_release_candidate.csv](loop10_v5_release_candidate.csv); [README.md](README.md) describes how the data were measured.
 Values are **medians in MB per minute of stereo music** (1 MB = 10^6 bytes; 10-second excerpts x 6). "CD" is the CD layer as
-uncompressed PCM; "depth" and "freq." are the two extension layers; "total" = CD + depth + freq. The CD layer is identical in all modes.
+uncompressed PCM; "depth" and "freq." are the depth layer and the frequency layer; "total" = CD + depth + freq. The CD layer is identical in all modes.
 
-- Measured on the v5 release candidate: the published encoder gives frequency-layer sizes 0.01-0.3 % smaller.
-- **Recordings** (88.2-192 kHz, anonymised) are the representative figures. **Synthetic** signals are stress tests (sweeps, noise,
-  square waves, transients ...) and show extremes, not typical music; they are the only data at 352.8 and 384 kHz.
+- The figures were measured on the v5 release candidate; with the published encoder, frequency-layer sizes are 0.01-0.3 % smaller.
+- **Recordings** (88.2-192 kHz, anonymised) provide the representative figures. **Synthetic** signals are stress tests (sweeps, noise,
+  square waves, transients, etc.); they show extremes rather than typical music, and they are the only data at 352.8 and 384 kHz.
 
 ## Recordings
 
@@ -126,4 +126,3 @@ uncompressed PCM; "depth" and "freq." are the two extension layers; "total" = CD
 | 5 | 2.1 | 12.4 | 25.7 | 2.1 | 9.8 | 23.2 |
 | keep | 2.2 | 12.8 | 26.1 | 2.2 | 10.3 | 23.6 |
 | keep20 | 3.6 | 12.8 | 27.0 | 3.6 | 10.3 | 24.5 |
-

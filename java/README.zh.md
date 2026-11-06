@@ -52,4 +52,4 @@ Java 代码移植自 `src/` 中的 C++ 参考实现，移植过程中不修改 C
 
 ## 许可
 
-与 C++ 代码相同：解码器和公共工具为 Apache-2.0；编码器文件为 GPL-3.0-or-later 或商业许可（见 [COMMERCIAL.md](../COMMERCIAL.md)）。每个文件在其 SPDX 文件头中写明许可。
+与 C++ 代码相同：解码器和公共工具为 Apache-2.0；编码器文件为双重许可：GPL-3.0-or-later 与作者的商业许可，使用者任选其一（见 [COMMERCIAL.md](../COMMERCIAL.md)）。每个文件在其 SPDX 文件头中写明许可。

@@ -3,7 +3,7 @@
 // Block-wise encoder (2026-10-29): the master read piece by piece instead of whole. RIFF/WAVE (as wavio::read), RF64 (ds64 sizes) and
 // Sony Wave64; integer PCM 16 / 24 / 32 bit (PCM or WAVE_FORMAT_EXTENSIBLE). The samples become the raw stereo int32 file every module
 // reads (24-bit value left-aligned, 32-bit input: the top 24 bits), exactly the values wavio::read gives. While reading, the MD5 of the
-// data bytes is computed once and, for 32-bit input, the samples with a non-zero lowest byte are counted.
+// data bytes is computed once (RM-1) and, for 32-bit input, the samples with a non-zero lowest byte are counted.
 #pragma once
 #include <cstdio>
 #include <cstdint>

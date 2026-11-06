@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: Apache-2.0
 // The encoder's elementary functions, identical on every platform (2026-11-03). The C library's log2 / sin / cos / pow / log10 may
-// differ in the last bit between platforms (x86 and x64 already did: log2 changed the choice between two partitions of equal cost), and the
+// differ in the last bit between platforms (x86 and x64 already did), and the
 // encoder's decisions (code lengths, detector thresholds, filter taps) follow from them. These versions use only IEEE-754 binary64
 // +, -, *, / and the exactly rounded or exact operations sqrt, floor, frexp, ldexp, in the fixed order written below, the way
 // laes_math.h does for LAES. Compile with /fp:strict (MSVC) or -ffp-contract=off (GCC / Clang); on 32-bit x86 with SSE2.

@@ -1,0 +1,73 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en_GB\n"
+
+msgctxt "#30000"
+msgid "General"
+msgstr ""
+
+msgctxt "#30001"
+msgid "What plays"
+msgstr ""
+
+msgctxt "#30002"
+msgid "Highest sample rate"
+msgstr ""
+
+msgctxt "#30003"
+msgid "LAES: highest word length"
+msgstr ""
+
+msgctxt "#30010"
+msgid "All layers / the master"
+msgstr ""
+
+msgctxt "#30011"
+msgid "CD layer + depth layer (base rate)"
+msgstr ""
+
+msgctxt "#30012"
+msgid "CD layer only"
+msgstr ""
+
+msgctxt "#30020"
+msgid "No limit"
+msgstr ""
+
+msgctxt "#30021"
+msgid "192 kHz"
+msgstr ""
+
+msgctxt "#30022"
+msgid "96 kHz"
+msgstr ""
+
+msgctxt "#30030"
+msgid "No limit"
+msgstr ""
+
+msgctxt "#30031"
+msgid "16 bit"
+msgstr ""
+
+msgctxt "#30032"
+msgid "24 bit"
+msgstr ""
+
+msgctxt "#30033"
+msgid "32 bit"
+msgstr ""
+
+msgctxt "#30100"
+msgid "LAE decoder: LAES"
+msgstr ""
+
+msgctxt "#30101"
+msgid "First play of this file: checking all masters (SHA-256), once per file"
+msgstr ""
+
+msgctxt "#30200"
+msgid "LAE audio (LAES lossless / LAEY)"
+msgstr ""
+

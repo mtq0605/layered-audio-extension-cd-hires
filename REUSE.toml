@@ -16,7 +16,7 @@ version = 1
 
 # Specification texts and documentation.
 [[annotations]]
-path = ["README.md", "README.zh.md", "CHANGELOG.md", "spec/**", "docs/**", "plugins/**.md", "plugins/**.png"]
+path = ["README.md", "README.zh.md", "CHANGELOG.md", "SECURITY.md", "SECURITY.zh.md", "THIRD_PARTY.md", "THIRD_PARTY.zh.md", "spec/**", "docs/**", "plugins/**.md", "plugins/**.png", "java/**.md"]
 precedence = "closest"
 SPDX-FileCopyrightText = "2026 mtq0605"
 SPDX-License-Identifier = "CC-BY-4.0"
@@ -68,4 +68,38 @@ path = [
 ]
 precedence = "closest"
 SPDX-FileCopyrightText = "2026 mtq0605"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Licence text for the audio works attached to releases (the audio itself is
+# not in this repository and is covered by AUDIO_LICENSE, all rights reserved).
+[[annotations]]
+path = ["AUDIO_LICENSE.md", "AUDIO_LICENSE.zh.md"]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 mtq0605"
+SPDX-License-Identifier = "CC0-1.0"
+
+# Player plug-ins: resource, module-definition, manifest and settings files,
+# test programs without their own header, and the Windows UTF-8 / long-path
+# helpers in src/ (decoder side, Apache-2.0). The Kodi add-on binary built
+# from these sources is distributed under GPL-3.0-or-later (THIRD_PARTY.md).
+[[annotations]]
+path = [
+  "plugins/**.def",
+  "plugins/**.rc",
+  "plugins/**.manifest",
+  "plugins/**.xml",
+  "plugins/**.po",
+  "plugins/**.cpp",
+  "src/win_utf8.h",
+  "src/win_longpath.manifest",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 mtq0605"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Licence texts shipped inside the Kodi add-on package.
+[[annotations]]
+path = ["plugins/kodi_audiodecoder_lae/audiodecoder.lae/LICENSE*.txt"]
+precedence = "closest"
+SPDX-FileCopyrightText = "Free Software Foundation, Inc.; The Apache Software Foundation"
 SPDX-License-Identifier = "CC0-1.0"

@@ -22,7 +22,7 @@
 // gives P(Q > x) ~ n e^{-x} (n frames = trial frequencies per bin); the threshold makes the expected number of false lines per file
 // 0.01. Only the bin's own values are used. Two resolutions, M and S. Lines are linked across windows into time spans; a strong
 // line's coherent leakage into neighbouring bins is removed.
-// Output (user 2026-11-04: no labels): one candidate list of everything detected (stationary-noise regions and lines), each with
+// Output (no labels): one candidate list of everything detected (stationary-noise regions and lines), each with
 // plane, start, end, length, frequency range and level, sorted by start time and then frequency. The user chooses.
 // usage: lae_noise scan <in.wav> <out.txt> [candidates.laenoise]   (the candidate file has the marking format of noise_marks.h)
 //        (2026-11-06: part of lae_noise, which includes this file with NOISE_SCAN_NO_MAIN; built alone it is noise_scan0c, same output)
@@ -100,7 +100,7 @@ static void planeFrames(WavStream& ws, int plane, long fr0, long fr1, vector<i32
         for (int n = 0; n < N / 2; n++) { u[n] = -z[3 * N / 2 - 1 - n] - z[3 * N / 2 + n]; u[N / 2 + n] = z[n] - z[N - 1 - n]; }
         mdct::dct4(u, c); for (int k = 0; k < N; k++) Xc[(size_t)(m - fr0) * N + k] = (i32)std::llround(c[k]); } }
 
-// one detected candidate (user 2026-11-04: no labels, everything listed, sorted by position and length)
+// one detected candidate (no labels, everything listed, sorted by position and length)
 struct Cand { double t0, t1, f0, f1, lv; string kind, plane; long m0 = 0, m1 = 0; int c0 = 0, c1 = 0; double fLine = 0; };   // m0..m1, c0..c1: encoder cell coordinates (noise_marks.h)
 
 static void stationaryPass(FILE* out, WavStream& ws, int plane, double rate, const char* name, double dbOff, const vector<double>& edges, const Calib& cal, int C, int T, vector<Cand>& cands) {

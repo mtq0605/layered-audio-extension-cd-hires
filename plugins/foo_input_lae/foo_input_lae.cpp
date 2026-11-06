@@ -1,12 +1,19 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: Apache-2.0
-// foo_input_lae: LAE (Layered Audio Extension) decoder for foobar2000 1.4 / 1.5 (and the 32-bit foobar2000 2.x).
+// foo_input_lae: LAE (Layered Audio Extension) decoder for foobar2000: 1.4 / 1.5 and 2.x 32-bit (x86 build), 2.x 64-bit (x64 build).
 // Plays LAE v5 WAV files (.wav with an "LAE " chunk after the CD layer, or the same file named .lae) through liblae
 // (src/lae_api.h, compiled into this DLL). WAV files without an LAE chunk are refused at once, so foobar2000 hands them to its
 // standard WAV decoder. Rules of the LAE reader (spec/cdx/SPEC.md R17, R20): a track is verified completely before it
 // plays in high resolution (chunk CRC, header and stream structure); when it cannot be, the whole track plays as the CD layer; no
 // automatic switch between CD and extension inside a track (only the user's choice in the layer menu switches, at the current position).
-// Built against the foobar2000 1.5 SDK (SDK-2019-12-27, BSD-style licence, not part of this repository; see README.md here).
+// LAE Lossless (LAES, 2026-11-01): WAV files whose LAE chunk begins with LAE2 and FLAC files with "LAE2" APPLICATION blocks (other FLAC
+// files are refused at once and go to foobar2000's FLAC decoder). One choice plays (the core, a master, a rate level; settings below);
+// a worker thread decodes it into a temporary file that Windows deletes on close. A choice plays as that master only after a full run
+// matched its SHA-256 (spec 1.3); the result is remembered by the SHA-256 of the whole file (laes_verified.txt in the profile folder),
+// so an unchanged file plays at once the next time, a changed one is checked again. Seeking goes to any decoded position at once and
+// waits for the worker beyond it; a switch or a jump starts at the block that holds the time, using block positions found while
+// decoding and kept in memory for the session only (the file holds no index; LAES rules T-1, T-2).
+// Built against the foobar2000 SDK (x86: SDK-2019-12-27; x64: SDK-2026-10-01; BSD-style licence, not part of this repository).
 // Layers: menu Playback > LAE (applies at once); the same settings in Preferences > Advanced > Decoding > LAE decoder.
 // Texts are Chinese when the Windows display language is Chinese, English otherwise.
 #include <foobar2000/SDK/foobar2000.h>
@@ -16,12 +23,20 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <cstdarg>
 #include <exception>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <thread>
 #include <set>
 #include <vector>
 #include <string>
 #include "lae_api.h"
+#include "lae_wavtags.h"   // tags of the WAV form (LIST/INFO + id3), shared by the LAE player plugins
 
 namespace {
 // ---- texts: Chinese when the Windows display language is Chinese
@@ -29,9 +44,10 @@ bool zh() { static const bool z = PRIMARYLANGID(GetUserDefaultUILanguage()) == L
 const char* T(const char* en, const char* cn) { return zh() ? cn : en; }
 }
 
-DECLARE_COMPONENT_VERSION(T("LAE decoder", "LAE 解码器"), "0.3",
+DECLARE_COMPONENT_VERSION(T("LAE decoder", "LAE 解码器"), "0.20",
     "LAE (Layered Audio Extension) decoder\n"
-    "Plays LAE v5 WAV files: the CD layer plus the depth and frequency layers, up to the master rate (e.g. 352.8 kHz).\n"
+    "Plays LAE v5 WAV files (LAEY: the CD layer plus the depth and frequency layers, up to the master rate, e.g. 352.8 kHz) and\n"
+    "LAE Lossless files (LAES, WAV or FLAC: the core master, another master or a rate level; a master plays after its SHA-256 check).\n"
     "Files without an LAE extension are left to the standard decoders.\n"
     "Decoder: liblae (Apache-2.0). foobar2000 SDK (c) Peter Pawlowski, BSD-style licence.");
 VALIDATE_COMPONENT_FILENAME("foo_input_lae.dll");
@@ -48,8 +64,17 @@ advconfig_integer_factory g_layers(T("Layers: 0 = all layers, 1 = CD layer + dep
 advconfig_integer_factory g_maxrate(T("Highest output sample rate in Hz (0 = the master rate; all layers are decoded to the highest octave of the master rate "
     "not above it, but never below twice the CD rate)", "最高输出采样率 Hz（0 = 母带采样率；全部层解到不超过它的最高一档，但不低于 CD 采样率的 2 倍）"),
     guid_maxrate, guid_branch, 1, 0, 0, 1536000);
-advconfig_checkbox_factory g_autoOrder(T("Put LAE ahead of decoders that also take .wav files (automatically)", "自动把 LAE 排在其他接收 .wav 的解码器前面"),
+advconfig_checkbox_factory g_autoOrder(T("Put LAE ahead of decoders that also take .wav / .flac files (automatically)", "自动把 LAE 排在其他接收 .wav / .flac 的解码器前面"),
     guid_autoorder, guid_branch, 2, true);
+const GUID guid_maxbits = { 0x3f4c2a91, 0x6d0e, 0x4b8a, { 0x9e, 0x51, 0x27, 0xc3, 0x84, 0x1d, 0xa6, 0x5b } };
+advconfig_integer_factory g_maxbits(T("LAES (lossless): highest bit depth (0 = no limit, 16, 24 or 32)", "LAES（无损）：最高位深（0 = 不限，16、24 或 32）"),
+    guid_maxbits, guid_branch, 3, 0, 0, 32);
+const GUID guid_verifyadd = { 0x52e8d0a4, 0x19b7, 0x4c3e, { 0xa6, 0x2f, 0x81, 0x0d, 0x5c, 0x93, 0x7b, 0xe4 } };
+advconfig_checkbox_factory g_verifyOnAdd(T("LAES (lossless): check files in the background when they are added to the media library (then they play at once)",
+    "LAES（无损）：音乐入库时在后台校验（之后播放不用等）"), guid_verifyadd, guid_branch, 4, true);
+const GUID guid_prefetch = { 0x8c41e2d7, 0x3b6a, 0x4f19, { 0x92, 0x5e, 0x0a, 0xd4, 0x71, 0x38, 0xc6, 0xbf } };
+advconfig_checkbox_factory g_prefetch(T("LAES (lossless): keep the other masters ready while playing, for switching without a gap (uses more CPU)",
+    "LAES（无损）：播放时让其他母带在后台待命，切换几乎无间断（多用一些 CPU）"), guid_prefetch, guid_branch, 5, true);
 
 // ---- the decoder's identity in foobar2000's decoder priority list. foobar2000 puts a decoder it has never seen at the top of a saved
 // list, but builds the first list of a new profile in no fixed order. When a decoder that also takes .wav files is ahead of LAE and the
@@ -66,6 +91,11 @@ const GUID guid_cfg_promoted = { 0x108e268b, 0xf67e, 0x4000, { 0x88, 0x1a, 0xab,
 const GUID guid_cfg_known = { 0xfb1a94ae, 0x3079, 0x4cb7, { 0xbd, 0xd7, 0x41, 0x24, 0xcd, 0x18, 0xcf, 0x6d } };
 // the GUID slot: read once from the configuration and fixed for the session (foobar2000 knows a decoder by one GUID per session);
 // a move is saved for the next start
+#if FOOBAR2000_TARGET_VERSION >= 81   // the 2.0 SDK (x64 build): the same stored settings through its legacy cfg_var classes
+using cfg_var_legacy::cfg_var; typedef cfg_var_legacy::cfg_bool cfg_bool_l; typedef cfg_var_legacy::cfg_string cfg_string_l;
+#else
+typedef cfg_bool cfg_bool_l; typedef cfg_string cfg_string_l;
+#endif
 class cfg_slot : public cfg_var {
 public:
     explicit cfg_slot(const GUID& g) : cfg_var(g) {}
@@ -75,8 +105,8 @@ protected:
     void set_data_raw(stream_reader* s, t_size, abort_callback& a) { t_uint32 v = 0; s->read_lendian_t(v, a); current = next = std::min<t_uint32>(v, kInputGuids - 1); }
 };
 cfg_slot g_slot(guid_cfg_slot);
-cfg_bool g_promoted(guid_cfg_promoted, false);   // LAE has moved itself at least once (a record; the decision uses g_known)
-cfg_string g_known(guid_cfg_known, "");          // GUIDs of the decoders seen at the last start (to tell a newly installed one)
+cfg_bool_l g_promoted(guid_cfg_promoted, false);   // LAE has moved itself at least once (a record; the decision uses g_known)
+cfg_string_l g_known(guid_cfg_known, "");          // GUIDs of the decoders seen at the last start (to tell a newly installed one)
 
 // ---- the decoder needs strict IEEE-754 double arithmetic: round to nearest, no flush-to-zero, 53-bit x87 precision (x86)
 struct FpPin {   // x87 and SSE are saved and restored separately (_controlfp_s would report and write back a mix of the two)
@@ -101,32 +131,497 @@ struct FileReader {
         try { r->f->seek(offset, r->abort); r->f->read_object(buf, len, r->abort); return 0; } catch (...) { r->ep = std::current_exception(); return -1; } }
 };
 std::string khz(int hz) { char s[32]; snprintf(s, sizeof s, hz % 1000 ? "%.1f kHz" : "%.0f kHz", hz / 1000.0); return s; }
+
+uint64_t nowMs() { return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+// the folder shared by every LAE player of this user (foobar2000, Kodi, DirectShow): SHA-256 results and block position records, so a file
+// checked in one player plays at once in the others
+std::wstring laeSharedDir() { wchar_t p[MAX_PATH]; const DWORD n = GetEnvironmentVariableW(L"APPDATA", p, MAX_PATH);
+    std::wstring d = n && n < MAX_PATH ? std::wstring(p) : std::wstring(L"."); d += L"\\LAE"; CreateDirectoryW(d.c_str(), nullptr); return d; }
+// ---- LAES (LAE Lossless): which masters passed a full decode with their SHA-256 (spec 1.3), remembered by the SHA-256 of the whole file
+// content (not its path or date: a changed byte means a new check). A choice plays as its master (or a rate level / derived version of
+// it) only when that master is recorded as ok. File: laes_verified.txt in the profile folder, one line per result:
+// <file SHA-256 hex> m<master index from 1> ok|fail
+class VerifiedStore {
+public:
+    // a hint by path and size that the file was checked before (only for the scale of the progress bar; the check itself goes by content)
+    bool hint(const std::string& path, uint64_t size) { std::lock_guard<std::mutex> g(mx); load(); return map.count("file " + std::to_string(size) + " " + path) != 0; }
+    void putHint(const std::string& path, uint64_t size) { if (hint(path, size)) return; std::lock_guard<std::mutex> g(mx); const std::string k = "file " + std::to_string(size) + " " + path; map[k] = 1;
+        FILE* f = _wfopen(this->path().c_str(), L"ab"); if (!f) return; fprintf(f, "%s ok\n", k.c_str()); fclose(f); }
+    int get(const unsigned char sha[32], int m) { std::lock_guard<std::mutex> g(mx); load(); auto it = map.find(key(sha, m));
+        if (it == map.end()) { loaded = false; load(); it = map.find(key(sha, m)); }   // another player may have checked it meanwhile
+        return it == map.end() ? 0 : it->second; }   // 1 ok, -1 fail, 0 unknown
+    void put(const unsigned char sha[32], int m, bool ok) { std::lock_guard<std::mutex> g(mx); load(); const std::string k = key(sha, m); auto it = map.find(k);
+        if (it != map.end() && it->second == (ok ? 1 : -1)) return; map[k] = ok ? 1 : -1;
+        FILE* f = _wfopen(path().c_str(), L"ab"); if (!f) return; fprintf(f, "%s %s\n", k.c_str(), ok ? "ok" : "fail"); fclose(f); }
+private:
+    std::mutex mx; bool loaded = false; std::map<std::string, int> map;
+    static std::string key(const unsigned char sha[32], int m) { static const char* d = "0123456789ABCDEF"; std::string s; for (int i = 0; i < 32; i++) { s += d[sha[i] >> 4]; s += d[sha[i] & 15]; } return s + " m" + std::to_string(m + 1); }
+    // the file shared by every LAE player of this user (%APPDATA%\LAE); lines are only appended, so players running at once keep each
+    // other's results. Up to 0.14 the file was in the foobar2000 profile folder: it is read as well.
+    static std::wstring path() { return laeSharedDir() + L"\\laes_verified.txt"; }
+    static std::wstring oldPath() { pfc::string8 p = core_api::get_profile_path(); const char* s = p.get_ptr(); if (!strncmp(s, "file://", 7)) s += 7;
+        return std::wstring(pfc::stringcvt::string_wide_from_utf8(s)) + L"\\laes_verified.txt"; }
+    void load() { if (loaded) return; loaded = true;
+        for (const std::wstring& pth : {oldPath(), path()}) { FILE* f = _wfopen(pth.c_str(), L"rb"); if (!f) continue; char line[512];
+            while (fgets(line, sizeof line, f)) { std::string s(line); while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+                const size_t a = s.rfind(' '); if (a == std::string::npos) continue; map[s.substr(0, a)] = s.substr(a + 1) == "ok" ? 1 : -1; }
+            fclose(f); } }
+};
+VerifiedStore g_verified;
+// measured decoding speeds as real-time factors (seconds of audio per second of decoding) on this machine, by the SHA-256 of the file:
+// "all" = every master in one pass (the background or first check; any single choice decodes at least this fast), or a choice's name
+// (measured while it played). The buffer at the next start is sized from them instead of being measured first. File: laes_speed.txt.
+class SpeedStore {
+public:
+    double get(const unsigned char sha[32], const std::string& what) { std::lock_guard<std::mutex> g(mx); load(); auto it = map.find(key(sha, what)); return it == map.end() ? 0 : it->second; }
+    void put(const unsigned char sha[32], const std::string& what, double rtf) { if (!(rtf > 0)) return; std::lock_guard<std::mutex> g(mx); load(); map[key(sha, what)] = rtf;
+        FILE* f = _wfopen(file().c_str(), L"ab"); if (!f) return; fprintf(f, "%s %.3f\n", key(sha, what).c_str(), rtf); fclose(f); }
+private:
+    std::mutex mx; bool loaded = false; std::map<std::string, double> map;
+    static std::string key(const unsigned char sha[32], const std::string& what) { static const char* d = "0123456789ABCDEF"; std::string s; for (int i = 0; i < 32; i++) { s += d[sha[i] >> 4]; s += d[sha[i] & 15]; } return s + " " + what; }
+    static std::wstring file() { pfc::string8 p = core_api::get_profile_path(); const char* s = p.get_ptr(); if (!strncmp(s, "file://", 7)) s += 7;
+        return std::wstring(pfc::stringcvt::string_wide_from_utf8(s)) + L"\\laes_speed.txt"; }
+    void load() { if (loaded) return; loaded = true; FILE* f = _wfopen(file().c_str(), L"rb"); if (!f) return; char line[600];
+        while (fgets(line, sizeof line, f)) { std::string s(line); while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+            const size_t a = s.rfind(' '); if (a == std::string::npos) continue; map[s.substr(0, a)] = atof(s.c_str() + a + 1); }
+        fclose(f); }
+};
+SpeedStore g_speed;
+// the choice the user picked for a track (context menu "LAES: choose what plays"), by path; it wins over the general settings.
+// File: laes_choices.txt in the profile folder, one line per track: <choice name> TAB <path>; an empty name = automatic.
+class ChoiceStore {
+public:
+    std::string get(const char* path) { std::lock_guard<std::mutex> g(mx); load(); auto it = map.find(path); return it == map.end() ? std::string() : it->second; }
+    void set(const char* path, const std::string& name) { std::lock_guard<std::mutex> g(mx); load(); if (name.empty()) map.erase(path); else map[path] = name;
+        FILE* f = _wfopen(file().c_str(), L"wb"); if (!f) return; for (auto& e : map) fprintf(f, "%s\t%s\n", e.second.c_str(), e.first.c_str()); fclose(f); }
+private:
+    std::mutex mx; bool loaded = false; std::map<std::string, std::string> map;
+    // up to 0.10 the name lacked its backslash, so the file sat beside the profile folder ("<profile>laes_choices.txt"): read that once
+    static std::wstring file(bool old = false) { pfc::string8 p = core_api::get_profile_path(); const char* s = p.get_ptr(); if (!strncmp(s, "file://", 7)) s += 7;
+        return std::wstring(pfc::stringcvt::string_wide_from_utf8(s)) + (old ? L"laes_choices.txt" : L"\\laes_choices.txt"); }
+    void load() { if (loaded) return; loaded = true; FILE* f = _wfopen(file().c_str(), L"rb"); if (!f) f = _wfopen(file(true).c_str(), L"rb"); if (!f) return; char line[4096];
+        while (fgets(line, sizeof line, f)) { std::string s(line); while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+            const size_t t = s.find('\t'); if (t != std::string::npos && t > 0) map[s.substr(t + 1)] = s.substr(0, t); }
+        fclose(f); }
+};
+ChoiceStore g_choices;
+// "176.4 kHz / 24 bit, master 3" and the like
+std::string choiceText(const laes_choice_info& c) {
+    std::string s = khz(c.rate) + " / " + std::to_string(c.bits) + " bit";
+    if (c.kind == LAES_KIND_CORE) return s + T(", core master", "，核心母带");
+    if (c.kind == LAES_KIND_MASTER) return s + T(", master ", "，母带 ") + std::to_string(c.master + 1);
+    if (c.kind == LAES_KIND_LEVEL) return s + T(", rate level of master ", "，母带 ") + std::to_string(c.master + 1) + T("", " 的采样率档");
+    return s + T(", derived 16-bit master (lossless relative to its definition, bit-identical on every decoder; not lossless relative to its source master)",
+                 "，派生 16 位母带（相对其定义无损，每个解码器逐位一致；相对所取自的母带不是无损）"); }
+// after a run to the end: every master it decoded is recorded (ok or fail)
+void recordRun(const laes_play* p, const unsigned char sha[32], int masters) { for (int m = 0; m < masters; m++) { const int r = laes_master_ok(p, m); if (r >= 0) g_verified.put(sha, m, r == 1); } }
+int mastersOf(const laes_file* f) { laes_file_info fi; laes_get_info(f, &fi); int n = 0; for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_MASTER) n++; } return n; }
+// event log of LAES playback (initialize, seek, switch, stop) for finding playback faults: written only while laes_debug.log exists in the
+// profile folder (create an empty file to turn it on, delete it to turn it off)
+void dbg(const char* fmt, ...) { static std::mutex mx; std::lock_guard<std::mutex> g(mx); pfc::string8 p = core_api::get_profile_path(); const char* s = p.get_ptr(); if (!strncmp(s, "file://", 7)) s += 7;
+    FILE* fo = _wfopen((std::wstring(pfc::stringcvt::string_wide_from_utf8(s)) + L"\\laes_debug.log").c_str(), L"r+b"); if (!fo) return; _fseeki64(fo, 0, SEEK_END);   // r+b: only an existing file
+    char b[600]; va_list a; va_start(a, fmt); vsnprintf(b, sizeof b, fmt, a); va_end(a); fprintf(fo, "%llu %s\n", (unsigned long long)nowMs(), b); fclose(fo); }
+// a file read through a foobar2000 file object of its own (file objects are not shared between threads)
+// For the progress window it also times the full read of an LAES file: the core (FLAC frames decoded and hashed, or WAV samples) costs
+// far more per byte than the rest (hashed only), so the bar follows the time each part takes, not the bytes. The speeds measured on this
+// machine are kept (laes_speed.txt, key "machine") and used for the parts not yet reached.
+const unsigned char kMachine[32] = {0};
+struct OwnReader { service_ptr_t<file> f; abort_callback_impl abort; std::atomic<uint64_t> bytes{0};   // bytes: read so far
+    // path: for opening the file again after park() (2026-11-06): a kept file that nothing plays holds no handle, so the user can write,
+    // move or delete it (tags, for example) while the decoder state stays in memory
+    std::string path; std::mutex fm;
+    static int LAE_CALL read(void* ctx, uint64_t off, void* buf, size_t len) { OwnReader* r = (OwnReader*)ctx; std::lock_guard<std::mutex> g(r->fm);
+        try { if (!r->f.is_valid()) filesystem::g_open(r->f, r->path.c_str(), filesystem::open_mode_read, r->abort);
+            r->f->seek(off, r->abort); r->f->read_object(buf, len, r->abort); r->bytes += len; r->timed(off, len); return 0; } catch (...) { return -1; } }
+    void park() { std::lock_guard<std::mutex> g(fm); if (!path.empty()) f.release(); }
+    // the core's byte range (FLAC: after the metadata blocks; WAV: the last 'data' chunk); call once after f is opened
+    void locateCore(uint64_t size) { uint64_t coreOff = 0, coreLen = 0; try { uint8_t h[12]; f->seek(0, abort); f->read_object(h, 12, abort);
+            if (!memcmp(h, "fLaC", 4)) { uint64_t p = 4; for (;;) { uint8_t b[4]; f->seek(p, abort); f->read_object(b, 4, abort); p += 4 + ((uint64_t)b[1] << 16 | b[2] << 8 | b[3]); if ((b[0] & 0x80) || p >= size) break; }
+                coreOff = (std::min)(p, size); coreLen = size - coreOff; }
+            else if (!memcmp(h, "RIFF", 4) || !memcmp(h, "RF64", 4) || !memcmp(h, "BW64", 4)) { uint64_t p = 12, ds = 0; if (memcmp(h, "RIFF", 4)) { uint8_t d[16]; f->seek(20, abort); f->read_object(d, 16, abort); ds = (uint64_t)le32(d + 8) | (uint64_t)le32(d + 12) << 32; }   // RF64: data size in ds64
+                while (p + 8 <= size) { uint8_t c[8]; f->seek(p, abort); f->read_object(c, 8, abort); uint64_t n = le32(c + 4); if (ds && n == 0xFFFFFFFFu && !memcmp(c, "data", 4)) n = ds; if (n > size - p - 8) n = size - p - 8;
+                    if (!memcmp(c, "data", 4)) { coreOff = p + 8; coreLen = n; } p += 8 + n + (n & 1); } } } catch (...) { coreLen = 0; }
+        std::lock_guard<std::mutex> g(m); this->coreOff = coreOff; this->coreLen = coreLen; total = size; }
+    // seconds still needed to read and check the whole file; the share of that work done (0..1)
+    double remaining() const { std::lock_guard<std::mutex> g(m); double s = 0; for (int r = 0; r < 2; r++) s += (double)(len(r) - (std::min)(len(r), done[r])) / rate(r); return s; }
+    double fraction() const { std::lock_guard<std::mutex> g(m); double a = 0, b = 0; for (int r = 0; r < 2; r++) { a += (double)(std::min)(len(r), done[r]) / rate(r); b += (double)len(r) / rate(r); } return b > 0 ? a / b : 0; }
+    void remember() const { std::lock_guard<std::mutex> g(m); for (int r = 0; r < 2; r++) if (busy[r] >= 0.3) g_speed.put(kMachine, kWhat[r], done[r] / busy[r]); }
+private:
+    static constexpr const char* kWhat[2] = {"open_rest_bytes_per_s", "open_core_bytes_per_s"};
+    mutable std::mutex m; uint64_t coreOff = 0, coreLen = 0, total = 0, done[2] = {0, 0}, prevLen = 0; double busy[2] = {0, 0}; uint64_t tPrev = 0; int prevR = -1; mutable double known[2] = {-1, -1};
+    uint64_t len(int r) const { return r ? coreLen : total - (std::min)(total, coreLen); }
+    double rate(int r) const { if (busy[r] >= 0.3 && done[r]) return done[r] / busy[r];   // measured in this read
+        if (known[r] < 0) known[r] = g_speed.get(kMachine, kWhat[r]); return known[r] > 0 ? known[r] : r ? 30e6 : 800e6; }   // earlier reads, or a first guess
+    void timed(uint64_t off, size_t n) { std::lock_guard<std::mutex> g(m); const uint64_t now = nowMs(); const int r = coreLen && off >= coreOff && off < coreOff + coreLen ? 1 : 0;
+        if (prevR >= 0) { busy[prevR] += (now - tPrev) / 1000.0; done[prevR] += prevLen; }   // the previous piece was used up by now
+        prevR = r; prevLen = n; tPrev = now; } };
+
+// ---- progress window: foobar2000's own progress dialog (modeless, shown only when the wait is longer than half a second), with a
+// Cancel button. Used while a track cannot play yet (the file check, the first check of a master, buffering) and for "Verify LAES".
+struct LaesProgress {   // one progress bar for the whole wait: permille 0..1000, what is being done, since when
+    enum { kIdle = 0, kReading = 1, kChecking = 2, kBuffering = 3 };
+    std::atomic<int> phase{kIdle}, masters{0}; std::atomic<int> permille{0}; std::atomic<uint64_t> t0{0};
+    std::atomic<unsigned> episode{0}; std::atomic<bool> cancel{false}, shown{false}; std::string name;
+};
+std::string mmss(double s) { if (s < 0) s = 0; char b[16]; snprintf(b, sizeof b, "%d:%02d", (int)s / 60, (int)s % 60); return b; }
+class laes_progress_cb : public threaded_process_callback {
+public:
+    laes_progress_cb(std::shared_ptr<LaesProgress> p, bool stopPlayback) : m_p(std::move(p)), m_stopPlayback(stopPlayback), m_ep(m_p->episode.load()) {}
+    void run(threaded_process_status& st, abort_callback& a) {
+        while (m_p->episode.load() == m_ep) {
+            if (a.is_aborting()) { m_p->cancel = true; if (m_stopPlayback) fb2k::inMainThread([] { playback_control::get()->stop(); }); break; }
+            const LaesProgress& p = *m_p; const double f = p.permille.load() / 1000.0, el = (nowMs() - p.t0.load()) / 1000.0;
+            std::string t;
+            switch (p.phase.load()) {
+            case LaesProgress::kReading: t = T("Checking the file (SHA-256 of the whole file, CRC-32, core master)", "检查文件（整个文件的 SHA-256、CRC-32、核心母带）"); break;
+            case LaesProgress::kChecking: t = std::string(T("Checking all ", "校验全部 ")) + std::to_string(p.masters) + T(" masters (SHA-256), once per file", " 个母带（SHA-256），每个文件只需一次"); break;
+            case LaesProgress::kBuffering: t = T("Decoding ahead so that playback does not pause", "提前解码，保证播放中途不停顿"); break;
+            default: t = T("Starting", "准备中"); }
+            char pct[96]; snprintf(pct, sizeof pct, "%.0f %%", f * 100.0);
+            t += std::string("\n") + pct + T(", elapsed ", "，已用 ") + mmss(el) + (f > 0.02 ? std::string(T(", about ", "，约剩 ")) + mmss(el * (1.0 - f) / f) + T(" left", "") : std::string());
+            st.set_item((m_p->name + "\n" + t).c_str()); st.set_progress_float((std::min)(1.0, f)); Sleep(200); }
+        m_p->shown = false; }
+private:
+    std::shared_ptr<LaesProgress> m_p; bool m_stopPlayback; unsigned m_ep;
+};
+// opens the window for the current episode of p (once); closeProgress ends the episode and the window
+void showProgress(const std::shared_ptr<LaesProgress>& p, bool stopPlayback) {
+    if (p->shown.exchange(true)) return; std::shared_ptr<LaesProgress> q = p;
+    fb2k::inMainThread([q, stopPlayback] { threaded_process::g_run_modeless(new service_impl_t<laes_progress_cb>(q, stopPlayback),
+        threaded_process::flag_show_abort | threaded_process::flag_show_progress | threaded_process::flag_show_item | threaded_process::flag_show_delayed,
+        core_api::get_main_window(), T("LAE decoder: LAES", "LAE 解码器：LAES")); }); }
+void closeProgress(const std::shared_ptr<LaesProgress>& p) { p->episode++; p->phase = LaesProgress::kIdle; }
+// the share of the bar for reading the file before a check (the decoding takes the rest)
+const int kReadShare = 60;
+
+// the decoded PCM of one choice (int32 L R per frame) in a temporary file that Windows deletes when it is closed (also after a crash)
+class PcmCache {
+public:
+    ~PcmCache() { if (h != INVALID_HANDLE_VALUE) CloseHandle(h); }
+    bool create(uint64_t bytes, std::string& why) {
+        wchar_t dir[MAX_PATH + 1]; if (!GetTempPathW(MAX_PATH, dir)) { why = "no temporary folder"; return false; }
+        ULARGE_INTEGER freeB; if (GetDiskFreeSpaceExW(dir, &freeB, nullptr, nullptr) && freeB.QuadPart < bytes + (512ull << 20)) {
+            why = pfc::string_formatter() << "not enough free space in the temporary folder (" << (unsigned)((bytes >> 20) + 512) << " MB needed)"; return false; }
+        static std::atomic<unsigned> n{0}; wchar_t name[MAX_PATH + 64]; swprintf(name, MAX_PATH + 64, L"%slaes_play_%u_%u.pcm", dir, GetCurrentProcessId(), n++);
+        h = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+        if (h == INVALID_HANDLE_VALUE) { why = "cannot create the temporary file"; return false; } return true; }
+    bool write(uint64_t at, const void* d, size_t n) { OVERLAPPED o{}; o.Offset = (DWORD)at; o.OffsetHigh = (DWORD)(at >> 32); DWORD w = 0; return WriteFile(h, d, (DWORD)n, &w, &o) && w == n; }
+    bool read(uint64_t at, void* d, size_t n) { OVERLAPPED o{}; o.Offset = (DWORD)at; o.OffsetHigh = (DWORD)(at >> 32); DWORD r = 0; return ReadFile(h, d, (DWORD)n, &r, &o) && r == n; }
+private:
+    HANDLE h = INVALID_HANDLE_VALUE;
+};
+
+// ---- LAES files opened (read once in full: file SHA-256, CRC-32, core) and kept for this session, so that switching to another
+// choice of the same file does not read it again. An entry is used again only while the file's size and modification time are the
+// ones it was read with; otherwise the file is read again. At most 3 files are kept (the core of each is held in memory).
+void parkIdleLaes(bool tryOnly);   // below: closes the handles of kept files that nothing uses
+struct SharedLaes { OwnReader rd; laes_file* f = nullptr; std::string path; t_filesize size = 0; t_filetimestamp ts = 0; std::atomic<bool> indexing{false};
+    // after the full read: every layer is entropy-decoded once on a thread of its own (seconds) so that a start at any frame (switching,
+    // seeking) can begin at the block that holds it; the positions are kept in memory only (laes_index_layers)
+    std::thread indexer; volatile int cancel = 0;
+    // the positions are also kept for later sessions in laes_index\<file SHA-256>.idx in the shared LAE folder (every 16th block start, tens of
+    // kB; never written into the media file): loaded when present and matching, else made once by the pass above and saved
+    void startIndex() { indexing = true; indexer = std::thread([this] { FpPin pin; SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        struct Done { SharedLaes* s; ~Done() { s->indexing = false; parkIdleLaes(true); } } done{this};   // try only: the cache may be destroying this entry
+        const std::wstring rec = recordPath();
+        if (!rec.empty()) { std::vector<uint8_t> d; FILE* fi = _wfopen(rec.c_str(), L"rb"); if (!fi) fi = _wfopen(recordPath(true).c_str(), L"rb");
+            if (fi) { _fseeki64(fi, 0, SEEK_END); const int64_t n = _ftelli64(fi); _fseeki64(fi, 0, SEEK_SET);
+                if (n > 0 && n < (64ll << 20)) { d.resize((size_t)n); if (fread(d.data(), 1, d.size(), fi) != d.size()) d.clear(); } fclose(fi); }
+            if (!d.empty() && laes_index_load(f, d.data(), (int64_t)d.size()) == 0) { dbg("index record loaded (%u bytes)", (unsigned)d.size()); return; } }
+        laes_index_layers(f, &cancel, 0); if (cancel || rec.empty()) return;
+        const int64_t n = laes_index_save(f, nullptr, 0); if (n <= 0) return; std::vector<uint8_t> b((size_t)n); if (laes_index_save(f, b.data(), n) != n) return;
+        const std::wstring tmp = rec + L".part"; FILE* fo = _wfopen(tmp.c_str(), L"wb"); if (!fo) return; const bool ok = fwrite(b.data(), 1, b.size(), fo) == b.size(); fclose(fo);
+        if (!ok || !MoveFileExW(tmp.c_str(), rec.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str()); else dbg("index record saved (%u bytes)", (unsigned)b.size()); }); }
+    // in the folder shared by the LAE players (%APPDATA%\LAE\laes_index); old: the foobar2000 profile folder (up to 0.14), read when the shared one is missing
+    std::wstring recordPath(bool old = false) const { laes_file_info fi; if (laes_get_info(f, &fi) != 0) return std::wstring();
+        static const wchar_t* hx = L"0123456789ABCDEF"; std::wstring name; for (int i = 0; i < 32; i++) { name += hx[fi.file_sha256[i] >> 4]; name += hx[fi.file_sha256[i] & 15]; }
+        pfc::string8 p = core_api::get_profile_path(); const char* s = p.get_ptr(); if (!strncmp(s, "file://", 7)) s += 7;
+        const std::wstring dir = (old ? std::wstring(pfc::stringcvt::string_wide_from_utf8(s)) : laeSharedDir()) + L"\\laes_index"; if (!old) CreateDirectoryW(dir.c_str(), nullptr);
+        return dir + L"\\" + name + L".idx"; }
+    ~SharedLaes() { cancel = 1; if (indexer.joinable()) indexer.join(); if (f) { FpPin pin; laes_close(f); } } };
+class LaesFileCache {
+public:
+    static LaesFileCache& get() { static LaesFileCache c; return c; }
+    std::shared_ptr<SharedLaes> find(const std::string& path, t_filesize size, t_filetimestamp ts) { std::lock_guard<std::mutex> g(mx);
+        for (size_t i = 0; i < items.size(); i++) if (items[i]->path == path && items[i]->size == size && items[i]->ts == ts) { auto e = items[i]; items.erase(items.begin() + i); items.push_back(e); return e; }
+        return nullptr; }
+    void keep(const std::shared_ptr<SharedLaes>& e) { std::lock_guard<std::mutex> g(mx);
+        for (size_t i = 0; i < items.size(); i++) if (items[i]->path == e->path) { items.erase(items.begin() + i); break; }
+        items.push_back(e); while (items.size() > 3) items.erase(items.begin()); }
+    void clear() { std::lock_guard<std::mutex> g(mx); items.clear(); }
+    // closes the file handle of every kept entry that nothing but this cache uses and whose indexer is done (the next read opens it again)
+    void parkIdle(bool tryOnly) { std::unique_lock<std::mutex> g(mx, std::defer_lock); if (tryOnly) { if (!g.try_lock()) return; } else g.lock();
+        for (auto& e : items) if (e.use_count() == 1 && !e->indexing) e->rd.park(); }
+private:
+    std::mutex mx; std::vector<std::shared_ptr<SharedLaes>> items;
+};
+void parkIdleLaes(bool tryOnly) { LaesFileCache::get().parkIdle(tryOnly); }
+
+// decoded samples of a choice around the playing position, made ahead of a switch by LaesPrefetcher: the decoder that made them (positioned
+// at b1) and the frames [b0, b1) it gave, interleaved L R. A worker that adopts it continues from b1 instead of starting a decoder.
+struct Prefetched { std::shared_ptr<SharedLaes> sh; laes_play* p = nullptr; uint64_t b0 = 0, b1 = 0; std::vector<int32_t> pcm;
+    ~Prefetched() { if (p) { FpPin pin; laes_stop(p); } } };
+
+// one LAES choice decoded by a worker thread into a PcmCache. The worker opens the file itself (one full read: file SHA-256, CRC-32,
+// core), then decodes the choice in time order. When a master of the file is not yet recorded as verified for this file content, every
+// master of the file is decoded and checked in the same run (one pass) and nothing plays before the end; afterwards every choice of the
+// file plays at once. When the decoder is slower than playback (the 32-bit build), playback starts once enough is decoded to reach the
+// end without a pause. Whenever playback has to wait, one progress bar shows how far it is (Cancel stops playback).
+class LaesWorker {
+public:
+    // start > 0: decoding begins at that frame (switching or seeking inside a track; only for a master already verified for this file
+    // content: otherwise the worker checks the whole file from frame 0 first)
+    // adopt: samples and the decoder prepared by LaesPrefetcher for this choice (switching without starting a decoder)
+    LaesWorker(std::string path, uint64_t size, int choice, int master, uint64_t frames, int rate, uint64_t start = 0, std::unique_ptr<Prefetched> adopt = nullptr)
+        : m_path(std::move(path)), m_size(size), m_choice(choice), m_master(master), m_frames(frames), m_rate(rate), m_base(adopt ? adopt->b0 : start), m_written(adopt ? adopt->b0 : start), m_adopt(std::move(adopt)), m_prog(std::make_shared<LaesProgress>()) {
+        m_prog->name = pfc::string_filename_ext(m_path.c_str()).get_ptr(); m_prog->t0 = nowMs(); m_guessCheck = master >= 0 && !g_verified.hint(m_path, size);
+        m_thread = std::thread([this] { run(); }); }
+    ~LaesWorker() { closeProgress(m_prog); m_stop = true; { SharedLaes* o = m_opening.load(); if (o) o->rd.abort.abort(); }   // a read in progress (not yet shared) stops
+        if (m_thread.joinable()) m_thread.join(); if (m_play) { FpPin pin; laes_stop(m_play); } }
+    // waits until frames [from, from + n) can be played, with the progress bar when that takes a while. Returns false when they never
+    // will (error / mismatch / end).
+    bool waitFor(uint64_t from, uint64_t n, abort_callback& a) {
+        int r = ready(from, n); if (r >= 0) return r == 1;
+        m_prog->t0 = nowMs(); m_prog->permille = 0; showProgress(m_prog, true);
+        for (;;) { try { a.check(); } catch (...) { closeProgress(m_prog); throw; }
+            r = ready(from, n); if (r >= 0) { closeProgress(m_prog); return r == 1; }
+            Sleep(50); } }
+    bool read(uint64_t from, int32_t* out, uint64_t n) { return from >= m_base && m_cache.read((from - m_base) * 8, out, (size_t)n * 8); }
+    uint64_t base() const { return m_base; } uint64_t written() const { return m_written; } bool checking() const { return m_checkAll || !m_opened; }
+    // the opened file, once this worker plays a verified master (for LaesPrefetcher); null before
+    std::shared_ptr<SharedLaes> shared() const { return m_opened && !m_checkAll ? m_sh : nullptr; }
+    bool failed() const { return m_failed; } const std::string& why() const { return m_why; }
+private:
+    // 1: playable now, 0: never (error / end), -1: not yet (sets the progress)
+    int ready(uint64_t from, uint64_t n) {
+        if (m_failed) return 0;
+        if (from < m_base) return 0;   // before this worker's start: the caller starts another
+        const uint64_t need = (std::min)(m_frames, from + n), w = m_written;
+        if (m_done) return from < m_frames && w >= need ? 1 : 0;
+        // the bar follows the time: the share of this wait gone by, from the time still needed (the speeds measured so far on this machine)
+        const double ckRtf = g_speed.get(kMachine, "check_rtf"), ckLeft = ckRtf > 0 && m_rate > 0 ? (double)(m_frames - (std::min)(m_frames, w)) / m_rate / ckRtf : -1;
+        if (!m_opened) { SharedLaes* o = m_opening.load(); m_prog->phase = LaesProgress::kReading;
+            if (!o) return -1;
+            if (!m_guessCheck) { barTo(o->rd.fraction()); return -1; }
+            if (ckLeft >= 0) barLeft(o->rd.remaining() + ckLeft); else barTo(o->rd.fraction() * kReadShare / 1000.0);   // a check follows: its time, or a share
+            return -1; }
+        if (m_checkAll) { m_prog->phase = LaesProgress::kChecking;
+            const uint64_t t1 = m_t1.load(), w1 = m_w1.load(); const double el = t1 ? (nowMs() - t1) / 1000.0 : 0;
+            if (el > 1 && w > w1) barLeft((double)(m_frames - (std::min)(m_frames, w)) * el / (double)(w - w1));   // measured in this run
+            else if (ckLeft >= 0) barLeft(ckLeft); else barTo(kReadShare / 1000.0 + (1000 - kReadShare) / 1000.0 * (double)w / (double)(std::max)(m_frames, (uint64_t)1));
+            return -1; }
+        // the decoding speed in steady state: frames per second after the first piece (start-up costs are not counted). Until it is known
+        // (about 0.5 s of decoding), playback starts with a quarter of a second decoded ahead; once it is known and slower than playback,
+        // enough must be decoded that the rest arrives before it is needed
+        const uint64_t t1 = m_t1.load(), w1 = m_w1.load(); const double el = t1 ? (nowMs() - t1) / 1000.0 : 0, speed = el > 0.5 && w > w1 ? (double)(w - w1) / el : 0;
+        // before it is measured: the speed this file decoded at before on this machine (this choice, or all masters at once as a lower bound)
+        const double rtf = speed > 0 ? speed / m_rate : m_knownRtf, few = (std::max)((double)(need - (std::min)(need, from)), m_rate * 0.25);
+        const double lead = rtf == 0 || rtf >= 1.05 ? few : (std::max)(few, (double)(m_frames - from) * (1.0 - rtf) * 1.1);
+        if (w >= need && (double)(w - from) >= lead) return 1;
+        const uint64_t target = (std::max)(need, from + (uint64_t)lead); m_prog->phase = LaesProgress::kBuffering;
+        if (rtf > 0 && m_rate > 0) barLeft((double)(target - (std::min)(target, w)) / (rtf * m_rate));
+        else barTo((double)(w > from ? w - from : 0) / (double)(std::max)(target - from, (uint64_t)1));
+        return -1; }
+    // the bar never goes back within one wait (waitFor starts it at 0)
+    void barTo(double f) { const int p = (int)(1000.0 * (std::min)(0.99, (std::max)(0.0, f))); if (p > m_prog->permille.load()) m_prog->permille = p; }
+    void barLeft(double secondsLeft) { const double el = (nowMs() - m_prog->t0.load()) / 1000.0; barTo(el + secondsLeft > 0 ? el / (el + secondsLeft) : 0); }
+    void run() {
+        FpPin pin; char err[512] = ""; char mg[5];
+        if (m_adopt) {   // a prefetched start: its samples go to the cache, its decoder continues
+            m_sh = m_adopt->sh; m_f = m_sh->f; laes_file_info fi; laes_get_info(m_f, &fi); memcpy(m_sha, fi.file_sha256, 32);
+            { laes_choice_info ci; if (laes_get_choice(m_f, m_choice, &ci) == 0) m_name = ci.name; } m_knownRtf = (std::max)(g_speed.get(m_sha, m_name), g_speed.get(m_sha, "all"));
+            std::string why; if (!m_cache.create((m_frames - m_base) * 8, why)) { fail(why); return; }
+            if (!m_adopt->pcm.empty() && !m_cache.write(0, m_adopt->pcm.data(), m_adopt->pcm.size() * 4)) { fail("cannot write the temporary file (disk full?)"); return; }
+            m_play = m_adopt->p; m_adopt->p = nullptr; m_written = m_adopt->b1; m_adopt.reset(); m_opened = true; decodeLoop(); return; }
+        // the file as opened earlier in this session (same size and modification time), or read now in full
+        t_filestats st{}; try { bool wr = false; filesystem::g_get_stats(m_path.c_str(), st, wr, m_statAbort); } catch (...) { st.m_size = m_size; st.m_timestamp = 0; }
+        m_sh = st.m_timestamp ? LaesFileCache::get().find(m_path, st.m_size, st.m_timestamp) : nullptr;
+        if (!m_sh) { auto e = std::make_shared<SharedLaes>(); e->path = m_path; e->rd.path = m_path; e->size = st.m_size; e->ts = st.m_timestamp; m_opening = e.get();
+            try { filesystem::g_open(e->rd.f, m_path.c_str(), filesystem::open_mode_read, e->rd.abort); e->rd.locateCore(m_size); } catch (const std::exception& x) { m_opening = nullptr; fail(std::string("cannot open the file: ") + x.what()); return; }
+            e->f = laes_open_reader(&OwnReader::read, &e->rd, m_size, 0, mg, err, sizeof err); m_opening = nullptr; if (e->f) e->rd.remember();
+            if (!e->f) { fail(err); return; }
+            m_sh = e; e->startIndex(); if (st.m_timestamp) LaesFileCache::get().keep(e); }
+        m_f = m_sh->f; { laes_choice_info ci; if (laes_get_choice(m_f, m_choice, &ci) == 0) m_name = ci.name; }
+        laes_file_info fi; laes_get_info(m_f, &fi); memcpy(m_sha, fi.file_sha256, 32); m_knownRtf = (std::max)(g_speed.get(m_sha, m_name), g_speed.get(m_sha, "all"));
+        if (!fi.payload_ok && m_choice != 0) { fail(laes_file_problem(m_f)); return; }
+        const int nm = mastersOf(m_f); m_prog->masters = nm;
+        if (m_master >= 0) { const int v = g_verified.get(m_sha, m_master); if (v < 0) { fail("this master failed its SHA-256 check before (file unchanged)"); return; }
+            bool all = true; for (int m = 0; m < nm; m++) all &= g_verified.get(m_sha, m) != 0;
+            m_checkAll = v == 0;   // its master is not checked yet: check every master of the file now, in this one run
+            if (m_checkAll && m_base) { m_base = 0; m_written = 0; }   if (m_checkAll) dbg("worker: master %d not verified: checks all from 0", m_master);   // a check runs from frame 0
+            if (m_checkAll) { const std::string msg = std::string(T("LAES: first play of this file: all ", "LAES：首次播放本文件：先校验全部 ")) + std::to_string(nm) +
+                  T(" masters are decoded and checked (SHA-256) once, in one pass; then every choice plays at once", " 个母带（SHA-256，一次完成），之后任何选择都直接播放");
+                fb2k::inMainThread([msg] { console::print(msg.c_str()); }); }
+            (void)all; }
+        std::string why; if (!m_cache.create((m_frames - m_base) * 8, why)) { fail(why); return; }
+        m_play = m_checkAll ? laes_start_all(m_f, m_choice, 0, err, sizeof err) : m_base ? laes_start_at(m_f, m_choice, m_base, 0, err, sizeof err) : laes_start(m_f, m_choice, 0, err, sizeof err); if (!m_play) { fail(err); return; }
+        m_opened = true; decodeLoop(); }
+    // decodes from m_written on into the cache; at the end of a run from frame 0, records the masters' results
+    void decodeLoop() {
+        std::vector<int32_t> buf(65536 * 2); uint64_t at = m_written; int pieces = 0;
+        while (!m_stop) { const int64_t want = pieces < 4 ? 8192 : 65536;   // small first pieces: the first audio is there sooner
+            const int64_t k = laes_read(m_play, buf.data(), want); if (k < 0) { fail(laes_play_error(m_play)); return; } if (k == 0) break;
+            if (!m_cache.write((at - m_base) * 8, buf.data(), (size_t)k * 8)) { fail("cannot write the temporary file (disk full?)"); return; } at += (uint64_t)k; m_written = at;
+            if (++pieces == 1) { m_w1 = at; m_t1 = nowMs(); } }   // the speed is measured from here on
+        { const uint64_t t1 = m_t1.load(); const double el = t1 ? (nowMs() - t1) / 1000.0 : 0; const uint64_t w = m_written, w1 = m_w1;   // the speed, for the next start
+          if (el >= 3 && w > w1 && m_rate > 0) { const double rtf = (double)(w - w1) / m_rate / el; g_speed.put(m_sha, m_checkAll ? std::string("all") : m_name, rtf); if (m_checkAll) g_speed.put(kMachine, "check_rtf", rtf); } }
+        if (m_stop) return;
+        if (m_base) { m_done = true; return; }   // a run from a later frame checks nothing (its master was verified before)
+        const int nm = mastersOf(m_f);
+        recordRun(m_play, m_sha, nm); { bool all = true; for (int m = 0; m < nm; m++) all &= g_verified.get(m_sha, m) > 0; if (all) g_verified.putHint(m_path, m_size); }
+        if (m_master >= 0 && laes_master_ok(m_play, m_master) != 1) { fail(laes_play_error(m_play)); return; }
+        m_done = true; }
+    void fail(const std::string& why) { dbg("worker fail: %s", why.c_str()); m_why = why; m_failed = true; m_done = true; }
+    std::string m_path; uint64_t m_size; int m_choice, m_master; uint64_t m_frames; int m_rate; std::atomic<uint64_t> m_base; std::atomic<uint64_t> m_written; std::atomic<uint64_t> m_t1{0}, m_w1{0};
+    std::shared_ptr<SharedLaes> m_sh; std::atomic<SharedLaes*> m_opening{nullptr}; abort_callback_impl m_statAbort; std::thread m_thread; std::atomic<bool> m_stop{false}, m_done{false}, m_failed{false}, m_opened{false}, m_checkAll{false}; bool m_guessCheck = false;
+    std::string m_why, m_name; unsigned char m_sha[32] = {0}; std::unique_ptr<Prefetched> m_adopt; std::atomic<double> m_knownRtf{0};
+    laes_file* m_f = nullptr; laes_play* m_play = nullptr; PcmCache m_cache; std::shared_ptr<LaesProgress> m_prog;
+};
+
+// a worker that is replaced (switching, seeking) is stopped and freed on a thread of its own, so that playback does not wait for its
+// threads to end; foobar2000 waits for these at exit (laes_quit)
+std::atomic<int> g_retiring{0};
+void retireWorker(std::unique_ptr<LaesWorker> w) { if (!w) return; LaesWorker* p = w.release(); g_retiring++;
+    try { std::thread([p] { delete p; g_retiring--; parkIdleLaes(false); }).detach(); } catch (...) { delete p; g_retiring--; parkIdleLaes(false); } }
+
+// ---- the other masters kept ready (setting; on by default): while one choice plays, a thread of lowered priority keeps a few seconds
+// around the playing time decoded for every other master of the file that is verified for this file content, each started at its
+// position by the noted block positions and then decoded at the pace of playback. A switch takes these samples and their decoder over
+// (LaesWorker adopt), so the new master plays without starting a decoder. The seconds kept follow the free memory of the machine.
+class LaesPrefetcher {
+public:
+    LaesPrefetcher(std::shared_ptr<SharedLaes> sh, std::vector<std::pair<int, laes_choice_info>> cs) : m_sh(std::move(sh)) {   // (choice number, its info)
+        for (auto& c : cs) { Item it; it.idx = c.first; it.ci = c.second; m_items.push_back(std::move(it)); }
+        MEMORYSTATUSEX ms{}; ms.dwLength = sizeof ms; GlobalMemoryStatusEx(&ms);
+        m_keep = ms.ullAvailPhys < (2ull << 30) || ms.ullAvailVirtual < (1ull << 30) ? 1.0 : 3.0;   // seconds ahead: less on a machine short of memory
+        m_thread = std::thread([this] { run(); }); }
+    ~LaesPrefetcher() { m_stop = true; if (m_thread.joinable()) m_thread.join(); }
+    void setTime(double t) { m_time = t; }
+    // the prepared samples of choice index `idx` (laes choice number) when they hold frame `at`; null otherwise
+    std::unique_ptr<Prefetched> take(int idx, uint64_t at) { m_hold++; std::lock_guard<std::mutex> g(m_mx); m_hold--;   // the thread lets go of the lock within one piece
+        for (auto& it : m_items) if (it.idx == idx && it.p && it.b0 <= at && at < it.b1) {
+            std::unique_ptr<Prefetched> r(new Prefetched()); r->sh = m_sh; r->p = it.p; it.p = nullptr; r->b0 = it.b0; r->b1 = it.b1; r->pcm.swap(it.pcm); it.b0 = it.b1 = 0; return r; }
+        return nullptr; }
+private:
+    struct Item { int idx = -1; laes_choice_info ci{}; laes_play* p = nullptr; uint64_t b0 = 0, b1 = 0; std::vector<int32_t> pcm; };
+    std::shared_ptr<SharedLaes> m_sh; std::vector<Item> m_items; std::mutex m_mx; std::thread m_thread; std::atomic<bool> m_stop{false}; std::atomic<int> m_hold{0}; std::atomic<double> m_time{0}; double m_keep = 3.0;
+    void run() { FpPin pin; SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL); std::vector<int32_t> buf(16384 * 2); char err[256];
+        while (!m_stop) { bool busy = false;
+            for (auto& it : m_items) { if (m_stop) break; while (m_hold.load() > 0 && !m_stop) Sleep(1);   // a switch is taking samples: it gets the lock first
+                std::lock_guard<std::mutex> g(m_mx); if (it.idx < 0) continue;
+                const uint64_t pos = (std::min)(it.ci.frames, (uint64_t)(m_time.load() * it.ci.rate)), ahead = (uint64_t)(m_keep * it.ci.rate), behind = (uint64_t)((m_keep >= 3 ? 3.0 : 1.5) * it.ci.rate);
+                // nothing yet, or the playing time moved away (a seek): before the kept samples, or further ahead than decoding catches up with soon
+                if (!it.p || pos < it.b0 || pos > it.b1 + behind + 2 * (uint64_t)it.ci.rate) {
+                    if (it.p) laes_stop(it.p); it.pcm.clear(); const uint64_t s = pos > behind ? pos - behind : 0;
+                    it.p = laes_start_at(m_sh->f, it.idx, s, 2, err, sizeof err); it.b0 = it.b1 = s; dbg("prefetch %d start at %llu (pos %llu)", it.idx, (unsigned long long)s, (unsigned long long)pos); if (!it.p) { it.idx = -1; continue; } }
+                if (it.b1 < (std::min)(it.ci.frames, pos + ahead)) { const int64_t k = laes_read(it.p, buf.data(), 16384);
+                    if (k <= 0) dbg("prefetch %d read %lld at %llu", it.idx, (long long)k, (unsigned long long)it.b1);
+                    if (k <= 0) { laes_stop(it.p); it.p = nullptr; continue; }
+                    it.pcm.insert(it.pcm.end(), buf.begin(), buf.begin() + k * 2); it.b1 += (uint64_t)k; busy = true; }
+                if (pos > behind && it.b0 + behind < pos - behind) { const uint64_t drop = (std::min)((pos - behind) - it.b0, it.b1 - it.b0);   // older than the kept seconds
+                    it.pcm.erase(it.pcm.begin(), it.pcm.begin() + (size_t)drop * 2); it.b0 += drop; } }
+            if (!busy) Sleep(30); }
+        std::lock_guard<std::mutex> g(m_mx); for (auto& it : m_items) if (it.p) { laes_stop(it.p); it.p = nullptr; } }
+};
+void retirePrefetcher(std::unique_ptr<LaesPrefetcher> p) { if (!p) return; LaesPrefetcher* q = p.release(); g_retiring++;
+    try { std::thread([q] { delete q; g_retiring--; parkIdleLaes(false); }).detach(); } catch (...) { delete q; g_retiring--; parkIdleLaes(false); } }
+
+// ---- checking LAES files ahead of playback: files added to the media library (setting) and the context menu command (one progress
+// bar per file; Cancel skips the file). One file at a time, on a background thread of lowered priority; all masters of a file not yet
+// recorded are decoded and checked in one pass.
+class LaesVerifier {
+public:
+    static LaesVerifier& get() { static LaesVerifier v; return v; }
+    void add(const char* path, bool manual) { std::lock_guard<std::mutex> g(mx); for (auto& q : queue) if (q.first == path) { q.second |= manual; return; }
+        queue.push_back({path, manual}); cv.notify_one(); if (!thread.joinable()) thread = std::thread([this] { loop(); }); }
+    void quit() { { std::lock_guard<std::mutex> g(mx); stop = true; queue.clear(); } abort.abort(); cv.notify_one(); if (thread.joinable()) thread.join(); }
+private:
+    std::mutex mx; std::condition_variable cv; std::deque<std::pair<std::string, bool>> queue; std::thread thread; bool stop = false; abort_callback_impl abort;
+    void loop() {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+        for (;;) { std::pair<std::string, bool> p; { std::unique_lock<std::mutex> g(mx); cv.wait(g, [this] { return stop || !queue.empty(); }); if (stop) return; p = queue.front(); queue.pop_front(); }
+            try { one(p.first, p.second); } catch (...) {} } }
+    static void say(const std::string& s) { const std::string m = s; fb2k::inMainThread([m] { console::print(m.c_str()); }); }
+    bool stopping() { std::lock_guard<std::mutex> g(mx); return stop; }
+    void one(const std::string& path, bool manual) {
+        dbg("verify %s manual %d", path.c_str(), (int)manual);
+        FpPin pin; OwnReader rd; filesystem::g_open(rd.f, path.c_str(), filesystem::open_mode_read, abort);
+        const t_filesize size = rd.f->get_size(abort); char err[512] = "", mg[5];
+        const std::string name = pfc::string_filename_ext(path.c_str()).get_ptr();
+        std::shared_ptr<LaesProgress> pr = std::make_shared<LaesProgress>(); pr->name = name; pr->phase = LaesProgress::kReading; pr->t0 = nowMs();
+        if (manual) showProgress(pr, false);
+        // the bar follows the time: the file read (timed by OwnReader) and the check after it (the machine's measured check speed)
+        double secs = 0; { laes_file* q = laes_open_reader(&OwnReader::read, &rd, size, 1, mg, err, sizeof err); if (q) { laes_file_info qi; laes_get_info(q, &qi); if (qi.base_rate > 0) secs = (double)qi.core_frames / qi.base_rate; laes_close(q); } }
+        rd.locateCore(size); const double ckRtf = g_speed.get(kMachine, "check_rtf"); const double ckAll = ckRtf > 0 && secs > 0 ? secs / ckRtf : -1;
+        auto bar = [&](double left, double share) { int p; if (left >= 0) { const double el = (nowMs() - pr->t0.load()) / 1000.0; p = (int)(1000.0 * (el + left > 0 ? el / (el + left) : 0)); } else p = (int)(1000.0 * share);
+            p = (std::min)(990, p); if (p > pr->permille.load()) pr->permille = p; };
+        std::atomic<bool> reading{true}; std::thread ticker([&] { while (reading) { bar(ckAll >= 0 ? rd.remaining() + ckAll : -1, rd.fraction() * kReadShare / 1000.0); Sleep(100); } });
+        laes_file* f = laes_open_reader(&OwnReader::read, &rd, size, 0, mg, err, sizeof err); reading = false; ticker.join(); if (f) rd.remember();
+        if (!f) { closeProgress(pr); return; }   // not LAES (or unreadable): nothing to do
+        laes_file_info fi; laes_get_info(f, &fi);
+        if (!fi.payload_ok) { closeProgress(pr); say("LAES " + name + ": " + laes_file_problem(f) + T(" (the core master plays)", "（播放核心母带）")); laes_close(f); return; }
+        const int nm = mastersOf(f); pr->masters = nm; bool todo = false; for (int m = 0; m < nm; m++) todo |= g_verified.get(fi.file_sha256, m) == 0;
+        if (todo && !stopping() && !pr->cancel) {
+            int choice = 1; laes_choice_info ci{}; for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_MASTER) { choice = i; ci = c; break; } }
+            laes_play* p = laes_start_all(f, choice, (std::max)(1, (int)std::thread::hardware_concurrency() / (manual ? 1 : 2)), err, sizeof err);
+            if (p) { pr->phase = LaesProgress::kChecking; std::vector<int32_t> buf(65536 * 2); const uint64_t t0 = nowMs(); bool stopped = false; uint64_t got = 0;
+                for (;;) { if (stopping() || pr->cancel) { stopped = true; break; } const int64_t k = laes_read(p, buf.data(), 65536); if (k <= 0) break; got += (uint64_t)k;
+                    const double el = (nowMs() - t0) / 1000.0; bar(el > 1 && got ? (double)(ci.frames - (std::min)(ci.frames, got)) * el / (double)got : ckAll >= 0 ? ckAll * (1.0 - (double)got / (double)(std::max)(ci.frames, (uint64_t)1)) : -1.0, kReadShare / 1000.0 + (1000 - kReadShare) / 1000.0 * (double)got / (double)(std::max)(ci.frames, (uint64_t)1)); }
+                if (!stopped && got > 0) { const double el = (nowMs() - t0) / 1000.0; if (el > 0 && ci.rate > 0) { g_speed.put(fi.file_sha256, "all", (double)got / ci.rate / el); if (manual && got == ci.frames) g_speed.put(kMachine, "check_rtf", (double)got / ci.rate / el); } }   // all masters at once: a lower bound for any choice
+                if (!stopped && laes_verified(p) >= 0) { recordRun(p, fi.file_sha256, nm); unsigned ok = 0; for (int m = 0; m < nm; m++) ok += laes_master_ok(p, m) == 1; if (ok == (unsigned)nm) g_verified.putHint(path, size);
+                    say(std::string((pfc::string_formatter() << "LAES " << name.c_str() << T(": ", "：") << ok << " / " << nm << T(" masters verified", " 个母带校验通过")
+                        << (ok == (unsigned)nm ? "" : T(" (the others FAILED their SHA-256 check)", "（其余 SHA-256 校验未通过）")) << " (" << (unsigned)((nowMs() - t0) / 1000) << " s)").get_ptr())); }
+                laes_stop(p); } }
+        else if (manual) say("LAES " + name + T(": all masters were verified before (file unchanged)", "：全部母带此前已校验通过（文件未变）"));
+        if (pr->cancel) say("LAES " + name + T(": check cancelled", "：校验已取消"));
+        closeProgress(pr); laes_close(f); }
+};
 }
+
+// ---- tags of the WAV form (LAEY, and LAES in the WAV form), 2026-11-06: the RIFF LIST/INFO chunk and the "id3 " chunk (ID3v2.3 / 2.4) under
+// foobar2000's field names. ID3 first (it holds every field; laes / lae_enc write the same values to both); INFO adds what ID3 lacks. Text
+// that is not UTF-8 (INFO from older programs, ID3 encoding 0) is read in the system code page / Latin-1. Without this, foobar2000 showed
+// the raw <IART> / <INAM> or nothing, and a tag edit dropped the fields it had not read.
+namespace wavtags {   // the shared reader (src/lae_wavtags.h), read through foobar2000's file object
+typedef lae_wavtags::List List;
+inline List read(service_ptr_t<file>& f, t_filesize size, abort_callback& a) {
+    return lae_wavtags::read([&](uint64_t off, void* buf, size_t n) { try { f->seek(off, a); f->read_object(buf, n, a); return true; } catch (...) { return false; } }, size); }
+}  // namespace wavtags
 
 class input_lae : public input_stubs {
 public:
-    ~input_lae() {
+    ~input_lae() { if (m_laes) dbg("%p closed at %llu", (void*)this, (unsigned long long)m_pos);
+        m_pf.reset(); m_worker.reset();
+        if (m_lq) { FpPin pin; laes_close(m_lq); }
         if (m_track) { FpPin pin; lae_close(m_track); }
-        if (m_playback) { std::lock_guard<std::mutex> g(s_lock); s_live.erase(std::remove(s_live.begin(), s_live.end(), this), s_live.end()); } }
+        if (m_playback) { std::lock_guard<std::mutex> g(s_lock); s_live.erase(std::remove(s_live.begin(), s_live.end(), this), s_live.end()); }
+        parkIdleLaes(false); }   // a file this track played stays decodable in the cache, but no longer open
     void open(service_ptr_t<file> p_filehint, const char* p_path, t_input_open_reason p_reason, abort_callback& p_abort) {
-        if (p_reason == input_open_info_write) throw exception_io_unsupported_format();   // tags are not written
+        if (p_reason == input_open_info_write) throw exception_io_unsupported_format();   // tags are not written here: foobar2000's own WAV / FLAC writer does it (it gets every field from get_info)
         m_file = p_filehint; input_open_file_helper(m_file, p_path, p_reason, p_abort); m_path = p_path;
-        // cheap check first: a RIFF/WAVE whose chunk list contains "LAE " (anything else goes to the next decoder)
+        // cheap check first: a RIFF/WAVE whose chunk list contains "LAE ", or a FLAC file with "LAE2" APPLICATION blocks (anything else
+        // goes to the next decoder). The first 4 bytes of the LAE chunk name the format: LAE1 = LAEY, LAE2 = LAES.
         const t_filesize size = m_file->get_size(p_abort);
-        if (size == filesize_invalid || size < 12 + 8 + 24 || size > 0xFFFFFFFFull + 8) throw exception_io_unsupported_format();
-        uint8_t h[12]; m_file->read_object(h, 12, p_abort); if (memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) throw exception_io_unsupported_format();
+        if (size == filesize_invalid || size < 12 + 8 + 24) throw exception_io_unsupported_format();
+        uint8_t h[12]; m_file->read_object(h, 12, p_abort);
+        if (!memcmp(h, "fLaC", 4)) { m_size = size; laesOpen(p_abort); return; }
+        if ((!memcmp(h, "RF64", 4) || !memcmp(h, "BW64", 4)) && !memcmp(h + 8, "WAVE", 4)) { m_size = size; m_wavForm = true; m_wavTags = wavtags::read(m_file, size, p_abort); laesOpen(p_abort); return; }   // RF64 (beyond 4 GB): LAES only
+        if (memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) throw exception_io_unsupported_format();
         t_filesize pos = 12, laeAt = 0;
         while (pos + 8 <= size) { uint8_t c[8]; m_file->seek(pos, p_abort); m_file->read_object(c, 8, p_abort); const t_filesize n = le32(c + 4);
             if (!memcmp(c, "LAE ", 4)) { laeAt = pos + 8; break; } pos += 8 + n + (n & 1); }
         if (!laeAt || laeAt + 24 > size) throw exception_io_unsupported_format();
         uint8_t hd[24]; m_file->seek(laeAt, p_abort); m_file->read_object(hd, 24, p_abort);
+        if (le32(hd) == 0x3245414Cu) { m_size = size; m_wavForm = true; m_wavTags = wavtags::read(m_file, size, p_abort); laesOpen(p_abort); return; }   // LAE2: LAES
+        if (size > 0xFFFFFFFFull + 8) throw exception_io_unsupported_format();
         if (le32(hd) != 0x3145414Cu || le32(hd + 4) != 5) throw exception_io_unsupported_format();   // not container v5
         m_master = (int)le32(hd + 8); m_base = (int)le32(hd + 12); m_stages = (int)le32(hd + 16); m_masterFrames = le32(hd + 20);
         if ((m_base != 44100 && m_base != 48000) || m_stages < 1 || m_stages > 3 || m_master != (m_base << m_stages)) throw exception_io_unsupported_format();
-        m_size = size;
+        m_size = size; m_wavForm = true; m_wavTags = wavtags::read(m_file, size, p_abort);
         if (p_reason == input_open_decode) load(p_abort);
     }
     void get_info(file_info& p_info, abort_callback&) {
+        if (m_laes) { laesInfo(p_info); return; }
         p_info.set_length((double)m_masterFrames / m_master);
         const bool cd = m_cdOnly || m_fallbackNow;   // known only to a decoding instance
         p_info.info_set_int("samplerate", cd ? m_base : outRate());
@@ -139,9 +634,17 @@ public:
         p_info.info_set("lae_layers", (std::string(T("CD layer 16 bit / ", "CD 层 16 bit / ")) + khz(m_base) + T(" + depth layer 24 bit + frequency layer up to ",
             " + 深度层 24 bit + 频率层 至 ") + khz(m_master)).c_str());
         p_info.info_set_bitrate((t_int64)((m_size * 8) / ((double)m_masterFrames / m_master) / 1000.0 + 0.5));   // the whole file's average
+        for (auto& kv : m_wavTags) p_info.meta_add(kv.first.c_str(), kv.second.c_str());
     }
     t_filestats get_file_stats(abort_callback& p_abort) { return m_file->get_stats(p_abort); }
+#if FOOBAR2000_TARGET_VERSION >= 81
+    t_filestats2 get_stats2(uint32_t f, abort_callback& a) { return m_file->get_stats2_(f, a); }
+#endif
     void decode_initialize(unsigned p_flags, abort_callback& p_abort) {
+        if (m_laes) { m_testing = (p_flags & input_flag_testing_integrity) != 0;
+            if ((p_flags & input_flag_playback) && !m_playback) { m_playback = true; std::lock_guard<std::mutex> g(s_lock); s_live.push_back(this); }
+            dbg("%p initialize flags %u path %s", (void*)this, p_flags, m_path.get_ptr());
+            m_pos = 0; m_laesPlayed = false; m_laesFallback.clear(); m_laesFellBack = false; laesStart(laesPick(), p_abort); return; }
         if (!m_track && !m_cdOnly) load(p_abort);
         // integrity tests (input.h): a track that can only play as its CD layer fails, even when only the CD layer was asked for
         m_testing = (p_flags & input_flag_testing_integrity) != 0;
@@ -151,8 +654,9 @@ public:
         if (m_cdOnly) { m_rate = m_base; m_bits = 16; m_fallbackNow = true; m_route = LAE_ROUTE_CD; m_report = true; return; }
         startRoute(m_testing);
     }
-    bool decode_run(audio_chunk& p_chunk, abort_callback&) {
+    bool decode_run(audio_chunk& p_chunk, abort_callback& p_abort) {
         enum { block = 4096 };
+        if (m_laes) return laesRun(p_chunk, p_abort);
         applyLayerChange();   // e.g. the next track was opened before the user changed the layers
         if (m_cdOnly) {   // the CD layer itself (the LAE extension could not be verified)
             const size_t frames = m_cd.size() / 2; if (m_pos >= frames) return false; const size_t n = (std::min)((size_t)block, frames - m_pos);
@@ -165,7 +669,14 @@ public:
         p_chunk.set_data_fixedpoint(m_bytes.data(), m_bytes.size(), m_rate, 2, m_bits, audio_chunk::channel_config_stereo);
         m_pos += (size_t)got; countBitrate((uint64_t)got); return true;
     }
-    void decode_seek(double p_seconds, abort_callback&) {
+    void decode_seek(double p_seconds, abort_callback& p_abort) {
+        if (m_laes) {   // the menus switch by seeking to the audible time: a new choice begins right there (not where decoding had got to)
+            dbg("%p seek %.3f s: m_pos %llu rate %d choice %d gen %u/%u", (void*)this, p_seconds, (unsigned long long)m_pos, m_rate, m_laesChoice, m_gen, s_layerGen.load());
+            if (laesApplyChange(p_abort, p_seconds)) return;
+            const uint64_t to = (std::min)(m_laesFrames, (uint64_t)audio_math::time_to_samples(p_seconds, m_rate));
+            // before this worker's start (it can never give that), or beyond what it will have within 2 s: a new worker begins right there
+            if (!m_worker ? to < m_laesFrames : !m_worker->failed() && (to < m_worker->base() || (!m_worker->checking() && to > m_worker->written() + (uint64_t)m_rate * 2))) laesStart(m_laesChoice, p_abort, to);
+            m_pos = (size_t)to; return; }
         applyLayerChange();   // the layer menu seeks to the current position, so the change is heard at once
         const uint64_t frame = audio_math::time_to_samples(p_seconds, m_rate);
         if (m_cdOnly) { m_pos = (size_t)(std::min)((uint64_t)(m_cd.size() / 2), frame); return; }
@@ -177,6 +688,10 @@ public:
     bool decode_get_dynamic_info(file_info& p_out, double& p_timestamp_delta) {
         if (!m_report && !m_reportRate) return false;
         p_timestamp_delta = 0;
+        if (m_laes) { p_out.info_set("codec", m_laesLabel.c_str()); p_out.info_set_int("samplerate", m_rate); p_out.info_set_int("bitspersample", m_bits);
+            p_out.info_set("encoding", "lossless");
+            if (!m_laesFallback.empty()) p_out.info_set("laes_note", m_laesFallback.c_str()); else p_out.info_remove("laes_note");
+            m_report = m_reportRate = false; return true; }
         if (m_report) {
             p_out.info_set("codec", routeLabel().c_str()); p_out.info_set_int("samplerate", m_rate); p_out.info_set_int("bitspersample", m_bits);
             if (m_fallbackNow) p_out.info_set("lae_route", (std::string(T("CD layer (", "CD 层（")) + m_fallback + T(")", "）")).c_str()); else p_out.info_remove("lae_route");
@@ -184,17 +699,19 @@ public:
         if (m_reportRate) p_out.info_set_bitrate_vbr(m_kbps);
         m_report = m_reportRate = false; return true; }
     bool decode_get_dynamic_info_track(file_info&, double&) { return false; }
-    void decode_on_idle(abort_callback& p_abort) { m_file->on_idle(p_abort); }
+    void decode_on_idle(abort_callback& p_abort) { if (!m_laes) m_file->on_idle(p_abort); }
     void retag(const file_info&, abort_callback&) { throw exception_io_unsupported_format(); }
     void remove_tags(abort_callback&) { throw exception_io_unsupported_format(); }
     // a forward seek decodes the entropy streams up to the target (no seek table in v5): tell the host to avoid needless seeks
     size_t extended_param(const GUID& p_type, size_t, void*, size_t) { return p_type == input_params::seeking_expensive ? 1 : 0; }
 
     static bool g_is_our_content_type(const char*) { return false; }
-    static bool g_is_our_path(const char*, const char* p_extension) { return stricmp_utf8(p_extension, "wav") == 0 || stricmp_utf8(p_extension, "lae") == 0; }
+    static bool g_is_our_path(const char*, const char* p_extension) {
+        return stricmp_utf8(p_extension, "wav") == 0 || stricmp_utf8(p_extension, "lae") == 0 || stricmp_utf8(p_extension, "flac") == 0; }
     static const char* g_get_name() { return T("LAE decoder", "LAE 解码器"); }
     static const GUID g_get_guid() { return guid_input[g_slot.current]; }
     static std::atomic<unsigned> s_layerGen;   // bumped by the layer menu
+    static std::atomic<uint64_t> s_menuSeekMs;   // when a menu last seeked to switch the playing track (the switch is made at that seek)
     // whether the playback decoder of this path would play other layers with the current settings (the layer menu seeks only then)
     static bool s_wouldChange(const char* path) {
         std::lock_guard<std::mutex> g(s_lock);
@@ -211,6 +728,7 @@ private:
         while (cap > 0 && r > cap && (r >> 1) > m_base) r >>= 1;
         return r; }
     bool wouldChange() const {   // called under s_lock from the menu (main thread): reads only the atomics the decoding thread publishes
+        if (m_laes) return !m_laesFellBack.load() && laesPick() != m_laesChoiceNow.load();
         if (m_cdOnly || m_fallbackNowA.load()) return false;   // a track that fell back to the CD layer keeps it (no second attempt mid-track)
         const int r = askedRoute();
         return r != m_routeNow.load() || (r == LAE_ROUTE_FULL && outRate() != m_rateNow.load()); }
@@ -280,7 +798,93 @@ private:
         try { m_cd.resize((size_t)len); } catch (...) { throw exception_io_data("LAE: the file is too large for this decoder"); }
         m_file->seek(dOff, p_abort); m_file->read_object(m_cd.data(), (size_t)len * 2, p_abort);   // little-endian: the bytes are the samples
     }
+    // ---- LAES (LAE Lossless)
+    // the structure only (for track info and the choice); the worker opens the file again and reads it whole
+    void laesOpen(abort_callback& p_abort) {
+        char err[512] = "", mg[5]; FileReader r{m_file, p_abort};
+        { FpPin pin; m_lq = laes_open_reader(&FileReader::read, &r, m_size, 1, mg, err, sizeof err); }
+        if (r.ep) std::rethrow_exception(r.ep);
+        if (!m_lq) throw exception_io_unsupported_format();   // a plain FLAC / WAV (or one this reader cannot read): the next decoder takes it
+        m_laes = true; laes_file_info fi; laes_get_info(m_lq, &fi); m_base = fi.base_rate; }
+    // the choice to play: the one picked for this track in the context menu, if any; else what the settings ask for: "CD layer only" = the
+    // core; "CD + depth layer" = the base rate; otherwise the highest rate up to the set maximum, then the longest word up to the set
+    // maximum; masters before rate levels; derived 16-bit versions only when nothing else fits
+    int laesPick() const {
+        laes_file_info fi; laes_get_info(m_lq, &fi); if (!fi.payload_ok) return 0;
+        { const std::string want = g_choices.get(m_path.get_ptr());
+          if (!want.empty()) for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(m_lq, i, &c); if (want == c.name) return i; } }
+        if (layers() == 2) return 0;
+        const int capR = layers() == 1 ? fi.base_rate : (int)g_maxrate.get(), capB = (int)g_maxbits.get(); int best = 0; laes_choice_info b{}; laes_get_choice(m_lq, 0, &b);
+        for (int i = 1; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(m_lq, i, &c); if (c.kind == LAES_KIND_DERIVED16) continue;
+            if ((capR > 0 && c.rate > capR) || (capB > 0 && c.bits > capB)) continue;
+            const bool better = c.rate != b.rate ? c.rate > b.rate : c.bits != b.bits ? c.bits > b.bits : (c.kind == LAES_KIND_MASTER && b.kind != LAES_KIND_MASTER);
+            if (better) { best = i; b = c; } }
+        if (best == 0 && capB > 0 && capB < fi.core_bits) for (int i = 1; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(m_lq, i, &c); if (c.kind == LAES_KIND_DERIVED16 && c.rate == fi.base_rate) return i; }
+        return best; }
+    std::string laesWhat(int i) const { laes_choice_info c; laes_get_choice(m_lq, i, &c); return choiceText(c); }
+    void laesInfo(file_info& p_info) {
+        const int i = laesPick(); laes_choice_info c; laes_get_choice(m_lq, i, &c); laes_file_info fi; laes_get_info(m_lq, &fi);
+        p_info.set_length((double)c.frames / c.rate); p_info.info_set_int("samplerate", c.rate); p_info.info_set_int("channels", 2); p_info.info_set_int("bitspersample", c.bits);
+        p_info.info_set("encoding", "lossless"); p_info.info_set("codec", "LAES");
+        p_info.info_set("laes_form", fi.is_flac ? "FLAC" : "WAV"); p_info.info_set("laes_core", (khz(fi.base_rate) + " / " + std::to_string(fi.core_bits) + " bit").c_str());
+        std::string all; for (int k = 0; k < fi.choices; k++) { if (k) all += "; "; all += laesWhat(k); } p_info.info_set("laes_choices", all.c_str());
+        p_info.info_set("laes_plays", laesWhat(i).c_str());
+        if (!fi.payload_ok) p_info.info_set("laes_note", (std::string(T("extension unusable, the core master plays: ", "扩展不可用，播放核心母带：")) + laes_file_problem(m_lq)).c_str());
+        if (m_wavForm) for (auto& kv : m_wavTags) p_info.meta_add(kv.first.c_str(), kv.second.c_str());   // INFO + id3 under foobar2000's names
+        else for (int k = 0; ; k++) { const char* key; const char* val; if (laes_get_tag(m_lq, k, &key, &val) != 0) break; p_info.meta_add(key, val); }
+        p_info.info_set_bitrate((t_int64)((m_size * 8) / ((double)c.frames / c.rate) / 1000.0 + 0.5)); }
+    // startAt: the frame to begin at (switching, seeking); a derived 16-bit version always begins at 0 (its dither runs from frame 0)
+    void laesStart(int choice, abort_callback& p_abort, uint64_t startAt = 0, std::unique_ptr<Prefetched> adopt = nullptr) {
+        laes_choice_info c; laes_get_choice(m_lq, choice, &c);
+        // masters are independent and may differ in length: a time past the end of this choice ends the track there (no worker), never a
+        // start from 0. A derived 16-bit version always begins at 0 (its dither runs from frame 0).
+        const bool past = c.kind != LAES_KIND_DERIVED16 && startAt >= c.frames; if (c.kind == LAES_KIND_DERIVED16) startAt = 0;
+        dbg("%p start choice %d (%s) at %llu adopt %s [%llu..%llu) m_pos %llu", (void*)this, choice, c.name, (unsigned long long)startAt, adopt ? "yes" : "no", adopt ? (unsigned long long)adopt->b0 : 0ull, adopt ? (unsigned long long)adopt->b1 : 0ull, (unsigned long long)m_pos);
+        retirePrefetcher(std::move(m_pf));   // made again for the new choice (laesRun)
+        retireWorker(std::move(m_worker)); if (!past) m_worker.reset(new LaesWorker(m_path.get_ptr(), m_size, choice, c.master, c.frames, c.rate, startAt, std::move(adopt)));
+        m_laesChoice = choice; m_laesChoiceNow = choice; m_laesFrames = c.frames; m_rate = c.rate; m_bits = c.bits; m_laesKind = c.kind; m_gen = s_layerGen.load();
+        m_laesLabel = std::string("LAES ") + laesWhat(choice); if (!m_laesFallback.empty()) m_laesLabel += T(" (extension unusable)", "（扩展不可用）");
+        m_report = true; (void)p_abort; }
+    bool laesRun(audio_chunk& p_chunk, abort_callback& p_abort) {
+        enum { block = 4096 };
+        if (nowMs() - s_menuSeekMs.load() > 1000) laesApplyChange(p_abort);   // a menu switch is made at its seek (the audible time), unless that seek does not come
+        if (m_pos >= m_laesFrames) { dbg("%p end: m_pos %llu >= frames %llu", (void*)this, (unsigned long long)m_pos, (unsigned long long)m_laesFrames); return false; }
+        const uint64_t n = (std::min)((uint64_t)block, m_laesFrames - m_pos);
+        if (!m_worker->waitFor(m_pos, n, p_abort)) {
+            dbg("%p waitFor false at %llu: base %llu written %llu failed %d why %s", (void*)this, (unsigned long long)m_pos, (unsigned long long)m_worker->base(), (unsigned long long)m_worker->written(), (int)m_worker->failed(), m_worker->why().c_str());
+            if (!m_worker->failed()) return false;
+            // nothing of this choice has played yet: the whole track plays as the core instead (spec 1.3: no master that failed its check)
+            if (!m_laesPlayed && m_laesChoice != 0 && !m_testing) { m_laesFallback = m_worker->why(); m_laesFellBack = true; console::formatter() << "LAES: " << m_laesFallback.c_str() << " -> the whole track plays as the core";
+                const double t = (double)m_pos / m_rate; laesStart(0, p_abort); m_pos = (size_t)(std::min)(m_laesFrames, (uint64_t)audio_math::time_to_samples(t, m_rate)); return laesRun(p_chunk, p_abort); }
+            throw exception_io_data((std::string("LAES: ") + m_worker->why()).c_str()); }   // never switch to the core inside a track
+        m_buf.resize((size_t)n * 2); if (!m_worker->read(m_pos, m_buf.data(), n)) throw exception_io_data("LAES: cannot read the temporary file");
+        const int bps = m_bits / 8; m_bytes.resize((size_t)n * 2 * bps);
+        for (size_t i = 0; i < (size_t)n * 2; i++) { const int32_t v = m_buf[i]; for (int k = 0; k < bps; k++) m_bytes[i * bps + k] = (uint8_t)(v >> (8 * k)); }
+        p_chunk.set_data_fixedpoint(m_bytes.data(), m_bytes.size(), m_rate, 2, m_bits, audio_chunk::channel_config_stereo);
+        if (!m_laesPlayed) dbg("%p first audio at %llu", (void*)this, (unsigned long long)m_pos);
+        m_pos += (size_t)n; m_laesPlayed = true; laesPrefetch(); return true; }
+    // keeps the other verified masters of the file ready (setting), once this worker plays a verified master
+    void laesPrefetch() {
+        if (!m_pf && g_prefetch.get() && m_playback && !m_testing && m_laesFallback.empty() && m_worker) { std::shared_ptr<SharedLaes> sh = m_worker->shared();
+            if (sh) { laes_file_info fi; laes_get_info(sh->f, &fi); std::vector<std::pair<int, laes_choice_info>> cs;
+                for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(sh->f, i, &c); if (c.kind == LAES_KIND_MASTER && i != m_laesChoice && g_verified.get(fi.file_sha256, c.master) > 0) cs.push_back({i, c}); }
+                if (!cs.empty()) m_pf.reset(new LaesPrefetcher(sh, cs)); } }
+        if (m_pf && m_rate > 0) m_pf->setTime((double)m_pos / m_rate); }
+    // the user chose other settings in the menu: a playback decoder continues at the same time position with the new choice
+    // returns true when it switched. atSeconds: the time to begin at (a seek); otherwise where decoding has got to
+    bool laesApplyChange(abort_callback& p_abort, double atSeconds = -1) {
+        if (!m_playback || m_testing || !m_laesFallback.empty() || m_gen == s_layerGen.load()) return false;
+        const unsigned gen = s_layerGen.load(); const int want = laesPick(); m_gen = gen; dbg("%p apply: want %d now %d pinned '%s' at %.3f", (void*)this, want, m_laesChoice, g_choices.get(m_path.get_ptr()).c_str(), atSeconds); if (want == m_laesChoice) return false;
+        // the new choice begins right at the current time (the frame at its own rate), not at its start
+        const double t = atSeconds >= 0 ? atSeconds : m_rate > 0 ? (double)m_pos / m_rate : 0; laes_choice_info c; laes_get_choice(m_lq, want, &c);
+        const uint64_t at = (std::min)(c.frames, (uint64_t)audio_math::time_to_samples(t, c.rate));
+        std::unique_ptr<Prefetched> pre = m_pf ? m_pf->take(want, at) : nullptr;   // the samples kept ready, when they hold the position
+        laesStart(want, p_abort, at, std::move(pre)); m_pos = (size_t)at; return true; }
+    bool m_laes = false, m_laesPlayed = false; laes_file* m_lq = nullptr; std::unique_ptr<LaesPrefetcher> m_pf; std::unique_ptr<LaesWorker> m_worker; int m_laesChoice = 0, m_laesKind = 0; std::atomic<int> m_laesChoiceNow{0};
+    uint64_t m_laesFrames = 0; std::string m_laesLabel, m_laesFallback; std::atomic<bool> m_laesFellBack{false};   // m_laesFallback set, published for the menu thread
+
     service_ptr_t<file> m_file; t_filesize m_size = 0; pfc::string8 m_path;
+    wavtags::List m_wavTags; bool m_wavForm = false;   // the tags of a WAV-form file (LAEY, LAES WAV), read at open
     int m_master = 0, m_base = 0, m_stages = 0, m_rate = 0, m_bits = 24, m_route = LAE_ROUTE_FULL; uint64_t m_masterFrames = 0;
     std::atomic<int> m_routeNow{LAE_ROUTE_FULL}, m_rateNow{0};   // m_route / m_rate published for the menu thread
     lae_track* m_track = nullptr; std::vector<int16_t> m_cd; size_t m_pos = 0;
@@ -292,6 +896,7 @@ private:
     std::vector<int32_t> m_buf; std::vector<uint8_t> m_bytes;
 };
 std::atomic<unsigned> input_lae::s_layerGen{0};
+std::atomic<uint64_t> input_lae::s_menuSeekMs{0};
 std::mutex input_lae::s_lock;
 std::vector<const input_lae*> input_lae::s_live;
 
@@ -327,13 +932,13 @@ public:
     t_uint32 get_sort_priority() { return sort_priority_base; }   // the presets keep their order (equal priorities: same group order)
     bool get_display(t_uint32 i, pfc::string_base& text, t_uint32& flags) { get_name(i, text); flags = currentPreset() == (int)i ? flag_radiochecked : 0; return true; }
     void execute(t_uint32 i, service_ptr_t<service_base>) {
-        g_layers.set(kPresets[i].layers); g_maxrate.set(kPresets[i].maxrate); input_lae::s_layerGen++;
+        g_layers.set(kPresets[i].layers); g_maxrate.set(kPresets[i].maxrate); dbg("menu preset %u", i); input_lae::s_menuSeekMs = nowMs(); input_lae::s_layerGen++;
         // when the audible track's playback decoder would play other layers: a seek to the current position empties the playback buffer
         // and reaches that decoder, which switches there (other LAE decoders switch on their next block; a non-LAE track is left alone)
         auto pc = playback_control::get(); metadb_handle_ptr np;
         if (!pc->get_now_playing(np) || !pc->playback_can_seek()) return;
-        bool lae = false; { metadb_info_container::ptr ic; if (np->get_info_ref(ic)) { const char* c = ic->info().info_get("codec"); lae = c && !strcmp(c, "LAE"); } }
-        if (input_lae::s_wouldChange(np->get_path()) || (lae && input_lae::s_wouldChange(nullptr))) pc->playback_seek(pc->playback_get_position());
+        bool lae = false; { metadb_info_container::ptr ic; if (np->get_info_ref(ic)) { const char* c = ic->info().info_get("codec"); lae = c && (!strcmp(c, "LAE") || !strncmp(c, "LAES", 4)); } }
+        if (input_lae::s_wouldChange(np->get_path()) || (lae && input_lae::s_wouldChange(nullptr))) { input_lae::s_menuSeekMs = nowMs(); pc->playback_seek(pc->playback_get_position()); };
     }
 };
 static mainmenu_commands_factory_t<lae_menu> g_lae_menu;
@@ -356,7 +961,7 @@ public:
             const GUID mine = input_lae::g_get_guid(); bool found = false, ahead = false, fresh = false; pfc::string8 who;
             for (size_t i = 0; i < list.get_count(); i++) { input_entry_v2::ptr v2; const bool isV2 = list[i]->service_query_t(v2);
                 if (isV2 && v2->get_guid() == mine) { found = true; break; }
-                if (!list[i]->is_our_path("C:\\x.wav", "wav")) continue;
+                if (!list[i]->is_our_path("C:\\x.wav", "wav") && !list[i]->is_our_path("C:\\x.flac", "flac")) continue;
                 ahead = true; if (who.is_empty() && isV2) who = v2->get_name();
                 if (isV2 && !known.empty() && !known.count(pfc::print_guid(v2->get_guid()).get_ptr())) fresh = true; }
             if (!found || !ahead) return;   // LAE disabled by the user, or first among the decoders that take .wav
@@ -376,4 +981,52 @@ public:
     }
 };
 static initquit_factory_t<lae_order> g_lae_order;
+class laes_quit : public initquit { public: void on_quit() { dbg("quit: begin, retiring %d", g_retiring.load()); LaesVerifier::get().quit(); for (int i = 0; i < 1000 && g_retiring.load() > 0; i++) Sleep(10); LaesFileCache::get().clear(); dbg("quit: end, retiring %d", g_retiring.load()); } };   // the verifier stops before foobar2000 closes
+static initquit_factory_t<laes_quit> g_laes_quit;
+
+// ---- LAES files added to the media library are checked in the background (setting; on by default)
+bool isLaesCandidate(const char* path) { const char* e = strrchr(path, '.'); return e && (!stricmp_utf8(e, ".flac") || !stricmp_utf8(e, ".wav")); }
+class laes_library : public library_callback {
+public:
+    void on_items_added(metadb_handle_list_cref items) { if (!g_verifyOnAdd.get()) return; for (size_t i = 0; i < items.get_count(); i++) if (isLaesCandidate(items[i]->get_path())) LaesVerifier::get().add(items[i]->get_path(), false); }
+    void on_items_removed(metadb_handle_list_cref) {}
+    void on_items_modified(metadb_handle_list_cref items) { on_items_added(items); }   // a changed file has a new SHA-256: checked again
+};
+static service_factory_single_t<laes_library> g_laes_library;
+
+// ---- context menu: "Verify LAES" (checks the selected LAES files now, with the progress window; results in the console) and
+// "LAES: choose what plays" (a list of the track's choices; the pick is remembered for that track and applies at once)
+const GUID guid_ctx_verify = { 0x7a9b31c2, 0x4e5d, 0x4f60, { 0x8a, 0x71, 0x92, 0xb3, 0xc4, 0xd5, 0xe6, 0x07 } };
+const GUID guid_ctx_choose = { 0x1d6e8f25, 0x9a3b, 0x4c71, { 0xb4, 0x0e, 0x5f, 0x62, 0x83, 0xa9, 0xc7, 0x1d } };
+class laes_ctx : public contextmenu_item_simple {
+public:
+    unsigned get_num_items() { return 2; }
+    void get_item_name(unsigned i, pfc::string_base& out) { out = i == 0 ? T("Verify LAES (lossless)", "校验 LAES（无损）") : T("LAES: choose what plays...", "LAES：选择播放内容…"); }
+    void context_command(unsigned i, metadb_handle_list_cref items, const GUID&) {
+        if (i == 0) { unsigned n = 0; for (size_t k = 0; k < items.get_count(); k++) if (isLaesCandidate(items[k]->get_path())) { LaesVerifier::get().add(items[k]->get_path(), true); n++; }
+            console::formatter() << T("LAES: checking ", "LAES：校验 ") << n << T(" file(s); results appear here", " 个文件，结果显示在这里"); return; }
+        if (items.get_count() < 1) return; const char* path = items[0]->get_path();
+        laes_file* f = nullptr; char err[512] = "", mg[5];
+        try { OwnReader rd; abort_callback_dummy ab; filesystem::g_open(rd.f, path, filesystem::open_mode_read, ab); const t_filesize size = rd.f->get_size(ab);
+            FpPin pin; f = laes_open_reader(&OwnReader::read, &rd, size, 1, mg, err, sizeof err); } catch (...) { f = nullptr; }
+        if (!f) { uMessageBox(core_api::get_main_window(), T("This track is not an LAES file.", "这首曲目不是 LAES 文件。"), T("LAE decoder", "LAE 解码器"), MB_OK | MB_ICONINFORMATION); return; }
+        laes_file_info fi; laes_get_info(f, &fi); const std::string cur = g_choices.get(path);
+        HMENU m = CreatePopupMenu(); AppendMenuW(m, MF_STRING | (cur.empty() ? MF_CHECKED : 0), 1, pfc::stringcvt::string_wide_from_utf8(T("Automatic (the settings in Playback > LAE)", "自动（按“播放 > LAE”的设置）")));
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr); std::vector<std::string> names;
+        for (int k = 0; k < fi.choices; k++) { laes_choice_info c; laes_get_choice(f, k, &c); names.push_back(c.name);
+            const bool ok = fi.payload_ok || c.kind == LAES_KIND_CORE;
+            AppendMenuW(m, MF_STRING | (cur == c.name ? MF_CHECKED : 0) | (ok ? 0 : MF_GRAYED), 2 + k, pfc::stringcvt::string_wide_from_utf8(choiceText(c).c_str())); }
+        laes_close(f);
+        POINT pt; GetCursorPos(&pt); const int cmd = (int)TrackPopupMenu(m, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, core_api::get_main_window(), nullptr); DestroyMenu(m);
+        if (cmd <= 0) return;
+        g_choices.set(path, cmd == 1 ? std::string() : names[(size_t)cmd - 2]); dbg("menu choose '%s' for %s", cmd == 1 ? "" : names[(size_t)cmd - 2].c_str(), path); input_lae::s_menuSeekMs = nowMs(); input_lae::s_layerGen++;
+        // the playing track switches at the same position (as with the layer menu)
+        auto pc = playback_control::get(); metadb_handle_ptr np;
+        if (pc->get_now_playing(np) && !strcmp(np->get_path(), path) && pc->playback_can_seek()) { input_lae::s_menuSeekMs = nowMs(); pc->playback_seek(pc->playback_get_position()); }; }
+    GUID get_item_guid(unsigned i) { return i == 0 ? guid_ctx_verify : guid_ctx_choose; }
+    bool get_item_description(unsigned i, pfc::string_base& out) {
+        out = i == 0 ? T("Decodes every master of the selected LAES files once and checks its SHA-256, so that they play at once later", "把所选 LAES 文件的每个母带解码一遍并核对 SHA-256，之后播放就不用等")
+                     : T("Picks the core master, another master or a rate level for this track", "为这首曲目选择播放核心母带、其他某个母带或某个采样率档"); return true; }
+};
+static contextmenu_item_factory_t<laes_ctx> g_laes_ctx;
 }

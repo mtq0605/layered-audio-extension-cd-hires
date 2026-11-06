@@ -35,8 +35,8 @@ extern "C" {
 #endif
 
 /* grows only when functions are added: a host needs lae_api_version() >= the version it was built against
-   (2: lae_open_reader; 3: lae_stream_bytes) */
-#define LAE_API_VERSION 3
+   (2: lae_open_reader; 3: lae_stream_bytes; 4: the laes_* functions, LAE Lossless) */
+#define LAE_API_VERSION 5
 enum lae_route {
     LAE_ROUTE_CD = 0,     /* the CD layer itself (16-bit, base rate) */
     LAE_ROUTE_CD24 = 1,   /* CD layer + depth layer (24-bit, base rate) */
@@ -87,6 +87,67 @@ LAE_API int LAE_CALL lae_stats(const lae_track* t, uint64_t* limited, int* strea
    target, so measure from after that read. Returns 0, or -1. */
 LAE_API int LAE_CALL lae_stream_bytes(const lae_track* t, uint64_t* bytes);
 LAE_API void LAE_CALL lae_close(lae_track* t);
+
+/* ---- LAE Lossless (LAES, extension LAE2), API version 4 (2026-11-01). Implemented in laes_api.cpp (compile it with strict
+   floating point: MSVC /fp:strict, GCC / Clang -ffp-contract=off). A WAV file whose "LAE " chunk begins with LAE2, or a FLAC file with
+   APPLICATION blocks "LAE2". A choice is the core, a master, a rate level of a master, or a derived 16-bit master (lossless relative to its definition, not relative to its source). The file
+   has no index (spec, rules T-1 / T-2): a choice is decoded in time order from its start. A master's SHA-256 is known only after its
+   last sample: a player presents a master as that master only after a run of laes_read to the end gave laes_verified() == 1 for the
+   same file content (spec 1.3); it may remember that by file_sha256 and the choice's name. */
+#define LAES_KIND_CORE 0
+#define LAES_KIND_MASTER 1
+#define LAES_KIND_LEVEL 2
+#define LAES_KIND_DERIVED16 3
+typedef struct laes_file laes_file;
+typedef struct laes_play laes_play;
+typedef struct laes_file_info {
+    int is_flac, base_rate, core_bits, choices;
+    uint64_t core_frames;
+    int payload_ok;               /* 0: the payload failed a check (reason in laes_file_problem); only the core plays */
+    unsigned char file_sha256[32];/* SHA-256 of every byte of the file (all zero after a quick open) */
+    int quick;                    /* 1: opened for track info only (laes_start refuses) */
+} laes_file_info;
+typedef struct laes_choice_info { int kind, master, level, rate, bits; uint64_t frames; const char* name; const char* what; } laes_choice_info;
+/* opens an LAES file read through the host. quick_info = 1 reads only the structure (milliseconds, for track info); 0 reads the whole
+   file once (its SHA-256, the payload CRC-32, the core and its hash). Returns NULL with err "not LAES" for a file without an LAE2
+   payload (lae_magic, if not NULL, receives "LAE1" for an LAEY file), or another reason. */
+LAE_API laes_file* LAE_CALL laes_open_reader(lae_read_fn read, void* ctx, uint64_t size, int quick_info, char lae_magic[5], char* err, int errlen);
+LAE_API int LAE_CALL laes_get_info(const laes_file* f, laes_file_info* out);
+LAE_API const char* LAE_CALL laes_file_problem(const laes_file* f);   /* "" when the payload passed every check */
+LAE_API int LAE_CALL laes_get_choice(const laes_file* f, int index, laes_choice_info* out);   /* the strings live as long as f */
+/* tags: FLAC VORBIS_COMMENT entries, or WAV LIST/INFO entries (4-letter keys); index from 0; returns -1 past the last */
+LAE_API int LAE_CALL laes_get_tag(const laes_file* f, int index, const char** key, const char** value);
+/* starts decoding one choice from its first frame; threads 0 = half the logical cores. NULL with err on failure. f must outlive it.
+   The file is read through the callback given to laes_open_reader (same ctx): keep it valid, and use one thread per laes_file. */
+LAE_API laes_play* LAE_CALL laes_start(laes_file* f, int choice, int threads, char* err, int errlen);
+/* as laes_start, and every master of the file is decoded and checked in the same run (one pass; tiers shared): after the last frame,
+   laes_master_ok gives the result of each master. For a player's first check of a file. */
+LAE_API laes_play* LAE_CALL laes_start_all(laes_file* f, int choice, int threads, char* err, int errlen);
+/* starts a choice at output frame `frame` (seeking / switching inside a track). The layers begin at the block positions noted earlier in
+   this process (while layers were decoded, or by laes_index_layers); where none is noted the layer is decoded from its start, which is
+   correct but slower. No SHA-256 is computed (laes_verified stays 0): only for a master already verified for this file content. Not
+   for derived 16-bit versions (their dither runs from frame 0). The file holds no index; the noted positions are kept in memory only. */
+LAE_API laes_play* LAE_CALL laes_start_at(laes_file* f, int choice, uint64_t frame, int threads, char* err, int errlen);
+/* decodes every layer of the file once, entropy decoding only, noting where each block begins (memory only), so that laes_start_at can
+   begin near any frame. Seconds for a 10-minute file; a host runs it on a background thread. Stops early when *cancel becomes non-zero. */
+LAE_API void LAE_CALL laes_index_layers(laes_file* f, const volatile int* cancel, int threads);
+/* the player's own record of block positions, for its profile folder (never written into the media file): every 16th block start of
+   every layer, with the file's SHA-256 and a CRC-32. laes_index_save returns the record's size (0 while laes_index_layers has not
+   noted every layer yet) and writes it when cap is large enough. laes_index_load returns 0 when the record matches this file (it then
+   serves laes_start_at at once and laes_index_layers has nothing left to do), -1 otherwise (nothing is changed). API version 5. */
+LAE_API int64_t LAE_CALL laes_index_save(laes_file* f, void* buf, int64_t cap);
+LAE_API int LAE_CALL laes_index_load(laes_file* f, const void* data, int64_t len);
+/* next frames in order, interleaved L R, int32 in the choice's word length; returns frames written, 0 at the end, -1 on an error */
+LAE_API int64_t LAE_CALL laes_read(laes_play* p, int32_t* out, int64_t frames);
+/* 1: the last frame was read and every master the choice depends on matched its SHA-256 (always 1 for the core); 0: not yet at the
+   end, or a mismatch (then laes_play_error says so); -1: an error stopped the decoding */
+LAE_API int LAE_CALL laes_verified(const laes_play* p);
+LAE_API const char* LAE_CALL laes_play_error(const laes_play* p);
+/* after laes_verified() != 0 for a finished run: whether master m (0-based) was decoded in this run and matched its SHA-256: 1 yes, 0 mismatch,
+   -1 not part of this run (a choice decodes its master and the masters it refers to). */
+LAE_API int LAE_CALL laes_master_ok(const laes_play* p, int m);
+LAE_API void LAE_CALL laes_stop(laes_play* p);
+LAE_API void LAE_CALL laes_close(laes_file* f);
 
 #ifdef __cplusplus
 }

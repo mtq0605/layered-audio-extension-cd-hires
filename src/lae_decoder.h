@@ -35,7 +35,7 @@ struct PlaneStream {
     // checkpoints for seeking: the decoder state before the row at frame M0, kept every `every` rows (about 4 s of the stream)
     struct Mark { long M0; Dec dc; std::unique_ptr<Walker<Dec>> w; };
     std::vector<Mark> marks; long every = 1;
-    // checkpoints from the player's own one-time check of this file (every 30 s, kept in the player's folder, never in the file: PL-7)
+    // checkpoints from the player's own one-time check of this file (every 30 s, kept in the player's folder, never in the file)
     std::vector<Mark> fileMarks; Dec dc0;   // dc0: the state at the start of the stream
     bool open(const uint8_t* p, int32_t nbytes) { if (nbytes < 40) return false; Rd s{p, (size_t)nbytes}; int32_t f[10]; for (int i = 0; i < 10; i++) f[i] = s.i32v();
         h = Hdr{f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]}; if (h.N != N || f[9] != nbytes - 40 || h.K <= 0 || h.k0 < 0 || h.k1 > N || h.k0 >= h.k1) return false;
@@ -52,7 +52,7 @@ struct PlaneStream {
         for (const Mark& k : marks) { if (k.M0 > m) break; best = &k; }
         for (const Mark& k : fileMarks) { if (k.M0 > m) break; if (!best || k.M0 > best->M0) best = &k; }
         if (best && (!forward || best->M0 > cur)) { dc = best->dc; w.reset(new Walker<Dec>(h, *best->w)); row0 = -1; rows = 0; } } };
-// ---- the player's one-time check of a file and its saved checkpoints (PL-7: made only by the player's own decoding, kept only in the
+// ---- the player's one-time check of a file and its saved checkpoints (made only by the player's own decoding, kept only in the
 // player's folder under the SHA-256 of the whole file, never written into or sent with the media; fixed interval, not chosen by the encoder)
 static const double FILE_MARK_SECONDS = 30.0;
 struct SavedMark { long M0; size_t i; uint32_t width, code; uint64_t pos; int prevTier, prevE; std::vector<uint32_t> diff; };   // diff: index << 16 | value, for model values != 1024

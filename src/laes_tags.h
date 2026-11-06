@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
 #pragma once
-// Tags and pictures of a release file (2026-11-05, docs/PLAN_LAES_TAGS_2026-11-05.md; patent rules TG-1 ... TG-8 in FTO_SUMMARY_v5).
+// Tags and pictures of a release file (2026-11-05).
 // Only the standard structures: FLAC VORBIS_COMMENT + PICTURE blocks; RIFF LIST/INFO + an "id3 " chunk holding an ID3v2.4 tag.
 //   --tag=KEY=VALUE        Vorbis comment names (TITLE, ARTIST, ALBUM, DATE, COPYRIGHT, COMMENT, ...); a key may repeat
 //   --cover=<image>        the front cover (picture type 3)
 //   --picture=<type>:<image>   any other picture (the type table shared by ID3 APIC and FLAC PICTURE: 4 back cover, 5 leaflet, 6 medium,
 //                          8 artist, ...); any number; JPEG or PNG, stored byte for byte; at most 16 MB - 1 for the FLAC block
-// One set describes the core and every master (TG-1): no scope field, no version, no hash of the tags. Placement (TG-2): FLAC after
+// One set describes the core and every master: no scope field, no version, no hash of the tags. Placement: FLAC after
 // STREAMINFO and before every "LAE2" block; WAV after "fmt " and before "data". Nothing here touches the samples or the payload.
 // Without any of these arguments nothing is written and the file is the same byte for byte as before.
 #include <cstdint>

@@ -6,11 +6,14 @@
 
 | Version | Date | Contents | Files | Download |
 |---|---|---|---|---|
-| **v5-2026-10-30** (current) | 2026-10-30 | LAEY: container version 5, decoding unchanged; the encoder is 3–4 times faster and works block by block (byte-identical output, much less memory). New lossless tier LAE Lossless (LAES, `LAE2`): its own specification, the tool `laes`, WAV, FLAC and CD-Extra carriers. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-30) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-30.zip) |
+| **v5-NEXT** (current) | NEXT | LAEY container version 5 and LAES payload version 1, decoding unchanged. New: marked-noise deletion and `g` (encoder options), tags and pictures in LAEY and LAES files, CD-TEXT in CD-Extra images, fast first seek in `liblae`, encoder bit-identical on every platform, the VLC, Kodi and DirectShow plug-ins, the Java library, and demonstration audio with its masters for verification ([docs/VERSIONS.md](docs/VERSIONS.md)). | TODO: release link | TODO: release link |
+| v5-2026-10-30 | 2026-10-30 | LAEY: container version 5, decoding unchanged; the encoder is 3–4 times faster and works block by block (byte-identical output, much less memory). New lossless tier LAE Lossless (LAES, `LAE2`): its own specification, the tool `laes`, WAV, FLAC and CD-Extra carriers. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-30) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-30.zip) |
 | v5-2026-10-24 | 2026-10-24 | Container version 5. Adds independent-CD alignment, the whole-disc planner, CD-Extra encapsulation (`lae_cdx`), the decoder library `liblae` and the foobar2000 component. Decoding unchanged. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-24) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-24.zip) |
 | v5-2026-10-18 | 2026-10-18 | Container version 5, first public release: specification, reference encoder and decoder, 16 conformance vectors. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-18) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-18.zip) |
 
 All versions use LAEY container version 5 and the same decoding process: LAEY files of any version play with the decoder of any version. LAES files (from v5-2026-10-30) are read with `laes`; the core of the FLAC form plays in any FLAC player. All changes: [CHANGELOG.md](CHANGELOG.md).
+
+**LAES (LAE Lossless) in short:** one ordinary FLAC or WAV file holds a **core master** and further **lossless masters** (up to 352.8 / 384 kHz, 16, 24 or 32 bit). A player without LAE software plays the core master, which at 16 bit can be CD-compatible. A player with LAE support plays any of the masters, each checked bit for bit against its SHA-256. In a test the file was 44–47 % smaller than the same versions as separate FLAC files. Introduction, advantages and limits, and the comparison with FLAC and WAV: [spec/lossless/OVERVIEW.md](spec/lossless/OVERVIEW.md); the `laes` tool: [spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.md).
 
 **Status:** this is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), the normative specification is [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (draft for public review, 2026-10-29) and the reference tool is `laes`; the earlier design document ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)) is superseded.
 
@@ -37,7 +40,7 @@ The encapsulation of the extension on CD-Extra, in separate files and in streams
 - The decoder library is `src/lae_decoder.h`. Its C interface is `liblae` (`src/lae_api.h`).
 - The foobar2000 component is `foo_input_lae`.
 - The RIFF chunk ID is `LAE ` (with a trailing space). The chunk begins with the magic `LAE1`.
-- LAE files are distributed with the extension `.wav`, so that every player plays the CD layer.
+- LAE files are distributed with the extension `.wav`, so that every player plays the CD layer. Tested decoders and the known limitations of some: [spec/COMPATIBILITY.md](spec/COMPATIBILITY.md).
 - The extension file of the encapsulation specification has the extension `.lax` (`.LAX` on a CD). It ends with an 80-byte trailer that begins with the identifier `LTVT` (Section 10.6).
 - `.lae` is the format's own file extension. The layout of a `.lae` file is not specified for container version 5.
 
@@ -1526,20 +1529,24 @@ The stages of the reference decoder have been moved unchanged into the library `
 
 The usage is given in Section 14.7.
 
-### 13.7 Player component
+### 13.7 Player plug-ins and the Java library
 
-The foobar2000 component `foo_input_lae` 0.3 is built on `liblae`, which is compiled into the component DLL. It plays LAE v5 files with all layers up to the master rate, for example 352.8 kHz / 24 bit.
+Four player plug-ins and a Java library decode both LAE formats: LAEY (container version 5, all layers up to the master rate) and LAES (every lossless master, each checked against its SHA-256). All use the same decoders as the reference tools and give the same samples.
 
-- **Hosts.** 32-bit foobar2000 1.4, 1.5 and 2.x. A 64-bit version for foobar2000 2.x is planned.
-- **Files.** The component accepts `.wav` files that carry an `LAE ` chunk, and the same files renamed to `.lae`. Such a renamed file is a v5 WAV file, not the `.lae` layout, which remains unspecified. A WAV file without an `LAE ` chunk is rejected at once and left to the built-in WAV decoder.
-- **Layer selection.** All layers at the master rate (default); all layers at the highest octave up to 192 kHz or up to 96 kHz; CD layer + depth layer (24 bit at the base rate); or the CD layer alone. A change during playback takes effect at the current position.
-- **Verification.** The component checks the whole file before playback: the CRC of the extension chunk and the structure of the header and the streams. A file that fails is played entirely as the CD layer, and the reason is written to the console and to the file properties.
-- **No switching within a track.** The component never switches between the CD layer and the extension within a track. A stream error during playback is reported as an error and stops playback. Only a layer change selected by the user takes effect mid-track.
-- **Determinism.** The floating-point state is fixed during decoding and restored afterwards, for both x87 and SSE.
-- **Memory.** About the file size per track. Because a 32-bit host is limited to 4 GB, tracks longer than about one hour at 352.8 kHz require the planned 64-bit version.
-- **Decoder priority.** Because the built-in WAV decoder also accepts `.wav`, the component places itself ahead of it in the decoder list when necessary and asks for one restart of foobar2000. This adjustment can be disabled in the advanced settings.
+| Component | Host | Version | Documentation |
+|---|---|---|---|
+| `foo_input_lae` | foobar2000 1.4, 1.5 and 2.x, 32-bit and 64-bit | 0.20 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md) |
+| `liblae_plugin.dll` | VLC 3.0, Windows 64-bit | 0.1.4 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.md) |
+| `audiodecoder.lae` | Kodi 21 (Omega), Windows 64-bit | 0.2.5 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.md) |
+| `lae_source.ax` | DirectShow players (PotPlayer, MPC-BE, MPC-HC, Windows Media Player), Windows 64-bit | 0.2.4 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.md) |
+| Java library | Java 8, Android API 24 and later | — | [java/README.md](java/README.md) |
 
-The component does not yet open CD-Extra rips directly; a rip is first restored with `lae_cdx read` (Section 10.8). The usage is given in Section 14.8; installation and the displayed information are documented in [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md).
+- **Files.** A WAV or FLAC file without an LAE extension is left to the host's own decoder. Players without LAE support play the CD layer of an LAEY file and the core master of an LAES file.
+- **Tags.** The plug-ins read the tags of both forms: Vorbis comments in FLAC, and RIFF `LIST/INFO` and `id3 ` chunks in WAV.
+- **VLC.** VLC may shorten the end of a track by about 40 ms; this is VLC's own behaviour.
+- **Java.** The Java library is a pure-Java port of the encoders and decoders, without native code. Its results equal those of the C++ tools of the same commit, byte for byte.
+
+CD-Extra rips are first restored with `lae_cdx read` (Section 10.8).
 
 ---
 
@@ -1762,17 +1769,33 @@ lae_close(t);
 
 The full interface is documented in `src/lae_api.h`.
 
-### 14.8 foobar2000 component
+### 14.8 Player plug-ins
 
-Copy `foo_input_lae.dll` into the `components` folder of foobar2000 and restart foobar2000. The layers are selected in the menu Playback → LAE, or in Preferences → Advanced → Decoding → LAE decoder. The status bar shows the layers being played and the output rate. The file properties show the layers present in the file (`lae_layers`), the master rate (`lae_master`) and the format of the CD layer (`lae_cd_layer`).
+Installation, settings and building are described in the README of each plug-in (Section 13.7). Each release provides built packages: the foobar2000 component (`.fb2k-component`), installers for VLC and DirectShow, and the Kodi add-on as a zip file.
 
-Building the component requires the foobar2000 1.5 SDK (`SDK-2019-12-27.7z`, from foobar2000.org), which is not included in the repository, and the x86 compiler of the Visual Studio 2022 build tools:
+Building requires third-party SDKs or headers that are not part of this repository: the foobar2000 SDK, the VLC 3.0 SDK, or Kodi's `kodi-dev-kit` headers ([THIRD_PARTY.md](THIRD_PARTY.md)). The LAE decoders are compiled with their own verified options.
+
+### 14.9 Demonstration audio and verification
+
+Each release attaches three works by the author (*Grand*, *Tolled*, *LAES demo*) in every form, together with the masters they were made from, so that anyone can check the formats independently:
+
+- **Masters** as FLAC files: the high-resolution masters and, for *Grand*, the CD master that serves as the core master of two of its LAES files.
+- **LAES files**: per work a `.flac` (FLAC form, 24-bit core master), a `.wav` (WAV form, 16-bit core master) and a `.lae` (FLAC form, 16-bit core master).
+- **LAEY**: three CD-Extra disc images (modes `max`, `3` and `keep`, each with the three works and CD-TEXT) and the LAEY file of each track.
+- **Comparison pages and a codec comparison report** with measurements.
+
+**LAES.** Decode each FLAC master to WAV with the reference `flac` tool, then compare it with the LAES file:
 
 ```
-plugins\foo_input_lae\build_fb2k.cmd <unpacked SDK folder> <output folder>
+flac -d Grand_352k8_32bit.flac
+laes verify Grand_LAES.flac Grand_352k8_32bit.wav Grand_352k8_24bit.wav Grand_176k4_24bit.wav Grand_352k8_16bit.wav
 ```
 
-The SDK code is compiled with the options required by the SDK; the LAE decoder is compiled with its own verified options (`/fp:precise`). Details are given in [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md).
+`laes verify` reports `IDENTICAL` for every master that equals the decoded master sample for sample. The core master is written by `laes dec` as `core.wav`; for `Grand_LAES.wav` and `Grand_LAES.lae` it equals the CD master `Grand_44k1_16bit.flac` sample for sample. The release notes list the SHA-256 of every file and of the samples of every master.
+
+**LAEY.** The CD layer of an LAEY file derived from a master is the encoder's own derivation; the full decode is compared with the master by measurement (`cmp_wav`). The disc images are restored to the LAEY files with `lae_cdx read` (Section 10.8), and the restored files are compared with the attached LAEY files byte for byte.
+
+The audio is not covered by the code or documentation licences: it may be downloaded, listened to and used to test and verify the formats, and nothing else ([AUDIO_LICENSE.md](AUDIO_LICENSE.md)).
 
 ---
 
@@ -1819,7 +1842,9 @@ The alignment of an independent CD and the encapsulation use the following publi
 | Documentation (`README.md`, `docs/`) | CC-BY-4.0 |
 | Reference decoder and the other decoder-side sources in `src/`, including the decoder library `src/lae_decoder.h` and `liblae` (`src/lae_api.*`); tools in `tools/` | Apache License 2.0 |
 | Encapsulation tool `lae_cdx` (`src/lae_cdx.*`, `src/lae_cdx_read.h`, `src/iso9660.h`) | Apache License 2.0 |
-| foobar2000 component sources (`plugins/foo_input_lae/`) | Apache License 2.0. The built DLL also contains code of the foobar2000 SDK, under the SDK's BSD-style licence, and of pfc, under the zlib licence; the SDK is not included in the repository. |
+| Player plug-in sources (`plugins/`) | Apache License 2.0. The built Kodi add-on is distributed under GPL-3.0-or-later, because it is built with Kodi's GPL headers. Third-party code in built packages: [THIRD_PARTY.md](THIRD_PARTY.md). |
+| Java library (`java/`) | As for the C++ sources: decoders and shared helpers Apache-2.0; encoder files GPL-3.0-or-later or a commercial licence |
+| Demonstration audio and masters attached to releases | All rights reserved: listening and verification only ([AUDIO_LICENSE.md](AUDIO_LICENSE.md)). The code and documentation licences do not apply. |
 | Reference encoder (encoder-side sources in `src/`, including the alignment `src/cd_align.cpp` and the planner `src/cd_plan.cpp`) | GNU General Public License v3.0 or later (GPL-3.0-or-later), or a commercial licence from the author ([COMMERCIAL.md](COMMERCIAL.md)) |
 | Test scripts, build files, CI configuration | Apache License 2.0 |
 | Conformance vectors, test data and the vector manifest; measurement data in `data/` | Creative Commons Zero v1.0 Universal (CC0-1.0). The vectors are generated signals only; no third-party recordings are included. |

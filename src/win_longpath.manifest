@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Windows: paths longer than 260 characters (2026-11-05). Embedded at link time:
+     cl ... /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
+     Takes effect where long paths are enabled in Windows (LongPathsEnabled = 1, Windows 10 1607 and later); elsewhere nothing
+     changes. The file names themselves are UTF-8 inside the tools (src/win_utf8.h). -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings xmlns:ws2="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
+      <ws2:longPathAware>true</ws2:longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

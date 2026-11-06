@@ -16,7 +16,25 @@
 #include <stdexcept>
 #include <algorithm>
 #include "laes_file.h"
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#include <immintrin.h>
+#include <intrin.h>
+#endif
 namespace laess {
+// ---- exact sums of int32 x int32 products (2026-11-02): when every factor is below 2^31 in magnitude, an int64 product of two int32
+// gives the same value as the int64 x int64 product, and the int64 sum is the same (the callers have already proved that the sum fits
+// int64). Used on 32-bit x86 (no int64 multiply instruction) and, with AVX2 (4 products per instruction, chosen at run time), on x64 too.
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#define LAESS_AVX2 1
+inline bool hasAvx2() { static const bool v = [] { int r[4]; __cpuid(r, 0); if (r[0] < 7) return false; __cpuid(r, 1);
+        if (!((r[2] >> 27) & 1) || !((r[2] >> 28) & 1) || (_xgetbv(0) & 6) != 6) return false; __cpuidex(r, 7, 0); return ((r[1] >> 5) & 1) != 0; }(); return v; }
+inline __m256i loadH4(const int32_t* p) { return _mm256_cvtepi32_epi64(_mm_loadu_si128((const __m128i*)p)); }
+inline __m256i loadH4(const int64_t* p) { return _mm256_loadu_si256((const __m256i*)p); }
+inline int64_t sum4(__m256i v) { alignas(32) int64_t s[4]; _mm256_store_si256((__m256i*)s, v); return s[0] + s[1] + s[2] + s[3]; }
+#else
+inline bool hasAvx2() { return false; }
+#endif
+inline bool int32Path() { return sizeof(void*) == 4 || hasAvx2(); }   // worth it on 32-bit builds, or with AVX2
 using laes::V;
 struct Fail : std::runtime_error { using std::runtime_error::runtime_error; };
 [[noreturn]] inline void fail(const std::string& m) { throw Fail(m); }
@@ -78,6 +96,35 @@ template <int NT, class H> inline bool fits(const H* h, int64_t mx, int sh) { re
 template <int NT, bool WIDE, class H> inline int64_t wtap(const H* h, const int64_t* w, int64_t ia, int64_t ib, int sh) {
     if (!WIDE) { int64_t acc = 0; for (int t = 0; t < NT; t++) acc += (int64_t)h[t] * (w[ia - t] + w[ib + t]); return (acc + (1LL << (sh - 1))) >> sh; }
     laesfast::Acc128 A; for (int t = 0; t < NT; t++) { A.mac((int64_t)h[t], w[ia - t]); A.mac((int64_t)h[t], w[ib + t]); } return A.shr(sh); }
+// the same sum when every value of the window is below 2^30 in magnitude (the pair sums then fit int32 and so do the taps): products of
+// two int32 (a single instruction on 32-bit x86, where an int64 product is a library call); the result equals wtap<NT, false>
+template <int NT, class H> inline int64_t wtapN(const H* h, const int64_t* w, int64_t ia, int64_t ib, int sh) {
+#ifdef LAESS_AVX2
+    if (hasAvx2()) { static_assert(NT % 4 == 0, "tap count"); __m256i acc = _mm256_setzero_si256();
+        for (int t = 0; t < NT; t += 4) {   // w[ia - t - 3 .. ia - t] reversed, plus w[ib + t .. ib + t + 3]
+            const __m256i lo = _mm256_permute4x64_epi64(_mm256_loadu_si256((const __m256i*)(w + ia - t - 3)), 0x1B), hi = _mm256_loadu_si256((const __m256i*)(w + ib + t));
+            acc = _mm256_add_epi64(acc, _mm256_mul_epi32(loadH4(h + t), _mm256_add_epi64(lo, hi))); }
+        return (sum4(acc) + (1LL << (sh - 1))) >> sh; }
+#endif
+    int64_t acc = 0; for (int t = 0; t < NT; t++) acc += (int64_t)(int32_t)h[t] * (int64_t)(int32_t)(w[ia - t] + w[ib + t]); return (acc + (1LL << (sh - 1))) >> sh; }
+// round(2^-sh (ah 2^16 + al)) with the sum taken exactly in 128 bits (as laesfast::Acc128 rounds: add 2^(sh - 1), shift right)
+inline int64_t comb16(int64_t ah, int64_t al, int sh) { laesfast::Acc128 A; A.lo = (uint64_t)ah << 16; A.hi = ah >> 48;
+    const uint64_t n = A.lo + (uint64_t)al; A.hi += (al >> 63) + (n < A.lo ? 1 : 0); A.lo = n; return A.shr(sh); }
+// the same sum for larger values (32-bit masters), every value below 2^45: each pair sum p (below 2^46) is split into p >> 16 and
+// p & 0xFFFF, both int32, so h p = (h (p >> 16)) 2^16 + h (p & 0xFFFF) with int32 products; each of the two sums is exact in int64
+// (below 2^30 x sum|h| x 2), and they are combined in 128 bits, so the result equals wtap<NT, true> and wtap<NT, false> alike.
+template <int NT, class H> inline int64_t wtapS(const H* h, const int64_t* w, int64_t ia, int64_t ib, int sh) {
+#ifdef LAESS_AVX2
+    if (hasAvx2()) { __m256i ah = _mm256_setzero_si256(), al = _mm256_setzero_si256(); const __m256i m16 = _mm256_set1_epi64x(0xFFFF);
+        for (int t = 0; t < NT; t += 4) {
+            const __m256i p = _mm256_add_epi64(_mm256_permute4x64_epi64(_mm256_loadu_si256((const __m256i*)(w + ia - t - 3)), 0x1B), _mm256_loadu_si256((const __m256i*)(w + ib + t)));
+            const __m256i hv = loadH4(h + t);   // the low 32 bits of p >> 16 (logical) are those of the arithmetic shift: bits 16..47 of p
+            ah = _mm256_add_epi64(ah, _mm256_mul_epi32(hv, _mm256_srli_epi64(p, 16))); al = _mm256_add_epi64(al, _mm256_mul_epi32(hv, _mm256_and_si256(p, m16))); }
+        return comb16(sum4(ah), sum4(al), sh); }
+#endif
+    int64_t ah = 0, al = 0; for (int t = 0; t < NT; t++) { const int64_t p = w[ia - t] + w[ib + t];
+        ah += (int64_t)(int32_t)h[t] * (int64_t)(int32_t)(p >> 16); al += (int64_t)(int32_t)h[t] * (int64_t)(int32_t)(p & 0xFFFF); }
+    return comb16(ah, al, sh); }
 // ---- one lifting stage, a piece at a time
 // forward (laesfast::fwd): x (n samples) -> s[a, b) (ne = (n + 1) / 2) and d[a, min(b, no)) (no = n / 2)
 inline void fwdPiece(Sig& x, int64_t a, int64_t b, V& s, V& d, int threads) {
@@ -88,16 +135,16 @@ inline void fwdPiece(Sig& x, int64_t a, int64_t b, V& s, V& d, int threads) {
     if (a < db) { lo = std::min(lo, a); hi = std::max(hi, db - 1); }
     // d[lo..hi] = xo - P(xe), P reading xe[mir(i - 39 .. i + 40, ne)]
     const V xeW = window(xe, lo - 39, hi + 40); V xoW((size_t)(hi - lo + 1)); xo.get(lo, hi + 1, xoW.data()); V dv((size_t)(hi - lo + 1));
-    { const bool wide = !fits<40>(lae::kHalf0, maxAbsOf(xeW), 30); const int64_t* w = xeW.data();
-      laesfast::parallelFor((long)(hi - lo + 1), threads, [&](long p, long q) { for (long k = p; k < q; k++) { const int64_t i = lo + k, ia = i - (lo - 39), ib = ia + 1;
-          const int64_t pv = wide ? wtap<40, true>(lae::kHalf0, w, ia, ib, 30) : wtap<40, false>(lae::kHalf0, w, ia, ib, 30); dv[(size_t)k] = xoW[(size_t)k] - pv; } }); }
+    { const int64_t mxw_ = maxAbsOf(xeW); const bool wide = !fits<40>(lae::kHalf0, mxw_, 30), narrow = int32Path() && mxw_ < (1LL << 30), split = int32Path() && mxw_ < (1LL << 45); const int64_t* w = xeW.data();
+      laesfast::parallelFor((int64_t)(hi - lo + 1), threads, [&](int64_t p, int64_t q) { for (int64_t k = p; k < q; k++) { const int64_t i = lo + k, ia = i - (lo - 39), ib = ia + 1;
+          const int64_t pv = !wide && narrow ? wtapN<40>(lae::kHalf0, w, ia, ib, 30) : split ? wtapS<40>(lae::kHalf0, w, ia, ib, 30) : wide ? wtap<40, true>(lae::kHalf0, w, ia, ib, 30) : wtap<40, false>(lae::kHalf0, w, ia, ib, 30); dv[(size_t)k] = xoW[(size_t)k] - pv; } }); }
     for (int64_t i = a; i < db; i++) d[(size_t)(i - a)] = dv[(size_t)(i - lo)];
     // s = xe + U(d), U reading d[mir(i - 60 .. i + 59, no)]
     V dW((size_t)(b + 58 - (a - 60) + 1)); for (int64_t g = a - 60; g <= b + 58; g++) dW[(size_t)(g - (a - 60))] = dv[(size_t)(laes::mir(g, no) - lo)];
     V xeA((size_t)(b - a)); xe.get(a, b, xeA.data());
-    const bool wide = !fits<60>(laesfast::kU0, maxAbsOf(dW), 31); const int64_t* w = dW.data();
-    laesfast::parallelFor((long)(b - a), threads, [&](long p, long q) { for (long k = p; k < q; k++) { const int64_t ia = (a + k) - 1 - (a - 60), ib = ia + 1;
-        const int64_t u = wide ? wtap<60, true>(laesfast::kU0, w, ia, ib, 31) : wtap<60, false>(laesfast::kU0, w, ia, ib, 31); s[(size_t)k] = xeA[(size_t)k] + u; } }); }
+    const int64_t mxw_ = maxAbsOf(dW); const bool wide = !fits<60>(laesfast::kU0, mxw_, 31), narrow = int32Path() && mxw_ < (1LL << 30), split = int32Path() && mxw_ < (1LL << 45); const int64_t* w = dW.data();
+    laesfast::parallelFor((int64_t)(b - a), threads, [&](int64_t p, int64_t q) { for (int64_t k = p; k < q; k++) { const int64_t ia = (a + k) - 1 - (a - 60), ib = ia + 1;
+        const int64_t u = !wide && narrow ? wtapN<60>(laesfast::kU0, w, ia, ib, 31) : split ? wtapS<60>(laesfast::kU0, w, ia, ib, 31) : wide ? wtap<60, true>(laesfast::kU0, w, ia, ib, 31) : wtap<60, false>(laesfast::kU0, w, ia, ib, 31); s[(size_t)k] = xeA[(size_t)k] + u; } }); }
 // inverse (laesfast::inv): s (ne) and d (no), n = ne + no -> x[2a, min(2b, n)) for a piece [a, b) of the s indices
 inline void invPiece(Sig& s, Sig& d, int64_t n, int64_t a, int64_t b, V& x, int threads) {
     const int64_t ne = s.n, no = d.n; const int64_t ob = std::min(b, no), x0 = 2 * a, x1 = std::min(2 * b, n); x.assign((size_t)std::max<int64_t>(0, x1 - x0), 0);
@@ -107,24 +154,54 @@ inline void invPiece(Sig& s, Sig& d, int64_t n, int64_t a, int64_t b, V& x, int 
     lo = std::min(lo, a); hi = std::max(hi, b - 1);
     // xe[lo..hi] = s - U(d), U reading d[mir(i - 60 .. i + 59, no)]
     const V dW = window(d, lo - 60, hi + 59); V sW((size_t)(hi - lo + 1)); s.get(lo, hi + 1, sW.data()); V xev((size_t)(hi - lo + 1));
-    { const bool wide = !fits<60>(laesfast::kU0, maxAbsOf(dW), 31); const int64_t* w = dW.data();
-      laesfast::parallelFor((long)(hi - lo + 1), threads, [&](long p, long q) { for (long k = p; k < q; k++) { const int64_t i = lo + k, ia = i - 1 - (lo - 60), ib = ia + 1;
-          const int64_t u = wide ? wtap<60, true>(laesfast::kU0, w, ia, ib, 31) : wtap<60, false>(laesfast::kU0, w, ia, ib, 31); xev[(size_t)k] = sW[(size_t)k] - u; } }); }
+    { const int64_t mxw_ = maxAbsOf(dW); const bool wide = !fits<60>(laesfast::kU0, mxw_, 31), narrow = int32Path() && mxw_ < (1LL << 30), split = int32Path() && mxw_ < (1LL << 45); const int64_t* w = dW.data();
+      laesfast::parallelFor((int64_t)(hi - lo + 1), threads, [&](int64_t p, int64_t q) { for (int64_t k = p; k < q; k++) { const int64_t i = lo + k, ia = i - 1 - (lo - 60), ib = ia + 1;
+          const int64_t u = !wide && narrow ? wtapN<60>(laesfast::kU0, w, ia, ib, 31) : split ? wtapS<60>(laesfast::kU0, w, ia, ib, 31) : wide ? wtap<60, true>(laesfast::kU0, w, ia, ib, 31) : wtap<60, false>(laesfast::kU0, w, ia, ib, 31); xev[(size_t)k] = sW[(size_t)k] - u; } }); }
     for (int64_t i = a; i < b; i++) x[(size_t)(2 * i - x0)] = xev[(size_t)(i - lo)];
     if (a >= ob) return;
     // xo = d + P(xe), P reading xe[mir(i - 39 .. i + 40, ne)]
     V xeW((size_t)(ob + 39 - (a - 39) + 1)); for (int64_t g = a - 39; g <= ob + 39; g++) xeW[(size_t)(g - (a - 39))] = xev[(size_t)(laes::mir(g, ne) - lo)];
     V dA((size_t)(ob - a)); d.get(a, ob, dA.data());
-    const bool wide = !fits<40>(lae::kHalf0, maxAbsOf(xeW), 30); const int64_t* w = xeW.data();
-    laesfast::parallelFor((long)(ob - a), threads, [&](long p, long q) { for (long k = p; k < q; k++) { const int64_t ia = (a + k) - (a - 39), ib = ia + 1;
-        const int64_t pv = wide ? wtap<40, true>(lae::kHalf0, w, ia, ib, 30) : wtap<40, false>(lae::kHalf0, w, ia, ib, 30); x[(size_t)(2 * (a + k) + 1 - x0)] = dA[(size_t)k] + pv; } }); }
+    const int64_t mxw_ = maxAbsOf(xeW); const bool wide = !fits<40>(lae::kHalf0, mxw_, 30), narrow = int32Path() && mxw_ < (1LL << 30), split = int32Path() && mxw_ < (1LL << 45); const int64_t* w = xeW.data();
+    laesfast::parallelFor((int64_t)(ob - a), threads, [&](int64_t p, int64_t q) { for (int64_t k = p; k < q; k++) { const int64_t ia = (a + k) - (a - 39), ib = ia + 1;
+        const int64_t pv = !wide && narrow ? wtapN<40>(lae::kHalf0, w, ia, ib, 30) : split ? wtapS<40>(lae::kHalf0, w, ia, ib, 30) : wide ? wtap<40, true>(lae::kHalf0, w, ia, ib, 30) : wtap<40, false>(lae::kHalf0, w, ia, ib, 30); x[(size_t)(2 * (a + k) + 1 - x0)] = dA[(size_t)k] + pv; } }); }
 // the reference (laes::refLen) for the output indices [a, b): r[i] = round(sum_q h[q] src[mir(i + whole + q, n)] / 2^(31 - up))
 inline void refPiece(Sig& src, const std::vector<int64_t>& h, int64_t whole, int up, int64_t a, int64_t b, V& r, int threads) {
     r.assign((size_t)(b - a), 0); if (b <= a) return; const int64_t g0 = a + whole - 127; const V w = window(src, g0, b - 1 + whole + 128);
+    // a whole-sample offset (frac = 0): the taps are 2^31 at one place and 0 elsewhere, so r[i] = round(src[i + whole] * 2^up), computed
+    // directly (the same value as the sum below: 2^31 * v is a multiple of 2^(31 - up) when up >= 0)
+    { int c = -1, nz = 0; for (int t = 0; t < 256; t++) if (h[(size_t)t]) { nz++; c = t; }
+      if (nz == 1 && h[(size_t)c] == (1LL << 31)) { for (int64_t k = 0; k < b - a; k++) { const int64_t v = w[(size_t)(k + c)];
+              r[(size_t)k] = up >= 0 ? (int64_t)((uint64_t)v << up) : (v + (1LL << (-up - 1))) >> (-up); }
+          return; } }
     const int s = 31 - up; int64_t sh = 0; for (int64_t v : h) sh += v < 0 ? -v : v;
-    const bool wide = !((double)maxAbsOf(w) * (double)sh + (s > 0 ? (double)(1LL << (s - 1)) : 0.0) < 9.0e18);
-    laesfast::parallelFor((long)(b - a), threads, [&](long p, long q) { for (long k = p; k < q; k++) { const int64_t* c = w.data() + k;   // c[q + 127] = src at (a + k) + whole + q
-        if (!wide) { int64_t acc = 0; for (int t = 0; t < 256; t++) acc += h[t] * c[t]; r[(size_t)k] = s > 0 ? (acc + (1LL << (s - 1))) >> s : (int64_t)((uint64_t)acc << (-s)); }
+    const int64_t mxw = maxAbsOf(w); const bool wide = !((double)mxw * (double)sh + (s > 0 ? (double)(1LL << (s - 1)) : 0.0) < 9.0e18);
+    int64_t mh = 0; for (int64_t v : h) mh = std::max(mh, v < 0 ? -v : v);
+    const bool n32 = int32Path() && mxw < (1LL << 31) && mh < (1LL << 31);   // every factor fits int32: int32 products (AVX2 when present)
+    // larger samples (below 2^47, e.g. a 32-bit master's levels): each split into c >> 16 and c & 0xFFFF (both int32); the two sums are
+    // exact in int64 (sum|h| x 2^31 at most) and combined in 128 bits, so the result equals both the 64-bit and the 128-bit form below
+    const bool s48 = !(!wide && n32) && int32Path() && mxw < (1LL << 47) && mh < (1LL << 31) && (double)sh * (double)((mxw >> 16) + 1) < 9.0e18;
+    laesfast::parallelFor((int64_t)(b - a), threads, [&](int64_t p, int64_t q) { for (int64_t k = p; k < q; k++) { const int64_t* c = w.data() + k;   // c[q + 127] = src at (a + k) + whole + q
+        if (s48) { int64_t ah = 0, al = 0;
+#ifdef LAESS_AVX2
+            if (hasAvx2()) { __m256i vh = _mm256_setzero_si256(), vl = _mm256_setzero_si256(); const __m256i m16 = _mm256_set1_epi64x(0xFFFF);
+                for (int t = 0; t < 256; t += 4) { const __m256i hv = loadH4(h.data() + t), x = _mm256_loadu_si256((const __m256i*)(c + t));
+                    vh = _mm256_add_epi64(vh, _mm256_mul_epi32(hv, _mm256_srli_epi64(x, 16))); vl = _mm256_add_epi64(vl, _mm256_mul_epi32(hv, _mm256_and_si256(x, m16))); }
+                ah = sum4(vh); al = sum4(vl); }
+            else
+#endif
+            for (int t = 0; t < 256; t++) { ah += (int64_t)(int32_t)h[t] * (int64_t)(int32_t)(c[t] >> 16); al += (int64_t)(int32_t)h[t] * (int64_t)(int32_t)(c[t] & 0xFFFF); }
+            laes::Acc A; A.lo = (uint64_t)ah << 16; A.hi = ah >> 48; const uint64_t nlo = A.lo + (uint64_t)al; A.hi += (al >> 63) + (nlo < A.lo ? 1 : 0); A.lo = nlo;
+            r[(size_t)k] = s > 0 ? A.shr(s) : (int64_t)((uint64_t)A.lo << (-s)); }
+        else if (!wide) { int64_t acc = 0;
+            if (n32) {
+#ifdef LAESS_AVX2
+                if (hasAvx2()) { __m256i v = _mm256_setzero_si256(); for (int t = 0; t < 256; t += 4) v = _mm256_add_epi64(v, _mm256_mul_epi32(loadH4(h.data() + t), _mm256_loadu_si256((const __m256i*)(c + t)))); acc = sum4(v); }
+                else
+#endif
+                for (int t = 0; t < 256; t++) acc += (int64_t)(int32_t)h[t] * (int64_t)(int32_t)c[t]; }
+            else for (int t = 0; t < 256; t++) acc += h[t] * c[t];
+            r[(size_t)k] = s > 0 ? (acc + (1LL << (s - 1))) >> s : (int64_t)((uint64_t)acc << (-s)); }
         else { laes::Acc A; for (int t = 0; t < 256; t++) A.mac(h[t], c[t]); r[(size_t)k] = s > 0 ? A.shr(s) : (int64_t)((uint64_t)A.lo << (-s)); } } }); }
 // ---- the bit reader of laes_codec.h over a byte range of a file, read through a window
 struct BitRF { In* in = nullptr; long long off = 0, len = 0; size_t pos = 0; bool fail = false; std::vector<uint8_t> w; long long wb = -1;
@@ -137,9 +214,9 @@ struct BitRF { In* in = nullptr; long long off = 0, len = 0; size_t pos = 0; boo
         return v; }
     int64_t getS(int n) { if (n < 1 || n > 63) { fail = true; return 0; } uint64_t v = get(n); if (v >> (n - 1) & 1) v |= ~0ull << n; return (int64_t)v; } };
 // a layer (n values, blocks of B) decoded from a byte range of a file into a signal file
-inline bool decodeLayerToFile(In& in, long long off, long long len, int64_t n, long B, const std::string& out) {
+inline bool decodeLayerToFile(In& in, long long off, long long len, int64_t n, int64_t B, const std::string& out) {
     BitRF rd; rd.in = &in; rd.off = off; rd.len = len; SigOut o(out); V x;
-    for (int64_t a = 0; a < n; a += B) { const long k = (long)std::min<int64_t>(B, n - a); x.resize((size_t)k); if (!laes::decodeBlock(rd, x.data(), k)) return false; o.put(x.data(), x.size()); }
+    for (int64_t a = 0; a < n; a += B) { const int64_t k = (int64_t)std::min<int64_t>(B, n - a); x.resize((size_t)k); if (!laes::decodeBlock(rd, x.data(), k)) return false; o.put(x.data(), x.size()); }
     o.close(); return true; }
 // ---- block-wise decoder (laes::decodeLaes, piece by piece): the payload is a file; every decoded master is written as two channel files
 // of its samples >> w (top level) and its lower levels (for the masters that refer to it). piece = base-level samples per piece (a multiple
@@ -169,8 +246,8 @@ inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& cor
     uint64_t magic = u(4), ver = u(2), hs = u(2), base = u(4), cbits = u(1), ch = u(1), nm = u(1), cmode = u(1), nc = u(8); uint8_t csha[32] = {0}; if (pos + 32 <= end) { body.read(pos, csha, 32); pos += 32; } else trunc = true; u(8);
     if (trunc || magic != 0x3245414Cull) return "not an LAES block"; if (ver != 1 || hs != 64) return "unsupported LAES version";
     if ((base != 44100 && base != 48000) || (int)base != baseRate || (int)cbits != core.bits || ch != 2 || cmode > 1 || nm < 1 || nm > 16) return "invalid LAES header";
-    if (nc != (uint64_t)core.frames()) return "core length differs from the LAES header";
-    { uint8_t h[32]; hashAnyCore(core, h); if (memcmp(h, csha, 32)) return "core differs from the one this LAES block was made for (SHA-256)"; }
+    if (nc != (uint64_t)core.frames()) return "core master length differs from the LAES header";
+    { uint8_t h[32]; hashAnyCore(core, h); if (memcmp(h, csha, 32)) return "core master differs from the one this LAES block was made for (SHA-256)"; }
     for (uint64_t mi = 0; mi < nm; mi++) { DecMaster D; MasterInfo& I = D.I;
         I.bits = (int)u(1); I.stages = (int)u(1); I.w = (int)u(1); I.storage = (int)u(1); I.refTier = (int)u(1); u(3); I.rate = (int)u(4); u(4); const uint64_t F64 = u(8);
         I.whole = (int64_t)u(8); I.frac = (uint32_t)u(4); u(4); uint8_t sha[32] = {0}; if (pos + 32 <= end) { body.read(pos, sha, 32); pos += 32; } else trunc = true;
@@ -178,8 +255,8 @@ inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& cor
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)
             || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40)) return "invalid master record";
-        if (F64 > (uint64_t)LONG_MAX) return "master too long for this decoder"; I.frames = (long)F64;
-        memcpy(I.sha, sha, 32); const int j = I.storage == 2 ? std::min(I.stages, out[(size_t)I.refTier - 1].I.stages) : 0; const long nj = levLen(I.frames, I.stages - j);
+        if (F64 > (uint64_t)INT64_MAX) return "master too long for this decoder"; I.frames = (int64_t)F64;   // frame counts are int64_t on every platform (32 and 64 bit)
+        memcpy(I.sha, sha, 32); const int j = I.storage == 2 ? std::min(I.stages, out[(size_t)I.refTier - 1].I.stages) : 0; const int64_t nj = levLen(I.frames, I.stages - j);
         const std::string stem = wd + "/d" + std::to_string(mi);
         for (int c = 0; c < 2; c++) { const std::string sc = stem + "_c" + std::to_string(c);
             const uint32_t eb = (uint32_t)u(4); if (trunc || pos + eb > end) return "LAES block truncated";
@@ -194,7 +271,7 @@ inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& cor
                         for (size_t i = 0; i < ev.size(); i++) ev[i] += rv[i]; o.put(ev.data(), ev.size()); } o.close(); }
                 remove((sc + "_e").c_str()); }
             std::string cur = xj;
-            for (int k = j + 1; k <= I.stages; k++) { const long nh = levLen(I.frames, I.stages - k); const uint32_t db = (uint32_t)u(4); if (trunc || pos + db > end) return "LAES block truncated";
+            for (int k = j + 1; k <= I.stages; k++) { const int64_t nh = levLen(I.frames, I.stages - k); const uint32_t db = (uint32_t)u(4); if (trunc || pos + db > end) return "LAES block truncated";
                 const std::string dk = sc + "_d" + std::to_string(k); if (!decodeLayerToFile(body, pos, db, nh / 2, 4096L << (k - 1), dk)) return "damaged octave layer"; pos += db;
                 const std::string nx = sc + "_x" + std::to_string(k);
                 { FileSig s(cur), d(dk); if (s.n + d.n != nh) return "damaged octave layer"; SigOut o(nx); V x; const int64_t P = piece << (k - 1);

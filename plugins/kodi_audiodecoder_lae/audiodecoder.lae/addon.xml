@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon id="audiodecoder.lae" version="0.2.5" name="LAE decoder" provider-name="mtq0605">
+  <requires>
+    <import addon="kodi.binary.global.main" version="2.0.2"/>
+    <import addon="kodi.binary.global.general" version="1.0.5"/>
+    <import addon="kodi.binary.global.filesystem" version="1.1.9"/>
+    <import addon="kodi.binary.global.gui" version="5.15.0"/>
+    <import addon="kodi.binary.global.audioengine" version="1.1.1"/>
+    <import addon="kodi.binary.instance.audiodecoder" version="4.0.0"/>
+  </requires>
+  <extension point="kodi.audiodecoder" name="lae" tags="true" library_windx="audiodecoder.lae.dll">
+    <support>
+      <extension name=".lae">
+        <description>30200</description>
+      </extension>
+    </support>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="en_GB">LAE (Layered Audio Extension) decoder: LAES lossless masters and LAEY</summary>
+    <summary lang="zh_CN">LAE（分层音频扩展）解码器：LAES 无损母带和 LAEY</summary>
+    <description lang="en_GB">Plays .lae files: LAES (LAE Lossless) in the WAV, RF64 or FLAC form, and LAEY WAV. A master plays after its SHA-256 has been checked once (remembered per file content). Rename an LAE .flac or .wav file to .lae to play its masters; as .flac or .wav, Kodi plays its CD-compatible core.</description>
+    <description lang="zh_CN">播放 .lae 文件：LAES（LAE 无损，WAV、RF64 或 FLAC 形式）和 LAEY WAV。母带先核对一次 SHA-256 再播放（按文件内容记住结果）。把 LAE 的 .flac 或 .wav 改名为 .lae 就能放其中的母带；保持 .flac / .wav 时 Kodi 放它的 CD 兼容核心母带。</description>
+    <license>GPL-3.0-or-later (the add-on binary; LAE decoder sources Apache-2.0)</license>
+    <platform>windows-x86_64</platform>
+  </extension>
+</addon>

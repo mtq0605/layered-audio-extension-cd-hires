@@ -8,6 +8,9 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#define _fseeki64 fseeko   // 64-bit file offsets (Android, Linux: off_t is 64-bit on 64-bit targets)
+#define _ftelli64 ftello
 #endif
 #include "lae_api.h"
 #include "lae_decoder.h"
@@ -41,7 +44,7 @@ std::string md5hex(const std::vector<int16_t>& cd) {   // the whole-track MD5 ov
         for (size_t k = 0; k < n; k++) { by[k * 2] = (uint8_t)cd[i + k]; by[k * 2 + 1] = (uint8_t)((uint16_t)cd[i + k] >> 8); } m.update(by, n * 2); i += n; }
     return m.hex(); }
 
-// ---- the player's seek checkpoints (rule PL-7): made only by this library's own check of a file, kept only in the player's folder under
+// ---- the player's seek checkpoints: made only by this library's own check of a file, kept only in the player's folder under
 // the SHA-256 of the whole file, never written into or sent with the media file. Folder: %APPDATA%\LAE\lae_index (Windows) or
 // $XDG_CACHE_HOME/lae/lae_index, ~/.cache/lae/lae_index; the environment variable LAE_INDEX_DIR overrides it ("off": no folder).
 // At most 256 MB of .idx files: the least recently used ones are deleted (only *.idx in that folder). A missing or damaged record only

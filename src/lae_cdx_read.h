@@ -22,6 +22,7 @@
 #include <filesystem>
 #include "lae_cdx.h"
 #include "iso9660.h"
+#include "win_utf8.h"   // fromAnsi: the ANSI reading of a CUE file name (2026-11-05)
 namespace cdxr {
 namespace fs = std::filesystem;
 static const long long SECTOR = 588, PREGAP = 150 * 588, WDEF = 5880;
@@ -152,10 +153,10 @@ inline std::string parseCueText(std::string txt, const fs::path& dir, CueSheet& 
         if (meta.count(kw)) continue;
         if (kw == "FILE") { if (tok.size() != 3) return where + "FILE needs a name and a type" + R3;
             std::string type = upper(tok[2]); fs::path p, alt;
-            try { p = dir / (utf8 ? fs::u8path(tok[1]) : fs::path(tok[1])); } catch (...) { return where + "file name cannot be decoded" + R3; }
-            if (utf8 && !bom && !asciiOnly(tok[1])) { try { alt = dir / fs::path(tok[1]); } catch (...) { alt.clear(); } }
+            try { p = dir / fs::u8path(utf8 ? tok[1] : lae_u8::fromAnsi(tok[1])); } catch (...) { return where + "file name cannot be decoded" + R3; }
+            if (utf8 && !bom && !asciiOnly(tok[1])) { try { alt = dir / fs::u8path(lae_u8::fromAnsi(tok[1])); } catch (...) { alt.clear(); } }
             if (type == "MP3" || lossyExt(extOf(p))) return "lossy base layer (" + u8(p.filename()) + "): not used for the extension (F7)";
-            if (type != "BINARY" && type != "WAVE" && type != "MOTOROLA") return where + "unsupported FILE type " + tok[2] + R3;
+            if (type != "BINARY" && type != "WAVE" && type != "MOTOROLA") return where + "unsupported FILE type " + (utf8 ? tok[2] : lae_u8::fromAnsi(tok[2])) + R3;   // UTF-8 in every report
             CueSheet::File f; f.path = p; f.alt = alt; f.name = u8(p.filename()); f.type = type; c.files.push_back(f); continue; }
         if (kw == "TRACK") { if (tok.size() != 3 || c.files.empty()) return where + "TRACK needs a number, a type and a preceding FILE" + R3;
             int n = atoi(tok[1].c_str()); if (n < 1 || n > 99) return where + "track number out of range" + R3;

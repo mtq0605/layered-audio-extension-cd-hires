@@ -1,23 +1,56 @@
 @echo off
 rem SPDX-FileCopyrightText: 2026 mtq0605
 rem SPDX-License-Identifier: Apache-2.0
-rem usage: build_fb2k.cmd <foobar2000 SDK folder (SDK-2019-12-27, unpacked)> <output folder>
-rem Builds foo_input_lae.dll (x86) for foobar2000 1.4 / 1.5 and 2.x 32-bit. The SDK code needs /d2notypeopt (SDK readme);
-rem the LAE decoder (lae_api.cpp) is compiled with its own verified flags (/fp:precise, no /d2notypeopt).
-set SDK=%~1
-set OUT=%~2
+rem usage: build_fb2k.cmd <SDK-2019-12-27 folder> <SDK-2026-10-01 folder> <output folder>
+rem Builds foo_input_lae.dll twice and packs both into foo_input_lae.fb2k-component (foobar2000 picks the one that fits):
+rem   x86 (root of the package): foobar2000 1.4 / 1.5 and 2.x 32-bit, built against SDK-2019-12-27 (the SDK code needs /d2notypeopt);
+rem   x64 (folder x64 in the package): foobar2000 2.x 64-bit, built against SDK-2026-10-01.
+rem The LAE decoder (lae_api.cpp) is compiled with its own verified flags (/fp:precise, no /d2notypeopt), the LAES decoder
+rem (laes_api.cpp) with /fp:strict (its reference taps are computed in double). Both SDKs are BSD-style licensed and not part of this repository.
+setlocal
+set SDK86=%~1
+set SDK64=%~2
+set OUT=%~3
+if "%OUT%"=="" (echo usage: build_fb2k.cmd ^<SDK-2019-12-27^> ^<SDK-2026-10-01^> ^<output folder^> & exit /b 1)
 set LAE=%~dp0..\..\src
-call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars32.bat" >nul 2>nul
-if not exist "%OUT%\obj" mkdir "%OUT%\obj"
-set COMMON=/nologo /c /O2 /EHsc /MT /std:c++17 /utf-8 /DUNICODE /D_UNICODE /DNDEBUG /DWIN32 /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS /W3 /wd4996 /wd4244 /wd4267 /wd4018 /wd4334
-cl %COMMON% /d2notypeopt /I"%SDK%" /I"%SDK%\foobar2000" /Fo"%OUT%\obj\\" "%SDK%\foobar2000\SDK\*.cpp" "%SDK%\foobar2000\foobar2000_component_client\component_client.cpp" "%SDK%\pfc\*.cpp" > "%OUT%\build_sdk.txt" 2>&1
-if errorlevel 1 (echo BUILD FAILED sdk & type "%OUT%\build_sdk.txt" & exit /b 1)
-cl %COMMON% /d2notypeopt /DLAE_STATIC /I"%SDK%" /I"%SDK%\foobar2000" /I"%LAE%" /Fo"%OUT%\obj\\" "%~dp0foo_input_lae.cpp" > "%OUT%\build_component.txt" 2>&1
-if errorlevel 1 (echo BUILD FAILED component & type "%OUT%\build_component.txt" & exit /b 1)
-cl %COMMON% /fp:precise /D_USE_MATH_DEFINES /DLAE_STATIC /Fo"%OUT%\obj\\" "%LAE%\lae_api.cpp" > "%OUT%\build_lae.txt" 2>&1
-if errorlevel 1 (echo BUILD FAILED liblae & type "%OUT%\build_lae.txt" & exit /b 1)
-del /q "%OUT%\obj\pfc-fb2k-hooks.obj" "%OUT%\obj\nix-objects.obj" 2>nul
+set VC=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build
+call :one x86 "%SDK86%" vcvars32.bat shared.lib || exit /b 1
+call :one x64 "%SDK64%" vcvars64.bat shared-x64.lib || exit /b 1
+if exist "%OUT%\pkg" rmdir /s /q "%OUT%\pkg"
+mkdir "%OUT%\pkg\x64"
+copy /y "%OUT%\x86\foo_input_lae.dll" "%OUT%\pkg\" >nul
+copy /y "%OUT%\x64\foo_input_lae.dll" "%OUT%\pkg\x64\" >nul
+if exist "%OUT%\foo_input_lae.fb2k-component" del /q "%OUT%\foo_input_lae.fb2k-component"
+powershell -NoProfile -Command "Compress-Archive -Path '%OUT%\pkg\*' -DestinationPath '%OUT%\foo_input_lae.zip' -Force; Move-Item -Force '%OUT%\foo_input_lae.zip' '%OUT%\foo_input_lae.fb2k-component'"
+if errorlevel 1 (echo PACKING FAILED & exit /b 1)
+rmdir /s /q "%OUT%\pkg"
+echo built %OUT%\foo_input_lae.fb2k-component (x86 + x64)
+exit /b 0
+
+:one
+setlocal
+set ARCH=%~1
+set SDK=%~2
+set O=%OUT%\%ARCH%
+call "%VC%\%~3" >nul 2>nul
+if not exist "%O%\obj" mkdir "%O%\obj"
+set STD=/std:c++17
+if "%ARCH%"=="x64" set STD=/std:c++20
+set COMMON=/nologo /c /O2 /EHsc /MT %STD% /utf-8 /DUNICODE /D_UNICODE /DNDEBUG /D_WINDOWS /D_CRT_SECURE_NO_WARNINGS /W3 /wd4996 /wd4244 /wd4267 /wd4018 /wd4334
+if "%ARCH%"=="x86" set COMMON=%COMMON% /DWIN32
+cl %COMMON% /d2notypeopt /I"%SDK%" /I"%SDK%\foobar2000" /Fo"%O%\obj\\" "%SDK%\foobar2000\SDK\*.cpp" "%SDK%\foobar2000\foobar2000_component_client\component_client.cpp" "%SDK%\pfc\*.cpp" > "%O%\build_sdk.txt" 2>&1
+if errorlevel 1 (echo BUILD FAILED sdk %ARCH% & type "%O%\build_sdk.txt" & exit /b 1)
+set PERM=
+if "%ARCH%"=="x64" set PERM=/permissive
+cl %COMMON% %PERM% /d2notypeopt /DLAE_STATIC /I"%SDK%" /I"%SDK%\foobar2000" /I"%LAE%" /Fo"%O%\obj\\" "%~dp0foo_input_lae.cpp" > "%O%\build_component.txt" 2>&1
+if errorlevel 1 (echo BUILD FAILED component %ARCH% & type "%O%\build_component.txt" & exit /b 1)
+cl %COMMON% /std:c++17 /fp:precise /D_USE_MATH_DEFINES /DLAE_STATIC /Fo"%O%\obj\\" "%LAE%\lae_api.cpp" > "%O%\build_lae.txt" 2>&1
+if errorlevel 1 (echo BUILD FAILED liblae %ARCH% & type "%O%\build_lae.txt" & exit /b 1)
+cl %COMMON% /std:c++17 /fp:strict /D_USE_MATH_DEFINES /DLAE_STATIC /Fo"%O%\obj\\" "%LAE%\laes_api.cpp" > "%O%\build_laes.txt" 2>&1
+if errorlevel 1 (echo BUILD FAILED liblae LAES %ARCH% & type "%O%\build_laes.txt" & exit /b 1)
+del /q "%O%\obj\pfc-fb2k-hooks.obj" "%O%\obj\nix-objects.obj" 2>nul
 rem   (as in the SDK's "Release FB2K" configuration: these two pfc files are not part of a component)
-link /nologo /DLL /OUT:"%OUT%\foo_input_lae.dll" "%OUT%\obj\*.obj" "%SDK%\foobar2000\shared\shared.lib" user32.lib shell32.lib ole32.lib uuid.lib advapi32.lib comctl32.lib gdi32.lib shlwapi.lib > "%OUT%\build_link.txt" 2>&1
-if errorlevel 1 (echo LINK FAILED & type "%OUT%\build_link.txt" & exit /b 1)
-echo built %OUT%\foo_input_lae.dll
+link /nologo /DLL /OUT:"%O%\foo_input_lae.dll" "%O%\obj\*.obj" "%SDK%\foobar2000\shared\%~4" user32.lib shell32.lib ole32.lib uuid.lib advapi32.lib comctl32.lib gdi32.lib shlwapi.lib > "%O%\build_link.txt" 2>&1
+if errorlevel 1 (echo LINK FAILED %ARCH% & type "%O%\build_link.txt" & exit /b 1)
+echo built %O%\foo_input_lae.dll
+exit /b 0

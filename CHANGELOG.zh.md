@@ -4,7 +4,7 @@
 
 本文件记录 LAE（Layered Audio Extension）及其有损层级 LAE Lossy（LAEY）和无损层级 LAE Lossless（LAES）的重要变更，按时间由新到旧排列。
 
-## 未发布
+## 2026-11-07（v5-2026-11-07）
 
 - **测试信号生成器在各平台上输出一致（2026-11-07）。** `src/gen_suite.cpp` 使用 `src/lae_math.h` 而非 C 库的 `sin`、`cos`、`exp`、`pow` 和 `log` 计算其信号，因此 Windows、Linux 和 ARM64 生成逐字节相同的源信号。扫频源和电子乐源发生变化，其 8 个一致性测试向量已重新生成（`tests/vectors/MANIFEST.md`）；transients 和 imd 向量不变。编码器一致性检查现在在源信号不同时判为失败，而不再仅报告。解码器不受影响。
 - **演示音频（发布附件）。** 提供作者的三部作品（*Grand*、*Tolled*、*LAES demo*）的 LAES 文件（`.flac`、`.wav`、`.lae`）和 LAEY 文件、三张带 CD-TEXT 的 CD-Extra 光盘镜像，以及制作它们所用的全部母带。每个文件及每个母带的样本均附有 SHA-256，供独立验证（README 第 14.10 节）。音频的一切权利均予保留：仅供收听和验证（[AUDIO_LICENSE.md](AUDIO_LICENSE.zh.md)）。

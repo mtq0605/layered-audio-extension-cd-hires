@@ -4,7 +4,7 @@
 
 This file records the notable changes to LAE (Layered Audio Extension), its lossy tier LAE Lossy (LAEY) and its lossless tier LAE Lossless (LAES), newest first.
 
-## Unreleased
+## 2026-11-07 (v5-2026-11-07)
 
 - **Test-signal generator platform-identical (2026-11-07).** `src/gen_suite.cpp` computes its signals with `src/lae_math.h` instead of the C library's `sin`, `cos`, `exp`, `pow` and `log`, so Windows, Linux and ARM64 generate byte-identical sources. The sweep and electronic sources changed; their 8 conformance vectors were regenerated (`tests/vectors/MANIFEST.md`), and the transients and imd vectors are unchanged. The encoder conformance check now fails on a different source instead of only reporting it. Decoders are unaffected.
 - **Demonstration audio (release attachments).** Three works by the author (*Grand*, *Tolled*, *LAES demo*) as LAES files (`.flac`, `.wav`, `.lae`) and LAEY files, three CD-Extra disc images with CD-TEXT, and every master from which they were made, with the SHA-256 of every file and of the samples of every master, for independent verification (README Section 14.10). All rights in the audio are reserved: it is provided for listening and verification only ([AUDIO_LICENSE.md](AUDIO_LICENSE.md)).

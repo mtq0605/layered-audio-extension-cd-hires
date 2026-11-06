@@ -63,8 +63,8 @@ int main(int argc, char** argv) {
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
     if (argc < 3) { printf("usage: laes_export <in> --list | <in> <choice> <out.flac> [--from=s] [--len=s] [--index=rec] | <in> <choice> --seg=s --dir=folder [--index=rec]\n"); return 1; }
     FILE* fp = fopen(argv[1], "rb"); if (!fp) { printf("cannot open %s\n", argv[1]); return 2; }
-    _fseeki64(fp, 0, SEEK_END); const uint64_t size = (uint64_t)_ftelli64(fp);
-    laesp::FnSrc src; src.n = size; src.fn = [&](uint64_t at, void* d, size_t k) { return (_fseeki64(fp, (long long)at, SEEK_SET) == 0 && fread(d, 1, k, fp) == k) ? 0 : 1; };
+    const long long sz = laess::sizeOf(fp); if (sz < 0) { printf("cannot read %s\n", argv[1]); return 2; } const uint64_t size = (uint64_t)sz;   // 64-bit, Windows and POSIX (laes_stream.h)
+    laesp::FnSrc src; src.n = size; src.fn = [&](uint64_t at, void* d, size_t k) { return (laess::seekTo(fp, (long long)at) && fread(d, 1, k, fp) == k) ? 0 : 1; };
     laesp::File f; char mg[5]; std::string e; try { e = f.open(src, mg); } catch (const std::exception& x) { e = x.what(); }
     if (!e.empty()) { printf("%s: %s\n", argv[1], e.c_str()); return 2; }
     if (!f.why.empty()) printf("note: %s (only the core master can be exported)\n", f.why.c_str());

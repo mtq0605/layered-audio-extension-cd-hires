@@ -1567,7 +1567,8 @@ All options, the verified builds and the check scripts are given in [docs/BUILD.
 ### 14.2 Encoding
 
 ```
-lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [resume]
+lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [resume]
+lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]
 ```
 
 | Argument | Meaning |
@@ -1589,6 +1590,12 @@ lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [
 | `noise=<file>` | Code the cells marked in this marking file (LAE Noise Marker, `plugins/lae_noise_marker/`) as silence in the frequency layer (Section 8.6, [docs/NOISE.md](docs/NOISE.md)). The file must belong to this master. Marks in the CD band are listed, not deleted. |
 | `g`, `g=b`, `g=c`, `g=d` | Code the frequency layer a second time to cancel G, the up-converted CD layer, in deleted and silent cells (Section 8.6). `g` = `g=d` (step 1); `g=c` and `g=b` are coarser and smaller. Optional; the encoder prints what it costs. |
 | `resume` | Continue an interrupted run: the finished steps are kept in the work folder `<output>.tmp` and are not repeated when the same master is encoded again with the same options and `resume`; otherwise the run starts from the beginning. A run stopped after it wrote `<output>.part` writes that file again. With `cd=`, the alignment is done again (it gives the same result) and the steps after it continue. The output is the same as that of an uninterrupted run. |
+| `--tag=KEY=VALUE` | A tag, with the usual names: `TITLE`, `ARTIST`, `ALBUM`, `ALBUMARTIST`, `DATE`, `GENRE`, `TRACKNUMBER`, `COMPOSER`, `COPYRIGHT`, `COMMENT`, … (UTF-8; a name may repeat). Written as a RIFF `LIST/INFO` chunk and an `id3 ` chunk (ID3v2.4) between `fmt ` and `data`; the CD audio and the `LAE ` chunk do not change. |
+| `--cover=<image>` | The front cover, JPEG or PNG, stored byte for byte |
+| `--picture=<type>:<image>` | Any other picture, with the ID3 / FLAC picture type (4 back cover, 5 leaflet, 6 medium, 8 artist, …) |
+| `lae_enc tag` | New tags for an existing LAE file without encoding again: writes a new file with the given tags (none given: no tags), the same CD audio and the same `LAE ` chunk, and checks that both are byte-identical; the input is not changed. |
+
+The tag options may also be written without the leading `--` (`tag=`, `cover=`, `picture=`). Without them the output is unchanged.
 
 Notes on the encoder:
 

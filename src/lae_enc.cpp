@@ -7,6 +7,8 @@
 //           the depth layer (L, R) and the frequency layer (M, S), each range-coded with partition levels
 // usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2 (scheme), default s1] [zs] [cd=<CD.wav>] [energy] [equal]
 //                [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d]
+//                [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]
+//        lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   new tags, no re-encoding
 //        lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdaccept]   the CD's split markers onto the master (cd_plan.cpp)
 //   mode = share of the scanned D (and C) content kept at its tier (see the MODES table in partition_format.h); energy = measure the
 //   share by energy instead of cell count; equal = halving cuts only. The frequency layer is stored per octave (independent streams).
@@ -82,6 +84,7 @@ extern "C" __declspec(dllimport) int __stdcall GlobalMemoryStatusEx(LaeMemStatus
 #include "mdct_tb.h"   // global, shared by the lossy and decoder modules (both namespaces use ::mdct)
 #include "frac_delay.h"   // global: the v6 phase delay, shared by the route split, the alignment and the decoder (::lae_fd)
 #include "noise_marks.h"   // global: the marking file of noise= (::nmk), read by the encoder and by the layer coder
+#include "laes_tags.h"     // tags and pictures (2026-11-06): the same code and layout as laes
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 // ---- per-thread module settings and output: two layers (L and R, M and S) are coded at once, each in its own thread. A layer thread
 // keeps its own copy of the variables a layer sets (env() below) and its own printed text, which is shown after the pair in the usual
@@ -192,8 +195,76 @@ namespace m_plan {
 #include "cd_plan.cpp"
 }
 
+// Tags and pictures (2026-11-06), the same as laes: --tag=KEY=VALUE (Vorbis names: TITLE, ARTIST, ALBUM, DATE, ...; a key may repeat),
+// --cover=<image> (front cover), --picture=<type>:<image> (other picture types); JPEG or PNG, stored byte for byte. Also accepted without
+// the leading "--", like the encoder's other options. One set describes the whole file (CD layer and extension). WAV layout: a LIST/INFO
+// chunk and an "id3 " chunk (ID3v2.4, UTF-8) after "fmt " and before "data". The CD audio and the "LAE " chunk do not change, and
+// without these options the file is the same, byte for byte.
+static const char* kLaeyEncoder = "lae_enc (LAE Lossy)";
+static bool isTagOpt(const char* a) { return laestag::isTagArg(a) || !strncmp(a, "tag=", 4) || !strncmp(a, "cover=", 6) || !strncmp(a, "picture=", 8); }
+static std::string tagArgs(int argc, char** argv, int from, laestag::Tags& t) {
+    std::vector<std::string> v{"lae_enc"};
+    for (int i = from; i < argc; i++) if (isTagOpt(argv[i])) v.push_back(argv[i][0] == '-' ? std::string(argv[i]) : "--" + std::string(argv[i]));
+    std::vector<char*> pv; for (auto& x : v) pv.push_back(&x[0]); return laestag::parseArgs((int)pv.size(), pv.data(), t); }
+
+// lae_enc tag <in.wav> <out.wav> [tags] (2026-11-06): new tags without re-encoding. A new file is written ("fmt ", the new tags, then
+// every other chunk in its order; former LIST/INFO and "id3 " chunks are left out; no tags given = none); the input is not changed. The
+// new file's CD audio ("data") and "LAE " chunk are then compared byte for byte with the input's.
+namespace m_tag {
+struct Ck { char id[4]; long long body; uint32_t len; };
+static bool walk(FILE* f, std::vector<Ck>& cks, std::string& why) {
+    uint8_t h[12]; if (fread(h, 1, 12, f) != 12 || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) { why = "not a RIFF WAVE file"; return false; }
+    if (_fseeki64(f, 0, SEEK_END)) { why = "cannot seek"; return false; } const long long end = _ftelli64(f); long long p = 12;
+    while (p + 8 <= end) { uint8_t c[8]; if (_fseeki64(f, p, SEEK_SET) || fread(c, 1, 8, f) != 8) { why = "cannot read a chunk header"; return false; }
+        Ck k; memcpy(k.id, c, 4); k.len = (uint32_t)c[4] | (uint32_t)c[5] << 8 | (uint32_t)c[6] << 16 | (uint32_t)c[7] << 24; k.body = p + 8;
+        if (k.body + k.len > end) { why = std::string("chunk '") + std::string(k.id, 4) + "' runs past the end of the file"; return false; }
+        cks.push_back(k); p = k.body + k.len + (k.len & 1); }
+    return true; }
+static const Ck* find(const std::vector<Ck>& cks, const char* id) { for (auto& k : cks) if (!memcmp(k.id, id, 4)) return &k; return nullptr; }
+static bool isOldTag(FILE* f, const Ck& k) {   // LIST of type INFO, or an id3 chunk
+    if (!memcmp(k.id, "id3 ", 4) || !memcmp(k.id, "ID3 ", 4)) return true;
+    if (memcmp(k.id, "LIST", 4) || k.len < 4) return false; char t[4]; return !_fseeki64(f, k.body, SEEK_SET) && fread(t, 1, 4, f) == 4 && !memcmp(t, "INFO", 4); }
+static bool copyBody(FILE* in, const Ck& k, FILE* out) {   // header, body, pad byte
+    uint8_t h[8]; memcpy(h, k.id, 4); for (int i = 0; i < 4; i++) h[4 + i] = (uint8_t)(k.len >> (8 * i)); if (fwrite(h, 1, 8, out) != 8) return false;
+    if (_fseeki64(in, k.body, SEEK_SET)) return false; std::vector<uint8_t> b(1 << 20); unsigned long long left = k.len;
+    while (left) { const size_t n = (size_t)std::min<unsigned long long>(left, b.size()); if (fread(b.data(), 1, n, in) != n || fwrite(b.data(), 1, n, out) != n) return false; left -= n; }
+    const uint8_t z = 0; return !(k.len & 1) || fwrite(&z, 1, 1, out) == 1; }
+static bool sameBody(FILE* a, const Ck& ka, FILE* b, const Ck& kb) {
+    if (ka.len != kb.len || _fseeki64(a, ka.body, SEEK_SET) || _fseeki64(b, kb.body, SEEK_SET)) return false;
+    std::vector<uint8_t> x(1 << 20), y(1 << 20); unsigned long long left = ka.len;
+    while (left) { const size_t n = (size_t)std::min<unsigned long long>(left, x.size()); if (fread(x.data(), 1, n, a) != n || fread(y.data(), 1, n, b) != n || memcmp(x.data(), y.data(), n)) return false; left -= n; }
+    return true; }
+static int retag(int argc, char** argv) {
+    if (argc < 4) { printf("usage: lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   (no tags given: the tags are removed)\n"); return 1; }
+    const std::string in = argv[2], out = argv[3], part = out + ".part";
+    for (int i = 4; i < argc; i++) if (!isTagOpt(argv[i])) { printf("unknown option '%s': nothing written (options: --tag=KEY=VALUE --cover=<image> --picture=<type>:<image>)\n", argv[i]); return 1; }
+    std::error_code ec; if (std::filesystem::exists(std::filesystem::u8path(out), ec)) { printf("%s already exists: choose another output name (the input is never changed); nothing written\n", out.c_str()); return 1; }
+    if (std::filesystem::exists(std::filesystem::u8path(part), ec)) { printf("%s already exists: remove it or choose another output name; nothing written\n", part.c_str()); return 1; }
+    laestag::Tags tags; { const std::string e = tagArgs(argc, argv, 4, tags); if (!e.empty()) { printf("%s: nothing written\n", e.c_str()); return 1; } }
+    const std::vector<uint8_t> tc = laestag::wavChunks(tags, kLaeyEncoder);
+    FILE* fi = fopen(in.c_str(), "rb"); if (!fi) { printf("cannot read %s\n", in.c_str()); return 1; }
+    std::vector<Ck> cks; std::string why; if (!walk(fi, cks, why)) { fclose(fi); printf("%s: %s; nothing written\n", in.c_str(), why.c_str()); return 1; }
+    const Ck* fmt = find(cks, "fmt "); const Ck* dat = find(cks, "data"); const Ck* lae = find(cks, "LAE ");
+    if (!fmt || !dat || !lae) { fclose(fi); printf("%s is not an LAE file (it needs \"fmt \", \"data\" and \"LAE \" chunks); nothing written\n", in.c_str()); return 1; }
+    std::vector<Ck> keep; keep.push_back(*fmt); for (auto& k : cks) if (&k != fmt && !isOldTag(fi, k)) keep.push_back(k);
+    unsigned long long riff = 4 + tc.size(); for (auto& k : keep) riff += 8ULL + k.len + (k.len & 1);
+    if (riff > 0xFFFFFFFFull) { fclose(fi); printf("the new file would exceed the 4 GB limit of WAV; nothing written\n"); return 1; }
+    FILE* fo = fopen(part.c_str(), "wb"); bool ok = fo != nullptr;
+    if (ok) { uint8_t h[12] = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E'}; for (int i = 0; i < 4; i++) h[4 + i] = (uint8_t)(riff >> (8 * i)); ok = fwrite(h, 1, 12, fo) == 12; }
+    for (size_t i = 0; ok && i < keep.size(); i++) { ok = copyBody(fi, keep[i], fo); if (ok && i == 0 && !tc.empty()) ok = fwrite(tc.data(), 1, tc.size(), fo) == tc.size(); }
+    if (fo) ok = fclose(fo) == 0 && ok;
+    if (ok) { FILE* fc = fopen(part.c_str(), "rb"); std::vector<Ck> c2; std::string w2;
+        ok = fc && walk(fc, c2, w2) && find(c2, "data") && find(c2, "LAE ") && sameBody(fi, *dat, fc, *find(c2, "data")) && sameBody(fi, *lae, fc, *find(c2, "LAE ")); if (fc) fclose(fc);
+        if (!ok) printf("check FAILED: the new file's CD audio or LAE chunk differs from the input's\n"); }
+    else printf("cannot write %s\n", part.c_str());
+    fclose(fi);
+    if (ok) { std::filesystem::rename(std::filesystem::u8path(part), std::filesystem::u8path(out), ec); ok = !ec; if (!ok) printf("cannot rename %s to %s\n", part.c_str(), out.c_str()); }
+    if (!ok) { std::filesystem::remove(std::filesystem::u8path(part), ec); printf("nothing written\n"); return 2; }
+    printf("written: %s (%zu tag(s), %zu picture(s)); CD audio and LAE chunk byte-identical to %s\n", out.c_str(), tags.kv.size(), tags.pics.size(), in.c_str()); return 0; }
+}  // namespace m_tag
+
 static int encode(int argc, char** argv) {
-    if (argc < 3) { printf("usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2, default s1] [zs] [cd=<independent CD.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d]\n"); return 1; }
+    if (argc < 3) { printf("usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2, default s1] [zs] [cd=<independent CD.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]\n"); return 1; }
     auto T0 = std::chrono::steady_clock::now();
     const std::string outPath = argv[2], partPath = outPath + ".part", tmp = outPath + ".tmp";
     encrun::out = outPath; encrun::part = partPath; encrun::tmp = tmp; encrun::hadOld = exists(outPath);
@@ -204,7 +275,9 @@ static int encode(int argc, char** argv) {
     bool equal = false, zsOpt = false, cdCheck = false, cdAccept = false, bits24 = false, manual = false, resume = false; int wm = 0, scheme = 1, cdEdge = -1; const char* cdPath = nullptr; long long manualT = 0; unsigned long long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once (default: half the physical memory); cdEdge: cdedge=pad / cut (m_align::EDGE_*), -1 not given
     std::string manualText; int manualSg = 1; long long manualI = 0, manualF = 0, manualFs = 1, manualPlace = 0, manualPhi = 0;   // cdalign=<o>: o = sg * (I + F / Fs) master samples
     double manualMove = 0;   // the fraction (master samples, |f| <= 1/2) the master is moved by when it is placed at manualT
-    for (int i = 4; i < argc; i++) { const char* a = argv[i];
+    laestag::Tags tags; std::vector<uint8_t> tagChunks;   // --tag / --cover / --picture: read and checked before any work
+    { const std::string e = tagArgs(argc, argv, 4, tags); if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; } tagChunks = laestag::wavChunks(tags, kLaeyEncoder); }
+    for (int i = 4; i < argc; i++) { const char* a = argv[i]; if (isTagOpt(a)) continue;
         if (!strcmp(a, "equal")) equal = true; else if (!strcmp(a, "energy")) wm = 1; else if (!strcmp(a, "s2")) scheme = 2; else if (!strcmp(a, "s1")) scheme = 1;
         else if (!strcmp(a, "zs")) zsOpt = true; else if (!strncmp(a, "cd=", 3) && a[3]) cdPath = a + 3; else if (!strcmp(a, "cdcheck")) cdCheck = true;
         else if (!strcmp(a, "cdaccept")) cdAccept = true; else if (!strcmp(a, "cdedge=pad")) cdEdge = m_align::EDGE_PAD; else if (!strcmp(a, "cdedge=cut")) cdEdge = m_align::EDGE_CUT; else if (!strcmp(a, "bits=24")) bits24 = true; else if (!strcmp(a, "resume")) resume = true;
@@ -219,7 +292,7 @@ static int encode(int argc, char** argv) {
             if (!ni || !ok || *p || I > 2000000000LL) { printf(strchr(v, ',') ? "cdalign=%s: write the fraction with a point (for example cdalign=3.5)\n"
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
-        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d resume)\n", a); return 1; } }
+        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume)\n", a); return 1; } }
     encrun::keepTmp = resume;
     if ((cdCheck || cdAccept || manual || cdEdge >= 0) && !cdPath) { printf("cdcheck, cdalign, cdaccept and cdedge= need cd=<CD.wav>\n"); return 1; }
     if (mi >= part::MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
@@ -312,7 +385,7 @@ static int encode(int argc, char** argv) {
     // any other key starts from the beginning. The notes are read only by this encoder and never go into the LAE file.
     std::set<std::string> doneSteps; std::mutex stepMu; const std::string manifest = T("resume.txt");
     if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | options");   // not the block length: it does not change any result
-        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume")) key += std::string(" ") + argv[i];
+        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume") && !isTagOpt(argv[i])) key += std::string(" ") + argv[i];   // tags: written with the file only
         key += " | master " + masterMd5;
         if (noisePath) { const std::string t = encio::readText(noisePath); uint64_t h = 1469598103934665603ull; for (unsigned char ch : t) { h ^= ch; h *= 1099511628211ull; }   // FNV-1a of the marking file
             char hs[32]; snprintf(hs, sizeof hs, "%016llx", (unsigned long long)h); key += std::string(" | noise ") + hs; }
@@ -659,7 +732,8 @@ static int encode(int argc, char** argv) {
         size_t n = 0; for (auto& q : pc) n += q.second; return n; };
     // the bytes of the output file (as wavio::writeCD writes them), handed to f piece by piece
     auto fileBytes = [&](const std::vector<Piece>& pc, size_t laeN, const std::function<bool(const uint8_t*, size_t)>& f) {
-        std::vector<uint8_t> o; const size_t extra = laeN == 0 ? 0 : 8 + laeN + (laeN & 1); wavio::hdr(o, (int)base, 2, 16, (size_t)cdBytes, extra);
+        std::vector<uint8_t> o; const size_t extra = laeN == 0 ? 0 : 8 + laeN + (laeN & 1); wavio::hdr(o, (int)base, 2, 16, (size_t)cdBytes, extra + tagChunks.size());
+        if (!tagChunks.empty()) o.insert(o.begin() + 36, tagChunks.begin(), tagChunks.end());   // tags after "fmt " (RIFF 12 + fmt 24 bytes), before "data"
         if (!f(o.data(), o.size())) return false;
         blkio::Reader<int16_t, 2> r(T("b16.s16").c_str()); std::vector<int16_t> x; const long BS = 1L << 18;
         for (long a = pb; a < nb - pb; a += BS) { r.read(a, std::min(nb - pb, a + BS), x); if (!f((const uint8_t*)x.data(), x.size() * 2)) return false; }
@@ -670,7 +744,7 @@ static int encode(int argc, char** argv) {
         const uint8_t z = 0; return !(laeN & 1) || f(&z, 1); };
     // written to <out>.part and read back: the file on disk must hold exactly this CD layer and this chunk
     auto writeFile = [&]() { std::vector<std::vector<uint8_t>> small; std::vector<Piece> pc; const size_t laeN = chunkPieces(small, pc);
-        if (!wavio::fits32(cdBytes, 8ULL + laeN + 1)) { printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return (size_t)0; }
+        if (!wavio::fits32(cdBytes, 8ULL + laeN + 1 + tagChunks.size())) { printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return (size_t)0; }
         encrun::partMine = true; markDone("part");   // resume: this run owns the .part from here on
         bool okw = false; { FILE* f = fopen(partPath.c_str(), "wb"); if (f) { okw = fileBytes(pc, laeN, [&](const uint8_t* p, size_t n) { return fwrite(p, 1, n, f) == n; }); okw = fclose(f) == 0 && okw; } }
         if (!okw || encio::testFail("partwrite")) { printf("cannot write %s\n", partPath.c_str()); return (size_t)0; }
@@ -738,7 +812,7 @@ int main(int argc, char** argv) {
 #endif
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h); after signal(), so Ctrl+C sets the console back first
     int rc;
-    try { rc = argc > 1 && !strcmp(argv[1], "plan") ? m_plan::planMain(argc, argv) : encode(argc, argv); }
+    try { rc = argc > 1 && !strcmp(argv[1], "plan") ? m_plan::planMain(argc, argv) : argc > 1 && !strcmp(argv[1], "tag") ? m_tag::retag(argc, argv) : encode(argc, argv); }
     catch (const encio::Fail& e) { encrun::emergency(e.what()); return 2; }
     catch (const std::bad_alloc&) { encrun::emergency("out of memory"); return 2; }
     catch (const std::exception& e) { encrun::emergency(e.what()); return 2; }

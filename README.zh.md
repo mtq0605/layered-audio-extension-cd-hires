@@ -1596,7 +1596,8 @@ g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_enc src
 ### 14.2 编码
 
 ```
-lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [resume]
+lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [resume]
+lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]
 ```
 
 | 参数 | 含义 |
@@ -1618,6 +1619,12 @@ lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [
 | `noise=<文件>` | 把这个标定文件（LAE 噪声标定，`plugins/lae_noise_marker/`）里标定的格子，在频率层里编成静音（第 8.6 节，[docs/NOISE.zh.md](docs/NOISE.zh.md)）。文件必须属于这个母带。CD 频带里的标定只列出，不删除。 |
 | `g`、`g=b`、`g=c`、`g=d` | 把频率层再编一次，在删除的和静音的格子里抵消 G（升采样后的 CD 层）（第 8.6 节）。`g` = `g=d`（步长 1）；`g=c`、`g=b` 更粗、更小。可选；编码器会打印它的代价。 |
 | `resume` | 接着做被中断的编码：已完成的步骤保留在工作文件夹 `<output>.tmp` 里；用同一个母带、同样的参数加 `resume` 再运行时，这些步骤不再重做；否则从头开始。写出 `<output>.part` 以后被中断的，续跑时会重新写出这个文件。使用 `cd=` 时，对齐会重新做一遍（结果不变），对齐之后的步骤接着做。输出和一次编完的完全相同。 |
+| `--tag=KEY=VALUE` | 标签，用常见的名字：`TITLE`、`ARTIST`、`ALBUM`、`ALBUMARTIST`、`DATE`、`GENRE`、`TRACKNUMBER`、`COMPOSER`、`COPYRIGHT`、`COMMENT` 等（UTF-8，同一个名字可以重复）。写成 RIFF 的 `LIST/INFO` chunk 和 `id3 ` chunk（ID3v2.4），放在 `fmt ` 和 `data` 之间；CD 音频和 `LAE ` chunk 不变。 |
+| `--cover=<图片>` | 封面，JPEG 或 PNG，原样存 |
+| `--picture=<类型>:<图片>` | 其他图片，类型按 ID3 / FLAC 的图片类型（4 封底、5 小册子、6 光盘、8 艺术家等） |
+| `lae_enc tag` | 不重新编码，给已有的 LAE 文件换标签：写一个新文件，带上给出的标签（不给就是没有标签），CD 音频和 `LAE ` chunk 原样，并核对两者逐字节相同；原文件不动。 |
+
+标签选项也可以不写前面的 `--`（`tag=`、`cover=`、`picture=`）。不用这些选项时输出不变。
 
 编码器说明：
 

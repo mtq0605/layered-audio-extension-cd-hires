@@ -5,16 +5,16 @@ SPDX-License-Identifier: CC0-1.0
 
 # Contributing to LAE (Layered Audio Extension)
 
-Thank you for contributing. Please read this file before you open a pull
-request (PR). Contributions that do not follow these rules cannot be
+Thank you for contributing. Please read this document before you open a
+pull request (PR). Contributions that do not follow these rules cannot be
 merged.
 
 ## 1. Inbound licence and sign-off
 
 **Inbound licence.** Every contribution is accepted under the Apache
-License, Version 2.0 (`LICENSES/Apache-2.0.txt`). This applies whatever
-the licence of the file you change. By submitting a contribution, you
-license it under Apache-2.0, as described in section 5 of that licence.
+License, Version 2.0 (`LICENSES/Apache-2.0.txt`), regardless of the
+licence of the file that you change. By submitting a contribution, you
+license it under Apache-2.0, as described in Section 5 of that licence.
 
 **Developer Certificate of Origin.** Every commit must carry a sign-off
 line:
@@ -30,21 +30,21 @@ Signed-off-by: Your Name <your.address@example.org>
   no-reply address.
 - Commits without a sign-off cannot be merged.
 
-**Your rights.** You keep the copyright in your contribution. You are
-credited in the git history and in `AUTHORS`.
+**Your rights.** You retain the copyright in your contribution. You are
+credited in the Git history and in `AUTHORS`.
 
 **Use of contributions.** The author, mtq0605, may include your
-contribution in the encoder-side sources. These are distributed under
+contribution in the encoder-side sources, which are distributed under
 GPL-3.0-or-later and under a commercial licence (`COMMERCIAL.md`).
 
-**Employment.** If you write a contribution in the course of employment,
-make sure that you have the right to submit it under these terms. The
-Developer Certificate of Origin requires this.
+**Employment.** If you write a contribution in the course of your
+employment, make sure that you have the right to submit it under these
+terms. The Developer Certificate of Origin requires this.
 
 ## 2. Licences of the project files
 
-Contributions are accepted under Apache-2.0 (Section 1). The files of the
-project are distributed under the following licences.
+Contributions are accepted under Apache-2.0 (Section 1). The project files
+are distributed under the following licences.
 
 | Files | Licence (SPDX) |
 |---|---|
@@ -58,13 +58,14 @@ project are distributed under the following licences.
 | Conformance vectors, test data and the vector manifest in `tests/`; `data/` | `CC0-1.0` |
 | `LICENSE`, `NOTICE`, `AUTHORS`, `PATENTS.md`, `COMMERCIAL.md`, `CONTRIBUTING.md`, `REUSE.toml` | `CC0-1.0` |
 
-**New files.** For a new source file, state in the PR whether it belongs
-to the decoder side or the encoder side. The maintainer decides the final
-assignment.
+**New files.** For each new source file, state in the PR whether it
+belongs to the decoder side or to the encoder side. The maintainer decides
+the final assignment.
 
 ## 3. Attribution and file headers
 
-**AUTHORS.** In your first PR, add yourself to `AUTHORS` with:
+**AUTHORS.** In your first PR, add yourself to `AUTHORS` with the
+following:
 
 - your attribution name (a pseudonym is acceptable);
 - your GitHub username.
@@ -98,11 +99,11 @@ SPDX-License-Identifier: CC-BY-4.0
 -->
 ```
 
-**Your copyright line.** Add your own line when you author a substantial
-part of a file.
+**Your copyright line.** Add your own copyright line when you author a
+substantial part of a file.
 
-- **Substantial** means a new function, a new table, a new spec section,
-  or roughly 15 or more lines of non-trivial code.
+- **Substantial** means a new function, a new table, a new specification
+  section, or roughly 15 or more lines of non-trivial code.
 - **Form:** `SPDX-FileCopyrightText: <year> <your attribution name>`.
   Adding your e-mail address is optional.
 - **Place:** below the existing lines.
@@ -125,33 +126,34 @@ PR.
 2. **No new dependencies.** Do not add a dependency without prior
    discussion in an issue.
 3. **Algorithms from papers and standards are welcome.**
-   - Implement them from the description.
+   - Implement them from their description.
    - Cite the source in a comment: `// Method: <author, title, year>`.
    - Do not copy prose from them into `spec/` or `docs/`.
-4. **Clean room.** Tell us in the PR if you have recently read another
-   implementation's source code for the same technique. The maintainer may
-   ask someone else to write that part.
-5. **AI assistants are allowed**, under these conditions:
-   - state in the PR description whether you used AI assistance: none,
-     minor (completion) or substantial (drafted code or text);
-   - you must understand, and be able to explain, every line you submit;
-   - do not ask a tool to reproduce or imitate another project's code;
-   - enable any setting your tool has that blocks suggestions matching
-     public code.
-6. **Decoder and encoder boundary.**
+4. **Clean room.** If you have recently read the source code of another
+   implementation of the same technique, state this in the PR. The
+   maintainer may ask someone else to write that part.
+5. **AI assistants are allowed** under the following conditions.
+   - State in the PR description whether you used AI assistance: none,
+     minor (completion) or substantial (drafted code or text).
+   - You must understand, and be able to explain, every line that you
+     submit.
+   - Do not ask a tool to reproduce or imitate another project's code.
+   - If your tool has a setting that blocks suggestions matching public
+     code, enable it.
+6. **Boundary between decoder and encoder.**
    - Decoder-side files must not include, or depend on, any encoder-side
      file. This includes `partition.h`.
    - Encoder-side files may use decoder-side files.
 
 ## 5. Specification, bitstream and conformance changes
 
-- **Raise format changes first.** First raise a proposed change to the
-  format, to the decoding process or to the encoder's coding tools in an
-  issue, with its motivation.
-- **New container version.** Any change that alters decoder output for any
-  conformance vector requires a new container version.
-- **Label spec changes.** Mark each change to `spec/` as **normative**
-  (changes conformance) or **informative**.
+- **Raise format changes first.** Before you submit a change to the
+  format, to the decoding process or to the encoder's coding tools, raise
+  it in an issue and state its motivation.
+- **New container version.** Any change that alters the decoder output
+  for any conformance vector requires a new container version.
+- **Label specification changes.** Mark each change to `spec/` as
+  **normative** (it changes conformance) or **informative**.
 - **Describe output changes.** If a change affects the LAE bitstream or
   the decoder output, describe the effect in the PR.
 - **Explain vector changes.** Explain every change to a conformance vector
@@ -173,12 +175,13 @@ PR.
 
 - [ ] Every commit carries a `Signed-off-by:` line
 - [ ] I am listed in `AUTHORS`
-- [ ] SPDX headers on all new files, and my copyright line where my part is
-      substantial
+- [ ] SPDX headers present on all new files, and my copyright line added
+      where my part is substantial
 - [ ] Decoder-side files do not depend on encoder-side files
 - [ ] No third-party code and no new dependencies
 - [ ] AI assistance stated in the PR description
-- [ ] Spec changes labelled; bitstream or vector changes explained (or none)
+- [ ] Specification changes labelled, and bitstream or vector changes
+      explained (if any)
 - [ ] `reuse lint` passes
 
 ## 8. Contact
@@ -188,5 +191,5 @@ Contact is through GitHub.
 - **General questions and proposals.** Open an issue in the LAE
   repository.
 - **Security issues and other private matters.** Do not open a public
-  issue. Use the repository's private vulnerability reporting (Security
-  tab).
+  issue. Use the private vulnerability reporting of the repository (the
+  Security tab).

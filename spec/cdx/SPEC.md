@@ -7,7 +7,7 @@
 | Licence | CC BY 4.0 (text) |
 | Author | mtq0605 |
 
-**Scope.** This document specifies how the extension layer of LAE Lossy (LAEY), container version 5, is encapsulated in, and read from, three kinds of carrier: a CD-Extra disc, ordinary files (including files on DVD and BD data discs), and LAE streams. It defines the following:
+**Scope.** This document specifies how the extension layer of LAE Lossy (LAEY), container version 5, is encapsulated in, and read from, three kinds of carrier: a CD-Extra disc, ordinary files (including files on DVD and BD data discs), and LAE streams. It defines:
 
 - the CD-Extra layout;
 - the byte format of the extension file (.LAX) and its trailer record;
@@ -16,20 +16,20 @@
 - the requirements on encapsulation tools and on readers;
 - the conformance test cases.
 
-The v5 bitstream and its decoding are specified in [SPEC] and are not changed by this document. The encapsulation tool `lae_cdx` (pack, read, repack, image, self-check) and its reader core implement this draft. The draft will be revised after the measurements on real burns and rips listed in Appendix A have been completed.
+The v5 bitstream and its decoding are specified in [SPEC] and are not changed by this document. The encapsulation tool `lae_cdx` (pack, read, repack, image, self-check) and its reader core implement this draft. The draft will be revised once the measurements on real burns and rips listed in Appendix A have been completed.
 
 **References** (cited in the text in square brackets)
 
-- [SPEC] spec/lossy/SPEC.md (LAE Lossy specification, container v5)
+- [SPEC] spec/lossy/SPEC.md (LAE Lossy specification, container version 5)
 - [AH] src/align_hash.h; [ENC] src/lae_enc.cpp; [WV] src/wavio.h; [DEC] src/lae_dec.cpp
 
 **Marking of numbers**
 
 - Numbers without a marker are defined by this specification or taken from the cited references and standards.
-- "To be measured": the value can only be determined by an actual burn or rip; see Appendix A.
+- "To be measured": the value can be determined only by an actual burn or rip; see Appendix A.
 - "Derived": the value is computed from known constants.
 - "Estimate": an initial value chosen without measurement. It is to be measured; see Appendix A.
-- "Computed for this draft": the value was computed while drafting this specification. It is checked against `cdMd5` in [AH] and against the S1/S2 implementation of the reference tool: `lae_cdx selftest` verifies every example against these values (known-answer tests; all pass, 2026-10-24).
+- "Computed for this draft": the value was computed while this specification was being drafted. It is checked against `cdMd5` in [AH] and against the S1/S2 implementation of the reference tool: `lae_cdx selftest` verifies every example against these values (known-answer tests; all pass, 2026-10-24).
 - "Primary source" / "Secondary source": the value is taken from published documentation. A primary source is the defining document or the documentation of the implementation concerned; a secondary source is a third-party report. Unless stated otherwise, neither has yet been confirmed by measurement for this specification.
 
 ---
@@ -42,34 +42,34 @@ This specification defines:
 
 - the layout of the CD-Extra (Section 2);
 - the byte format of the extension file .LAX (Section 3);
-- the forms other than CD, and how they are re-encapsulated as v5 WAV (Section 4). These forms are ordinary files (including files on DVD and BD data discs) and LAE streams;
+- the forms other than CD, namely ordinary files (including files on DVD and BD data discs) and LAE streams, and their re-encapsulation as v5 WAV (Section 4);
 - the results that encapsulation tools and readers MUST achieve (Sections 5 and 6);
 - the conformance test cases (Section 7).
 
-The 44.1 kHz restriction applies only to CD (CD-Extra, Red Book). DVD, BD and other data discs do not use the layout of Section 2. They store ordinary files as specified in Section 4, and may use the 44.1 kHz family or the 48 kHz family.
+The 44.1 kHz restriction applies only to CD (CD-Extra, Red Book). DVD, BD and other data discs do not use the layout of Section 2. They store ordinary files as specified in Section 4 and may use either the 44.1 kHz family or the 48 kHz family.
 
 This specification does not define:
 
-- the v5 bitstream and decoding (see [SPEC]);
-- the extension block of LAES;
+- the v5 bitstream and its decoding (see [SPEC]);
+- the extension block of LAE Lossless (LAES);
 - "keep CD / keep master" and per-layer provenance (see Section 8);
 - concrete implementations of placement, search and other algorithms;
 - the transport of LAE streams (protocol, segmentation, buffering);
 - the user interface.
 
-### 1.2 Relation to Container v5
+### 1.2 Relation to Container Version 5
 
-- This specification requires no change to container v5 or to the decoder ([DEC]).
-- The extension block in an extension file is the body of the `LAE ` chunk of a v5 WAV file, byte for byte ([SPEC] 3.3).
-- Everything specified here lies outside v5: the CD layout, the trailer record, file pairing and the delivery of LAE streams. This specification has its own version number (Section 8).
+- This specification requires no change to container version 5 or to the decoder ([DEC]).
+- The extension block in an extension file is, byte for byte, the body of the `LAE ` chunk of a v5 WAV file ([SPEC] 3.3).
+- Everything specified here lies outside container version 5: the CD layout, the trailer record, file pairing and the delivery of LAE streams. This specification has its own version number (Section 8).
 - `.lae` remains reserved for the complete file layout of [SPEC] 1.1. `.LAX` is a different kind of file.
-- [SPEC] Appendix C item 7 asks how FLAC carries LAE, and 4.2 of this specification answers it. FLAC carries only the base layer, as a base-layer WAV file does; the extension layer is placed in an accompanying .lax file, which has the same format as the extension file on CD.
+- [SPEC] Appendix C item 7 asks how FLAC carries LAE; 4.2 of this specification answers it. FLAC carries only the base layer, as a base-layer WAV file does; the extension layer is placed in an accompanying .lax file, which has the same format as the extension file on CD.
 
 ### 1.3 Key Words and Clause Identifiers
 
 - The key words "MUST", "MUST NOT", "SHOULD", "SHOULD NOT" and "MAY" in this document are to be interpreted as described in BCP 14 (RFC 2119, RFC 8174) when, and only when, they appear in all capitals.
 - Every normative clause carries an identifier in square brackets, for example [L1]. The test cases of Section 7 cover the clauses one by one.
-- Paragraphs marked "Informative" are explanations only and impose no requirements.
+- Paragraphs marked "Informative" are explanatory only and impose no requirements.
 
 ### 1.4 Terms
 
@@ -80,7 +80,7 @@ This specification does not define:
 | digital silence | Samples in which L and R are both exactly 0. Passages containing only dither noise are not silence; they are content |
 | CD layer | The 16-bit PCM of a track, i.e. the content of the data chunk of the track's v5 file. Its length is ncd samples |
 | extension layer | The v5 `LAE ` chunk: depth layer plus frequency layer, coding "master − CD" |
-| extension block | The entire body of the `LAE ` chunk, n bytes, including the CRC-32 at the end of the body. Note: the payload of [SPEC] 3.3 is only bytes 0 … n−5, without the CRC, and is therefore not the same as the extension block |
+| extension block | The entire body of the `LAE ` chunk, n bytes, including the CRC-32 at the end of the body. Note: the payload of [SPEC] 3.3 comprises only bytes 0 … n−5, without the CRC, and is therefore not the same as the extension block |
 | extension file | Extension block plus trailer record. The file name extension is .LAX on CD and .lax in file distribution and in LAE streams (Section 3) |
 | trailer record | The fixed record occupying the last 80 bytes of the extension file (3.2) |
 | whole-track MD5, S1, S2 | Defined in 3.3 and 3.4 |
@@ -97,15 +97,15 @@ This specification does not define:
 | start guard | Digital silence before the CD layer of track 1: at least 5880 samples = 10 sectors = 0.133 s. It is provided by the pregap of track 1 ([L5]) |
 | offset o | The first sample of the CD layer of track k on the disc appears at position q_k + o of the disc stream. o > 0 means later in the disc stream. o combines the read offset and the write/pressing offset and may differ between tracks. The reader does not assume a uniform disc-wide offset |
 | disc stream | The sequence of samples that the reader assembles from its input (6.2). With a TOC, it is addressed by absolute position. Without a TOC, it consists of the samples of a single file, with positions counted from the first sample of the file |
-| coarse location / fine location | Coarse location: an approximate start of a track derived from the TOC or from the information range. Fine location: every position near the coarse location is screened with S1 and S2, and the result is confirmed by the whole-track MD5 ([R7]) |
+| coarse location / fine location | Coarse location: an approximate start of a track, derived from the TOC or from the information range. Fine location: every position near the coarse location is screened with S1 and S2, and the result is confirmed by the whole-track MD5 ([R7]) |
 | W | Search radius of fine location, W ≥ 5880 samples (10 sectors) |
-| slip | Loss or insertion of samples within a track, for example by a read error |
+| slip | Loss or insertion of samples within a track, for example as a result of a read error |
 | derived mode | The CD layer is derived from the master by the encoder. This is the current default |
 | independent-CD mode | The publisher's existing CD is used as the CD layer (encoder option `cd=`, [ENC]) |
 | CD route (fallback) | When a track fails verification, only the ripped CD audio is output; the extension layer is not used |
 | LAE stream | Per-track delivery of the CD layer, unchanged sample by sample, together with the extension file (4.5) |
 | encapsulation tool | A program that produces CD images and distribution files |
-| reader | A program that reads rips, files or LAE streams and outputs high resolution, including player plug-ins |
+| reader | A program that reads rips, files or LAE streams and outputs high resolution; this includes player plug-ins |
 
 ### 1.5 General Conventions
 
@@ -127,7 +127,7 @@ This specification does not define:
 **[L1]** The CD MUST be a two-session CD-Extra. Session 1 is audio (2.2); session 2 is one data track (2.3).
 
 - The CD is used only for the 44.1 kHz family. The sample rate of every CD layer MUST be 44 100 Hz.
-- This restriction applies to CD only. DVD and BD data discs store ordinary files as specified in Section 4, and both families are permitted there.
+- This restriction applies only to CD. DVD and BD data discs store ordinary files as specified in Section 4, and both families are permitted there.
 
 **[L2]** If n is the number of audio tracks, n + 1 ≤ 99 MUST hold. The data track also occupies a track number, so there are at most 98 audio tracks. A CD provides at most 99 track numbers; the figure 98 is derived.
 
@@ -154,20 +154,20 @@ With only one track (n = 1), TOC track 1 = CD layer + padding z_1.
 
 **[L6]** The CD layer of every track begins at INDEX 01: q_k = p_k (k = 1 … n), and q_1 = 0.
 
-Exception (independent-CD mode): the master's sound may begin less than one CD sample earlier than the first sample of the publisher's track 1. In that case one frame of digital silence is placed in front of the CD layer of track 1, and q_1 = −1. The digital silence at the start of every encapsulation absorbs this difference:
+Exception (independent-CD mode): the master's sound may begin less than one CD sample earlier than the first sample of the publisher's track 1. In that case, one frame of digital silence is placed in front of the CD layer of track 1, and q_1 = −1. The digital silence present at the start of every encapsulation absorbs this difference:
 
 - the frame lies within the digital silence of the pregap of track 1, and [L4] and [L5] continue to hold;
 - session 1 remains sample-identical to the publisher's programme ([P11]);
 - a reader that searches by whole-track MD5 within W of the TOC position finds the CD layer at −1. If the pregap was not ripped, these positions are unknown and are read as 0.
 
-**[L7]** Track-end padding: the CD layer of every track MUST lie entirely within that track in the TOC.
+**[L7]** Track-end padding: the CD layer of every track MUST lie entirely within that track as given in the TOC.
 
 - Let z_k = p_{k+1} − q_k − ncd_k (k = 1 … n), where p_{n+1} = A2 × 588. The condition 0 ≤ z_k < 588 MUST hold.
 - These z_k padding samples MUST be digital silence. There are at most 587 of them, i.e. 13.3 ms (derived).
 
 **[L8]** End: between the CD layer of the last track and the lead-out there is only the padding z_n of the last track ([L7]). A guard track MUST NOT be added, and no other silence MUST be added either. The end of the CD layer of the last track is given by its length ncd_n ([R6]).
 
-**[L9]** Neither the pregap of track 1 nor the padding belongs to the CD layer of any track. They do not enter the v5 file or the extension file, and they do not change the decoded length.
+**[L9]** Neither the pregap of track 1 nor the padding belongs to the CD layer of any track. They are not included in the v5 file or the extension file, and they do not change the decoded length.
 
 **[L10]** Every TOC audio track MUST consist of a whole number of sectors and MUST NOT be shorter than 300 sectors (4 s). The reader does not require ncd to be a multiple of 588.
 
@@ -177,7 +177,7 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 
 **[L13]** Derived mode:
 
-- From track 2 onward no INDEX 00 is set; the pregap is 0.
+- From track 2 onward, no INDEX 00 is set; the pregap is 0.
 - For a continuous master ([P5]), z_k = 0 for every track except the last, and the CD layers follow one another without gaps.
 - For the last track, and for every track of a per-track master ([P6]), z_k is determined by [L7].
 
@@ -192,7 +192,7 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 - With a TOC, reading uses only the positions of INDEX 01. INDEX 00, INDEX 02 and above, and ISRC do not affect reading.
 - The guard does not alter the audio of any track:
   - the start guard is the pregap of track 1 that every CD has, and no silence is added at the end;
-  - each track of session 1 is its CD layer plus padding of less than one sector;
+  - each track of session 1 consists of its CD layer plus padding of less than one sector;
   - files ripped per track contain no added zeros.
 - Session 1 exceeds the total length of the CD layers only by the padding, which is less than one sector per track.
 
@@ -212,7 +212,7 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 
 **[D3]** The LBA of INDEX 01 of the data track of session 2 (sector 0 of the ISO 9660 volume) MUST equal the next writable address reported by the drive at write time.
 
-- For an image written in one pass, this LBA is precomputed as A2 + 11,400 sectors. The figure 11,400 = 6,750 + 4,500 + 150: the lead-out of session 1, the lead-in of session 2, and the 150-sector pregap of the data track (primary sources; to be measured, Appendix A.1 item 1).
+- For an image written in one pass, this LBA is precomputed as A2 + 11,400 sectors. The figure 11,400 = 6,750 + 4,500 + 150 comprises the lead-out of session 1, the lead-in of session 2, and the 150-sector pregap of the data track (primary sources; to be measured, Appendix A.1 item 1).
 - For two-step writing, it is generated from the address actually reported ([P15]).
 
 **[D4]** Directories:
@@ -236,7 +236,7 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 
 *Informative.*
 
-- The volume label does not affect reading. It is recommended to derive the label from the album name, and to use LAE_EXT if this conversion fails.
+- The volume label does not affect reading. It is recommended that the label be derived from the album name, and that LAE_EXT be used if this conversion fails.
 - Windows Explorer shows the last session, so the extension files can be read as ordinary files (secondary source, to be measured; Appendix A.1 item 10).
 
 ### 2.4 Subcode and Metadata
@@ -249,12 +249,12 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 
 - N1 = A2: the number of sectors of session 1 from LBA 0, padding included.
 - N2 = file system sectors + Σ ceil(file size in bytes / 2048) + trailing zero sectors. With few files, the file system occupies only a few tens of sectors (estimate).
-- C = ATIP capacity of the blank disc minus a safety margin. For an 80-minute disc this is about 359,849 sectors (secondary source; to be measured, Appendix A.1 item 9).
+- C = ATIP capacity of the blank disc minus a safety margin. For an 80-minute disc, this is about 359,849 sectors (secondary source; to be measured, Appendix A.1 item 9).
 
 **In disc minutes** (1 disc minute = 4500 sectors; every term in disc minutes): L·(1 + r) + padding + 2.533 + file system + trailing zero sectors ≤ C / 4500, where:
 
 - L is the length of the music in minutes.
-- The padding is less than one sector per track, i.e. less than 0.00023 disc minutes. The constant 2.533 = 11,400 / 4500 (both derived).
+- The padding is less than one sector per track, i.e. less than 0.00023 disc minutes per track. The constant 2.533 = 11,400 / 4500 (both derived).
 - r = (size of the extension layer in MB per minute of music) ÷ 9.216. The constant 9.216 = 2048 × 4500 / 10^6 (derived; 9.22 when rounded).
 
 ---
@@ -283,9 +283,9 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 | 0 | 4 | bytes | identifier | ASCII `LTVT` (4C 54 56 54) |
 | 4 | 2 | uint16 | version | 1 |
 | 6 | 2 | uint16 | length | 80, the size of the whole trailer record in bytes |
-| 8 | 2 | uint16 | extension block type | 1 = body of the `LAE ` chunk of LAEY container v5 (begins with the magic `LAE1`); 2 = LAES extension block (begins with the magic `LAE2`); other values reserved |
+| 8 | 2 | uint16 | extension block type | 1 = body of the `LAE ` chunk of LAEY container version 5 (begins with the magic `LAE1`); 2 = LAES extension block (begins with the magic `LAE2`); other values reserved |
 | 10 | 2 | uint16 | track number | On CD: the TOC audio track number, 1–98. Outside CD: if the track is also released on CD, its track number in the CD TOC; otherwise its track number within the album (≥ 1); 1 for a single |
-| 12 | 4 | uint32 | sample rate | Sample rate of the CD layer. On CD MUST be 44100; outside CD, 44100 or 48000. For extension block type 1, MUST equal base in the extension block |
+| 12 | 4 | uint32 | sample rate | Sample rate of the CD layer. On CD, MUST be 44100; outside CD, 44100 or 48000. For extension block type 1, MUST equal base in the extension block |
 | 16 | 4 | uint32 | ncd | Number of samples of the CD layer, 1 ≤ ncd < 2^28. For extension block type 1, MUST equal nb − 2·pb of the extension block |
 | 20 | 16 | bytes | MD5 | Whole-track MD5 (3.3), stored in the byte order of the MD5 output |
 | 36 | 8 | uint64 | S1 | See 3.4; 0 ≤ S1 < M |
@@ -301,8 +301,8 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 - lead0 and tail0 describe the content of the CD layer itself: how much digital silence it contains at its start and at its end.
   - They are independent of burning, ripping and offsets, and they are not positions ([X6]).
   - The reader uses them only for coarse location ([R7]).
-  - Wrong values can only make coarse location miss. They cannot cause wrong audio to pass, because acceptance depends solely on the whole-track MD5.
-- These silent samples are part of the track: they are always played and included in the whole-track MD5. No program (decoder, player, packaging or reading tool) may remove or skip them, or use or pass lead0 and tail0 as an amount that may be removed or as "invalid" data.
+  - Wrong values can only cause coarse location to miss. They cannot cause wrong audio to pass, because acceptance depends solely on the whole-track MD5.
+- These silent samples are part of the track: they are always played and are included in the whole-track MD5. No program (decoder, player, packaging or reading tool) may remove or skip them, or use or pass on lead0 and tail0 as an amount that may be removed or as "invalid" data.
 
 ### 3.3 Whole-Track MD5
 
@@ -361,7 +361,7 @@ Example 1:
   - Initial window: A(0) = 6442352641, B(0) = 15032156162.
   - After one step to the right: A(1) = 6442352641 = S1, B(1) = 8589803521 = S2.
 
-Example 2 (the frame words moving out of and into the window are both non-zero, so every term of the sliding formula is exercised):
+Example 2 (the frame words leaving and entering the window are both non-zero, so every term of the sliding formula is exercised):
 
 - Input: 3 samples (1, −1), (−32768, 32767), (32767, −32768).
 - Byte stream: 01 00 FF FF 00 80 FF 7F FF 7F 00 80.
@@ -377,7 +377,7 @@ Example 3 (all zero): 3 samples (0, 0) give lead0 = tail0 = 3 and S1 = S2 = 0 (d
 
 ### 3.5 Content Excluded from the Extension File
 
-**[X6]** The trailer record and the extension file MUST NOT contain the following:
+**[X6]** The trailer record and the extension file MUST NOT contain any of the following:
 
 - Values derived from the extension layer:
   - any value computed from the bytes of the extension layer (CRC, hash, size);
@@ -385,7 +385,7 @@ Example 3 (all zero): 3 samples (0, 0) give lead0 = tail0 = 3 and S1 = S2 = 0 (d
   - any value computed from the two layers together.
 
   The extension layer is protected only by its own CRC-32 ([SPEC] 3.3).
-- Any position, LBA, offset, delay or gain. lead0 and tail0 are counts of the content of the CD layer and are not covered by this item.
+- Any position, LBA, offset, delay or gain. lead0 and tail0 are counts describing the content of the CD layer and are not covered by this item.
 - Any per-sector or per-frame data; entry tables, seek tables or cue-point tables.
 - Any header. Within the extension file, the whole-track MD5 is stored only in the trailer record.
 
@@ -396,7 +396,7 @@ Example 3 (all zero): 3 samples (0, 0) give lead0 = tail0 = 3 and S1 = S2 = 0 (d
 1. The file length is ≥ 88, and the last 80 bytes begin with `LTVT` ("no trailer record"; see [R14]).
 2. The CRC-32 matches ("record corrupted").
 3. The version is 1, and the length is 80 ("unknown record version").
-4. The extension block type is 1 and the extension block begins with `LAE1` ("unknown extension block type"; if the type is 2 and the block begins with `LAE2`, "LAES extension block, not supported by this reader"; a type that does not match the magic, "extension block does not match its trailer type").
+4. The extension block type is 1, and the extension block begins with `LAE1` ("unknown extension block type"; if the type is 2 and the block begins with `LAE2`, "LAES extension block, not supported by this reader"; if the type does not match the magic, "extension block does not match its trailer type").
 5. Track number, sample rate, ncd, S1, S2, lead0 and tail0 are within the ranges specified in 3.2 ("invalid record field").
 
 The extension block itself is checked by the decoder: CRC and V1–V13 ([SPEC] 4.3). The reader MAY check the CRC of the extension block in advance and, if it does not match, report "extension layer corrupted".
@@ -441,13 +441,13 @@ Version 0 does not define a trailer record appended inside the WAV file.
   - Its content is exactly the CD layer of the track: ncd samples, 16-bit, 2 channels, at the sample rate given in the trailer record.
   - A base-layer WAV contains no `LAE ` chunk.
   - Ordinary players play only this file.
-- **Extension file:** it has the same name as the base-layer file with the file name extension .lax, and its format is that of Section 3. If the same track is also released on CD, this file MUST be byte-identical to TRACKnn.LAX on the CD.
+- **Extension file:** it has the same name as the base-layer file, with the file name extension .lax, and its format is that of Section 3. If the same track is also released on CD, this file MUST be byte-identical to TRACKnn.LAX on the CD.
 - The extension layer and the trailer record MUST NOT be placed inside the FLAC file. No FLAC metadata block carries them.
 - The audio MD5 SHOULD be written into the FLAC STREAMINFO.
 
 ### 4.3 Pairing and Ripped Files
 
-**[F3]** The reader first looks for a .lax file of the same name (case-insensitive), and MAY then try other .lax files in the same folder.
+**[F3]** The reader first looks for a .lax file with the same name (case-insensitive), and MAY then try other .lax files in the same folder.
 
 **Condition for pairing:** the number of samples decoded from the base-layer file equals ncd, and the whole-track MD5 of the decoded PCM equals the MD5 in the trailer record. Detailed rules:
 
@@ -459,7 +459,7 @@ Version 0 does not define a trailer record appended inside the WAV file.
 
 When pairing succeeds, no offset needs to be found, and S1 and S2 are not used.
 
-**[F4]** The pairing of [F3] serves base-layer files distributed by the publisher and LAE streams (4.5). Ripped files (WAV, FLAC and so on, including per-track rips) usually fail to pair under [F3]. The rip carries an offset, the files contain padding, and the file of track 1 may contain the pregap. Therefore:
+**[F4]** The pairing of [F3] serves base-layer files distributed by the publisher and LAE streams (4.5). Ripped files (WAV, FLAC and so on, including per-track rips) usually fail to pair under [F3]: the rip carries an offset, the files contain padding, and the file of track 1 may contain the pregap. Therefore:
 
 - the reader first attempts [F3];
 - if pairing fails, the reader MUST locate the tracks one by one as specified in Section 6 ([R2], [R7]):
@@ -471,7 +471,7 @@ When pairing succeeds, no offset needs to be found, and S1 and S2 are not used.
 
 **[F5]** Re-encapsulation (for extension block type 1):
 
-- Input: a verified CD layer, plus the extension block from the extension file. The CD layer comes from one of:
+- Input: a verified CD layer, plus the extension block from the extension file. The CD layer comes from one of the following:
   - a rip or an LAE stream ([R8]);
   - a successfully paired base-layer file ([F3]).
 - Output: a v5 WAV in the canonical layout of 4.1. The result MUST be byte-identical to the file originally written by the encoder.
@@ -494,7 +494,7 @@ The player treats streams and rips in the same way:
 **[F7]** A stream in which the CD layer has been re-encoded lossily (AAC, MP3 and so on) is not an LAE stream. The extension layer cannot be used, and only the base layer is played.
 
 - If the base layer is in a lossy format, the reader does not attempt location and reports "base layer is lossy".
-- The reader MUST NOT apply the extension layer to lossily decoded audio. Audio that has been lossily decoded and then delivered in a lossless form does not match the whole-track MD5, and only the base layer is played in that case too ([R11]).
+- The reader MUST NOT apply the extension layer to lossily decoded audio. Audio that has been lossily decoded and then delivered in a lossless form does not match the whole-track MD5; in that case, too, only the base layer is played ([R11]).
 
 ---
 
@@ -505,7 +505,7 @@ The player treats streams and rips in the same way:
 **[P1]** Sample-rate families:
 
 - When a CD is produced, the master MUST belong to the 44.1 kHz family (88.2 / 176.4 / 352.8 kHz), and the CD layer is 44 100 Hz.
-- When only forms other than CD are produced, the master MAY also belong to the 48 kHz family (96 / 192 / 384 kHz), and the CD layer is then 48 000 Hz. These forms are files, files on DVD or BD data discs, and LAE streams.
+- When only forms other than CD are produced (files, files on DVD or BD data discs, and LAE streams), the master MAY also belong to the 48 kHz family (96 / 192 / 384 kHz), and the CD layer is then 48 000 Hz.
 - If these conditions are not met, the tool stops and states the reason.
 
 **[P2]** The v5 file and trailer record of each track:
@@ -516,7 +516,7 @@ The player treats streams and rips in the same way:
   - sample rate = base;
   - MD5, S1, S2, lead0 and tail0 as specified in Section 3.
 
-**[P3]** Neither encapsulation nor alignment changes the CD layer. For every track, the MD5 of the range [q_k, q_k + ncd_k) of session 1 MUST equal the trailer-record MD5 and the MD5 of the data chunk of the track's v5 file.
+**[P3]** Neither encapsulation nor alignment changes the CD layer. For every track, the MD5 of the range [q_k, q_k + ncd_k) of session 1 MUST equal both the trailer-record MD5 and the MD5 of the data chunk of the track's v5 file.
 
 **[P4]** Measured offsets, position differences, shift amounts and trim or padding amounts MAY be displayed. They MUST NOT be written into any file, including images, CUE files, extension files, reports and logs. Reports and CUE files are given only to the producer and are not placed on the disc.
 
@@ -524,7 +524,7 @@ The player treats streams and rips in the same way:
 
 **[P5]** A continuous master is one file, or a set of per-track files that the publisher declares to be gapless and concatenated in order.
 
-- Track boundaries are placed at the positions given by the publisher and are not moved by a single sample. In particular, the tool does not move a start to the nearest point of the sector grid.
+- Track boundaries are placed at the positions given by the publisher and are not moved by even a single sample. In particular, the tool does not move a start to the nearest point of the sector grid.
 - The start of every track MUST lie on the sector grid.
   - The grid unit is G = 588 × 2^s master samples, i.e. 588 CD samples, where s is stages.
   - Starts given in CUE "minutes:seconds:frames" notation always lie on the grid, because one frame is one sector.
@@ -541,7 +541,7 @@ The player treats streams and rips in the same way:
 **[P7]** The division into tracks is entirely the publisher's decision:
 
 - The tool MUST NOT add, delete or move any track boundary.
-- If a complete long work forms one track, its ncd need not be a multiple of 588. The part of a sector that remains is absorbed by the padding ([L7]).
+- If a complete long work forms one track, its ncd need not be a multiple of 588. The remaining part of a sector is absorbed by the padding ([L7]).
 - Every track MUST satisfy ncd < 2^28.
 
 ### 5.3 Independent-CD Mode
@@ -549,7 +549,7 @@ The player treats streams and rips in the same way:
 **[P8]** Alignment is performed when the v5 file of each piece is produced ([ENC]):
 
 - for a single piece, with the encoder option `cd=`;
-- for a whole disc, the planner `lae_enc plan` first cuts the master at the CD's track markers.
+- for a whole disc, the whole-disc planner `lae_enc plan` first cuts the master at the CD's track markers.
 
 The encapsulation tool accepts only files that are already aligned and performs no alignment itself. The following rules apply:
 
@@ -561,15 +561,15 @@ The encapsulation tool accepts only files that are already aligned and performs 
   - classification of the error into bands.
 - The position of every piece MUST be confirmed by the user:
   - Without `cdalign=`, the encoder runs the search twice, once with a whitened and once with a plain cross-correlation. It reports both results and writes nothing.
-  - A piece is encoded only with the offset given by `cdalign=`. For a whole disc, the planner prints this offset for each piece.
+  - A piece is encoded only with the offset given by `cdalign=`. For a whole disc, the whole-disc planner prints this offset for each piece.
 - A piece that falls into a confirmation band is encoded only after confirmation, either at the console or with `cdaccept`. The encoder states this in its result.
 - If the result is "warning" (for example inverted polarity or swapped channels), a warning MUST be displayed, and processing continues.
 - If both the CD piece and the corresponding master segment are entirely digital zero, a sample-by-sample comparison MUST be used instead of the statistical decision.
 
-**[P9]** The planner places the master automatically only if every difference between master and CD consists entirely of digital silence. This covers the differences at both ends and those between pieces.
+**[P9]** The whole-disc planner places the master automatically only if every difference between master and CD consists entirely of digital silence. This covers the differences at both ends and those between pieces.
 
 - The master is laid onto the CD's time line in its original order, and the silences are treated as blank passages.
-- The master may consist of several files, which are concatenated sample by sample in the given order. Their own split points are not used. If these split points differ from the CD's, the planner reports that the master has been re-split at the CD's positions.
+- The master may consist of several files, which are concatenated sample by sample in the given order. Their own split points are not used. If these split points differ from the CD's, the whole-disc planner reports that the master has been re-split at the CD's positions.
 
 The result of the placement MUST satisfy all of the following:
 
@@ -581,19 +581,19 @@ The result of the placement MUST satisfy all of the following:
 - Sub-sample differences:
   - If the master's sound begins less than one CD sample earlier than the CD's (for example with a CD processed by minimum-phase EQ), one frame of digital silence is added in front of the CD layer. This is the silence that is present at the start of every encapsulation in any case. The master then plays from its own first sample.
   - If the master ends less than one CD sample later than the CD, the format itself accommodates the difference; the master length need not be a multiple of 2^stages.
-  - Sound of one CD sample or more that only the master has leads to a stop under [P10].
+  - Sound of one CD sample or more that only the master contains leads to a stop under [P10].
 - Samples added to the master for alignment are all digital zero, and they are added only at positions where the CD is also digital zero.
 
 The concrete placement algorithm is a matter of implementation. Automatic placement is not performed if the master or the CD has non-silent content that the other lacks; content consisting only of dither noise also counts as content. This case belongs to the future "keep CD / keep master" task (Section 8). Version 0 stops under [P10] and states this.
 
 **[P10]** In any of the following cases, the tool MUST stop, write no file, state the reason and list the time ranges concerned:
 
-- The alignment check of a piece results in "stop" ([P8]), or a piece falls into a confirmation band without being confirmed. "Stop" covers: no position found, no match, drift or an edit, or the wrong CD.
-- Placement according to [P9] is not possible. This includes non-silent content that the master or the CD lacks in the other, for example a passage repeated or missing when master files were joined, and a different order of pieces.
+- The alignment check of a piece results in "stop" ([P8]), or a piece falls into a confirmation band without being confirmed. "Stop" covers: no position found, no match, drift or an edit, and the wrong CD.
+- Placement according to [P9] is not possible. This includes non-silent content present in only one of the master and the CD (for example a passage repeated or missing where master files were joined) and a different order of pieces.
 - INDEX 00 of track 1 of the publisher's CD contains non-silent content ([L4]).
 - The publisher's CD uses pre-emphasis ([L11]).
 
-**[P11]** The CD layer is the publisher's CD, unchanged by a single sample. All samples of session 1 from LBA 0 to A2 MUST be sample-identical to the programme of the publisher's CD. The programme extends from INDEX 01 of track 1 to the end of the programme.
+**[P11]** The CD layer is the publisher's CD, unchanged by even a single sample. All samples of session 1 from LBA 0 to A2 MUST be sample-identical to the programme of the publisher's CD. The programme extends from INDEX 01 of track 1 to the end of the programme.
 
 ### 5.4 Image and Deliverables
 
@@ -608,7 +608,7 @@ The concrete placement algorithm is a matter of implementation. Automatic placem
 - Derived mode: from track 2 onward, only INDEX 01 is written. Independent-CD mode: write according to [L14].
 - The two sessions are separated by `REM SESSION 01` / `REM SESSION 02`. After `REM SESSION 02`, write, in this order:
   - `FILE "DATA.BIN" BINARY`, or `FILE "DATA.ISO" BINARY` when DATA.ISO is used;
-  - `TRACK nn MODE2/2352`, or with DATA.ISO the `MODE2/2048` variant found to work in practice;
+  - `TRACK nn MODE2/2352`, or, with DATA.ISO, the `MODE2/2048` variant found to work in practice;
   - `INDEX 01 00:00:00`.
 - `REM LEAD-OUT` gives the length of AUDIO.BIN.
 - The CUE MUST NOT contain any CRC, MD5 or other hash.
@@ -627,7 +627,7 @@ The v5 WAV of each track (4.1) MAY be supplied in addition, for file distributio
 
 **[P16]** Before an image is released, the tool MUST read it once with the same code as the reader, taking the extension files from the data session of the image. The following combinations are read:
 
-- whole-disc image with CUE: offsets taken from values within ±5880;
+- whole-disc image with CUE, at offsets chosen within ±5880;
 - at offset 0:
   - whole disc as one file without CUE;
   - per-track files, both with CUE and with file order only, in the three gap modes (appended to the previous track, prepended to the next track, omitted), with and without the pregap in the file of track 1.
@@ -641,7 +641,7 @@ Exception: independent-CD mode with INDEX 00 gaps from track 2 onward. In a rip 
   - If it is not, the previous track falls back with "unknown samples" (consistent with C30).
 - With file order only, the positions cannot be known, and the previous track generally falls back.
   - It may pass if the gap is digital silence and the next track happens to begin with digital silence at least as long, so that the window is unchanged.
-  - In that case it MUST be reconstructed into a byte-identical v5.
+  - In that case, it MUST be reconstructed into a byte-identical v5.
 - The self-check judges each track against this expectation. All other combinations still require every track to pass.
 
 If these conditions are not met, the image is void. The specific offsets and rip combinations are given in C02, C06, C23 and C25 of 7.2.
@@ -652,7 +652,7 @@ If these conditions are not met, the image is void. The specific offsets and rip
 - an extension file from a different album substituted;
 - the trailer record removed.
 
-Each of these tracks MUST fall back. If any one does not fall back, the image is void and the process stops.
+Each of these tracks MUST fall back. If any one of them does not fall back, the image is void and the process stops.
 
 ### 5.6 Capacity
 
@@ -678,7 +678,7 @@ Each of these tracks MUST fall back. If any one does not fall back, the image is
   2. fine location, in which every position is screened with S1 and S2;
   3. confirmation by the whole-track MD5.
 - A uniform disc-wide offset is neither assumed nor needed.
-- A slip within a track (lost or extra samples) makes only that track's MD5 fail. That track is played as CD, and the other tracks are unaffected ([R10]).
+- A slip within a track (lost or extra samples) causes only that track's MD5 to fail. That track is played as CD, and the other tracks are unaffected ([R10]).
 
 ### 6.1 Input
 
@@ -702,7 +702,7 @@ Requirements on audio formats:
 
 If only the last source is available, the report MUST highlight this prominently.
 
-A single file (a single-track file, or a whole-disc rip without CUE) has no TOC, and neither has any track of an LAE stream. The reader searches such a file by content according to 6.3, and the report MUST state "no TOC".
+A single file (a single-track file, or a whole-disc rip without CUE) has no TOC, and neither does any track of an LAE stream. The reader searches such a file by content according to 6.3, and the report MUST state "no TOC".
 
 **[R3]** On encountering an unrecognised CUE construct, the reader MUST stop. It does not guess.
 
@@ -717,9 +717,9 @@ A single file (a single-track file, or a whole-disc rip without CUE) has no TOC,
 
 **[R5]** Unknown positions and conflicts:
 
-- Positions in the disc stream that are covered by no file are recorded as "unknown". This includes, without a TOC, the positions outside the file.
+- Positions in the disc stream that are covered by no file are recorded as "unknown". Without a TOC, this includes the positions outside the file.
   - Unknown positions are always treated as 0.
-  - The reader MUST NOT retry with other values to make the MD5 match.
+  - The reader MUST NOT retry with other values in order to make the MD5 match.
 - If two files give different values at the same position, the reader reports a conflict, and the position is treated as unknown.
 
 **[R6]** The length of the CD layer of every track is always the ncd of the trailer record. For the last track, only the start is taken from the TOC. The start of the data track, or A2, MUST NOT be used as the end of the CD layer of the last track; A2 is used only for bookkeeping.
@@ -728,7 +728,7 @@ A single file (a single-track file, or a whole-disc rip without CUE) has no TOC,
 
 **[R7]** Every track is located independently. Each extension file that has passed the checks of [X7] has a track number k and a CD layer length ncd.
 
-With a TOC, k MUST be an audio track of the TOC. Otherwise the file is not used, and "track number not in TOC" is reported.
+With a TOC, k MUST be an audio track of the TOC. Otherwise, the file is not used, and "track number not in TOC" is reported.
 
 Each extension file is processed in the following steps:
 
@@ -737,12 +737,12 @@ Each extension file is processed in the following steps:
    - From the information range, if lead0 < ncd and the range R contains non-zero samples:
      - find the positions f and l of the first and last non-zero samples in R;
      - this gives c = f − lead0 and c = l + 1 + tail0 − ncd;
-     - with a TOC, R = [q_k − W, q_k + ncd + W), and the computation is repeated with R = [q_k, q_k + ncd + W). The second range is needed when the file of this track begins with a silent gap: in the first range, the first sound is then the end of the previous track, and coarse location would land on the boundary;
+     - with a TOC, R = [q_k − W, q_k + ncd + W), and the computation is repeated with R = [q_k, q_k + ncd + W). The second range is needed when the file of this track begins with a silent gap: in that case, the first sound in the first range is the end of the previous track, and coarse location would land on the boundary;
      - without a TOC, R is the whole file;
      - unknown positions are counted as 0.
 2. **Fine location:** examine each window [t, t + ncd).
    - With a TOC, t covers every position within W of each coarse position: c − W ≤ t ≤ c + W.
-   - If the TOC is derived from the file order only and none of the above windows matches, t additionally covers q_k − W up to the start of the next file + W. The file of this track may begin with its INDEX 00 gap, whatever that gap contains.
+   - If the TOC is derived from the file order only and none of the above windows matches, t additionally covers the range from q_k − W to the start of the next file + W, because the file of this track may begin with its INDEX 00 gap, whatever that gap contains.
    - Without a TOC, t covers the whole file: −W ≤ t ≤ file length − ncd + W. The coarse positions only determine where the search starts.
 3. Screen with the sliding values of S1 and S2 ([X4]). Only positions with A = S1 and B = S2 are candidate windows.
 4. The track passes only if the whole-track MD5 of a candidate window equals the MD5 in the trailer record.
@@ -751,11 +751,11 @@ W ≥ 5880. W MAY be larger, for example 44 100. For windows that are entirely z
 
 *Informative.*
 
-- Coarse and fine location only determine where to look for the track. Once the track is found, the whole-track MD5 serves as a simple check of whether the audio has been damaged or altered: it confirms, track by track, that the track is identical to the audio at production time. Acceptance depends solely on it.
+- Coarse and fine location only determine where to look for the track. Once the track has been found, the whole-track MD5 serves as a simple check of whether the audio has been damaged or altered: it confirms, track by track, that the track is identical to the audio at production time. Acceptance depends solely on it.
 - The information range is most useful for tracks with silence at the start or at the end. Even if the offset exceeds W, such a track can still be found from the boundary between silence and sound. Tracks that run into one another without intervening silence rely on the TOC alone.
 - A single per-track file without CUE and without neighbouring files is affected by the offset:
   - |o| samples at one end of the track are pushed out of the file, and |o| samples of the adjacent track are pulled in.
-  - If the samples pushed out are only padding or digital silence at the start or end of the CD layer, the track is still found and passes. Otherwise the track falls back.
+  - If the samples pushed out are only padding or digital silence at the start or end of the CD layer, the track is still found and passes. Otherwise, the track falls back.
   - With a CUE or a complete set of per-track files, the neighbouring files supply the samples that were pushed out ([R4]).
 
 **[R8]** A track that passes is processed as follows:
@@ -766,12 +766,12 @@ W ≥ 5880. W MAY be larger, for example 44 100. For windows that are entirely z
 
 **[R9]** If several candidates pass, their window contents are necessarily identical (for example in an entirely silent track). Any one of them may be used, and the result is the same.
 
-**[R10]** Every track is searched and judged independently.
+**[R10]** Every track is searched for and judged independently.
 
-- A slip within a track makes only the whole-track MD5 of that track fail. That track takes the CD route and is played as CD.
+- A slip within a track causes only the whole-track MD5 of that track to fail. That track takes the CD route and is played as CD.
 - The other tracks are not affected. The tracks after the slip are found at their shifted positions, because the shift is much smaller than W.
 
-*Informative.* An implementation may first try the offsets already confirmed for other tracks, to speed up the search. Acceptance depends solely on the MD5 of the track itself ([R7]). A future dedicated direct reader may re-read tracks with a slip (Section 8).
+*Informative.* To speed up the search, an implementation may first try the offsets already confirmed for other tracks. Acceptance depends solely on the MD5 of the track itself ([R7]). A future dedicated direct reader may re-read tracks with a slip (Section 8).
 
 ### 6.4 Failure and Reporting
 
@@ -797,7 +797,7 @@ The report MUST give the reason category. Reasons are decided by counts only, wi
 - If there are several extension files for the same track number, each is tried in turn, and the MD5 decides.
 - If several pass but their extension blocks differ, the reader MUST reject the track and report this.
 - Without a TOC:
-  - every extension file is searched for in the input files, and the file of the same name is tried first;
+  - every extension file is searched for in the input files, and the file with the same name is tried first;
   - an extension file that is found in no file is listed as "unused" in the report and does not count as a failed track.
 
 **[R14]** A file without a trailer record, or whose trailer record fails [X7], MUST NOT be used. Tracks without a usable extension file are output as CD.
@@ -851,7 +851,7 @@ The report MUST give the reason category. Reasons are decided by counts only, wi
 - Test material:
   - excerpts of 10–15 s of two tracks of one recording, Track A and Track B;
   - test discs derived from these excerpts;
-  - CC0 synthetic vectors.
+  - synthetic CC0 conformance vectors.
 
   Intermediate files are deleted after use.
 - Defaults for each case, unless stated otherwise:
@@ -897,8 +897,8 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 
 | ID | Case | Expected result | Clauses covered |
 |---|---|---|---|
-| C01 | Disc X, offset 0, whole-disc image (WAV + CUE) | All tracks pass. The SHA-256 of each reconstructed v5 WAV equals the encoder output. The CD layer of track 1 starts at absolute position 0. In session 1, the MD5 of [q_k, q_k + ncd_k) of each track = trailer-record MD5 = MD5 of the data chunk of the v5 file | L1 L6 L9 X1 X3 X7 F5 P3 R1 R4 R7 R8 |
-| C02 | Discs X and T at offsets 0, 1, 6, 48, 102, 588, 667, 1164, 1292, 1776, 2939, 4103, 4715 and 5880, each with both signs. In addition, a coarse sweep in steps of 97 samples within ±5880. For disc X the samples before and after the programme are read; for disc T they are read or zero-filled | All tracks pass | L5 L8 R6 R7 P16 |
+| C01 | Disc X, offset 0, whole-disc image (WAV + CUE) | All tracks pass. The SHA-256 of each reconstructed v5 WAV equals that of the encoder output. The CD layer of track 1 starts at absolute position 0. In session 1, for each track, the MD5 of [q_k, q_k + ncd_k) = trailer-record MD5 = MD5 of the data chunk of the v5 file | L1 L6 L9 X1 X3 X7 F5 P3 R1 R4 R7 R8 |
+| C02 | Discs X and T at offsets 0, 1, 6, 48, 102, 588, 667, 1164, 1292, 1776, 2939, 4103, 4715 and 5880, each with both signs. In addition, a coarse sweep in steps of 97 samples within ±5880. For disc X, the samples before and after the programme are read; for disc T, they are read or zero-filled | All tracks pass | L5 L8 R6 R7 P16 |
 | C03 | Offset ±20,000 (more than twice W): (a) disc T, W = 5880; (b) disc S, W = 5880; (c) disc S, W = 44 100 | (a) All tracks pass (coarse location from the information range). (b) At +20,000, track 1 passes and tracks 2 and 3 fall back; at −20,000, track 3 passes and tracks 1 and 2 fall back; the reason is always "no match". (c) All tracks pass | R7 R11 |
 | C04 | Slip: disc S, offset +667, in the middle of track 2: (a) 1 sample lost; (b) 1 sample inserted; (c) 1 sample lost and, 1 s later, 1 sample inserted | Only track 2 falls back, with reason "no match". This track produces no high-resolution output and is played as CD. Tracks 1 and 3 pass; the offset displayed for track 3 is +666, +668 and +667 respectively | R10 R11 R15 R17 |
 | C05 | Disc X, 1 sample of track 1 changed | Only this track falls back, with reason "no match". It produces no high-resolution output; only 16-bit audio is output, with CD indicated in the file name | R10 R11 R15 R17 R19 |
@@ -910,7 +910,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 | C11 | Disc X with the trailer record removed from TRACK01.LAX | Rejected; track 1 takes the CD route | X7 R14 |
 | C12 | Disc X: 1 byte flipped in the trailer record; 1 byte flipped in the extension block; extension file truncated; trailer-record track number changed to 5 with the CRC recomputed (the TOC has only 2 tracks) | Reported in turn: "record corrupted", "extension layer corrupted", "no trailer record", "track number not in TOC". All take the CD route, and the output file names indicate CD | X7 R7 R8 R11 R19 |
 | C13 | Extension block type changed to 2; record version changed to 2; lead0 changed to ncd + 1 (CRC recomputed in each case) | The first two cases are skipped with a notice. The third reports "invalid record field". All take the CD route | X2 X7 |
-| C14 | (a) TRACK01.LAX of disc X and of disc Y in the same folder, the latter renamed TRACK01B.LAX. (b) Track 1 re-encoded in independent-CD mode (`cd=` the CD layer of track 1 of disc X) with a different encoder setting, giving an extension file with the same CD layer but a different extension block; renamed in the same way and added | (a) Both files are grouped as track 1 by their trailer-record track number, and the MD5 decides: the file of disc X passes. (b) Both pass but their extension blocks differ; the track is rejected, and this is reported | R13 |
+| C14 | (a) TRACK01.LAX of disc X and of disc Y in the same folder, the latter renamed TRACK01B.LAX. (b) Track 1 re-encoded in independent-CD mode (`cd=` the CD layer of track 1 of disc X) with a different encoder setting, giving an extension file with the same CD layer but a different extension block; renamed in the same way and added | (a) Both files are grouped as track 1 by their trailer-record track number, and the MD5 decides: the file of disc X passes. (b) Both pass, but their extension blocks differ; the track is rejected, and this is reported | R13 |
 | C15 | Disc S with a different offset for each of the three tracks (0, +6, +48) | Each track passes with its own offset; no uniform disc-wide offset is needed | R7 R10 |
 | C16 | Disc X with a 4 s (300-sector) all-zero track inserted between its two tracks, offset +667 | All tracks pass | R7 R9 |
 | C17 | Disc X, track 1: ncd = 440,875, not a multiple of 588 | z_1 = 125 digital zeros in the image; reading passes | L7 L10 P6 |
@@ -919,7 +919,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 | C20 | Disc X: pack, then unpack. The extension block of the .LAX is compared with the body of the `LAE ` chunk in the v5 WAV. The distribution .lax of the same track is compared with TRACKnn.LAX on the CD | The SHA-256 of the v5 WAV is identical. The extension blocks are byte-identical, and the two extension files are byte-identical. Every trailer-record field conforms to 3.2: lead0 and tail0 equal the values counted from the CD layer, the reserved bytes are 0, and there are no extra fields | X1 X2 X6 F1 F2 F5 P2 |
 | C21 | FLAC base layer + .lax: STREAMINFO MD5 present / 0; .lax renamed; two .lax files that both pair but have different extension blocks; one case in the 48 kHz family (the sample-rate field of a Track A excerpt changed to 384 000; files only) | Pairing succeeds, and re-encapsulation is byte-identical. The FLAC file contains no extension layer and no trailer record. After renaming, the file still pairs by MD5 (tested only if "try other .lax files" is implemented). The case with two .lax files is rejected and reported. In the 48 kHz case, the trailer-record sample rate is 48000 and pairing succeeds | F2 F3 F5 P1 |
 | C22 | WAV base layer + .lax; a second case in which the base layer lacks its last sample | The first pairs, and re-encapsulation is byte-identical. The second does not pair and is not found in the whole file under Section 6 either (reason "file too short"); only the base layer is output | F2 F3 F4 F5 R11 |
-| C23 | Per-track rip of disc T (offset +667) stored as FLAC, in the same folder as the two .LAX files: (a) with CUE; (b) without CUE | No pairing under [F3]. (a) Processed under Section 6; all tracks pass. (b) The TOC is derived from the file order and highlighted prominently in the report; all tracks pass | F4 R1 R2 R4 |
+| C23 | Per-track rip of disc T (offset +667) stored as FLAC, in the same folder as the two .LAX files: (a) with CUE; (b) without CUE | No pairing under [F3]. (a) Processed under Section 6; all tracks pass. (b) The TOC is derived from the file order, and this is highlighted prominently in the report; all tracks pass | F4 R1 R2 R4 |
 | C24 | A single per-track file without CUE, with all .LAX files of the disc in the same folder: (a) the file of track 2 of disc T at offset +667 (it begins with the last 667 samples of track 1 and lacks the last 667 digital-silence samples of track 2); (b) the file of track 1 of disc T at offset −667 (it lacks 667 digital-silence samples at the start and ends with the first 667 samples of track 2); (c) the file of track 2 of disc S at offset +667, then with the file of track 3 and the CUE added | (a)(b) The track is found by content and passes, and the report states "no TOC". The other .LAX files are listed as "unused" and do not count as failures. (c) On its own, track 2 falls back with reason "no match", because the 667 samples pushed out are music. The whole file is output as CD with the notice of [R12]. After the additions, track 2 passes | F4 R2 R4 R7 R11 R13 R19 |
 | C25 | Whole-disc rip stored as one WAV without CUE: (a) disc S, offset 0; (b) disc T, offset +667 | All tracks are found by content and pass; the report states "no TOC". Each track is extracted at the position where it was found. (b) The 667 digital-silence samples at the start of the file belong to no track and are not output | R2 R4 R7 R19 |
 | C26 | LAE stream (simulated): the CD layer of each track of disc S stored as FLAC and delivered to the reader track by track together with the .lax files: (a) delivered unchanged; (b) 1 sample changed in the base-layer file of track 2 | (a) Every track passes, and re-encapsulation is byte-identical. (b) The whole-track MD5 of track 2 does not match. The track does not pair, is not found under Section 6 either (reason "no match"), and only the base layer is played. Tracks 1 and 3 pass | F6 R1 |
@@ -929,7 +929,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 | C30 | Independent-CD mode: the publisher's CD marks a 2 s INDEX 00 before track 2 that contains music (the master contains it as well, and encapsulation succeeds); per-track rip with the gaps omitted | Track 1 falls back with reason "unknown samples"; the other tracks pass | L14 R4 R11 |
 | C31 | Disc X ripped and read at offset 0 and at offset +667 | All output files of the two runs are byte-identical, which shows that the offset has entered no file | R16 |
 | C32 | During the self-check: (a) a positive case is made to fail artificially; (b) the reader is made to accept a modified track artificially | (a) The image is void. (b) The image is void, and the process stops | P16 P17 |
-| C33 | Image inspection (disc X, disc S, I2). AUDIO.BIN: contains, sample by sample, only the CD layers and padding; the CD layer of track 1 starts at sample 0; only z_n zeros follow the CD layer of the last track; the length is a whole number of sectors. IMAGE.CUE: track 1 has INDEX 01 00:00:00 and no PREGAP; in derived mode only INDEX 01 from track 2 onward; REM SESSION lines; the FILE line and MODE2 of the data track; no FLAGS PRE; no hashes. ISRC, CATALOG and CDTEXT lines contain only standard metadata. Data track: the mode byte in every sector header of DATA.BIN is 2; the track, including trailing zero sectors, is at least 300 sectors; its start = A2 + 11,400. The deliverables are complete | All conform | L3 L4 L5 L6 L7 L8 L9 L11 L12 L13 D1 D3 D6 M1 P12 P13 P14 |
+| C33 | Image inspection (disc X, disc S, I2). AUDIO.BIN: contains, sample by sample, only the CD layers and padding; the CD layer of track 1 starts at sample 0; only z_n zeros follow the CD layer of the last track; the length is a whole number of sectors. IMAGE.CUE: track 1 has INDEX 01 00:00:00 and no PREGAP; in derived mode, only INDEX 01 from track 2 onward; REM SESSION lines; the FILE line and MODE2 of the data track; no FLAGS PRE; no hashes. ISRC, CATALOG and CDTEXT lines contain only standard metadata. Data track: the mode byte in every sector header of DATA.BIN is 2; the track, including trailing zero sectors, is at least 300 sectors long; its start = A2 + 11,400. The deliverables are complete | All conform | L3 L4 L5 L6 L7 L8 L9 L11 L12 L13 D1 D3 D6 M1 P12 P13 P14 |
 | C34 | Data session: both directory trees read with the built-in parser; a copy with start address 0 mounted on Windows | Files byte-identical; README.TXT present; only TRACKnn.LAX under /LAE/; no CUE, TOC copy, report, program or autorun.inf; README.TXT contains no hashes, positions, offsets or tables of lengths | L1 D1 D2 D4 D5 |
 | C35 | Unrecognised CUE construct; only the file order available | Stop; highlighted prominently in the report | R2 R3 |
 | C36 | Plug-in: the next track has not finished verification, or has failed | The whole track is played as CD; no switching within the track | R17 R20 |
@@ -942,7 +942,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 ## 8. Versions and Extensions
 
 - **Specification version.**
-  - This specification is draft version 0. It will be revised after the measurements of Appendix A have been completed.
+  - This specification is draft version 0. It will be revised once the measurements of Appendix A have been completed.
   - It is published as spec/cdx/SPEC.md under CC BY 4.0.
 - **Trailer record version.**
   - The current version is 1.
@@ -951,12 +951,12 @@ In every passing case, session 1 is sample-identical to the publisher's programm
   - Readers reject unknown versions ([X7]).
   - Reserved bytes are written as 0 and ignored when read.
 - **Extension block types.**
-  - 1 = LAEY container v5.
+  - 1 = LAEY container version 5.
   - 2 = reserved for LAES. The relation between the extension block and the CD layer is defined by the LAES specification.
   - Later LAEY container versions, if any, use new type codes.
   - Type codes identify only the container or the tier.
-  - The reader treats the extension block as opaque bytes and passes it unchanged to the corresponding decoder. Therefore the CD layout, the trailer record and the reading rules of this specification need no change when LAES is added.
-- **v5 unchanged.** This specification does not require v6.
+  - The reader treats the extension block as opaque bytes and passes it unchanged to the corresponding decoder. Therefore, the CD layout, the trailer record and the reading rules of this specification need no change when LAES is added.
+- **Container version 5 unchanged.** This specification does not require v6.
 - **Not in version 0; to be specified later:**
   - keep CD / keep master, and per-layer provenance. This is a future task that this specification does not address. It also covers the case in independent-CD mode in which master and CD differ in non-silent content (version 0 stops; [P10]);
   - a dedicated direct reader (one-step operation on inserting the disc). It is only another kind of input to [R1] and likewise follows Section 6. It may re-read tracks with a slip ([R10]). Details are to be specified later;
@@ -982,7 +982,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 | 4 | Sector format of the data session | MODE2/2048 preferred; MODE2/2352 if necessary | Preference: sync, header, EDC and ECC generated by the drive; to be measured | See which one ImgBurn accepts. Before using 2352, run an EDC/ECC known-answer test against a real CD |
 | 5 | XA subheader values (submode 0x08, EOR/EOF bits); header set to zero when computing the ECC | As stated | Secondary source | Needed only when 2352 is used; verify against a real CD |
 | 6 | Volume space size in the PVD = absolute last LBA + 1 | As stated | Estimate (multisession convention) | Check whether Windows, macOS and Linux display session 2 |
-| 7 | Whether ImgBurn 2.5.8.0 can burn the disc in one pass. Whether, with a CUE giving "track 1 INDEX 01 00:00:00, no PREGAP", the 2 s pregap of track 1 is written as digital silence. Whether ImgBurn adds the 150-sector pregap of the data track of session 2 automatically, or it must be written in the CUE | — | No source for either pregap; to be measured | Route A |
+| 7 | Whether ImgBurn 2.5.8.0 can burn the disc in one pass. Whether, with a CUE giving "track 1 INDEX 01 00:00:00, no PREGAP", the 2 s pregap of track 1 is written as digital silence. Whether ImgBurn adds the 150-sector pregap of the data track of session 2 automatically, or whether it must be written in the CUE | — | No source for either pregap; to be measured | Route A |
 | 8 | Whether SAO can be used on an appendable disc | — | To be measured | Route B |
 | 9 | Capacity of an 80-minute blank disc | 359,849 sectors | Secondary source (ATIP maximum 79:59:74, as reported by cdrecord) | Read the ATIP of the blank disc |
 | 10 | Whether Windows 10/11 displays the Joliet files of session 2 | Yes | Secondary source | Inspect with Windows Explorer |
@@ -1004,7 +1004,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
    - Compare, one by one, the LBAs of the tracks and the start of the data track of session 2 shown under "image information" with the layout table in the burning and acceptance instructions ([P14]).
    - If they differ, do not burn.
 3. **Burn.**
-   - First burn in one pass (route A).
+   - First, burn in one pass (route A).
    - If this fails, or if session 2 is at the wrong position, use the two-step writing kit (route B).
    - While the disc is still open, Windows may offer to "burn files to disc"; do not accept this offer.
 4. **Recognition and reading.**
@@ -1019,11 +1019,10 @@ In every passing case, session 1 is sample-identical to the publisher's programm
    - Run the reader. Every track should pass.
    - The reconstructed v5 WAV files should have the same SHA-256 as the per-track v5 WAV files given to the encapsulation tool (check with `certutil -hashfile <file> SHA256`).
 8. **Return the measured values.**
-   - Record the measured results of every item of A.1, including the drive and burner models, the offsets and the addresses displayed by ImgBurn.
+   - Record the measured results for every item of A.1, including the drive and burner models, the offsets and the addresses displayed by ImgBurn.
    - Return them for the revision of this specification.
 
 **Notes**
 
-- The test discs contain only material derived from Track A and Track B. They are not distributed, and they are disposed of by the tester after acceptance.
+- The test discs contain only material derived from Track A and Track B. They are not distributed, and the tester disposes of them after acceptance.
 - Third-party software (ImgBurn, EAC and so on) is obtained and installed by the tester. It is used only for burning and ripping tests and is not part of the LAE code or repository.
-

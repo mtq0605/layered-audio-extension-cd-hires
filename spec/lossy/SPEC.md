@@ -6,7 +6,7 @@
 **English** | [中文](SPEC.zh.md)
 
 **Status:** Draft for public review.
-**Applies to:** LAE Lossy (short name LAEY), the lossy tier of the LAE (Layered Audio Extension) format family, container version 5.
+**Applies to:** LAE Lossy (LAEY), the lossy tier of the LAE (Layered Audio Extension) format family, container version 5.
 **Licence of this document:** CC BY 4.0 (see Section 15). Copyright (c) 2026 mtq0605.
 
 This document specifies the container syntax and the decoding process of LAE Lossy, container version 5. It is intended to let an independent implementer write a conforming decoder without other material. There are two exceptions:
@@ -36,7 +36,7 @@ The format family is called LAE. It has two tiers:
 
 The encapsulation of the extension on CD-Extra discs and in separate extension files is specified in [spec/cdx/SPEC.md](../cdx/SPEC.md) (draft).
 
-The RIFF chunk identifier is `LAE `, with a trailing space. The chunk magic is `LAE1` (Section 4). The magic names the format: `LAE1` = LAEY (this specification); `LAE2` = LAES, the lossless tier, which has its own specification. A decoder SHOULD tell the user which format it found; an LAEY decoder that finds `LAE2` reports an LAES file and does not decode it (the CD layer stays playable).
+The RIFF chunk identifier is `LAE `, with a trailing space. The chunk magic is `LAE1` (Section 4). The magic names the format: `LAE1` = LAEY (this specification); `LAE2` = LAES, the lossless tier, which has its own specification. A decoder SHOULD tell the user which format it found; an LAEY decoder that finds `LAE2` reports an LAES file and does not decode it (the CD layer remains playable).
 
 ---
 
@@ -84,11 +84,11 @@ In the cd24 route, steps 4 to 6 are omitted.
 
 ### 1.3 Conformance
 
-A conforming decoder MUST meet every requirement of Sections 3 to 13 that applies to a decoder, including the validation and refusal rules of Sections 4.3 and 12 and the requirement to remain memory-safe for every input. In addition, for every test vector and every route listed in [tests/vectors/MANIFEST.md](../../tests/vectors/MANIFEST.md) (Appendix B), it MUST produce an output WAV file (header and samples, Section 11.8) whose SHA-256 matches the listed value.
+A conforming decoder MUST meet every requirement of Sections 3 to 13 that applies to a decoder, including the validation and refusal rules of Sections 4.3 and 12 and the requirement to remain memory-safe for every input. In addition, for every conformance vector and every route listed in [tests/vectors/MANIFEST.md](../../tests/vectors/MANIFEST.md) (Appendix B), it MUST produce an output WAV file (header and samples, Section 11.8) whose SHA-256 matches the listed value.
 
 The main table of the manifest lists the first 16 hexadecimal digits of each SHA-256 value; the full 64-digit values are listed in its section "Full SHA-256 values".
 
-The test vectors exercise the process defined in Sections 3 to 13. An implementation that follows these sections exactly produces the listed outputs.
+The conformance vectors exercise the process defined in Sections 3 to 13. An implementation that follows these sections exactly produces the listed outputs.
 
 A decoder MAY be structured differently internally, provided that every output byte is identical. For example, it may decode whole tracks instead of streaming, or decode streams in parallel.
 
@@ -133,7 +133,7 @@ The coefficient reconstruction (Section 8) and the inverse MDCT (Section 9) use 
 
 * GCC and Clang: `-ffp-contract=off`, without `-ffast-math`.
 * GCC and Clang on 32-bit x86: additionally `-msse2 -mfpmath=sse`.
-* MSVC: `/fp:precise`, which is the MSVC default; `/fp:fast` must not be used. On 32-bit x86, `/arch:SSE2`, which is the MSVC default.
+* MSVC: `/fp:precise`, which is the MSVC default; `/fp:fast` must not be used. On 32-bit x86, additionally `/arch:SSE2`, which is also the MSVC default.
 
 Builds that generate x87 floating-point code are not supported (Section 13). The build commands of the reference implementation are given in [docs/BUILD.md](../../docs/BUILD.md).
 
@@ -184,9 +184,9 @@ An LAE Lossy file is a RIFF/WAVE file. The first 4 bytes MUST be `RIFF` and byte
 2. the `data` chunk containing the CD layer;
 3. the `LAE ` chunk.
 
-The RIFF size MUST cover all chunks. Players that do not know the `LAE ` chunk skip it and play the CD layer.
+The RIFF size MUST cover all chunks. Players that do not recognise the `LAE ` chunk skip it and play the CD layer.
 
-The reference decoder does not compare the `fmt ` sample rate with the `base` field of Section 4. Encoders MUST write `base` there. Whether a decoder is required to reject a mismatch will be specified in a later revision.
+The reference decoder does not compare the `fmt ` sample rate with the `base` field of Section 4. Encoders MUST write the value of `base` as the `fmt ` sample rate. Whether a decoder is required to reject a mismatch will be specified in a later revision.
 
 ### 3.2 The CD layer (`data` chunk)
 
@@ -227,7 +227,7 @@ crc = crc XOR 0xFFFFFFFF
 where T[i] = i iterated 8 times through: c = (c AND 1) ? 0xEDB88320 XOR (c >> 1) : (c >> 1)
 ```
 
-A decoder MUST verify the CRC **before** interpreting any other byte of the chunk body. The CRC covers the whole extension once.
+A decoder MUST verify the CRC **before** interpreting any other byte of the chunk body. A single CRC covers the whole extension.
 
 In the rest of this document, the **payload** means bytes `0 ... n-5`, that is, the chunk body without the CRC. Offsets are relative to its start.
 
@@ -392,7 +392,7 @@ A stream describes a plane `X[m][k]` with `m` in `[0, K)` and `k` in `[0, 512)`.
 
 * Bins `[k0, k1)` are grouped into `nc = ceil((k1 - k0) / 8)` **cells** of `CW = 8` bins.
 * Cell `cc` covers bins `kb = k0 + 8*cc` up to `min(k1, kb + 8) - 1`. The last cell may therefore be narrower than 8 bins.
-* Cells are grouped into **root blocks** of `ROOTF = 16` cells × `ROOTT = 8` frames. Roots at the high-frequency edge and at the end of the track may be smaller.
+* Cells are grouped into **root blocks** of `ROOTF = 16` cells × `ROOTT = 8` frames. Root blocks at the high-frequency edge and at the end of the track may be smaller.
 
 ---
 
@@ -404,7 +404,7 @@ Each decoded stream has its own range decoder (`struct Dec` in `src/part_stream.
 
 * `range` is a `uint32`, initialised to `0xFFFFFFFF`.
 * `code` is a `uint32`, initialised to 0.
-* `next()` returns the next payload byte. Once all `plen` bytes have been consumed, it returns 0.
+* `next()` returns the next byte of the coded payload. Once all `plen` bytes have been consumed, it returns 0.
 
 ### 6.2 Initialisation
 
@@ -472,9 +472,9 @@ The reference encoder flushes four bytes at the end of a stream. A decoder MUST 
 
 ### 6.8 Model persistence
 
-All adaptive models of a stream are created once, when the stream is opened. They persist through the whole stream, across root and row boundaries.
+All adaptive models of a stream are created once, when the stream is opened. They persist through the whole stream, across root-block and row boundaries.
 
-Version 5 defines no random-access points. Each stream is decoded from its beginning.
+Container version 5 defines no random-access points. Each stream is decoded from its beginning.
 
 ---
 
@@ -508,7 +508,7 @@ posBits(n): smallest b >= 0 with 2^b >= n
 
 ### 7.3 Stream walk
 
-Roots are visited row by row in increasing time order, 8 frames per row. Within a row, roots are visited in increasing frequency order.
+Root blocks are visited row by row in increasing time order, 8 frames per row. Within a row, root blocks are visited in increasing frequency order.
 
 ```
 decode_plane(hdr):
@@ -547,7 +547,7 @@ node(f0, f1, t0, t1):
 
 ### 7.5 Leaves
 
-Each leaf carries its own tier, exponent and zero-level index. These are signalled only at leaves. Interior nodes carry nothing.
+Each leaf carries its own tier, exponent and zero-level index. These are signalled only at leaves; interior nodes carry nothing.
 
 ```
 leaf(f0, f1, t0, t1):
@@ -583,13 +583,13 @@ Context selection:
 
 * The coefficient model is selected by the leaf's tier and exponent.
 * The tier context is the tier of the previous leaf in decoding order.
-* The exponent is coded as a difference to the exponent of the previous non-A leaf.
+* The exponent is coded as a difference from the exponent of the previous non-A leaf.
 
 ### 7.6 Corrupt-stream handling
 
 `CORRUPT` marks the stream as corrupt. The reference decoder clamps the offending value as shown and continues without overrunning memory. At the end of decoding, it discards the output (Section 12). Because the output is never delivered in that case, the clamped values have no normative effect. A decoder MUST nevertheless remain memory-safe for every input.
 
-The reference decoder decodes only the rows of a stream, and computes only the inverse-MDCT output samples, that the requested route and output rate need. A `CORRUPT` condition in parts that are never needed can therefore go undetected. Whether a decoder is required to detect `CORRUPT` in the whole stream, or only in the parts it needs, will be specified in a later revision.
+The reference decoder decodes only those rows of a stream, and computes only those inverse-MDCT output samples, that the requested route and output rate need. A `CORRUPT` condition in parts that are never needed can therefore go undetected. Whether a decoder is required to detect `CORRUPT` in the whole stream, or only in the parts it needs, will be specified in a later revision.
 
 ---
 
@@ -617,7 +617,7 @@ The step exponent `s` is computed from the leaf exponent `E`, the tier and the s
 | 3 | `max(0, min(E, 6) - TB[tier])` | Depth layer of mode keep20. Loud blocks: B 20 / C 22 / D 24 bit |
 | 0, or any other value | `min(8, max(0, E - TB[tier]))` | Default rule (the formula of container version 4) |
 
-Version 5 encoders write rule 1, 2 or 3. Other values are reserved. A decoder MUST nevertheless apply the last row of the table to them, as the reference decoder does.
+Encoders for container version 5 write rule 1, 2 or 3. Other values are reserved. A decoder MUST nevertheless apply the last row of the table to them, as the reference decoder does.
 
 The `rule` value is a per-stream field. The last row gives every value of that field a defined decoding; its formula is the one used in container version 4. Files of container version 4 are themselves rejected by check V2 (Section 4.3). Whether reserved `rule` values must instead be rejected will be specified in a later revision.
 
@@ -681,7 +681,7 @@ For a signal of length `Ls`:
 
 ### 9.2 Constant tables
 
-Let `M = N/2 = 256`. The tables are defined by these generating formulas (`tools/gen_mdct_tables.cpp`):
+Let `M = N/2 = 256`. The tables are defined by the following generating formulas (`tools/gen_mdct_tables.cpp`):
 
 | Table | Size | Formula |
 |---|---|---|
@@ -696,7 +696,7 @@ The pre- and post-twiddles are both `exp(-i * 2*pi * (n + 1/8) / (2*N))`. The PR
 
 *Informative.* This twiddle form is that of FFmpeg `libavcodec/mdct.c` (Section 15.3).
 
-The exact values are the hexadecimal double literals of `src/mdct_tables.h`, generated by `tools/gen_mdct_tables.cpp`. Values recomputed with a host math library may differ in the last bit. A decoder MUST use the values of `src/mdct_tables.h`. The content of `src/mdct_tables.h` will be reproduced as a normative annex of this document in a later revision.
+The exact values are the hexadecimal double literals of `src/mdct_tables.h`, generated by `tools/gen_mdct_tables.cpp`. Values recomputed with a host maths library may differ in the last bit. A decoder MUST use the values of `src/mdct_tables.h`. The content of `src/mdct_tables.h` will be reproduced as a normative annex of this document in a later revision.
 
 ### 9.3 DCT-IV through an M-point complex FFT
 
@@ -776,7 +776,7 @@ Each IMDCT signal sums the selected planes before the transform:
 * M: the selected M segments;
 * S: the selected S segments.
 
-The segments of one plane MAY overlap in frequency (an encoder may code the same bins twice, for example to cancel the up-converted CD layer in silent cells); the planes are added coefficient by coefficient. Each plane value is an `int32` with magnitude at most 1073741823, and there are at most 8 planes. Their double sum is therefore exact, and its order is irrelevant.
+The segments of one plane MAY overlap in frequency (an encoder may code the same bins twice, for example to cancel the up-converted CD layer in silent cells); the planes are added coefficient by coefficient. Each plane value is an `int32` with a magnitude of at most 1073741823, and there are at most 8 planes. Their double sum is therefore exact, and its order is irrelevant.
 
 A plane whose stream has fewer than `m + 1` frames contributes zero to frame `m`. The transform of an all-zero frame contributes only zeros, so it MAY be skipped.
 
@@ -896,7 +896,7 @@ B_c[i] = 4096 * x_c[i] - delta_c[i] + 16 * D_c[i]         for i in [0, nb)
 ```
 
 * `D_c` is the inverse-MDCT output of the depth plane of channel `c` (Section 9, `Ls = nb`), in LSB24.
-* In the 16-bit route the term `16 * D_c[i]` is omitted. The dither is still subtracted.
+* In the 16-bit route, the term `16 * D_c[i]` is omitted. The dither is still subtracted.
 
 ### 11.3 Interpolation to the master rate
 
@@ -941,7 +941,7 @@ o_c[i] = clamp(v, -8388608, 8388607)                   // hard limiter
 
 ### 11.8 Output file
 
-The output is a 44-byte canonical WAV header followed by `Lo` stereo frames. Each frame contains `o_0[i]` then `o_1[i]`. Each value is written as 3 little-endian bytes, the low 24 bits of its two's-complement representation. With `D = 6*Lo`:
+The output is a 44-byte canonical WAV header followed by `Lo` stereo frames. Each frame contains `o_0[i]` followed by `o_1[i]`. Each value is written as 3 little-endian bytes: the low 24 bits of its two's-complement representation. With `D = 6*Lo`:
 
 | Offset | Content |
 |---|---|
@@ -1021,8 +1021,8 @@ Passing the self-test does not replace the conformance test of Section 1.3.
 *Informative.* Status of the reference implementation ([docs/BUILD.md](../../docs/BUILD.md)):
 
 * The decoder and the encoder build and run on Windows (MSVC) and on Linux (GCC 13 at `-O2` and `-O0`, Clang 18). The decoder has also been built with GCC as a 32-bit SSE2 build.
-* On Linux x86, the decoder outputs were identical in 256 of 256 comparisons, and the encoder reproduces all 16 vector files byte for byte.
-* On Linux ARM64 (aarch64; GCC 13 at `-O2` and `-O0`, Clang 18 at `-O2`), the decoder outputs were identical in 192 of 192 comparisons, and the encoder (GCC 13, `-O2`) reproduces all 16 vector files byte for byte. Other ARM platforms have not been tested.
+* On Linux x86, the decoder outputs were identical in 256 of 256 comparisons, and the encoder reproduces all 16 conformance vector files byte for byte.
+* On Linux ARM64 (aarch64; GCC 13 at `-O2` and `-O0`, Clang 18 at `-O2`), the decoder outputs were identical in 192 of 192 comparisons, and the encoder (GCC 13, `-O2`) reproduces all 16 conformance vector files byte for byte. Other ARM platforms have not been tested.
 * x87 builds are not supported; the reference decoder's self-test refuses them.
 
 ---
@@ -1045,14 +1045,14 @@ Unless another source is cited, the statements in this section are based on the 
 * **Independent CD input.** The encoder option `cd=<file>` accepts a separately supplied 16-bit two-channel CD at the base rate.
   * The supplied CD becomes the CD layer bit for bit. The encoder places the master on the time axis of the CD and moves the master by whole master samples and by a fraction of a master sample; the CD is never moved (README, Section 4.3). Nothing about the alignment is stored in the file, and decoding is unchanged.
   * All dither flags are then 0.
-  * The CD cut-off is found by a coherence test (threshold 0.98), which does not depend on the gain of the CD, instead of the transfer test.
+  * The CD cut-off is found by a coherence test (threshold 0.98) instead of the transfer test; the coherence test does not depend on the gain of the CD.
   * The extension codes the master minus the CD path.
   * The edge samples (Section 4.1) are still taken from the CD layer that the encoder derives from the master.
 * **Partition search** (`src/partition.h`).
   * The search runs per root block, in parallel. The number of threads does not affect the encoded stream ([docs/BUILD.md](../../docs/BUILD.md)).
   * The search aims at the D and C share targets of the selected mode (`src/partition_format.h`). The share targets exist only in the encoder.
   * The decoder needs no mode table. `mi`, `lv`, `wm` and the main-header `eq` are informational.
-  * For given penalties λD and λC, a dynamic program over all sub-rectangles of each root chooses the cut tree and the tier of each leaf. It minimises the estimated number of bits plus λD per demoted D unit (a D cell in a leaf below tier D) and λC per demoted C unit (a C cell in a leaf below tier C). A unit is one cell (share by cells), the cell's energy relative to the mean energy of all D (or C) cells of the plane (share by energy), or the mean of both (cells + energy). A leaf is tier A only if all its cells are A.
+  * For given penalties λD and λC, a dynamic program over all sub-rectangles of each root block chooses the cut tree and the tier of each leaf. It minimises the estimated number of bits plus λD per demoted D unit (a D cell in a leaf below tier D) and λC per demoted C unit (a C cell in a leaf below tier C). A unit is one cell (share by cells), the cell's energy relative to the mean energy of all D (or C) cells of the plane (share by energy), or the mean of both (cells + energy). A leaf is tier A only if all its cells are A.
   * The penalties are found by bisection on a logarithmic scale between 10^−3 and 10^4, in 7 steps: first λC with λD = 0, until the C share target is met, then λD. For modes with a C share of 100 % (keep, keep20), λC is fixed at 10^9. With the share measure "cells + energy", the smaller of the two shares must meet the target.
 * **Modes.** There are six modes per scheme (`src/partition_format.h`):
 
@@ -1069,10 +1069,10 @@ Unless another source is cited, the statements in this section are based on the 
 * **Quantiser.** The encoder uses scalar quantisation with a dead zone. A coefficient `x` of a leaf with step `2^s` is quantised to `q = sign(x) * floor(|x| / step + 0.5 - 0.30)`. The dead zone 0.30 is used by the encoder only and is not signalled. The decoder reconstructs `(|q| + 0.20) * step` with the sign of `q` (Section 8.3); the reconstruction offset 0.20 is a format constant.
 * **Leakage compensation.** The encoder obtains the decoded frequency layer, brought down to the base rate with the decimators of Section 10 (`LEAKOUT` hook of `src/lae_dec.cpp`), and uses it to compensate the depth target.
   * After a first complete encode, the encoder decodes the written file and obtains the frequency layer alone at the base rate.
-  * It filters this leak with a zero-phase windowed-sinc lowpass (2047 taps, Kaiser window β = 9) with cut-off `fc - 1150` Hz, 150 Hz below the start of the frequency layer, and subtracts the result from `B24 - v` before the depth target is formed. The cut-off `fc` of the first pass is kept.
+  * It filters this leakage with a zero-phase windowed-sinc lowpass (2047 taps, Kaiser window β = 9) with cut-off `fc - 1150` Hz, 150 Hz below the start of the frequency layer, and subtracts the result from `B24 - v` before the depth target is formed. The cut-off `fc` of the first pass is kept.
   * Only the depth layer is then re-encoded, and the file is written again. The frequency layer of the first pass is kept.
-  * Leakage compensation is always on in version 5.
-* **Clipping.** The only output protection is the decoder's final hard limiter (Section 11.7). The reference encoder runs one diagnostic decode with the `CLIPMAP` hook and reports how many samples the limiter touches. This report is not stored in the file.
+  * Leakage compensation is always on in container version 5.
+* **Clipping.** The only output protection is the decoder's final hard limiter (Section 11.7). The reference encoder runs one diagnostic decode with the `CLIPMAP` hook and reports how many samples the limiter affects. This report is not stored in the file.
 * **Signal analysis.** The encoder's analysis uses the FFT module `src/fft.h`. The inverse MDCT of Section 9.3 is implemented separately, in `src/mdct_tb.h`.
 
 ---
@@ -1086,7 +1086,7 @@ Unless another source is cited, the statements in this section are based on the 
 | This specification | CC BY 4.0 |
 | Reference decoder | Apache-2.0 |
 | Reference encoder | GPL-3.0-or-later, or a commercial licence from the author |
-| Test vectors | CC0-1.0. Generated synthetic signals only; no third-party recordings |
+| Conformance vectors | CC0-1.0. Generated synthetic signals only; no third-party recordings |
 
 Contributions are accepted under the Apache-2.0 licence (inbound licence). Every commit must carry a Developer Certificate of Origin sign-off (`Signed-off-by`). No Contributor Licence Agreement is required.
 
@@ -1104,7 +1104,7 @@ The author makes the following pledge:
 
 LAE Lossy is built from the following published techniques:
 
-* the textbook MDCT with sine window, computed through a DCT-IV via an M-point complex FFT. The pre- and post-twiddle form `exp(-i * 2*pi * (n + 1/8) / (2*N))` was published in FFmpeg `libavcodec/mdct.c` on 2002-10-28;
+* the textbook MDCT with sine window, computed through a DCT-IV via an M-point complex FFT; the pre- and post-twiddle form `exp(-i * 2*pi * (n + 1/8) / (2*N))` was published in FFmpeg `libavcodec/mdct.c` on 2002-10-28;
 * dead-zone scalar quantisation (encoder side);
 * binary adaptive range coding;
 * half-band FIR interpolation and decimation;
@@ -1167,7 +1167,7 @@ The conformance vectors and their hash values are listed in [tests/vectors/MANIF
 
 ## Appendix C. Open items
 
-1. Publish the full SHA-256 values of all test vectors (Section 1.3).
+1. Publish the full SHA-256 values of all conformance vectors (Section 1.3).
 2. Reproduce `src/mdct_tables.h` as a normative annex (Section 9.2).
 3. Confirm whether a decoder must reject a `fmt ` sample rate that differs from `base` (Section 3.1).
 4. Document the values that the reference encoder writes into the stream-header fields `rate` and `L` (Section 5.3).

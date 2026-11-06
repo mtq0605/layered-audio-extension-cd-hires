@@ -9,21 +9,21 @@
 **Applies to:** LAE Lossless (short name LAES), the lossless tier of the LAE (Layered Audio Extension) format family, payload version 1.
 **Licence of this document:** CC BY 4.0. (c) 2026 mtq0605.
 
-This document specifies the LAES payload, its three carriers (WAV file, FLAC file, CD-Extra disc) and the decoding process. It is written so that an independent implementer can write a conforming decoder without other material. It replaces the informative design document `spec/lossless/DESIGN.md` (2026-10-18) as the normative description; where the two differ, this document applies.
+This document specifies the LAES payload, its three carriers (WAV file, FLAC file and CD-Extra disc) and the decoding process. It is written so that an independent implementer can write a conforming decoder without other material. It replaces the informative design document `spec/lossless/DESIGN.md` (2026-10-18) as the normative description; where the two differ, this document applies.
 
-Sections 11 and 12, the appendices marked informative, and all text marked *informative* are not normative. The key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
+Sections 11 and 12, the appendices marked informative, and all text marked *informative* are not normative. The key words MUST, MUST NOT, SHOULD and MAY are to be interpreted as described in RFC 2119.
 
-The reference implementation is normative wherever this text is silent or ambiguous. Its files are:
+The reference implementation is normative wherever this text is silent or ambiguous. It consists of the following files:
 
 | File | Content |
 |---|---|
-| `src/laes_math.h` | normative arithmetic: 128-bit accumulation, symmetric extension, rate-level lifting, reference taps and reference |
+| `src/laes_math.h` | normative arithmetic: 128-bit accumulation, symmetric extension, rate-level lifting, reference taps and the reference |
 | `src/halfband.h` | the half-band table `kHalf0` used by the lifting (shared with LAE Lossy) |
-| `src/laes_codec.h` | layer coder (Section 5) |
-| `src/laes_file.h` | LAES payload, encoder and decoder (Sections 6 and 7) |
-| `src/laes_flac.h` | FLAC reader and writer for the FLAC form (Section 8) |
-| `src/lae_cdx.h` | CD-Extra extension file and trailer record (Section 9) |
-| `src/laes_tool.cpp` | command-line tool `laes`: encoder choices, decoder outputs, derived 16-bit version (Sections 10 and 11) |
+| `src/laes_codec.h` | the layer coder (Section 5) |
+| `src/laes_file.h` | the LAES payload, encoder and decoder (Sections 6 and 7) |
+| `src/laes_flac.h` | the FLAC reader and writer for the FLAC form (Section 8) |
+| `src/lae_cdx.h` | the CD-Extra extension file and trailer record (Section 9) |
+| `src/laes_tool.cpp` | the command-line tool `laes`: encoder choices, decoder outputs, derived 16-bit master (Sections 10 and 11) |
 
 `src/laes_lift.h` contains faster forms of the lifting and the reference. They give identical results (verified against `src/laes_math.h` on test recordings during development) and are informative.
 
@@ -35,12 +35,12 @@ The reference implementation is normative wherever this text is silent or ambigu
 
 LAES stores, in one file or on one disc:
 
-* a **core master**: two-channel integer PCM at a **base rate** of 44 100 Hz or 48 000 Hz, 16, 24 or 32 bits. An ordinary player plays the core master unchanged;
-* one to sixteen **masters**: two-channel integer PCM of 16, 24 or 32 bits, each at the base rate × 1, 2, 4 or 8. Masters are independent of each other: each may come from a different production (for example a 16-bit master at 88.2 kHz and a 24-bit master at 352.8 kHz of the same piece).
+* a **core master**: two-channel integer PCM at a **base rate** of 44 100 Hz or 48 000 Hz, with 16, 24 or 32 bits, which an ordinary player plays unchanged;
+* one to sixteen **masters**: two-channel integer PCM with 16, 24 or 32 bits, each at the base rate × 1, 2, 4 or 8. The masters are independent of one another: each may come from a different production (for example, a 16-bit master at 88.2 kHz and a 24-bit master at 352.8 kHz of the same piece).
 
-Every master is restored **bit for bit**. From each master the decoder also obtains its **rate levels**, the master at its rate / 2, / 4 and / 8 down to the base rate, by the lifting of Section 3. The rate levels are exactly defined integer signals; they are not stored separately.
+Every master is restored **bit for bit**. From each master, the decoder also obtains its **rate levels** by the lifting of Section 3: the master at its rate / 2, / 4 and / 8, down to the base rate. The rate levels are exactly defined integer signals and are not stored separately.
 
-LAES is lossless throughout. Nothing in the payload is approximated. A master is stored as the difference to another signal already in the file (the core master or an earlier master), or in full, whichever the encoder finds smaller (Section 6.4).
+LAES is lossless throughout: nothing in the payload is approximated. A master is stored either as the difference from another signal already in the file (the core master or an earlier master) or in full, whichever the encoder finds smaller (Section 6.4).
 
 ### 1.2 Carriers
 
@@ -50,7 +50,7 @@ LAES is lossless throughout. Nothing in the payload is approximated. A master is
 | **FLAC form** | the audio frames of a FLAC file | one or more APPLICATION metadata blocks with ID `LAE2` | 8 |
 | **CD-Extra** | the audio tracks of session 1 (16-bit, 44 100 Hz) | one extension file per track in the data session | 9 |
 
-All three carriers hold the same payload (Section 6). Only the place of the core master differs.
+All three carriers hold the same payload (Section 6); they differ only in where the core master is stored.
 
 ### 1.3 Conformance
 
@@ -69,20 +69,20 @@ A conforming encoder writes payloads that a conforming decoder accepts and that 
 | Term | Meaning |
 |---|---|
 | base rate | 44 100 Hz (CD family) or 48 000 Hz (DVD family) |
-| core master | the signal an ordinary player plays (Section 1.1). On a CD or DVD it is what LAE Lossy calls the CD layer; in the FLAC form it may also be 24 or 32 bits |
+| core master | the signal that an ordinary player plays (Section 1.1). On a CD or DVD, it is what LAE Lossy calls the CD layer; in the FLAC form, it may also have 24 or 32 bits |
 | stages | for a master at rate base × 2^S, the number S (0 to 3) |
-| level k | for a master with S stages, the signal at rate base × 2^k, 0 ≤ k ≤ S. Level S is the master itself (after removing unused low bits, Section 6.3); level 0 is its **base level** |
+| level k | for a master with S stages, the signal at rate base × 2^k, 0 ≤ k ≤ S. Level S is the master itself (after removal of its unused low bits, Section 6.3); level 0 is its **base level** |
 | octave layer k | the detail signal produced when level k is split into level k − 1 (Section 3) |
-| tier | a signal a master is stored against: the core master, or an earlier master in the payload |
-| T | the **time position** of a master relative to its tier, in base-rate samples, as an integer part and a fraction in units of 2^−32 base-rate sample |
+| tier | the signal against which a master is stored: the core master or an earlier master in the payload |
+| T | the **time position** of a master relative to its tier, in base-rate samples, given as an integer part and a fraction in units of 2^−32 base-rate sample |
 | w | the number of low bits that are zero in every sample of a master ("unused low bits"); w = 0 if every sample is 0 |
 
 ### 1.5 Design properties (informative)
 
-* No index, seek table, cue table or table of layer offsets exists anywhere in the payload or its carriers. Time positions are known only by decoding.
-* The payload is stored as one whole block. It is not interleaved with the core master.
+* The payload and its carriers contain no index, seek table, cue table or table of layer offsets. Time positions are known only by decoding.
+* The payload is stored as a single block; it is not interleaved with the core master.
 * Each master has exactly one storage choice and one tier for its whole length. No weights or gains are stored.
-* The two channels are always coded separately: the left channel of a master is reconstructed only from left-channel signals, the right only from right-channel signals.
+* The two channels are always coded separately: the left channel of a master is reconstructed only from left-channel signals, and the right channel only from right-channel signals.
 
 ---
 
@@ -90,20 +90,20 @@ A conforming encoder writes payloads that a conforming decoder accepts and that 
 
 ### 2.1 Integers
 
-* `int64` and `uint64` denote 64-bit two's-complement signed and unsigned integers; similarly for 8, 16 and 32 bits.
+* `int64` and `uint64` denote 64-bit signed (two's-complement) and unsigned integers; the same notation is used for 8, 16 and 32 bits.
 * All multi-byte quantities in the payload, in WAV chunks and in the CD-Extra trailer are **little-endian**. FLAC structures follow RFC 9639 (big-endian bit order).
 * `a >> s` on a signed value is an arithmetic shift (floor division by 2^s).
 * **Exact sums.** Where this specification writes a sum of products, the sum MUST be formed exactly. A 128-bit two's-complement accumulator is sufficient for every sum in Sections 3 and 4.
-* **Wrap-around.** Every value that Sections 3, 4.2, 5.1 and 6.6 produce (a prediction, a reconstructed sample, a lifting output, a reference value, `x << w`) is taken modulo 2^64 as int64 (two's complement). A correct payload never needs a wider value; a payload that would can only fail its SHA-256.
-* **Rounding.** For an exact integer A and s ≥ 1, `round_s(A) = (A + 2^(s−1)) >> s`, computed on the exact value. This rounds A / 2^s to the nearest integer, ties towards +∞.
+* **Wrap-around.** Every value produced in Sections 3, 4.2, 5.1 and 6.6 (a prediction, a reconstructed sample, a lifting output, a reference value, `x << w`) is taken modulo 2^64 as an int64 (two's complement). A correct payload never needs a wider value; a payload that would need one can only fail its SHA-256.
+* **Rounding.** For an exact integer A and s ≥ 1, `round_s(A) = (A + 2^(s−1)) >> s`, computed on the exact value. This rounds A / 2^s to the nearest integer, with ties rounded towards +∞.
 * **Symmetric extension.** For a signal x of length n ≥ 1 and any integer index i:
   `m(i, n) = 0` if n = 1; otherwise, with p = 2(n − 1), `j = i mod p` (0 ≤ j < p), `m(i, n) = j` if j < n, else `p − j`.
-  `x[m(i, n)]` is the value of x at index i extended by whole-sample mirroring. Indices are 64-bit.
-* `levLen(n, k)`: n halved k times, rounding up each time (`n = (n + 1) / 2`, k times).
+  `x[m(i, n)]` is the value of x at index i, extended by whole-sample mirroring. Indices are 64-bit.
+* `levLen(n, k)`: n halved k times, rounding up each time (`n = (n + 1) / 2`, applied k times).
 
 ### 2.2 Floating point (Section 4.1 only)
 
-The reference taps are computed in IEEE-754 binary64. Every `+ − × ÷` and `sqrt` MUST be rounded individually (round to nearest, ties to even), in the order written. Fused multiply-add, extended-precision intermediates and re-ordering MUST NOT be used. Library functions other than `sqrt` and `floor` MUST NOT be used. *Informative:* MSVC `/fp:strict`, GCC/Clang `-ffp-contract=off` without `-ffast-math`.
+The reference taps are computed in IEEE-754 binary64. Each `+ − × ÷` and `sqrt` operation MUST be rounded individually (round to nearest, ties to even), in the order written. Fused multiply-add, extended-precision intermediates and reordering MUST NOT be used. Library functions other than `sqrt` and `floor` MUST NOT be used. *Informative:* MSVC `/fp:strict`; GCC/Clang `-ffp-contract=off` without `-ffast-math`.
 
 ---
 
@@ -111,7 +111,7 @@ The reference taps are computed in IEEE-754 binary64. Every `+ − × ÷` and `s
 
 ### 3.1 One stage
 
-One stage splits a signal x of length n into a low part s (length ⌈n / 2⌉, the next lower level) and a detail d (length ⌊n / 2⌋, the octave layer):
+One stage splits a signal x of length n into a low part s (length ⌈n / 2⌉; the next lower level) and a detail signal d (length ⌊n / 2⌋; the octave layer):
 
 ```
 xe[i] = x[2i]          0 ≤ i < ⌈n/2⌉
@@ -123,7 +123,7 @@ P(xe, i) = round_30( Σ_{t=0..39} H0[t] · ( xe[m(i − t, ne)] + xe[m(i + 1 + t
 U(d, i)  = round_31( Σ_{t=0..59} U0[t] · ( d[m(i − 1 − t, no)] + d[m(i + t, no)] ) )            no = ⌊n/2⌋; U = 0 if no = 0
 ```
 
-H0 is the table `kHalf0` and U0 the table `kU0` (Appendix A). Each product is formed separately; the sum is exact (Section 2.1).
+H0 is the table `kHalf0` and U0 is the table `kU0` (Appendix A). Each product is formed separately, and the sum is exact (Section 2.1).
 
 The inverse stage, given s, d and n, is:
 
@@ -137,20 +137,20 @@ It reproduces x exactly.
 
 ### 3.2 All levels of a master
 
-For a master with S stages, after removing the unused low bits (Section 6.3), level S is the master. For k = S down to 1, one stage applied to level k gives level k − 1 and octave layer k. So:
+For a master with S stages, level S is the master after removal of its unused low bits (Section 6.3). For k = S down to 1, applying one stage to level k gives level k − 1 and octave layer k. Hence:
 
-* level k has `levLen(F, S − k)` samples per channel, where F is the master's frame count;
+* level k has `levLen(F, S − k)` samples per channel, where F is the frame count of the master;
 * octave layer k has `⌊levLen(F, S − k) / 2⌋` samples per channel.
 
 ---
 
 ## 4. The reference: time position and word length
 
-A master (or one of its levels) is stored as the difference to a **reference**: a tier signal moved to the master's time position and scaled to the master's word length.
+A master (or one of its levels) is stored as the difference from a **reference**: a tier signal moved to the time position of the master and scaled to the word length of the master.
 
 ### 4.1 Reference taps
 
-For a fraction f ∈ [0, 1) of a sample (given as an unsigned 32-bit value F, f = F / 2^32), the 256 reference taps h[q], q = −127 … 128, are computed as follows (binary64, Section 2.2):
+For a fraction f ∈ [0, 1) of a sample (given as an unsigned 32-bit value F, with f = F / 2^32), the 256 reference taps h[q], q = −127 … 128, are computed as follows (in binary64; Section 2.2):
 
 ```
 PI    = 3.141592653589793115997963468544185161590576171875       (the binary64 value nearest to π)
@@ -170,11 +170,11 @@ c = the smallest q with the smallest |u| (q scanned upwards, strict comparison; 
 h[c] = h[c] + 2^31 − Σ_q h[q]
 ```
 
-The taps are integers; their sum is exactly 2^31. For f = 0, h[0] = 2^31 and every other tap is 0.
+The taps are integers, and their sum is exactly 2^31. For f = 0, h[0] = 2^31 and all other taps are 0.
 
 ### 4.2 Reference values
 
-Let `src` be the tier signal at the relevant level (length n), `W` the integer part of the time position and F its fraction, both in samples of that level, and `up` the grid difference (Section 6.6). The reference has the length of the master's signal at that level (`nOut` values):
+Let `src` be the tier signal at the relevant level (length n), `W` the integer part of the time position and F its fraction, both in samples of that level, and `up` the grid difference (Section 6.6). The reference has the length of the signal of the master at that level (`nOut` values):
 
 ```
 A_i     = Σ_{q=−127..128} h[q] · src[m(i + W + q, n)]          exact
@@ -182,11 +182,11 @@ ref[i]  = round_{31−up}(A_i)            if 31 − up > 0
 ref[i]  = A_i · 2^(up−31)               if 31 − up ≤ 0 (taken modulo 2^64 as int64)
 ```
 
-*Informative.* `up` is the number of extra significant bits the master has over the tier. It is negative when the master has fewer bits; the reference then rounds the tier down to the master's word length.
+*Informative:* `up` is the number of extra significant bits that the master has over the tier. It is negative when the master has fewer bits; the reference then rounds the tier down to the word length of the master.
 
 ### 4.3 Time position at level j
 
-A time position T = W + F / 2^32 base-rate samples is, at level j (rate base × 2^j), T · 2^j samples of that level:
+A time position T = W + F / 2^32 base-rate samples corresponds, at level j (rate base × 2^j), to T · 2^j samples of that level:
 
 ```
 W_j = W · 2^j + (F >> (32 − j))        for j ≥ 1;   W_0 = W
@@ -197,7 +197,7 @@ F_j = (F · 2^j) mod 2^32
 
 ## 5. Layer coder
 
-Every stored signal (base level, level difference or octave layer, one channel at a time) is coded by the layer coder into a byte string. Bits are written most significant first. A **layer** of n samples is a sequence of **blocks** of length B (the last block takes the remainder), written back to back with no byte alignment between blocks; the layer ends with zero bits up to the next byte boundary.
+The layer coder codes every stored signal (base level, level difference or octave layer, one channel at a time) into a byte string. Bits are written most significant first. A **layer** of n samples is a sequence of **blocks** of length B (the last block holds the remainder), written back to back without byte alignment between blocks; the layer is padded with zero bits up to the next byte boundary.
 
 ### 5.1 Block
 
@@ -206,12 +206,12 @@ Every stored signal (base level, level difference or octave layer, one channel a
 | type | 2 | 0 = constant, 1 = verbatim, 2 = fixed predictor, 3 = LPC |
 | W | 6 | width of the stored constant, verbatim and warm-up values (W-bit two's complement); 1 ≤ W ≤ 62. An encoder chooses W so that every sample of the block fits; a decoder does not check decoded samples against W |
 
-Then, by type, for a block of n samples x[0 … n−1]:
+The block continues according to its type, for a block of n samples x[0 … n−1]:
 
 * **constant:** one W-bit value v; x[i] = v.
 * **verbatim:** n W-bit values.
-* **fixed:** order o (3 bits, 0 ≤ o ≤ 4, o < n); o warm-up samples (W bits each); residual of n − o values. Allowed only if W ≤ 58. Prediction (as in FLAC): o = 0: 0; 1: x[i−1]; 2: 2x[i−1] − x[i−2]; 3: 3x[i−1] − 3x[i−2] + x[i−3]; 4: 4x[i−1] − 6x[i−2] + 4x[i−3] − x[i−4].
-* **LPC:** order − 1 (5 bits; order o = 1 … 32, o < n); precision − 1 (4 bits; p = 1 … 16); shift (5 bits; 0 … 31); o coefficients c[0 … o−1] (p-bit two's complement each); o warm-up samples (W bits each); residual of n − o values. Allowed only if W ≤ 44. Prediction: `pred_i = floor( Σ_{j=0..o−1} c[j] · x[i−1−j] / 2^shift )` with the exact sum (for shift = 0 the sum itself).
+* **fixed:** order o (3 bits; 0 ≤ o ≤ 4, o < n); o warm-up samples (W bits each); a residual of n − o values. Allowed only if W ≤ 58. Prediction (as in FLAC): o = 0: 0; o = 1: x[i−1]; o = 2: 2x[i−1] − x[i−2]; o = 3: 3x[i−1] − 3x[i−2] + x[i−3]; o = 4: 4x[i−1] − 6x[i−2] + 4x[i−3] − x[i−4].
+* **LPC:** order − 1 (5 bits; order o = 1 … 32, o < n); precision − 1 (4 bits; p = 1 … 16); shift (5 bits; 0 … 31); o coefficients c[0 … o−1] (p-bit two's complement each); o warm-up samples (W bits each); a residual of n − o values. Allowed only if W ≤ 44. Prediction: `pred_i = floor( Σ_{j=0..o−1} c[j] · x[i−1−j] / 2^shift )`, with the sum formed exactly (for shift = 0, the sum itself).
 
 Reconstruction: x[i] = residual[i] + pred_i for i ≥ o.
 
@@ -221,10 +221,10 @@ Reconstruction: x[i] = residual[i] + pred_i for i ≥ o.
 |---|---|---|
 | partition order po | 4 | 0 ≤ po ≤ 8, 2^po ≤ m (m = number of residual values) |
 
-The m values are split into 2^po partitions: partitions 0 … 2^po − 2 have ⌊m / 2^po⌋ values each; the last has m − (2^po − 1) · ⌊m / 2^po⌋. Each partition has:
+The m values are split into 2^po partitions: partitions 0 … 2^po − 2 hold ⌊m / 2^po⌋ values each, and the last holds m − (2^po − 1) · ⌊m / 2^po⌋. Each partition consists of:
 
-* a 6-bit parameter k. For k = 0 … 62 the values are Rice-coded: u = 2v for v ≥ 0, u = −2v − 1 for v < 0; the quotient q = u >> k is written as q zero bits followed by a one bit, then the k low bits of u. The value u MUST fit in 64 bits.
-* k = 63 is an escape: a 6-bit width r (1 … 63) follows, then every value as r-bit two's complement.
+* a 6-bit parameter k. For k = 0 … 62, the values are Rice-coded: u = 2v for v ≥ 0 and u = −2v − 1 for v < 0; the quotient q = u >> k is written as q zero bits followed by a one bit, followed by the k low bits of u. The value u MUST fit in 64 bits.
+* k = 63 is an escape: a 6-bit width r (1 … 63) follows, then every value as an r-bit two's-complement number.
 
 All side information is fixed-length.
 
@@ -238,13 +238,13 @@ All side information is fixed-length.
 
 ### 5.4 Checks
 
-A decoder MUST reject a layer (Section 6.7) when a field is outside the ranges above, when a predictor type is used with a W above its limit, when the order is not smaller than the block length, or when the data ends early. Bytes of the stored layer length after the last block, and the padding bits, are not checked; a decoder MUST ignore them.
+A decoder MUST reject a layer (Section 6.7) when a field is outside the ranges above, when a predictor type is used with a W above its limit, when the order is not smaller than the block length, or when the data ends early. Bytes within the stored layer length that follow the last block, and the padding bits, are not checked; a decoder MUST ignore them.
 
 ---
 
 ## 6. The LAES payload
 
-The payload is a byte string followed by its CRC-32 (4 bytes). The CRC-32 is the IEEE 802.3 CRC (reflected polynomial 0xEDB88320, initial value and final XOR 0xFFFFFFFF) over every payload byte before it.
+The payload is a byte string followed by its CRC-32 (4 bytes). The CRC-32 is the IEEE 802.3 CRC (reflected polynomial 0xEDB88320, initial value and final XOR 0xFFFFFFFF), computed over all payload bytes that precede it.
 
 ### 6.1 Header (64 bytes)
 
@@ -276,39 +276,39 @@ The payload is a byte string followed by its CRC-32 (4 bytes). The CRC-32 is the
 | 12 | 4 | reserved | 0 |
 | 16 | 8 | frames F | samples per channel, ≥ 1 |
 | 24 | 8 | T whole | int64, integer part of T (base-rate samples, relative to the tier) |
-| 32 | 4 | T fraction | uint32, units of 2^−32 base-rate sample |
+| 32 | 4 | T fraction | uint32, in units of 2^−32 base-rate sample |
 | 36 | 4 | reserved | 0 |
 | 40 | 32 | master SHA-256 | Section 6.5 |
 
-The masters follow each other in payload order: record of master 1, its layers, record of master 2, its layers, and so on. After the last master's layers comes the CRC-32. A master's tier MUST be the core master or a master that comes earlier in the payload.
+The masters follow one another in payload order: the record of master 1, its layers, the record of master 2, its layers, and so on. The CRC-32 follows the layers of the last master. The tier of a master MUST be the core master or a master that comes earlier in the payload.
 
 ### 6.3 Layers of a master
 
-Let j = 0 for storage 0 and 1, and j = min(S, S_t) for storage 2, where S_t is the stages of the tier master. For each channel, left first, then right:
+Let j = 0 for storage 0 and 1, and j = min(S, S_t) for storage 2, where S_t is the number of stages of the tier master. For each channel, left first, then right, the following are stored:
 
-1. a uint32 byte length and the layer coding (Section 5) of:
-   * storage 0 or 2: the **difference** at level j, `levLen(F, S − j)` values: the master's level j minus the reference (Section 6.6);
-   * storage 1: the master's base level itself, `levLen(F, S)` values;
-2. for each k = j + 1 … S: a uint32 byte length and the layer coding of octave layer k.
+1. a uint32 byte length followed by the layer coding (Section 5) of:
+   * storage 0 or 2: the **difference** at level j, `levLen(F, S − j)` values: level j of the master minus the reference (Section 6.6);
+   * storage 1: the base level of the master itself, `levLen(F, S)` values;
+2. for each k = j + 1 … S: a uint32 byte length followed by the layer coding of octave layer k.
 
-The samples of a master are taken **after removing its unused low bits**: `x = sample >> w`. The levels and octave layers of Section 3 are computed from x.
+The samples of a master are taken **after removal of its unused low bits**: `x = sample >> w`. The levels and octave layers of Section 3 are computed from x.
 
 ### 6.4 Storage values
 
 | Storage | Reference tier | Stored at level | Meaning |
 |---|---|---|---|
-| 0 | core master or any earlier master | j = 0 | difference to the tier at the base level |
+| 0 | core master or any earlier master | j = 0 | difference from the tier at the base level |
 | 1 | 0 (none) | j = 0 | base level stored in full |
-| 2 | an earlier master | j = min(S, S_t) | difference to the tier master at the highest level both have; only the octave layers above j are stored |
+| 2 | an earlier master | j = min(S, S_t) | difference from the tier master at the highest level that both have; only the octave layers above j are stored |
 
 ### 6.5 Hashes
 
-* **Master SHA-256:** over the master's samples in file order L, R, L, R, …, each sample as its int32 two's-complement value in 4 bytes little-endian.
-* **Core master SHA-256:** for a 16-bit core master, over the samples as int16 little-endian, L, R, L, R, … (the byte content of a 16-bit `data` chunk). For a 24- or 32-bit core master, as for a master (int32 little-endian).
+* **Master SHA-256:** computed over the samples of the master in file order L, R, L, R, …, each sample as its int32 two's-complement value in 4 bytes, little-endian.
+* **Core master SHA-256:** for a 16-bit core master, computed over the samples as int16 little-endian, L, R, L, R, … (the byte content of a 16-bit `data` chunk); for a 24- or 32-bit core master, computed as for a master (int32 little-endian).
 
 ### 6.6 Reconstruction
 
-For each master m in payload order, and each channel separately:
+For each master m in payload order, and for each channel separately:
 
 ```
 j  = 0 (storage 0, 1) or min(S, S_t) (storage 2)
@@ -324,87 +324,87 @@ for k = j + 1 … S:
 master sample = x_S << w
 ```
 
-Level j of a tier master t is obtained from its reconstructed samples: x_t = sample >> w_t is its level S_t; one stage per step (Section 3.1) gives the lower levels.
+Level j of a tier master t is obtained from its reconstructed samples: x_t = sample >> w_t is its level S_t, and each application of one stage (Section 3.1) gives the next lower level.
 
 ### 6.7 Checks
 
 A decoder MUST reject the payload (and play the core master only) if any of the following holds:
 
 * the CRC-32 does not match;
-* magic, version (1) or header size (64) differ; the base rate is not 44 100 or 48 000, or differs from the carrier's core master rate; the core master bits differ from the carrier's core master; channels ≠ 2; core master mode > 1; M is not 1 … 16;
-* core master frames differ from the carrier's core master length, or the core master SHA-256 differs;
-* for a master: bits not 16, 24 or 32; S > 3; w ≥ bits; storage > 2; rate ≠ base × 2^S; F < 1; `levLen(F, S)` > core master frames + 2^24; |T whole| ≥ 2^40. Core master frames and F are uint64 and MUST be compared without truncation; a decoder that cannot hold a master of F samples MUST reject the payload rather than truncate;
+* the magic, version (1) or header size (64) differs; the base rate is not 44 100 or 48 000, or differs from the rate of the carrier's core master; the core master bits differ from those of the carrier's core master; channels ≠ 2; core master mode > 1; M is not 1 … 16;
+* the core master frames differ from the length of the carrier's core master, or the core master SHA-256 differs;
+* for a master: bits is not 16, 24 or 32; S > 3; w ≥ bits; storage > 2; rate ≠ base × 2^S; F < 1; `levLen(F, S)` > core master frames + 2^24; |T whole| ≥ 2^40. Core master frames and F are uint64 and MUST be compared without truncation; a decoder that cannot hold a master of F samples MUST reject the payload rather than truncate the master;
 * storage 0 or 2 with a tier that is not earlier in the payload; storage 2 with tier 0; storage 1 with a tier other than 0;
-* a layer fails Section 5.4, or the payload ends early;
-* bytes remain between the last master's layers and the CRC-32.
+* a layer fails a check of Section 5.4, or the payload ends early;
+* bytes remain between the layers of the last master and the CRC-32.
 
-A master whose reconstruction does not match its SHA-256 MUST NOT be presented as that master, nor its rate levels. The core master and the other masters are unaffected, except masters whose chain of tiers includes it: they then also fail their SHA-256.
+A master whose reconstruction does not match its SHA-256 MUST NOT be presented as that master, nor its rate levels. The core master and the other masters are unaffected, except for masters whose chain of tiers includes the failed master: these then also fail their SHA-256.
 
-Reserved fields: writers MUST write 0. Readers MUST ignore them. The core master mode is not compared with the carrier.
+Reserved fields: writers MUST write 0, and readers MUST ignore them. The core master mode is not compared with the carrier.
 
 ---
 
 ## 7. WAV form
 
-An LAES WAV file is a RIFF/WAVE file:
+An LAES WAV file is a RIFF/WAVE file with the following chunks:
 
 * `fmt `: integer PCM (format tag 1, or 0xFFFE with the PCM sub-format), 2 channels, the base rate, 16, 24 or 32 bits;
 * `data`: the core master;
-* `LAE `: the LAES payload followed by its CRC-32 (Section 6), core master mode 0;
-* `LIST` of type `INFO` and `id3 ` (an ID3v2 tag), optional: tags and pictures. Writers place them after `fmt ` and before `data`. One set describes the core master and every master; no hash of this specification covers them, and they take no part in choosing or checking a version.
+* `LAE `: the LAES payload followed by its CRC-32 (Section 6), with core master mode 0;
+* `LIST` of type `INFO` and `id3 ` (an ID3v2 tag), both optional: tags and pictures. Writers place them after `fmt ` and before `data`. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking a version.
 
-A file MUST contain exactly one `data` chunk and at most one `LAE ` chunk. A reader skips every chunk it does not use. *Informative:* the reference reader takes the last of each and clamps a chunk size that runs past the end of the file.
+A file MUST contain exactly one `data` chunk and at most one `LAE ` chunk. A reader skips every chunk that it does not use. *Informative:* the reference decoder takes the last chunk of each type and clamps any chunk size that runs past the end of the file.
 
-Any WAV player plays the core master. The first 4 bytes of the chunk name the format: `LAE1` = LAEY (LAE Lossy), `LAE2` = LAES (this specification). A reader SHOULD tell the user which format it found; an LAEY decoder that meets `LAE2` reports an LAES file and does not decode it, and a player plays the core master. A WAV file whose single `data` chunk would exceed 4 GiB is outside version 1.
+Any WAV player plays the core master. The first 4 bytes of the `LAE ` chunk identify the format: `LAE1` = LAE Lossy (LAEY), `LAE2` = LAE Lossless (LAES) (this specification). A reader SHOULD tell the user which format it found; an LAEY decoder that encounters `LAE2` reports an LAES file and does not decode it, and a player plays the core master. A WAV file whose single `data` chunk would exceed 4 GiB is outside the scope of version 1.
 
 ---
 
 ## 8. FLAC form
 
-An LAES FLAC file is a FLAC stream (RFC 9639):
+An LAES FLAC file is a FLAC stream (RFC 9639) with the following structure:
 
 ```
 "fLaC" | STREAMINFO | VORBIS_COMMENT, PICTURE (optional) | APPLICATION blocks with ID "LAE2" (k ≥ 1) | other metadata blocks (optional) | audio frames = the core master
 ```
 
-* STREAMINFO: 2 channels, the base rate, 16, 24 or 32 bits, the core master's sample count (MUST NOT be 0) and the MD5 of the core master (MUST be given and correct). A decoder that finds the MD5 missing or wrong MUST NOT use the payload: the core master is not the one the payload was made for. Whether it still plays the core master is up to the player.
-* The LAES payload (with its CRC-32, core master mode 1) is split into pieces of at most 2^24 − 5 bytes. Each piece is the data of one APPLICATION block whose 4-byte ID is `LAE2` (0x4C 0x41 0x45 0x32), registered by IANA in the FLAC Application Metadata Block IDs registry (RFC 9639, Section 12.2; 2026-10-31). Writers place these blocks after STREAMINFO and after the VORBIS_COMMENT and PICTURE blocks, if any, one after another with no other block between them. A reader concatenates every APPLICATION block with ID `LAE2`, in file order, wherever it stands among the metadata blocks.
-* Tags and pictures (optional): at most one VORBIS_COMMENT block and any number of PICTURE blocks (RFC 9639, Sections 8.6 and 8.8). Writers place them before the `LAE2` blocks, so that a player reads them without skipping the payload. One set describes the core master and every master; no hash of this specification covers them, and they take no part in choosing or checking a version.
+* STREAMINFO: 2 channels, the base rate, 16, 24 or 32 bits, the sample count of the core master (MUST NOT be 0) and the MD5 of the core master (MUST be present and correct). A decoder that finds the MD5 missing or wrong MUST NOT use the payload: the core master is not the one for which the payload was made. Whether the decoder still plays the core master is up to the player.
+* The LAES payload (with its CRC-32; core master mode 1) is split into pieces of at most 2^24 − 5 bytes. Each piece is the data of one APPLICATION block whose 4-byte ID is `LAE2` (0x4C 0x41 0x45 0x32), registered by IANA in the FLAC Application Metadata Block IDs registry (RFC 9639, Section 12.2; 2026-10-31). Writers place these blocks after STREAMINFO and after the VORBIS_COMMENT and PICTURE blocks, if any, consecutively with no other block between them. A reader concatenates all APPLICATION blocks with ID `LAE2`, in file order, wherever they stand among the metadata blocks.
+* Tags and pictures (optional): at most one VORBIS_COMMENT block and any number of PICTURE blocks (RFC 9639, Sections 8.6 and 8.8). Writers place them before the `LAE2` blocks, so that a player reads them without skipping the payload. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking a version.
 * The audio frames hold the core master. Any valid FLAC coding of the core master is allowed.
-* No SEEKTABLE and no CUESHEET block is written.
+* No SEEKTABLE or CUESHEET block is written.
 
-Every FLAC decoder that implements RFC 9639 in full plays the core master and skips the APPLICATION blocks (checked 2026-11-05: libFLAC, FFmpeg). Decoders that implement only part of it may not: Windows' built-in FLAC decoder (Media Foundation, also used by Explorer) does not decode 32-bit FLAC, and it does not recognise a file whose first audio frame starts later than about 4 MiB into the file, which every LAES FLAC file with masters does. Tested decoders and workarounds: [COMPATIBILITY.md](../COMPATIBILITY.md).
+Every FLAC decoder that implements RFC 9639 in full plays the core master and skips the APPLICATION blocks (checked 2026-11-05 with libFLAC and FFmpeg). Decoders that implement only part of it may not do so: the built-in FLAC decoder of Windows (Media Foundation, also used by Explorer) does not decode 32-bit FLAC, and it does not recognise a file whose first audio frame starts more than about 4 MiB into the file, as is the case in every LAES FLAC file with masters. Tested decoders and workarounds are given in [COMPATIBILITY.md](../COMPATIBILITY.md).
 
-*Informative.* The reference writer (`src/laes_flac.h`) uses a fixed block size of 4096, two independently coded channels, LPC orders up to 12, precision up to 15 and Rice partition orders up to 8. At 44.1 / 48 kHz this is FLAC's streamable subset. Many older players do not play 32-bit FLAC; the reference encoder therefore uses a 24-bit core master unless asked otherwise (Section 11.1). The reference reader decodes only core masters with independently coded channels.
+*Informative:* the FLAC writer of the reference encoder (`src/laes_flac.h`) uses a fixed block size of 4096, two independently coded channels, LPC orders up to 12, a precision of up to 15 and Rice partition orders up to 8. At 44.1 / 48 kHz, this conforms to FLAC's streamable subset. Many older players do not play 32-bit FLAC; the reference encoder therefore uses a 24-bit core master unless instructed otherwise (Section 11.1). The reference decoder decodes only core masters with independently coded channels.
 
 ---
 
 ## 9. CD-Extra
 
-On a CD-Extra disc made with the LAE CD-Extra encapsulation (`spec/cdx/SPEC.md`), each track's extension file (`.LAX`) is:
+On a CD-Extra disc made with the LAE CD-Extra encapsulation (`spec/cdx/SPEC.md`), the extension file (`.LAX`) of each track is:
 
 ```
 LAES payload with its CRC-32 (core master mode 0) | 80-byte trailer record
 ```
 
-The trailer record is that of `spec/cdx/SPEC.md`, Section 3.2, with **extension block type 2**. A reader MUST check that the first 4 bytes of the extension block are `LAE2` for type 2 (and `LAE1` for type 1) and MUST otherwise reject the extension and play the CD track only. All other rules of the CD-Extra specification (whole-track MD5, sliding checksums, rip-offset search, the order of checks) apply unchanged. The core master is the CD track (16-bit, 44 100 Hz).
+The trailer record is the one defined in `spec/cdx/SPEC.md`, Section 3.2, with **extension block type 2**. A reader MUST check that the first 4 bytes of the extension block are `LAE2` for type 2 (and `LAE1` for type 1); otherwise, it MUST reject the extension and play the CD track only. All other rules of the CD-Extra specification (whole-track MD5, sliding checksums, rip-offset search, the order of checks) apply unchanged. The core master is the CD track (16-bit, 44 100 Hz).
 
 ---
 
 ## 10. Decoder outputs
 
-A decoder offers, for each file:
+A decoder offers the following outputs for each file:
 
 | Output | Lossless | Definition |
 |---|---|---|
 | the core master | yes | as stored |
 | each master | yes | Section 6.6 |
-| each rate level of a master | yes | level k (Section 3.2), samples `x_k << w`, written at the master's word length; a value outside that word length is limited to it on output |
-| a derived 16-bit master | relative to its definition: **yes** (every decoder reproduces it bit for bit). Relative to the master it is made from: **no** (requantised to 16 bits with TPDF dither) | Section 10.1 |
+| each rate level of a master | yes | level k (Section 3.2), with samples `x_k << w`, written at the word length of the master; a value outside that word length is limited to it on output |
+| a derived 16-bit master | relative to its definition: **yes** (every decoder reproduces it bit for bit); relative to the master from which it is made: **no** (requantised to 16 bits with TPDF dither) | Section 10.1 |
 
 ### 10.1 Derived 16-bit version
 
-For a rate at which the file offers no 16-bit output, a decoder MAY offer a 16-bit version derived from the output with the most bits at that rate (b bits, b > 16, s = b − 16). The outputs counted are the core master, every master whose SHA-256 matched, and their rate levels (after limiting). On a tie the first in this order is used: the core master; then, for each master in payload order, the master and its rate levels from high rate to low.
+For a rate at which the file offers no 16-bit output, a decoder MAY offer a derived master: a 16-bit version derived from the output with the most bits at that rate (b bits, b > 16, s = b − 16). The outputs considered are the core master, every master whose SHA-256 matched, and their rate levels (after limiting). On a tie, the first in the following order is used: the core master; then, for each master in payload order, the master and its rate levels from high rate to low rate.
 
 ```
 per channel, a xorshift64 generator with state st = 20261029 + 0x9E3779B97F4A7C15 · (channel + 1)  (mod 2^64; channel 0 = left)
@@ -412,11 +412,12 @@ next():  st ^= st << 13;  st ^= st >> 7;  st ^= st << 17;  return st >> (64 − 
 for each sample v in order:  r1 = next(); r2 = next();  y = clamp((v + r1 − r2 + 2^(s−1)) >> s, −32768, 32767)
 ```
 
-The result is a derived 16-bit master (TPDF dither of ±1 LSB).
-* **Lossless relative to this definition:** every decoder reproduces it bit for bit, on every run and platform. Decoding it again, or on another decoder, never changes a sample.
-* **Not lossless relative to the master it is made from:** its b − 16 lower bits are dropped and TPDF dither is added. That master cannot be recovered from it.
+The result is a derived 16-bit master (TPDF dither of ±1 LSB):
 
-It is not the original master. A decoder MUST label it as a derived master wherever it offers it and say relative to what it is lossless (for example "derived 16-bit master: lossless relative to its definition, not lossless relative to its source master"). It is the same on every run and every platform.
+* **Lossless relative to this definition:** every decoder reproduces it bit for bit, on every run and every platform. Decoding it again, or with another decoder, never changes a sample.
+* **Not lossless relative to the master from which it is made:** its b − 16 low bits are dropped and TPDF dither is added. That master cannot be recovered from it.
+
+It is not the original master. A decoder MUST label it as a derived master wherever it offers it and state relative to what it is lossless (for example "derived 16-bit master: lossless relative to its definition, not lossless relative to its source master").
 
 ---
 
@@ -424,9 +425,9 @@ It is not the original master. A decoder MUST label it as a derived master where
 
 ### 11.1 Core master
 
-The core master is either given (for example a released CD or DVD) or derived from a master's base level at a chosen word length. The reference encoder uses 16 bits for the WAV form and, for the FLAC form, the highest master word length up to 24 bits. The source master is one whose word length equals the core master's (its base level is then the core master exactly), otherwise the longest one, TPDF-dithered down.
+The core master is either given (for example, a released CD or DVD) or derived from the base level of a master at a chosen word length. The reference encoder uses 16 bits for the WAV form and, for the FLAC form, the highest master word length up to 24 bits. The source master is a master whose word length equals that of the core master (its base level is then exactly the core master) or, if there is none, the master with the longest word length, TPDF-dithered down.
 
-A derived core master is stored in the file like any other: what the file holds is the core master, checked by its SHA-256 (Section 6.5). The rule below lets anyone check, bit for bit, that it was derived from a given master; it is how the reference encoder (`laes enc --derive-core`, `src/laes_stream_enc.h`) derives it.
+A derived core master is stored in the file like any other core master: what the file holds is the core master, checked by its SHA-256 (Section 6.5). The rule below lets anyone check, bit for bit, that the core master was derived from a given master; it is the rule by which the reference encoder (`laes enc --derive-core`, `src/laes_stream_enc.h`) derives it.
 
 ```
 source:  among the masters in the order given to the encoder, the first whose word length equals b (the core master's bits);
@@ -442,19 +443,19 @@ else:         one xorshift64 generator for both channels, state st = 20261028 ·
                   core sample = clamp(⌊t⌋, −2^(b−1), 2^(b−1) − 1)             the first u() is added first)
 ```
 
-The arithmetic is exact up to the two additions of u() and the + 0.5, which IEEE-754 double rounds the same way on every platform. The left channel uses the first `levLen(F, S)` × 2 values of the generator, the right channel the next ones.
+The arithmetic is exact except for the two additions of u() and the addition of 0.5, which IEEE-754 double arithmetic rounds identically on every platform. The left channel uses the first `levLen(F, S)` × 2 values of the generator, and the right channel the values that follow.
 
 ### 11.2 Storage, tier and order
 
-The reference encoder tries, for each master: storage 1; storage 0 against the core master and against every earlier master; storage 2 against every earlier master when both have a level above the base. It keeps the smallest, once per master. It writes the masters in the smaller of two orders: longer word lengths first, then higher rates first; or, when the core master was derived from a master that is not already first, that master first and the others as before. A master can only refer to earlier masters, and a shorter word length refers to a longer one cheaply.
+For each master, the reference encoder tries storage 1; storage 0 against the core master and against every earlier master; and storage 2 against every earlier master when both have a level above the base level. It keeps the smallest result, with one choice per master. It writes the masters in whichever of two orders is smaller: either longer word lengths first, then higher rates first; or, when the core master was derived from a master that is not already first, that master first and the others in the same order as before. A master can refer only to earlier masters, and a master with a shorter word length can be stored cheaply against one with a longer word length.
 
 ### 11.3 Time position
 
-A master derived from the same production as the core master has T = 0. For an independently produced core master (a released CD), the reference tool `laes align` uses the automatic search of LAE Lossy's encoder and stores the measured position as T, fraction included; the master itself is never moved. An alignment error within −60 dB passes. Otherwise the error is shown and the user decides to continue or stop. A whole album is cut at the CD's track boundaries by the LAE Lossy planner (`lae_enc plan … laes`), which writes each track's master unmoved with its own T.
+A master derived from the same production as the core master has T = 0. For an independently produced core master (a released CD), the reference tool `laes align` uses the automatic search of the LAE Lossy encoder and stores the measured position as T, including the fraction; the master itself is never moved. An alignment error within −60 dB is accepted. Otherwise, the error is shown and the user decides whether to continue or stop. A whole album is cut at the track boundaries of the CD by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`), which writes the master of each track unmoved, with its own T.
 
 ### 11.4 Measured sizes
 
-Measured on 10-second excerpts: two 2L test recordings at 352.8 kHz (02 and 05), and one recording at 192 kHz for the 48 kHz family. Each comparison is with `flac -8`.
+Measured on 10-second excerpts of two 2L test recordings at 352.8 kHz (02 and 05) and of one recording at 192 kHz for the 48 kHz family. Each comparison is with `flac -8`.
 
 | Content | LAES FLAC form, compared with |
 |---|---|
@@ -464,22 +465,22 @@ Measured on 10-second excerpts: two 2L test recordings at 352.8 kHz (02 and 05),
 
 ### 11.5 Resources and resuming
 
-These describe the reference encoder (`laes enc`). None of them changes the file written: the same masters and options give the same bytes.
+The following items describe the reference encoder (`laes enc`). None of them changes the file written: the same masters and options give the same bytes.
 
-- **Masters.** A master is a 16-, 24- or 32-bit stereo WAV (RIFF, or RF64 beyond 4 GB), read where it is, or a FLAC file. A FLAC master is decoded once into the work folder and checked against the MD5 in its STREAMINFO.
-- **Work folder.** Intermediate data goes to `<output>.laes.tmp` next to the output. The folder is removed when the run ends.
-- **Memory.** Intermediate signals are processed one piece at a time. The memory budget (`--mem=<GB>`, default 2 GB, less on machines with little memory) sets only the piece length. The core master is held in memory at 4 bytes per sample and channel.
-- **Disk.** Before the work folder is made, the encoder estimates the disk it needs. If that is more than is free, it does not start; `--force-disk` overrides this.
-  - While it runs, free space below 2 GB makes it **wait**: nothing is removed, and the run goes on by itself once there is room again.
-  - With `--disk-stop` it stops instead and keeps the work folder.
-  - With `--disk-stop-remove` it stops and removes the work folder; the work done so far is lost.
-- **Resuming.** A run that stopped (disk full, the program closed, a crash) keeps its work folder. The same command run again continues where it stopped.
-  - The work folder records what the file depends on: the arguments, each master's size and modification time, and the encoder build. If any of these changed, the run starts again.
-  - A resumed run writes the same bytes as an uninterrupted one.
-- **`--small-disk`.** For small disks. The largest rate level of each master is not stored; it is computed again from the master whenever it is read. A FLAC master is not copied into the work folder; its frames are decoded again when read (their positions are kept in memory only). Encoding is slower; the memory does not increase.
-- **`--timing`.** Prints the time and the peak memory of each stage, and the largest size of the work folder.
+* **Masters.** A master is a 16-, 24- or 32-bit stereo WAV file (RIFF, or RF64 beyond 4 GB), read in place, or a FLAC file. A FLAC master is decoded once into the work folder and checked against the MD5 in its STREAMINFO.
+* **Work folder.** Intermediate data is written to `<output>.laes.tmp` next to the output. The folder is removed when the run ends.
+* **Memory.** Intermediate signals are processed one piece at a time. The memory budget (`--mem=<GB>`, default 2 GB, less on machines with little memory) determines only the piece length. The core master is held in memory at 4 bytes per sample per channel.
+* **Disk.** Before creating the work folder, the encoder estimates the disk space it needs. If this exceeds the free space, it does not start; `--force-disk` overrides this.
+  * While it runs, free space below 2 GB makes it **wait**: nothing is removed, and the run continues by itself once there is room again.
+  * With `--disk-stop`, it stops instead and keeps the work folder.
+  * With `--disk-stop-remove`, it stops and removes the work folder; the work done so far is lost.
+* **Resuming.** A run that stopped (disk full, program closed, crash) keeps its work folder. Running the same command again continues where the run stopped.
+  * The work folder records what the file depends on: the arguments, the size and modification time of each master, and the encoder build. If any of these has changed, the run starts again.
+  * A resumed run writes the same bytes as an uninterrupted one.
+* **`--small-disk`.** For small disks. The largest rate level of each master is not stored; it is recomputed from the master whenever it is read. A FLAC master is not copied into the work folder; its frames are decoded again when read (their positions are kept in memory only). Encoding is slower; memory use does not increase.
+* **`--timing`.** Prints the time and peak memory of each stage, and the largest size of the work folder.
 
-Measured on a 32-thread machine with the default 2 GB budget, FLAC form. The masters are given as WAV unless noted.
+Measured on a 32-thread machine with the default 2 GB budget, FLAC form. The masters are given as WAV unless noted otherwise.
 
 | Content | Mode | Time | Peak memory | Work folder, largest |
 |---|---|---|---|---|
@@ -490,20 +491,21 @@ Measured on a 32-thread machine with the default 2 GB budget, FLAC form. The mas
 | 30:13, 12 masters (16, 24 and 32 bits × 44.1, 88.2, 176.4 and 352.8 kHz) | normal | 2181 s | 1.41 GB | 27.8 GB |
 | | `--small-disk` | 3047 s | 1.53 GB (*) | 15.0 GB |
 
-(*) Measured with a build that derived the core master in one piece; the normal run went from 1.53 to 1.41 GB with the current one.
+(*) Measured with a build that derived the core master in one piece; with the current build, the normal run went from 1.53 GB to 1.41 GB.
 
-The peak memory grows with the length (the core master is held whole); the disk grows with the length and the number and rates of the masters.
+Peak memory grows with the length (the core master is held whole); disk use grows with the length and with the number and rates of the masters.
 
 ---
 
 ## 12. Conformance testing (informative)
 
-`laes selftest` runs, with synthetic signals only:
+`laes selftest` runs the following, with synthetic signals only:
+
 * round trips over both carriers, all word lengths, both rate families, fractional and negative T, unused low bits, short and odd lengths, and all three storage values;
 * damage tests: byte flips, flips behind a recomputed CRC, and truncation of the payload and of the FLAC file;
 * random input to the FLAC parsers.
 
-The fast forms (`src/laes_lift.h`, the fast paths in `src/laes_codec.h`) were compared with the normative forms on test recordings during development; every result was identical.
+The fast forms (`src/laes_lift.h` and the fast paths in `src/laes_codec.h`) were compared with the normative forms on test recordings during development; every result was identical.
 
 ---
 
@@ -532,7 +534,7 @@ The fast forms (`src/laes_lift.h`, the fast paths in `src/laes_codec.h`) were co
 ## Appendix B. Changes against the design document of 2026-10-18 (informative)
 
 * The rate levels use the lifting L of Section 3 (fixed tables, exact inverse).
-* Masters are stored as differences to a tier (core master or earlier master) or in full. Storage 2 (difference at the highest shared level) is new.
+* Masters are stored as differences from a tier (the core master or an earlier master) or in full. Storage 2 (difference at the highest shared level) is new.
 * The time position T replaces any moving of masters: masters are stored unmoved.
-* The core master may be 16, 24 or 32 bits. The FLAC form and the CD-Extra extension type 2 are specified.
-* Decoder outputs include a derived 16-bit master, labelled as derived (lossless relative to Section 10.1, not lossless relative to the master it is made from).
+* The core master may have 16, 24 or 32 bits. The FLAC form and the CD-Extra extension type 2 are specified.
+* Decoder outputs include a derived 16-bit master, labelled as derived (lossless relative to Section 10.1, not lossless relative to the master from which it is made).

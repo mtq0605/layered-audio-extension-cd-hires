@@ -21,7 +21,11 @@ mkdir "%OUT%\pkg\x64"
 copy /y "%OUT%\x86\foo_input_lae.dll" "%OUT%\pkg\" >nul
 copy /y "%OUT%\x64\foo_input_lae.dll" "%OUT%\pkg\x64\" >nul
 if exist "%OUT%\foo_input_lae.fb2k-component" del /q "%OUT%\foo_input_lae.fb2k-component"
-powershell -NoProfile -Command "Compress-Archive -Path '%OUT%\pkg\*' -DestinationPath '%OUT%\foo_input_lae.zip' -Force; Move-Item -Force '%OUT%\foo_input_lae.zip' '%OUT%\foo_input_lae.fb2k-component'"
+rem tar.exe of Windows 10 1803+ (bsdtar) writes ZIP entry names with forward slashes (APPNOTE 4.4.17); Compress-Archive of
+rem Windows PowerShell 5.1 writes backslashes, which unzip and other non-Windows readers take as part of one file name.
+if exist "%OUT%\foo_input_lae.zip" del /q "%OUT%\foo_input_lae.zip"
+"%SystemRoot%\System32\tar.exe" -a -c -f "%OUT%\foo_input_lae.zip" -C "%OUT%\pkg" foo_input_lae.dll x64 || (echo PACKING FAILED & exit /b 1)
+move /y "%OUT%\foo_input_lae.zip" "%OUT%\foo_input_lae.fb2k-component" >nul
 if errorlevel 1 (echo PACKING FAILED & exit /b 1)
 rmdir /s /q "%OUT%\pkg"
 echo built %OUT%\foo_input_lae.fb2k-component (x86 + x64)

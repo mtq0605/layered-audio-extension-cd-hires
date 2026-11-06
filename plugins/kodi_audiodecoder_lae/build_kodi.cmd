@@ -23,7 +23,9 @@ del /q "%OUT%\pkg\audiodecoder.lae\audiodecoder.lae.exp" "%OUT%\pkg\audiodecoder
 rem the version: the 4th quote-separated field of the line <addon id="..." version="x.y.z" ...>
 for /f tokens^=4^ delims^=^" %%v in ('findstr /b /c:"<addon id=" "%HERE%audiodecoder.lae\addon.xml"') do set V=%%v
 if exist "%OUT%\audiodecoder.lae-%V%.zip" del /q "%OUT%\audiodecoder.lae-%V%.zip"
-powershell -NoProfile -Command "Compress-Archive -Path '%OUT%\pkg\audiodecoder.lae' -DestinationPath '%OUT%\audiodecoder.lae-%V%.zip'"
+rem tar.exe of Windows 10 1803+ (bsdtar) writes ZIP entry names with forward slashes (APPNOTE 4.4.17); Compress-Archive of
+rem Windows PowerShell 5.1 writes backslashes, which unzip and Kodi on Linux take as part of one file name.
+"%SystemRoot%\System32\tar.exe" -a -c -f "%OUT%\audiodecoder.lae-%V%.zip" -C "%OUT%\pkg" audiodecoder.lae
 if errorlevel 1 (echo PACKING FAILED & exit /b 1)
 echo built %OUT%\audiodecoder.lae-%V%.zip
 exit /b 0

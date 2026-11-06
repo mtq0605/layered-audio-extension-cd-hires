@@ -7,8 +7,8 @@
 set -u
 cd "$(dirname "$0")/.."
 w=$(mktemp -d); bad=0; F="-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread"
-REF_PLAIN=27a49c088884e29727320bf122b9b72eeaaada0569006473aad101f7cebd65f3
-REF_TAGGED=1fef3fbec28512b20811d0f58def5cc2322f3e2a5349cb019bcddac1a0842846
+REF_PLAIN=c9cb93ff30a1f1887e5e826d671ca1716635affee64e278bc186e73e2bfeee25
+REF_TAGGED=47249d07b4e950237a5779ce3c325d6e432b3d5e53641ad2e523522b57c4a78d
 for p in lae_enc gen_suite cut_wav; do g++ $F -o "$w/$p" src/$p.cpp 2> "$w/b_$p.txt" || { echo "build $p: FAILED"; head -20 "$w/b_$p.txt"; exit 1; }; done
 "$w/gen_suite" "$w" 88200 > /dev/null && "$w/cut_wav" "$w/sweep_88200.wav" "$w/s.wav" 5 2 > /dev/null || { echo "source: FAILED"; exit 1; }
 # two tiny "pictures": a PNG header with IHDR (1 x 1, 8-bit RGB) and a JPEG start with an SOF0 marker; stored byte for byte

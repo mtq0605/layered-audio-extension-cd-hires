@@ -10,11 +10,16 @@ cd "$(dirname "$0")/.."
 w=$(mktemp -d); bad=0; F="-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread"
 for p in lae_enc lae_dec gen_suite cut_wav; do g++ $F -o "$w/$p" src/$p.cpp 2> "$w/b_$p.txt" || { echo "build $p: FAILED"; head -20 "$w/b_$p.txt"; exit 1; }; done
 echo "builds: OK"
-# reference SHA-256 prefixes of the generated sources (Windows MSVC build)
-for spec in "sweep_88200 AFCA3A5C89443738" "transients_176400 1D4FA24ADC8C2268" "imd_96000 CE5419A2E8EED5D0" "electronic_352800 22A824244FFC823B"; do
+# full SHA-256 of the generated 20-s sources (Windows MSVC x64 and x86 build): since 2026-11-07 gen_suite uses lmath only
+# (src/lae_math.h), so the whole generated file is the same on every platform; a different source is a failure
+for spec in "sweep_88200 814A6B7E392C8BF35E424B145F0971D4804A0EF3DE19B248387F865E22651606" \
+            "transients_176400 1D4FA24ADC8C2268443212D1070DB650D54A8ED878A9D67D7C9827736B6D1743" \
+            "imd_96000 CE5419A2E8EED5D0AD45F681E5285D3C80CFFD66EFE92021313DEB81870909FA" \
+            "electronic_352800 40D8F8D053F5AD175062052055BD0659973C28DDA824286BF4144B1080A2373D"; do
     c=${spec% *}; ref=${spec#* }; rate=${c#*_}
     [ -f "$w/$c.wav" ] || "$w/gen_suite" "$w" "$rate" > /dev/null
-    got=$(sha256sum "$w/$c.wav" | cut -c1-16 | tr a-f A-F); [ "$got" = "$ref" ] && echo "source $c: identical" || echo "source $c: DIFFERENT ($got)"
+    got=$(sha256sum "$w/$c.wav" | cut -c1-64 | tr a-f A-F)
+    if [ "$got" = "$ref" ]; then echo "source $c: identical"; else echo "source $c: DIFFERENT ($(echo "$got" | cut -c1-16))"; echo x >> "$w/bad"; fi
     "$w/cut_wav" "$w/$c.wav" "$w/$c.2s.wav" 5 2 > /dev/null
 done
 sed '/^## Full SHA-256/,$d' tests/vectors/MANIFEST.md | grep '^| [a-z]' | while IFS='|' read -r _ name enc h24 _; do

@@ -79,7 +79,7 @@ At the default operating point, the median CD-band error of the full 24-bit rout
 
 The extension size was measured during development (2026-10-16) on the v5 release candidate (Section 11.2). On real recordings in mode 3, its median size was about 0.24 to 1.23 times that of the uncompressed CD layer, depending on sampling rate and scheme.
 
-The encoder can combine a master with an independently produced CD. It locates the CD against the master by waveform comparison, checks the waveform residual at three fixed places, and shifts the master, never the CD, to the CD's position with sub-sample precision: the whole-sample part by placement, the part below one sample by band-limited interpolation. The waveform is unchanged: the error is below −140 dBFS, below the physical limits of reproduction, a precision that modern recordings rarely reach. Every position is confirmed by the user before anything is encoded. A whole-disc planner applies the same procedure to a publisher's complete disc. The result is an ordinary container-version-5 file, which every v5 decoder decodes unchanged.
+The encoder can combine a master with an independently produced CD. It locates the CD against the master by waveform comparison, checks the waveform residual at three fixed places, and shifts the master, never the CD, to the CD's position with sub-sample precision: the whole-sample part by placement, the part below one sample by band-limited interpolation. In the measurements of Table 4.3, the alignment error in the 0–20 kHz band is −140 dBFS; at hard-cut edges (sound at the first or last master sample) it is larger: −66 dBFS with the added digital silence, and up to −38.5 dBFS without it. Every position is confirmed by the user before anything is encoded. A whole-disc planner applies the same procedure to a publisher's complete disc. The result is an ordinary container-version-5 file, which every v5 decoder decodes unchanged.
 
 The reading side of `lae_cdx` restores the original LAE files from rips made with any drive offset. Each track is located individually, and it is accepted only when the MD5 over all of its CD samples matches. A decoder library with the C interface `liblae` offers bit-exact fast seeking, and a foobar2000 component built on it plays LAE files at up to the master rate.
 
@@ -132,7 +132,7 @@ LAE addresses this problem under one constraint: **the CD layer is an ordinary, 
 ### 1.3 Principal features
 
 - **Pyramid decomposition.** The signal is decomposed into CD, depth and frequency targets. These recombine by plain time-domain addition. The CD layer may be derived from the master or supplied independently.
-- **Alignment of an independent CD.** A supplied CD is located against the master by two waveform searches, one whitened and one plain. The waveform residual is checked in three blocks, including a check for drift. The master is then shifted onto the CD's time axis with sub-sample precision (the whole-sample part by placement, the part below one sample by band-limited interpolation; the waveform is unchanged, with an error below −140 dBFS), and the CD's samples remain unchanged. Every position is confirmed by the user (Section 4.3).
+- **Alignment of an independent CD.** A supplied CD is located against the master by two waveform searches, one whitened and one plain. The waveform residual is checked in three blocks, including a check for drift. The master is then shifted onto the CD's time axis with sub-sample precision (the whole-sample part by placement, the part below one sample by band-limited interpolation; with an error of −140 dBFS in the 0–20 kHz band and larger at hard-cut edges, Table 4.3), and the CD's samples remain unchanged. Every position is confirmed by the user (Section 4.3).
 - **Whole-disc planner.** `lae_enc plan` matches a master, given as one or more files, against a publisher's complete disc. It moves the master before cutting it at the CD's track markers (Section 4.5).
 - **Per-recording frequency-layer start.** The frequency layer begins at the detected cut-off of the actual CD, rather than at a fixed fraction of the CD Nyquist frequency.
 - **Encoder-only leakage compensation.** Quantisation noise of the frequency layer can leak into the CD band through the MDCT window. The depth layer cancels this leakage, and the decoder requires no change for it.
@@ -458,7 +458,7 @@ No program reads the report. It is part neither of the LAE file nor of a disc.
 
 | Test | Result |
 |---|---|
-| Fraction measurement: CD derived from the master delayed by 0.1, 0.25 and 0.5 master samples (Kaiser-windowed sinc), at 352.8, 176.4 and 88.2 kHz, tracks A and B | Error within ±2.3 × 10⁻⁵ master samples (≤ 108 ps); remaining time difference after alignment −99 dB (the printed floor) in all 18 cases |
+| Fraction measurement: CD derived from the master delayed by 0.1, 0.25 and 0.5 master samples (Kaiser-windowed sinc), at 352.8, 176.4 and 88.2 kHz, tracks A and B | Error within ±2.3 × 10⁻⁵ master samples; in time, at most 108 ps; remaining time difference after alignment −99 dB (the printed floor) in all 18 cases |
 | The move alone, track A, +0.3 and then −0.3 master samples | 0–20 kHz error −140 dBFS; ultrasonic error −147 to −166 dBFS. Without the added digital silence, up to −38.5 dBFS over a few dozen samples at hard-cut edges (sound at the first or last master sample); with it, −66 dBFS at such edges. Masters that start and end in digital silence are not affected. |
 | Track A, CD derived from the master delayed by 3.5 master samples | Measured offset +3.4999828; re-check residual −73.1 dB; extension 1,671,417 B, against 1,807,763 B with the whole offset only (−7.5 %); decoded 0–20 kHz error −112 dBFS against the independently placed and moved master (whole-offset encode: −113 dBFS) |
 | Track B, CD derived from the master delayed by 0.5 master samples | Measured offset +0.4999905; re-check residual −77.3 dB; extension 2,638,186 B, against 3,169,780 B with the whole offset only (−16.8 %); decoded 0–20 kHz error −111 dBFS, the codec's normal level with the 18-bit depth layer |
@@ -1170,16 +1170,16 @@ The figures in Tables 11.3a–11.5 and 12.2 were measured during development, on
 
 The CD layer is uncompressed 16-bit stereo PCM: 10.58 MB/min at 44.1 kHz and 11.52 MB/min at 48 kHz (1 MB = 10^6 bytes). Carrying the base layer in FLAC (Section 10.7) would reduce this.
 
-**Table 11.3a — Real recordings, mode 3, median MB per minute (release-candidate round).** (U): not part of the published data.
+**Table 11.3a — Real recordings, mode 3, median MB per minute (release-candidate round).** (U): not part of the published data. The rows at 88.2 kHz and the 176.4 kHz scheme 2 row were recomputed on 2026-11-07 from the published data (medians of the recordings at that rate without the DSD-converted one, which is in Table 11.3b, as in the other rows); the earlier figures could not be traced to the data.
 
 | Master rate | Scheme | Depth layer | Frequency layer | Extension total | Extension / CD |
 |---|---|---|---|---|---|
-| 88.2 kHz | 1 | 1.3 | 1.6 | 2.9 | 27 % |
-| 88.2 kHz | 2 | 1.3 | 1.2 | 2.5 | 24 % |
+| 88.2 kHz | 1 | 1.3 | 3.2 | 4.5 | 42 % |
+| 88.2 kHz | 2 | 1.3 | 1.8 | 3.1 | 29 % |
 | 96 kHz | 1 | 1.4 | 5.7 | 7.1 | 61 % |
 | 96 kHz | 2 | 1.4 | 4.3 | 5.7 | 50 % |
 | 176.4 kHz | 1 | 1.3 | 5.6 | 6.9 | 65 % |
-| 176.4 kHz | 2 | 1.3 | 2.8 | 4.1 | 39 % |
+| 176.4 kHz | 2 | 1.3 | 3.0 | 4.3 | 41 % |
 | 192 kHz (one excerpt) | 1 | 1.4 | 12.8 | 14.2 | 123 % |
 | 192 kHz (one excerpt) | 2 | 1.4 | 9.3 | 10.8 | 93 % |
 | 352.8 kHz (U) | 1 | 1.3 | 10.7 | 12.0 | 113 % |
@@ -1874,10 +1874,10 @@ The file-by-file assignment is given in [LICENSE](LICENSE) and [CONTRIBUTING.md]
 
 ### 16.2 Contributions
 
-- **Inbound licence.** Contributions are accepted under the Apache License 2.0.
+- **Inbound licence.** Contributions are accepted under the licence of the part they contribute to: code (including the encoder-side sources) under the Apache License 2.0, documentation under the licence of that document (CC-BY-4.0), and data under CC0-1.0. No Contributor Licence Agreement is required.
 - **Sign-off.** Every commit must carry a Developer Certificate of Origin sign-off (`Signed-off-by:`).
 - **Copyright and credit.** Contributors retain their copyright and are credited in the git history and in `AUTHORS`.
-- **Use in the encoder.** The author may include contributions in the GPL encoder and in its commercially licensed version.
+- **Use in the encoder.** Because code is contributed under Apache-2.0, the author may include code contributions in the GPL encoder and in its commercially licensed version.
 
 The rules are given in [CONTRIBUTING.md](CONTRIBUTING.md).
 

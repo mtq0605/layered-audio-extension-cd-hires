@@ -17,7 +17,7 @@ An LAE file is an ordinary WAV or FLAC file. A player without LAE support plays 
 ## Tested (2026-11-05)
 
 The test files were the largest demo files, together with short excerpts:
-- `Grand_LAES.flac`: 938 MB, of which 888 MB is metadata before the first audio frame; a 16-bit core master; 10:05;
+- `Grand_LAES.flac`: 938 MB, of which 888 MB is metadata before the first audio frame; a 16-bit core master (the independent CD), 26,667,616 frames = 604.7 s (10:04.7; Kodi shows 10:04); its masters are 609.3 s long (10:09; the DirectShow row below plays a master);
 - `Grand_LAES.wav`: 995 MB;
 - an LAEY file: 241 MB; 13:22;
 - 10-second LAES excerpts with a 24-bit or a 16-bit core master, in RIFF, RF64 and FLAC.
@@ -56,7 +56,7 @@ Other players built on libFLAC or FFmpeg, for example mpv and most apps, are exp
 ## Known limitations of other decoders
 
 1. **Windows' built-in FLAC decoder and LAES FLAC.**
-   - Windows (Media Foundation, which is used by the Media Player and Movies & TV apps, and by Explorer for length and tags) looks for the first audio frame of a FLAC file only within the first 4 MiB of the file. The measured limit is an audio start at byte 4,194,308.
+   - Windows (Media Foundation, which is used by the Media Player and Movies & TV apps, and by Explorer for length and tags) looks for the first audio frame of a FLAC file only within the first 4 MiB of the file. Measured: a first audio frame at byte offset 4,194,308 (4 MiB + 4) or earlier is recognised; from 4,194,309 on, it is not.
    - An LAES FLAC file that contains masters stores them before the audio frames, as RFC 9639 requires for all metadata. Its first frame therefore starts beyond this limit, and Windows does not recognise the file.
    - This decoder does not decode 32-bit FLAC either. An LAES FLAC file is nevertheless a valid FLAC file: libFLAC and FFmpeg play it (tested with 16- and 24-bit core masters; see the table).
    - **Use instead:** the WAV form, a player built on libFLAC or FFmpeg, or the LAE plug-ins.

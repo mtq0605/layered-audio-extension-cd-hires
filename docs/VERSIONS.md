@@ -32,14 +32,16 @@ The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IAN
 
 ## Compatibility
 
-- Every component that reads a format version reads every file of that version. A later release of a component does not change
+- Every component that reads a format version is meant to read every file of that version, within the known limits of the
+  component and of the platform listed in [spec/COMPATIBILITY.md](../spec/COMPATIBILITY.md) and in the component's README. A later release of a component does not change
   the decoded output of an existing file.
 - Encoders are deterministic: the same input, options and encoder commit produce the same file, byte for byte, on every supported
   platform (the builds listed in [BUILD.md](BUILD.md), Section 3). Encoder versions are therefore identified by commit. A change of encoder commit can change the encoded bytes, but it
   never changes the format version.
 - The Java library contains encoders and decoders for LAEY and LAES. It produces the same encoded files and the same decoded samples
   as the C++ tools (`lae_enc`, `lae_dec`, `laes`) of the same commit.
-- A format change that existing decoders cannot read raises the format version.
+- A format change that existing decoders cannot read raises the format version. For CDX, this rule applies from its first stable
+  version; version 0 is a draft and may still change.
 
 ## Release table
 

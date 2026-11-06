@@ -20,7 +20,7 @@ Measured on 2026-11-05 using two 10-second excerpts (2L 02 and 05). For each exc
 | four FLAC files (24-bit core master + three masters) | 24.8 MB | 28.7 MB |
 | one LAES file, WAV form (16-bit core master) | 16.6 MB | 17.5 MB |
 | four WAV files (16-bit core master + three masters) | 61.7 MB | 61.7 MB |
-| for scale: the core master alone as FLAC | 1.1 MB | 1.5 MB |
+| for scale: a core master alone as FLAC (2026-11-05; its word length was not recorded) | 1.1 MB | 1.5 MB |
 
 These figures apply to masters made from the same source, as in this test. Masters with a different mix, level or edit have little in common, and the encoder then stores them more or less in full.
 

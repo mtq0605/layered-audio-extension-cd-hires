@@ -475,7 +475,7 @@ The complete DCT-IV program has 6193 elementary operations per 512-coefficient b
   | 352.8 kHz | 1.32 LSB | 6.1 LSB |
   | 176.4 kHz | 1.31 LSB | 6.5 LSB |
 
-- **Rate–distortion.** Equal to the floating-point MDCT.
+- **Rate–distortion.** At least equal to the floating-point MDCT in these tests (Section 10.4).
 - **Speed.** Forward 0.7 s and inverse 0.6 s for 40 s of 352.8 kHz stereo, about 60 times real time.
 - **Lossless cost estimate.** The estimate used adaptive Rice coding of 16-coefficient groups without context modelling (Section 10.5).
 
@@ -509,7 +509,7 @@ The prediction loop involves no rounding other than the deterministic integer ev
 **Measured results** (Section 10.4):
 
 - **Reversibility.** Perfect reconstruction, with 0 mismatching samples, on six extreme full-scale 24-bit signals and on real audio at 352.8 and 176.4 kHz.
-- **Rate–distortion.** The rate–distortion comparison, which measures coding gain, was made on the high-frequency layer above 22.05 kHz under the quantiser of the lossy tier. Both wavelets were clearly worse than the 512-line MDCT; in the author's summary, about five times worse.
+- **Rate–distortion.** The rate–distortion comparison, which measures coding gain, was made on the high-frequency layer above 22.05 kHz under the quantiser of the lossy tier. Both wavelets were clearly worse than the 512-line MDCT (Section 10.4) (historical measurement of the superseded design, not repeated).
 
 **Assessment.** Rejected.
 
@@ -517,9 +517,9 @@ The prediction loop involves no rounding other than the deterministic integer ev
 
 | Option | Exact | Integer | Measured lossless cost | Coding gain | Status |
 |---|---|---|---|---|---|
-| (a) Integer MDCT, N = 512 | yes | yes | 110.3 % of master FLAC (prototype); Rice estimate +4.7 % vs FLAC level 8 | equal to the floating-point MDCT | candidate |
+| (a) Integer MDCT, N = 512 | yes | yes | 110.3 % of master FLAC (prototype); Rice estimate +4.7 % vs FLAC level 8 | at least equal to the floating-point MDCT in these tests (Section 10.4) | candidate |
 | (b) Time-domain LPC residual | yes | yes | about 103.7 % (estimate, side information not counted) | — | candidate; simplest |
-| (c) Integer lifting wavelets 5/3, 13/7 | yes | yes | — | about 5× worse than the MDCT | rejected |
+| (c) Integer lifting wavelets 5/3, 13/7 | yes | yes | — | clearly worse than the MDCT (Section 10.4) | rejected |
 
 ### 7.6 Selection criteria and status
 
@@ -732,7 +732,7 @@ Rate is given in kb/s. MSE is the mean squared error per high-frequency sample, 
 | 4 | 183.3 | 3,639,300 | 135.3 | 955,593 | 70.0 | 293,218 | 65.1 | 292,950 |
 | 6 | 95.8 | 4,788,453 | 62.0 | 1,419,257 | 22.2 | 412,337 | 20.0 | 412,158 |
 
-The integer MDCT matches the floating-point MDCT in rate–distortion. Both wavelets are clearly worse; this result motivated the rejection of option (c).
+In these tests, the integer MDCT was at least equal to the floating-point MDCT in rate–distortion; at 176.4 kHz it even had slightly lower rates at slightly lower MSE, which was not investigated (historical measurement of the superseded design, not repeated). Both wavelets are clearly worse; this result motivated the rejection of option (c).
 
 ### 10.5 Lossless cost estimate of the integer MDCT
 
@@ -751,7 +751,7 @@ The prototype was run on one of the seven DXD recordings, 40 s stereo. It had th
 
 - **CD16.** The CD layer, coded as FLAC.
 - **Depth residual.** The residual $r = b - 256c$, coded with the integer MDCT, with every coefficient exact.
-- **Difference layer.** The master minus the CD path, which was up-converted with the integer Q31 half-band tables, with mirrored edges (Section 6.6).
+- **Difference layer.** The master minus the CD path, which was up-converted with the integer Q31 half-band tables, with mirrored edges. *Historical note:* Section 6.6 describes the up-converted signal as the base word reconstructed from CD16 and the depth residual; the prototype is not part of the repository, and which of the two descriptions it followed can no longer be checked.
 
 The decoded output equalled the master in every sample.
 
@@ -763,7 +763,7 @@ The decoded output equalled the master in every sample.
 2. As 1, with the unused low bits removed and integer M/S applied to the difference. Removing the unused bits means reconstructing on the master's grid of multiples of 4 and shifting the difference right by 2 (Section 6.4).
 3. As 2, but with the difference layer costed by an order-32 time-domain linear predictor and a Laplacian entropy per partition. This variant is an estimate, and its side information is not counted.
 
-The reference is the master's FLAC file at compression level 12, 21,996,137 bytes.
+The reference is the master's FLAC file, 21,996,137 bytes, recorded in the prototype notes as "compression level 12" (the encoder is not recorded; the reference `flac` tool has levels 0–8) (historical measurement of the superseded design, not repeated).
 
 **Table 10.6 — Sizes of the prototype variants, in bytes.**
 

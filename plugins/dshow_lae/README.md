@@ -2,7 +2,7 @@
 
 **English** | [中文](README.zh.md)
 
-`lae_source.ax` is a DirectShow source filter for PotPlayer, MPC-BE, MPC-HC, Windows Media Player (legacy) and other DirectShow players (Windows x64). PotPlayer and MPC-BE were tested (see [Tested](#tested-windows-11-directshow-graph-with-the-standard-audio-renderer)); MPC-HC and Windows Media Player were not. It opens two kinds of LAE file:
+`lae_source.ax` is a DirectShow source filter for PotPlayer, MPC-BE, MPC-HC, Windows Media Player (legacy) and other DirectShow players (Windows x64). PotPlayer and MPC-BE were tested (see [Tested](#tested-windows-11)); MPC-HC and Windows Media Player were not. It opens two kinds of LAE file:
 
 - **LAES** (LAE Lossless; WAV, RF64 or FLAC form), with its lossless masters.
 - **LAEY** (LAE Lossy; WAV, container version 5).
@@ -46,10 +46,10 @@ Playback is controlled by DWORD registry values under `HKCU\Software\LAE\DirectS
 - A master is played as that master only after it has been decoded completely and its SHA-256 has matched. The first time a given file content is opened, all masters are checked in one pass, with a small progress window. For Grand (10 min, 4 masters), this took about 1 minute on the test machine. The result is stored by the SHA-256 of the whole file in `%APPDATA%\LAE\laes_verified.txt`, so later opens take a few seconds (the file check).
 - Seeking starts at the block that contains the requested time. Block positions (every 16th block, tens of kB) are stored in `%APPDATA%\LAE\laes_index\` and are never written to the media file.
 
-## Tested (Windows 11, DirectShow graph with the standard audio renderer)
+## Tested (Windows 11)
 
-- A 15-second LAES file and Grand (10:09, 4 masters, FLAC form): both loaded, played and sought to 60 % immediately. The first open of Grand checked all masters (63 s); the second open took 3 s.
-- PotPlayer 64-bit (2026-11-03), with the filter added as an external filter (Force use): a 15-second LAES file played its master at 352.8 kHz / 24 bit (PotPlayer showed PCM 16934 kb/s), and seeking during playback worked. The standard Windows audio renderer does not accept 352.8 kHz; `maxrate` helps in that case.
+- With the test program `test_dshow.cpp` (a DirectShow graph built with `IGraphBuilder::Render`; the renderer that it chose was not recorded), a 15-second LAES file and Grand (10:09, 4 masters, FLAC form): both loaded, played and sought to 60 % immediately. The first open of Grand checked all masters (63 s); the second open took 3 s.
+- PotPlayer 64-bit (2026-11-03), with the filter added as an external filter (Force use): a 15-second LAES file played its master at 352.8 kHz / 24 bit (PotPlayer showed PCM 16934 kb/s), and seeking during playback worked. If the audio renderer of a player does not accept 352.8 kHz, set `maxrate`.
 - MPC-BE 1.9.2 x64 (portable, 2026-11-03), with the filter preferred as an external filter: with 24-bit samples packed in 3 bytes, its audio path played noise. A loopback recording of the sound card showed ~15000 zero crossings per second instead of ~750. With 24-bit samples in 32-bit containers, it plays the music, with ~700-830 crossings per second in the recording, as with PotPlayer. The delivered bytes equal the decoded master (x 256 for 24-bit).
 
 ## Building

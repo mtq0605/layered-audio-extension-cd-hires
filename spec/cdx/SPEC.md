@@ -623,7 +623,7 @@ The concrete placement algorithm is a matter of implementation. Automatic placem
 
 The v5 WAV of each track (4.1) MAY be supplied in addition, for file distribution.
 
-**[P15]** For two-step writing, the next writable address MUST be taken from the drive's READ TRACK INFORMATION report (MMC 52h). It is checked against both the B0 entry of the TOC and A2 + 11,400. If the three values disagree, the tool MUST stop. Published descriptions of the B0 entry disagree, and B0 alone may be off by 150 sectors (secondary source).
+**[P15]** For two-step writing, the next writable address MUST be taken from the drive's READ TRACK INFORMATION report (MMC 52h). It is checked against both the B0 entry of the TOC and A2 + 11,400. If any of the three values differs from the others, the tool MUST stop. Published descriptions of the B0 entry disagree, and B0 alone may be off by 150 sectors (secondary source).
 
 ### 5.5 Closed-Loop Self-Check
 

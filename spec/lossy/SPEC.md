@@ -1091,9 +1091,9 @@ Unless another source is cited, the statements in this section are based on the 
 | Reference encoder | GPL-3.0-or-later, or a commercial licence from the author |
 | Conformance vectors | CC0-1.0. Generated synthetic signals only; no third-party recordings |
 
-Contributions are accepted under the Apache-2.0 licence (inbound licence). Every commit must carry a Developer Certificate of Origin sign-off (`Signed-off-by`). No Contributor Licence Agreement is required.
+Contributions are accepted under the licence of the part they contribute to: code under Apache-2.0, documentation (including this specification) under CC BY 4.0, and data under CC0-1.0 ([CONTRIBUTING.md](../../CONTRIBUTING.md)). Every commit must carry a Developer Certificate of Origin sign-off (`Signed-off-by`). No Contributor Licence Agreement is required.
 
-Contributors keep their copyright and are credited in the git history and in the `AUTHORS` file. The author may include contributions in the GPL-licensed reference encoder and in its commercially licensed version.
+Contributors keep their copyright and are credited in the git history and in the `AUTHORS` file. Because code is contributed under Apache-2.0, the author may include code contributions in the GPL-licensed reference encoder and in its commercially licensed version.
 
 Questions and commercial licence enquiries are handled through public GitHub issues; do not put confidential information in an issue ([COMMERCIAL.md](../../COMMERCIAL.md)). Security vulnerabilities are reported through the repository's private vulnerability reporting ([SECURITY.md](../../SECURITY.md)).
 

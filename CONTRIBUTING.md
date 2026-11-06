@@ -11,10 +11,18 @@ merged.
 
 ## 1. Inbound licence and sign-off
 
-**Inbound licence.** Every contribution is accepted under the Apache
-License, Version 2.0 (`LICENSES/Apache-2.0.txt`), regardless of the
-licence of the file that you change. By submitting a contribution, you
-license it under Apache-2.0, as described in Section 5 of that licence.
+**Inbound licence.** A contribution is accepted under the licence of the
+part of the repository that it contributes to:
+
+- **code** (sources, tools, test scripts, build files, including the
+  encoder-side sources): the Apache License, Version 2.0
+  (`LICENSES/Apache-2.0.txt`), as described in Section 5 of that licence;
+- **documentation and specifications**: the licence of that document
+  (`CC-BY-4.0`; `CC0-1.0` for the project files listed in Section 2);
+- **data** (conformance vectors, test data, measurement data): `CC0-1.0`.
+
+No Contributor Licence Agreement is required, and no copyright is
+transferred.
 
 **Developer Certificate of Origin.** Every commit must carry a sign-off
 line:
@@ -33,9 +41,10 @@ Signed-off-by: Your Name <your.address@example.org>
 **Your rights.** You retain the copyright in your contribution. You are
 credited in the Git history and in `AUTHORS`.
 
-**Use of contributions.** The author, mtq0605, may include your
-contribution in the encoder-side sources, which are distributed under
-GPL-3.0-or-later and under a commercial licence (`COMMERCIAL.md`).
+**Use of contributions.** Because code is contributed under Apache-2.0,
+the author, mtq0605, may include your code contribution in the
+encoder-side sources, which are distributed under GPL-3.0-or-later and
+under a commercial licence (`COMMERCIAL.md`).
 
 **Employment.** If you write a contribution in the course of your
 employment, make sure that you have the right to submit it under these
@@ -43,8 +52,9 @@ terms. The Developer Certificate of Origin requires this.
 
 ## 2. Licences of the project files
 
-Contributions are accepted under Apache-2.0 (Section 1). The project files
-are distributed under the following licences.
+The project files are distributed under the following licences.
+Contributions are accepted under the licence of the part they contribute
+to (Section 1); for encoder-side sources, that is Apache-2.0.
 
 | Files | Licence (SPDX) |
 |---|---|

@@ -108,9 +108,11 @@ shared-memory IPC), please ask; you will receive a written answer.
 
 - **Encoder-side sources.** The licence covers the encoder-side sources,
   including contributions to them.
-- **Contributions.** Contributions are accepted under the Apache License
-  2.0, with a Developer Certificate of Origin sign-off on every commit (see
-  `CONTRIBUTING.md`). The Apache License 2.0 allows the author to include
+- **Contributions.** Code contributions, including those to the
+  encoder-side sources, are accepted under the Apache License 2.0, with a
+  Developer Certificate of Origin sign-off on every commit (see
+  `CONTRIBUTING.md`; documentation and data follow the licence of the part
+  contributed to). The Apache License 2.0 allows the author to include
   them in the encoder under the GNU GPL and in its commercially licensed
   version. Contributors keep their copyright, and their contributions
   remain available under Apache-2.0.

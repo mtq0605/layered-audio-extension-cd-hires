@@ -100,7 +100,7 @@ When the extension is damaged (below, a test file in which one byte was delibera
 - Integrity check (components that call the decoder with the testing-integrity flag): a file that can be played only as the CD layer is reported as an error.
 - Within a track, the component never switches between the CD layer and the extension on its own; a stream error during playback is reported as an error and stops playback. Only a different selection in the menu changes the layers, at the current position.
 - During decoding, the floating-point state is fixed (round to nearest, denormals not flushed to zero, x87 at 53-bit precision); afterwards, the x87 and SSE states are restored separately.
-- Memory: for each track, only the CD layer and the extension block are kept, which is about the size of the file (version 0.1 required 3.6 times as much when opening a file). A 32-bit foobar2000 can use at most 4 GB,
+- Memory: for each track, only the CD layer and the extension block are kept, which is about the size of the file (version 0.1 required 3.6 times as much when opening a file). The 32-bit foobar2000 (1.5.1) is large-address-aware: on 64-bit Windows it can use up to 4 GB, on 32-bit Windows 2 GB,
   so a 352.8 kHz LAEY track longer than about one hour requires the 64-bit foobar2000 (the x64 build in the same package).
 - Seeking: a forward seek into a part not yet played must entropy-decode up to the target. On the test machine (i9-13900HX), this takes about 1.6 s per minute skipped at 352.8 kHz;
   a backward seek, or a seek into a part already played, is fast. Container version 5 has no seek table; this is a limitation of the format itself.
@@ -113,7 +113,7 @@ If no choice has been made for the track, the settings decide: "CD layer only" p
 "Highest output sample rate" is played, then the longest word length up to "LAES (lossless): highest bit depth". Masters take precedence over rate levels; the derived 16-bit masters (lossless relative to their definition, not relative to their source master) are used only when nothing else fits.
 
 Right-click a track and select **LAES: choose what plays…** to choose the core master, a master or a rate level for that track. The choice overrides the settings, is stored per path (`laes_choices.txt`),
-and takes effect immediately during playback: the new choice starts at the current position (with a short silence of about 0.2 s and no repetition of what has already been heard). "Automatic" reverts to the settings.
+and takes effect immediately during playback: the new choice starts at the current position (with a short silence of about 0.2 s when the other masters are not kept ready, see [Switching and seeking](#switching-and-seeking); no repetition of what has already been heard). "Automatic" reverts to the settings.
 
 ### Verification: once per file, remembered
 

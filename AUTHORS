@@ -3,8 +3,10 @@
 # SPDX-License-Identifier: CC0-1.0
 #
 # Contributors keep the copyright in their contributions. Contributions are
-# accepted under the Apache License 2.0, with a Developer Certificate of
-# Origin sign-off on every commit (see CONTRIBUTING.md).
+# accepted under the licence of the part they contribute to (code:
+# Apache-2.0; documentation: the licence of that document; data: CC0-1.0),
+# with a Developer Certificate of Origin sign-off on every commit (see
+# CONTRIBUTING.md).
 #
 # Entry format:
 #   Name or pseudonym | GitHub username | area | since

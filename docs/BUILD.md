@@ -137,7 +137,7 @@ Block-wise encoder of 2026-10-29 (same machine, mode 3, s1; output byte-identica
 |---|---|---|
 | 352.8 kHz stereo, 60 s | 127 s (machine under load from other runs) | 482 MB |
 | 352.8 kHz 32-bit stereo, 10.16 min (bits=24) | 492 s | 475 MB (whole-track encoder: 580 s with the layers one after the other, 12,039 MB) |
-| 352.8 kHz stereo, 13 min (beyond the former Windows limit) | 961 s | 733 MB (before the LAE chunk was written without a second copy of the streams) |
+| 352.8 kHz stereo, 13 min (beyond the former Windows limit of about 12.7 minutes at 352.8 kHz) | 961 s | 733 MB (measured with the build of 2026-10-29, before the `LAE ` chunk was written without a second copy of the streams) |
 
 For the whole-track encoders above, time and memory grew linearly with length (measured at 10, 20, 40 and 60 s). Most of the time saved comes from the partition search, which previously allocated a cut list for every rectangle; with many threads, these heap allocations waited on each other. The memory savings come from three changes: one reconstructed plane is kept instead of two identical copies, each octave segment holds only its own bins, and signals are freed as soon as they are no longer needed.
 
@@ -158,7 +158,7 @@ Without `cd=`, memory use does not grow with length, apart from the per-cell rec
 
 **Decoder input.** The decoder reads the CD audio of its input file in place (one copy, 2 bytes per CD sample).
 
-**LAE Lossless (`laes`, block-wise, 2026-10-30).** `laes enc`, `dec`, `verify` and `align` work on pieces of the base level (all rate levels of a piece at once); the output is byte-identical to that of the whole-track `laes` of 2026-10-29. Each storage candidate is written to a work folder (`<output>.laes.tmp`, which is removed at the end; `KEEPTMP=1` keeps it), and only the smallest is kept; the WAV and FLAC files are written and read back piece by piece. The memory limit is set with `--mem=<GB>`; by default it is min(1/2, max(1/4, physical memory − 28 GB)): 8 GB on a 32 GB machine, 20 GB on 48 GB and 32 GB on 64 GB. A WAV output larger than 4 GiB is written in the RF64 form ([spec/lossless/SPEC.md](../spec/lossless/SPEC.md), Section 7).
+**LAE Lossless (`laes`, block-wise, 2026-10-30).** `laes enc`, `dec`, `verify` and `align` work on pieces of the base level (all rate levels of a piece at once); the output is byte-identical to that of the whole-track `laes` of 2026-10-29. Each storage candidate is written to a work folder (`<output>.laes.tmp`, which is removed at the end; `KEEPTMP=1` keeps it), and only the smallest is kept; the WAV and FLAC files are written and read back piece by piece. The memory limit is set with `--mem=<GB>`; by default it is 2 GB, or less where min(1/2 × physical memory, max(1/4 × physical memory, physical memory − 28 GB)) is smaller (since 2026-11-04). The measurements below were made on 2026-10-30, when the default was min(1/2 × physical memory, max(1/4 × physical memory, physical memory − 28 GB)) without the 2 GB cap. A WAV output larger than 4 GiB is written in the RF64 form ([spec/lossless/SPEC.md](../spec/lossless/SPEC.md), Section 7).
 
 Measured on Windows x64 (32 threads, 32 GB):
 

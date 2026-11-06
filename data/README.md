@@ -34,7 +34,7 @@ The release candidate differs from the published codec for container version 5 i
 - `rate`: Sample rate of the master, in Hz.
 - `scheme`, `mode`: Encoder settings ([README](../README.md), Section 11).
 - `cd_bytes`, `depth_bytes`, `frequency_bytes`: Size of the PCM of the CD layer and of the two extension layers (the depth layer and the frequency layer).
-- `encode_s`, `encode_MB`, `decode_s`: Encoding time, peak encoder memory and decoding time. The encoder ran three jobs in parallel, with 8 threads each.
+- `encode_s`, `encode_MB`, `decode_s`: Encoding time, peak encoder memory and decoding time. The encoder ran three jobs in parallel, with 8 threads each. `decode_s` is the time of one decode on the 24-bit route (`lae_dec`, single-threaded), run inside the same jobs, so up to two other jobs ran at the same time.
 - `cdband_err_24bit_dB`, `cdband_err_16bit_dB`: Error level in the CD band on the 24-bit and 16-bit decode routes ([README](../README.md), Section 3.4: with and without the depth layer).
 - `hf1_err_dB` … `hf3_err_dB`: Error level in the ultrasonic bands (octaves of the rate family; see the note below for the 48 kHz family). A cell is empty where the master has no such band.
 - All error levels are relative to full scale and are the mean of the two channels. They are computed by `src/cmp_wav.cpp`.

@@ -19,6 +19,7 @@ This file records the notable changes to LAE (Layered Audio Extension), its loss
   - Specification Section 11.1 now specifies bit-exactly the derivation of a core master from a master (choice of source, level 0, TPDF dither with its seed, and the order of operations). Section 11.5 covers resources and resuming (FLAC masters, memory budget, disk checks, `--small-disk`, `--disk-stop`, `--disk-stop-remove`, `--force-disk`).
   - A resumed run now restores the per-master choices of an unfinished file order of the masters (Specification Section 11.2) and checks their files, instead of redoing that order. The output of an uninterrupted run is unchanged.
   - New documents: [spec/lossless/OVERVIEW.md](spec/lossless/OVERVIEW.md) (an introduction and a comparison with FLAC and WAV), [spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.md) (the `laes` tool) and [spec/COMPATIBILITY.md](spec/COMPATIBILITY.md) (what plays without LAE software, the decoders tested and their limits).
+- **LAES WAV files beyond 4 GiB (2026-11-04).** `laes enc` and `laes dec` write a WAV file whose RIFF size would exceed 4 GiB in the RF64 form (EBU Tech 3306), with a `ds64` chunk; `laes` and the LAES decoder of the plug-ins (`src/laes_play.h`) read RF64 and BW64 ([spec/lossless/SPEC.md](spec/lossless/SPEC.md), Section 7).
 - **Project documents.** [SECURITY.md](SECURITY.md), [THIRD_PARTY.md](THIRD_PARTY.md) and [docs/VERSIONS.md](docs/VERSIONS.md). `AUTHORS` records the origin of every encoder file of the Java library.
 - **CD-TEXT in CD-Extra images (2026-11-06).** `lae_cdx image` writes the album title, the performer and the track titles as `TITLE` / `PERFORMER` lines in its CUE files (CD-TEXT when burned). The text is taken from the files' tags, from the publisher's CUE, or from `album=`, `performer=`, `cdtitle=` and `cdperformer=`. Only printable ASCII is allowed: Chinese text stops the tool until the user gives the text in ASCII instead; `cdtext=off` writes no text. Without text, the image is byte-identical to that written before.
 - **Tags and pictures in LAEY files (2026-11-06).** `lae_enc --tag=KEY=VALUE --cover=<image> --picture=<type>:<image>` writes a RIFF `LIST/INFO` chunk and an `id3 ` chunk (ID3v2.4, UTF-8) between `fmt ` and `data`, using the same code and layout as LAE Lossless. `lae_enc tag <in> <out> ...` writes new tags without re-encoding and checks that the CD audio and the `LAE ` chunk are byte-identical. Without these options, the output is unchanged.
@@ -251,7 +252,7 @@ This release changes the encoder and the tools, and adds a decoder library and a
 - **Conformance vectors.** The encoder writes the 16 container version 5 conformance vectors byte-identically, and all 64 outputs of the decoder are identical.
 - **Measurement of the fraction.**
   - Test material: CDs made from the master delayed by 0.1 / 0.25 / 0.5 master samples (Kaiser-windowed sinc), at 352.8 / 176.4 / 88.2 kHz, on 2 tracks (18 cases).
-  - Measurement error: within ±2.3e-5 master samples (≤ 108 ps).
+  - Measurement error: within ±2.3e-5 master samples; in time, at most 108 ps.
   - Remaining time difference: −99 dB, the printed floor, in all 18 cases.
 - **Track A, CD = master delayed by 3.5 samples.**
   - Measured offset: +3.4999828. Re-check residual: −73.1 dB.

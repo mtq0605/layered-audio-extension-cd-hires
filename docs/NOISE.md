@@ -32,9 +32,12 @@ The usual terms are *interpolation images* or *image components*.
   that removes the spectral copies of the CD band. The filter's stopband is 120 dB, so each copy retains the music at about −120 dB.
   This remainder is G.
 - Normally the frequency layer holds "master − up-sampled CD", so it carries −G, and the two cancel during decoding.
-- In a tier-A cell the frequency layer is zero, so G remains in the decoded output. This happens in two kinds of cell:
+- In a tier-A cell the frequency layer is zero, so G remains in the decoded output. `g` treats two kinds of such cell:
   - cells that you marked and deleted with `noise=`;
   - cells in which the master itself is silent, for example the digital silence between synthesised notes.
+
+  In the other tier-A cells, the master is not silent: its content there is as faint as G (for example, on a master whose
+  ultrasonic band is the up-sampled CD), so what remains matches the master.
 
 Measured on a 352.8 kHz master, in dBFS per column of cells: the deleted noise was −109.5, the G remaining after deletion was −131.5,
 and the 24-bit rounding floor of the output is −164.4. A deleted cell is therefore far below the noise it replaced, but it is not
@@ -52,8 +55,9 @@ what remains (G) is exactly what was there. Deleting it on such a master require
    - cells that you deleted (fully marked);
    - cells in which the master itself is silent (at or below the 24-bit rounding floor).
 
-   Cells whose G is below the 24-bit floor are skipped. Tier-A cells whose master is not silent are left unchanged: their G is the
-   master's own content.
+   Cells whose G is below the 24-bit floor are skipped. Tier-A cells whose master is not silent are left unchanged: there the master
+   itself carries content at the level of G (for example, a master whose ultrasonic band is the up-sampled CD), and coding −G
+   would remove it.
 
 The streams of the second pass are added to the same frequency layer. Every decoder sums them with the first pass, coefficient by
 coefficient (spec Section 9.5), so G cancels. Existing decoders play such files without any change.

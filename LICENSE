@@ -93,8 +93,12 @@ The demonstration audio and masters attached to releases are not in this
 repository and are not covered by any licence above. They are all rights
 reserved, under AUDIO_LICENSE.md.
 
-Contributions to any part of the repository are accepted under the Apache
-License 2.0, with a Developer Certificate of Origin sign-off. See
+Contributions are accepted under the licence of the part they contribute
+to: code (including the encoder-side sources) under the Apache License
+2.0, documentation under the licence of that document (CC-BY-4.0, or
+CC0-1.0 for the project files), and data under CC0-1.0. Every commit
+carries a Developer Certificate of Origin sign-off. Contributors keep their
+copyright; no Contributor Licence Agreement is required. See
 CONTRIBUTING.md.
 
 
@@ -137,8 +141,8 @@ royalty-free and irrevocable permission to use, copy, modify and distribute
 that output under any terms, without any obligation under the GNU GPL.
 
 - The permission covers material in which mtq0605 holds the copyright.
-- Material contributed by others is available under the Apache License
-  2.0, under which it was contributed.
+- Code contributed by others is available under the Apache License 2.0,
+  under which it was contributed.
 - The permission is separate from, and in addition to, the GNU GPL.
 
 4. Implementing the format

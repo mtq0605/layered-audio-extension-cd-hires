@@ -35,7 +35,7 @@ For LAES, the highest sample rate within the limit is selected first, then the l
 
 ## Tested (Kodi 21.3 x64, portable copy)
 
-- A 15-second LAES file and Grand (10:09, 4 masters, FLAC form), each with the extension `.lae`: on the first play, the masters were checked and then the master played (352.8 kHz / 32 bit); seeking to 60 % reached 6:07 immediately; the second play started without a check (about 0.8 s after opening).
+- A 15-second LAES file and Grand (10:09, 4 masters, FLAC form), each with the extension `.lae`: on the first play, the masters were checked and then the master played (352.8 kHz / 32 bit); seeking to about 60 % worked immediately (Kodi showed 6:07); the second play started without a check (about 0.8 s after opening).
 - Not tested here: other platforms (Linux, macOS and Android require their own builds), LAEY files and network paths.
 
 ## Building

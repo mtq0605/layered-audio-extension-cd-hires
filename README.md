@@ -1699,12 +1699,14 @@ The mode (here `3`) must be given as the third argument. Pieces that were confir
 
 ```
 lae_cdx image <image dir> <track1.v5.wav> <track2.v5.wav> … [label=<album>] [noext=<n>,<m>,…] [layout=<publisher.cue>]
+              [album=<text>] [performer=<text>] [cdtitle=<n>:<text>,…] [cdperformer=<n>:<text>,…] [cdtext=off]
 ```
 
 - `<image dir>` must be new or empty.
 - `label=` sets the volume label of the data session.
 - `noext=` publishes the listed tracks as CD only, for example when capacity is short.
 - `layout=` selects the independent-CD layout of a publisher's disc (Section 10.5).
+- **CD-TEXT** (album title, performer, track titles, shown by CD players): written as `TITLE` / `PERFORMER` lines of `IMAGE.CUE` and `SESSION1.CUE`, which the burner writes as CD-TEXT. Taken from the files' tags (`TITLE`, `ARTIST`, `ALBUM`), in independent-CD mode from the publisher's CUE, and from the options `album=`, `performer=`, `cdtitle=<n>:<text>` and `cdperformer=<n>:<text>` (several tracks separated by commas). CD-TEXT takes only printable ASCII: a text in Chinese or with other characters is never converted; the tool stops, lists each such text with the option to type it (for example in pinyin), and writes nothing. `cdtext=off` writes no CD-TEXT. AUDIO.BIN, DATA.ISO and the extension files do not depend on the text.
 
 Each input v5 file first passes all checks of the decoder. The image is delivered only after the closed-loop self-check (Section 10.9). The burning instructions `BURN.TXT` describe two routes: route A writes `IMAGE.CUE` in one pass; route B writes in two steps, and the second step uses `lae_cdx data` to generate session 2 for the start address actually reported by the drive.
 

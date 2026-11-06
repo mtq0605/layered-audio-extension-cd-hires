@@ -1728,12 +1728,14 @@ lae_cdx image <image dir> planned/TRACK*.v5.wav layout=publisher.cue            
 
 ```
 lae_cdx image <image dir> <track1.v5.wav> <track2.v5.wav> … [label=<album>] [noext=<n>,<m>,…] [layout=<publisher.cue>]
+              [album=<text>] [performer=<text>] [cdtitle=<n>:<text>,…] [cdperformer=<n>:<text>,…] [cdtext=off]
 ```
 
 - `<image dir>` 必须是新目录或空目录。
 - `label=` 设置数据会话的卷标。
 - `noext=` 将所列音轨仅作为 CD 发布，例如在容量不足时。
 - `layout=` 选择发行方光盘的独立 CD 布局（第 10.5 节）。
+- **CD-TEXT**（专辑名、演唱者、曲名，CD 机上显示）：写成 `IMAGE.CUE` 和 `SESSION1.CUE` 里的 `TITLE` / `PERFORMER` 行，刻录软件把它们刻成 CD-TEXT。文字取自文件的标签（`TITLE`、`ARTIST`、`ALBUM`），独立 CD 模式下取自发行方的 CUE，也可以用选项 `album=`、`performer=`、`cdtitle=<n>:<文字>`、`cdperformer=<n>:<文字>` 给出（多首用逗号隔开）。CD-TEXT 只收可打印的 ASCII：含中文或其他字符的文字一律不自动转换，工具会停下，逐项列出要输入的内容和对应选项（例如输入拼音），什么都不写。`cdtext=off` 不写 CD-TEXT。AUDIO.BIN、DATA.ISO 和扩展文件与文字无关。
 
 每个输入 v5 文件首先须通过解码器的全部检查。只有在闭环自检（第 10.9 节）之后才交付映像。刻录说明 `BURN.TXT` 描述两种路线：路线 A 一次写入 `IMAGE.CUE`；路线 B 分两步写入，第二步使用 `lae_cdx data` 按驱动器实际报告的起始地址生成会话 2。
 

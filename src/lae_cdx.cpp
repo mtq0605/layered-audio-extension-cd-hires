@@ -9,6 +9,9 @@
 //        <outdir> must be new or empty. noext: these tracks go on the disc as CD only, without an extension file (D7, P18)
 //        layout: independent-CD mode (L14, P8-P11): the publisher's INDEX 00/01/02+, ISRC, FLAGS and CATALOG; every CD layer must be the
 //        publisher's track (INDEX 01 to the next INDEX 01; track 1 may begin with silent frames in the pregap); session 1 = the publisher's program
+//        CD-TEXT (2026-11-06): [album=TEXT] [performer=TEXT] [cdtitle=1:TEXT,...] [cdperformer=1:TEXT,...] [cdtext=off]; otherwise from the files'
+//        tags (TITLE, ARTIST, ALBUM); ASCII only: a Chinese text stops the image until the user types it (no automatic conversion)
+//        and, in independent-CD mode, the publisher's TITLE / PERFORMER; written as TITLE / PERFORMER lines of the two CUE files
 //   lae_cdx data <laxdir> <startLba> <out.iso> [label=NAME] [date=...]   session 2 at a reported start address (two-step burning)
 //   lae_cdx read <outdir> <extensions> <audio...> [W=N]
 //        the reader (section 6); <extensions> = a folder with .lax files, or iso:<DATA.ISO>@<startLba>;
@@ -35,6 +38,7 @@
 #include "lae_decoder.h"   // P2: every input v5 file must pass the decoder's own checks
 #include "laes_file.h"     // LAE Lossless blocks (extension type 2)
 #include "lae_cdx_read.h"
+#include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 namespace fs = std::filesystem;
 using namespace std;
 using cdxr::Disc; using cdxr::Ext; using cdxr::Report; using cdxr::Track; using cdxr::u8;
@@ -95,7 +99,47 @@ static vector<uint8_t> laxOf(const V5& v, uint16_t track) {
 // ---- the CD-Extra image (2.2, 2.3, 5.4)
 struct Image { vector<V5> t; vector<long long> p, z; long long A2 = 0, N2 = 0, total = 0, cap = CAPDEF; vector<int16_t> audio; vector<vector<uint8_t>> lax; set<int> noext;
                vector<uint8_t> iso; uint32_t isoLba = 0; string label, date;
-               vector<long long> idx1; bool pub = false; cdxr::Layout lay; };   // idx1: INDEX 01 (= p except track 1 in independent-CD mode); pub: independent-CD mode
+               vector<long long> idx1; bool pub = false; cdxr::Layout lay;
+               string album, performer; vector<string> title, artist; };   // CD-TEXT of the CUE files ("" = not written)   // idx1: INDEX 01 (= p except track 1 in independent-CD mode); pub: independent-CD mode
+// CD-TEXT (2026-11-06): TITLE / PERFORMER lines in IMAGE.CUE and SESSION1.CUE; the burner (ImgBurn) writes them as CD-TEXT. CD-TEXT
+// has no Chinese (ASCII, ISO 8859-1 or MS-JIS only; CD players show Latin letters), and the burner reads a CUE file in the system code
+// page, so only printable ASCII without '"', at most 80 characters, is written. A text with any other character is left out and named.
+static bool cdTextOk(const string& s) { if (s.empty() || s.size() > 80) return false; for (unsigned char c : s) if (c < 0x20 || c > 0x7E || c == '"') return false; return true; }
+static int seekCur(FILE* f, long long o) {
+#ifdef _WIN32
+    return _fseeki64(f, o, SEEK_CUR);
+#else
+    return fseeko(f, (off_t)o, SEEK_CUR);
+#endif
+}
+static map<string, string> infoTags(const fs::path& p) {   // LIST/INFO of a WAV file: id -> text (UTF-8, up to the first NUL)
+    map<string, string> m;
+#ifdef _WIN32
+    FILE* f = _wfopen(p.c_str(), L"rb");
+#else
+    FILE* f = fopen(p.c_str(), "rb");
+#endif
+    if (!f) return m; uint8_t h[12]; if (fread(h, 1, 12, f) != 12 || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) { fclose(f); return m; }
+    for (;;) { uint8_t c[8]; if (fread(c, 1, 8, f) != 8) break; const uint32_t n = (uint32_t)c[4] | (uint32_t)c[5] << 8 | (uint32_t)c[6] << 16 | (uint32_t)c[7] << 24;
+        if (!memcmp(c, "data", 4) || !memcmp(c, "LAE ", 4)) { if (seekCur(f, (long long)n + (n & 1))) break; continue; }
+        if (memcmp(c, "LIST", 4) || n < 4 || n > (1u << 24)) { if (seekCur(f, (long long)n + (n & 1))) break; continue; }
+        vector<uint8_t> b(n); if (fread(b.data(), 1, n, f) != n) break; if (n & 1) fgetc(f); if (memcmp(b.data(), "INFO", 4)) continue;
+        for (size_t q = 4; q + 8 <= n;) { const uint32_t L = (uint32_t)b[q + 4] | (uint32_t)b[q + 5] << 8 | (uint32_t)b[q + 6] << 16 | (uint32_t)b[q + 7] << 24; if (L > n - q - 8) break;
+            string v((const char*)&b[q + 8], L); const size_t z = v.find('\0'); if (z != string::npos) v.resize(z); m[string((const char*)&b[q], 4)] = v; q += 8 + L + (L & 1); } }
+    fclose(f); return m; }
+// the publisher's TITLE / PERFORMER (disc: index 0, track k: index k)
+static void publisherText(const fs::path& p, map<int, string>& title, map<int, string>& perf) {
+#ifdef _WIN32
+    FILE* f = _wfopen(p.c_str(), L"rb");
+#else
+    FILE* f = fopen(p.c_str(), "rb");
+#endif
+    if (!f) return; char line[1024]; int trk = 0;
+    while (fgets(line, sizeof line, f)) { string l = line; while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back(); size_t a = l.find_first_not_of(" \t"); if (a == string::npos) continue; l = l.substr(a);
+        if (!l.compare(0, 6, "TRACK ")) { trk = atoi(l.c_str() + 6); continue; }
+        for (int w = 0; w < 2; w++) { const string kw = w ? "PERFORMER " : "TITLE "; if (l.compare(0, kw.size(), kw)) continue; string v = l.substr(kw.size());
+            if (v.size() >= 2 && v.front() == '"' && v.back() == '"') v = v.substr(1, v.size() - 2); (w ? perf : title)[trk] = v; } }
+    fclose(f); }
 static string readme() {
     return "LAE (Layered Audio Extension) / LAE 分层音频扩展\r\n\r\n"
            "This is a CD-Extra disc. Session 1 is an ordinary audio CD that plays in every CD player.\r\n"
@@ -166,10 +210,14 @@ static string layoutPublisher(vector<V5> t, const Disc& pd, const cdxr::Layout& 
     return finishImage(im, t, label, date, noext); }
 
 static string cueText(const Image& im, bool withData) {
-    string c = "REM SESSION 01\r\n"; if (im.pub && !im.lay.catalog.empty()) c += "CATALOG " + im.lay.catalog + "\r\n"; c += "FILE \"AUDIO.BIN\" BINARY\r\n";
+    string c = "REM SESSION 01\r\n"; if (im.pub && !im.lay.catalog.empty()) c += "CATALOG " + im.lay.catalog + "\r\n";
+    if (!im.album.empty()) c += "TITLE \"" + im.album + "\"\r\n"; if (!im.performer.empty()) c += "PERFORMER \"" + im.performer + "\"\r\n";   // CD-TEXT
+    c += "FILE \"AUDIO.BIN\" BINARY\r\n";
+    auto text = [&](size_t k) { string t; if (k < im.title.size() && !im.title[k].empty()) t += "    TITLE \"" + im.title[k] + "\"\r\n";
+        if (k < im.artist.size() && !im.artist[k].empty()) t += "    PERFORMER \"" + im.artist[k] + "\"\r\n"; return t; };
     for (size_t k = 0; k < im.p.size(); k++) { char b[96];
-        if (!im.pub) { snprintf(b, sizeof b, "  TRACK %02d AUDIO\r\n    INDEX 01 %s\r\n", (int)k + 1, msf(im.p[k] / SECTOR).c_str()); c += b; continue; }
-        snprintf(b, sizeof b, "  TRACK %02d AUDIO\r\n", (int)k + 1); c += b; const auto& lt = im.lay.tracks[k];
+        if (!im.pub) { snprintf(b, sizeof b, "  TRACK %02d AUDIO\r\n", (int)k + 1); c += b; c += text(k); snprintf(b, sizeof b, "    INDEX 01 %s\r\n", msf(im.p[k] / SECTOR).c_str()); c += b; continue; }
+        snprintf(b, sizeof b, "  TRACK %02d AUDIO\r\n", (int)k + 1); c += b; c += text(k); const auto& lt = im.lay.tracks[k];
         if (!lt.flags.empty()) c += "    FLAGS " + lt.flags + "\r\n"; if (!lt.isrc.empty()) c += "    ISRC " + lt.isrc + "\r\n";
         auto ix = lt.idx; sort(ix.begin(), ix.end());
         for (auto& i : ix) { if (k == 0 && i.first == 0) continue;   // the track-1 pregap is written by the burner (L4, P12)
@@ -702,6 +750,34 @@ static int realMain(int argc, char** argv) {
             e = layoutPublisher(std::move(t), pd, lay, arg(argc, argv, "label", "LAE_EXT"), arg(argc, argv, "date", nowUtc()), atoll(arg(argc, argv, "capacity", to_string(CAPDEF)).c_str()), im, noext);
             if (e.empty()) printf("independent-CD mode: the publisher's layout (%s): CD layers checked against the publisher's tracks, session 1 = the publisher's program (P11)\n", lp.c_str()); }
         if (!e.empty()) { printf("%s; nothing written\n", e.c_str()); return 1; }
+        {   // CD-TEXT: the files' tags, then the publisher's CUE (independent-CD mode), then the options. Only printable ASCII is written
+            // (cdTextOk). The user (2026-11-06): a text in Chinese is never converted automatically; the user types the CD-TEXT (for example
+            // pinyin) with album= / performer= / cdtitle= / cdperformer=, or leaves CD-TEXT out with cdtext=off. Until then nothing is written.
+            const size_t n = im.t.size(); im.title.assign(n, ""); im.artist.assign(n, "");
+            const bool textOff = arg(argc, argv, "cdtext", "") == "off";
+            if (!textOff) {
+                for (size_t k = 0; k < n; k++) { auto m = infoTags(fs::path(pos[k + 1])); im.title[k] = m["INAM"]; im.artist[k] = m["IART"]; if (k == 0) { im.album = m["IPRD"]; im.performer = m["IART"]; } }
+                if (!lp.empty()) { map<int, string> pt, pp; publisherText(fs::path(lp), pt, pp);
+                    if (pt.count(0)) im.album = pt[0]; if (pp.count(0)) im.performer = pp[0];
+                    for (size_t k = 0; k < n; k++) { if (pt.count((int)k + 1)) im.title[k] = pt[(int)k + 1]; if (pp.count((int)k + 1)) im.artist[k] = pp[(int)k + 1]; } }
+                const string oa = arg(argc, argv, "album", ""), op = arg(argc, argv, "performer", "");
+                if (!oa.empty()) im.album = oa; if (!op.empty()) im.performer = op;
+                for (int w = 0; w < 2; w++) { const char* key = w ? "cdperformer" : "cdtitle"; const string ot = arg(argc, argv, key, ""); vector<string>& dst = w ? im.artist : im.title;
+                    for (size_t i = 0; i < ot.size();) { size_t j = ot.find(',', i); const string item = ot.substr(i, j == string::npos ? string::npos : j - i); const size_t c = item.find(':');
+                        const int k = c == string::npos ? 0 : atoi(item.substr(0, c).c_str());
+                        if (k < 1 || k > (int)n) { printf("%s=%s: give track:text pairs for tracks 1..%zu (for example %s=1:Da Diao,2:Grand); nothing written\n", key, ot.c_str(), n, key); return 1; }
+                        dst[(size_t)k - 1] = item.substr(c + 1); if (j == string::npos) break; i = j + 1; } }
+                vector<string> need;   // texts CD-TEXT cannot take: the user must type them
+                auto check = [&](const string& v, const string& what, const string& how) { if (!v.empty() && !cdTextOk(v)) need.push_back("  " + what + " \"" + v + "\"  ->  " + how); };
+                check(im.album, "album title", "album=TEXT"); check(im.performer, "album performer", "performer=TEXT");
+                for (size_t k = 0; k < n; k++) { char w[64], h[64]; snprintf(w, sizeof w, "track %02zu title", k + 1); snprintf(h, sizeof h, "cdtitle=%zu:TEXT", k + 1); check(im.title[k], w, h);
+                    snprintf(w, sizeof w, "track %02zu performer", k + 1); snprintf(h, sizeof h, "cdperformer=%zu:TEXT", k + 1); check(im.artist[k], w, h); }
+                if (!need.empty()) { printf("CD-TEXT takes only printable ASCII (no Chinese; CD players show Latin letters; no '\"'; at most 80 characters). Type these texts yourself, for example in pinyin:\n");
+                    for (auto& x : need) printf("%s\n", x.c_str());
+                    printf("(several tracks in one option: cdtitle=1:Da Diao,2:Xiao Diao) - or leave CD-TEXT out with cdtext=off. Nothing written\n"); return 1; } }
+            size_t nt = 0; for (size_t k = 0; k < n; k++) nt += !im.title[k].empty() + !im.artist[k].empty();
+            if (textOff) printf("CD-TEXT: off (cdtext=off)\n");
+            else if (!im.album.empty() || !im.performer.empty() || nt) printf("CD-TEXT: album \"%s\", performer \"%s\", %zu track text(s) (written to IMAGE.CUE and SESSION1.CUE; the burner writes them as CD-TEXT)\n", im.album.c_str(), im.performer.c_str(), nt); }
         printf("layout: %zu tracks (%zu CD only), session 1 = %lld sectors (A2 = LBA %lld), session 2 data track at LBA %u with %lld sectors; disc %lld of %lld sectors (%.1f %%)\n",
                im.t.size(), im.noext.size(), im.A2, im.A2, im.isoLba, im.N2, im.total, im.cap, 100.0 * (double)im.total / (double)im.cap);
         for (auto& v : im.t) if (!v.canonical) printf("note: %s is not in the canonical v5 layout (F1); readers rebuild the canonical layout\n", v.name.c_str());
@@ -757,9 +833,7 @@ static int realMain(int argc, char** argv) {
         printf("simulated rip (%s, combined offset %+lld%s%s%s) written to %s\n", form.c_str(), o, pg ? ", with the track-1 pregap" : "", change ? ", one sample changed" : "", slip ? ", one sample lost" : "", pos[1].c_str()); return 0; }
     printf("unknown command or wrong arguments (see the header of lae_cdx.cpp)\n"); return 1; }
 int main(int argc, char** argv) {
-#ifdef _WIN32
-    SetConsoleOutputCP(65001);   // every name in the reports is UTF-8
-#endif
+    lae_u8::init(argc, argv);   // UTF-8 arguments and file names; the console shows UTF-8 while the tool runs (win_utf8.h)
     try { return realMain(argc, argv); }
     catch (const std::bad_alloc&) { printf("out of memory; nothing more written\n"); return 2; }
     catch (const std::exception& ex) { printf("internal error: %s; nothing more written\n", ex.what()); return 2; } }

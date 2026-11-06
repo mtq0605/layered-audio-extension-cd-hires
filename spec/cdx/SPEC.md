@@ -16,7 +16,7 @@
 - the requirements on encapsulation tools and on readers;
 - the conformance test cases.
 
-The v5 bitstream and its decoding are specified in [SPEC] and are not changed by this document. The encapsulation tool `lae_cdx` (pack, read, repack, image, self-check) and its reader core implement this draft. The draft will be revised once the measurements on real burns and rips listed in Appendix A have been completed.
+The v5 bitstream and its decoding are specified in [SPEC] and are not changed by this document. The encapsulation tool `lae_cdx` (subcommands `pack`, `split`, `repack`, `image`, `data`, `read`, `sim`, `selftest` and `test`; `image` runs the closed-loop self-check of 5.5) and its reader core implement this draft. The draft will be revised once the measurements on real burns and rips listed in Appendix A have been completed.
 
 **References** (cited in the text in square brackets)
 
@@ -51,7 +51,7 @@ The 44.1 kHz restriction applies only to CD (CD-Extra, Red Book). DVD, BD and ot
 This specification does not define:
 
 - the v5 bitstream and its decoding (see [SPEC]);
-- the extension block of LAE Lossless (LAES);
+- the content of the extension block of LAE Lossless (LAES). The trailer record identifies such a block as type 2 ([X2], Section 8); its content and its relation to the CD layer are defined in the LAES specification (spec/lossless/SPEC.md, Section 9), and the layout and reading rules of this specification apply to it unchanged;
 - "keep CD / keep master" and per-layer provenance (see Section 8);
 - concrete implementations of placement, search and other algorithms;
 - the transport of LAE streams (protocol, segmentation, buffering);
@@ -97,7 +97,7 @@ This specification does not define:
 | start guard | Digital silence before the CD layer of track 1: at least 5880 samples = 10 sectors = 0.133 s. It is provided by the pregap of track 1 ([L5]) |
 | offset o | The first sample of the CD layer of track k on the disc appears at position q_k + o of the disc stream. o > 0 means later in the disc stream. o combines the read offset and the write/pressing offset and may differ between tracks. The reader does not assume a uniform disc-wide offset |
 | disc stream | The sequence of samples that the reader assembles from its input (6.2). With a TOC, it is addressed by absolute position. Without a TOC, it consists of the samples of a single file, with positions counted from the first sample of the file |
-| coarse location / fine location | Coarse location: an approximate start of a track, derived from the TOC or from the information range. Fine location: every position near the coarse location is screened with S1 and S2, and the result is confirmed by the whole-track MD5 ([R7]) |
+| coarse location / fine location | Coarse location: an approximate start of a track, derived from the TOC or from the information range. Fine location: every position near the coarse location (without a TOC, every position of the file) is screened with S1 and S2, and the result is confirmed by the whole-track MD5 ([R7]) |
 | W | Search radius of fine location, W ≥ 5880 samples (10 sectors) |
 | slip | Loss or insertion of samples within a track, for example as a result of a read error |
 | derived mode | The CD layer is derived from the master by the encoder. This is the current default |
@@ -193,7 +193,7 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 - The guard does not alter the audio of any track:
   - the start guard is the pregap of track 1 that every CD has, and no silence is added at the end;
   - each track of session 1 consists of its CD layer plus padding of less than one sector;
-  - files ripped per track contain no added zeros.
+  - files ripped per track contain no added zeros other than the padding z_k of less than one sector at the end of a track ([L7]).
 - Session 1 exceeds the total length of the CD layers only by the padding, which is less than one sector per track.
 
 ### 2.3 Session 2 (Data)
@@ -249,7 +249,7 @@ Exception (independent-CD mode): the master's sound may begin less than one CD s
 
 - N1 = A2: the number of sectors of session 1 from LBA 0, padding included.
 - N2 = file system sectors + Σ ceil(file size in bytes / 2048) + trailing zero sectors. With few files, the file system occupies only a few tens of sectors (estimate).
-- C = ATIP capacity of the blank disc minus a safety margin. For an 80-minute disc, this is about 359,849 sectors (secondary source; to be measured, Appendix A.1 item 9).
+- C = capacity of the blank disc from its ATIP, in sectors from LBA 0, less any safety margin the producer chooses. For an 80-minute disc, the capacity is 359,849 sectors: the ATIP maximum 79:59:74 is 359,999 sectors of absolute time, less the 150 sectors before LBA 0 (secondary source; to be measured, Appendix A.1 item 9). The encapsulation tool uses 359,849 unless another capacity is given.
 
 **In disc minutes** (1 disc minute = 4500 sectors; every term in disc minutes): L·(1 + r) + padding + 2.533 + file system + trailing zero sectors ≤ C / 4500, where:
 
@@ -608,7 +608,7 @@ The concrete placement algorithm is a matter of implementation. Automatic placem
 - Derived mode: from track 2 onward, only INDEX 01 is written. Independent-CD mode: write according to [L14].
 - The two sessions are separated by `REM SESSION 01` / `REM SESSION 02`. After `REM SESSION 02`, write, in this order:
   - `FILE "DATA.BIN" BINARY`, or `FILE "DATA.ISO" BINARY` when DATA.ISO is used;
-  - `TRACK nn MODE2/2352`, or, with DATA.ISO, the `MODE2/2048` variant found to work in practice;
+  - `TRACK nn MODE2/2352`, or, with DATA.ISO, `TRACK nn MODE2/2048` (the form the encapsulation tool writes; whether the burner accepts it is to be measured, Appendix A.1 item 4);
   - `INDEX 01 00:00:00`.
 - `REM LEAD-OUT` gives the length of AUDIO.BIN.
 - The CUE MUST NOT contain any CRC, MD5 or other hash.
@@ -764,7 +764,7 @@ W ≥ 5880. W MAY be larger, for example 44 100. For windows that are entirely z
 - For extension block type 1, a v5 WAV is reconstructed according to 4.4 and passed to the unmodified decoder.
 - If the decoder rejects the file, the track takes the CD route with the reason "extension layer corrupted".
 
-**[R9]** If several candidates pass, their window contents are necessarily identical (for example in an entirely silent track). Any one of them may be used, and the result is the same.
+**[R9]** If several candidates pass, their window contents are identical, barring an MD5 collision (for example in an entirely silent track). Any one of them may be used, and the result is the same.
 
 **[R10]** Every track is searched for and judged independently.
 
@@ -934,7 +934,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 | C35 | Unrecognised CUE construct; only the file order available | Stop; highlighted prominently in the report | R2 R3 |
 | C36 | Plug-in: the next track has not finished verification, or has failed | The whole track is played as CD; no switching within the track | R17 R20 |
 | C37 | Disc X with no extension file for track 2 | Track 2 is output as CD; no failure and no error is reported. Track 1 passes | D7 R19 |
-| CR1 | Code review | The reader does not read the edge samples in the extension block. It does not repair CD samples. It treats unknown positions only as 0 and does not retry with other values. It does not verify with windows shorter than the whole track. Location uses only the TOC, lead0, tail0, S1, S2 and the whole-track MD5. No external database is consulted, and there is no network access. The extension layer is not applied to a lossy base layer. The trailer record and the extension file contain no value derived from the extension layer and no position or offset. The PCM of session 1 contains no embedded data. The encapsulation tool does not pass `cdalign=none`. Offsets, position differences, shift amounts and trim or padding amounts are not written into any file. The tool stops when ncd ≥ 2^28. Capacity is checked again after the self-check | X6 L12 P4 P7 P8 P18 R1 R5 R15 R18 F7 |
+| CR1 | Code review | The reader does not read the edge samples in the extension block. It does not repair CD samples. It treats unknown positions only as 0 and does not retry with other values. It does not verify with windows shorter than the whole track. Location uses only the TOC, lead0, tail0, S1, S2 and the whole-track MD5. No external database is consulted, and there is no network access. The extension layer is not applied to a lossy base layer. The trailer record and the extension file contain no value derived from the extension layer and no position or offset. The PCM of session 1 contains no embedded data. Neither the encoder nor the encapsulation tool accepts an option that skips the alignment check (`cdalign=none` is refused). Offsets, position differences, shift amounts and trim or padding amounts are not written into any file. The tool stops when ncd ≥ 2^28. Capacity is checked again after the self-check | X6 L12 P4 P7 P8 P18 R1 R5 R15 R18 F7 |
 | BT1 | Acceptance test with a real burn (Appendix A.2) | See Appendix A | L3 L4 L5 D3 D6 P15 |
 
 ---

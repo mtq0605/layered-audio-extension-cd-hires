@@ -32,7 +32,7 @@ The encoder's partition search is in `src/partition.h`. That file is not needed 
 The format family is called LAE. It has two tiers:
 
 * the lossy tier, LAE Lossy (LAEY), specified here;
-* the lossless tier, LAE Lossless (LAES): design document published ([spec/lossless/DESIGN.md](../lossless/DESIGN.md), under review); normative specification not yet written.
+* the lossless tier, LAE Lossless (LAES): specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (draft for public review), which supersedes the design document [spec/lossless/DESIGN.md](../lossless/DESIGN.md).
 
 The encapsulation of the extension on CD-Extra discs and in separate extension files is specified in [spec/cdx/SPEC.md](../cdx/SPEC.md) (draft).
 
@@ -49,11 +49,11 @@ An LAE Lossy file is a RIFF/WAVE file with two parts:
 * **CD layer.** The `data` chunk holds ordinary 16-bit two-channel PCM at a base rate of 44 100 Hz or 48 000 Hz. Any WAV player can play it unchanged.
 * **Extension.** A chunk with identifier `LAE ` follows the audio. It carries two layers:
   * a **depth layer**, which extends the CD layer towards 24-bit resolution at the base rate, with one plane per channel L and R;
-  * a **frequency layer**, which extends the bandwidth up to a master rate of base × 2, × 4 or × 8. It is stored as mid/side (M, S) planes, split into streams by frequency segment: one per segment, or two where the encoder option `g` adds a second pass (Section 9.5).
+  * a **frequency layer**, which extends the bandwidth up to a master rate of base × 2, × 4 or × 8. It is stored as mid/side (M, S) planes, split into streams by frequency segment: one stream per segment, or two where the encoder option `g` codes the layer a second time; each stream is one segment record, and segments may overlap in frequency (Sections 5.2 and 9.5).
 
 **Distribution and file extensions.**
 
-* Files are distributed with the extension `.wav`, so that every player plays the CD layer. Distribution as `.flac` may optionally be added later; carriage in FLAC is not specified for container version 5.
+* Files are distributed with the extension `.wav`, so that every player plays the CD layer. Distribution as `.flac` is planned (Appendix C, item 7); carriage in FLAC is not specified for container version 5.
 * `.lae` is the format's own file extension. The layout of `.lae` files is not specified for container version 5; it will be specified in a later revision.
 
 A decoder can produce the following outputs. All of them are written as 24-bit two-channel PCM.
@@ -66,7 +66,7 @@ A decoder can produce the following outputs. All of them are written as 24-bit t
 
 When an output rate below the master rate is selected, the frequency-layer streams that start at or above the output Nyquist frequency are skipped without being decoded (Section 5.4). The result is then brought down to the selected rate with the half-band decimators of Section 10.
 
-LAE Lossless (LAES), the lossless tier, is not specified here. Its status: design document published ([spec/lossless/DESIGN.md](../lossless/DESIGN.md), under review); normative specification not yet written.
+LAE Lossless (LAES), the lossless tier, is not specified here; it is specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (draft for public review).
 
 ### 1.2 Decoding model (informative)
 
@@ -88,7 +88,7 @@ A conforming decoder MUST meet every requirement of Sections 3 to 13 that applie
 
 The main table of the manifest lists the first 16 hexadecimal digits of each SHA-256 value; the full 64-digit values are listed in its section "Full SHA-256 values".
 
-The conformance vectors exercise the process defined in Sections 3 to 13. An implementation that follows these sections exactly produces the listed outputs.
+The conformance vectors exercise the process defined in Sections 3 to 13. An implementation that follows these sections exactly, with the MDCT tables of `src/mdct_tables.h` (Section 9.2), is intended to produce the listed outputs; where the text is silent or ambiguous, the reference decoder decides.
 
 A decoder MAY be structured differently internally, provided that every output byte is identical. For example, it may decode whole tracks instead of streaming, or decode streams in parallel.
 
@@ -148,8 +148,8 @@ Builds that generate x87 floating-point code are not supported (Section 13). The
 * `LSB24` is one step of a 24-bit signal. Full scale is ±2^23 LSB24.
 * `LSB16` equals 256 LSB24.
 * The **fine unit** (FU) equals 1/16 LSB24. One LSB16 equals 4096 FU.
-* All time-domain stages of Section 11 operate in FU.
-* The inverse-MDCT outputs of the depth and frequency layers are in LSB24.
+* All time-domain stages of Section 11 operate in FU, except where a signal is stated to be in LSB24.
+* The inverse-MDCT outputs of the depth and frequency layers (`D_c`, `m`, `s`) are in LSB24; they are multiplied by 16 where they enter an FU signal. The final output `o_c` (Section 11.7) is in LSB24.
 
 ---
 
@@ -164,7 +164,7 @@ An LAE Lossy file is a RIFF/WAVE file. The first 4 bytes MUST be `RIFF` and byte
 * n body bytes;
 * one pad byte if n is odd.
 
-**Decoder parsing rules** (behaviour of the reference reader):
+**Decoder parsing rules** (behaviour of the reference reader; the items with key words are requirements, the others describe the reference reader):
 
 * Chunks MUST be parsed sequentially from offset 12 to the end of the file. The RIFF size field at offset 4 is not used.
 * If a chunk body extends beyond the end of the file, it is truncated to the bytes available.
@@ -374,7 +374,7 @@ The checks marked "(checked)" MUST be performed for every stream that is decoded
 
 **Depth streams** are decoded in the 24-bit and cd24 routes. They are skipped in the 16-bit route.
 
-**Frequency streams** are skipped in the cd24 route. In the 24-bit and 16-bit routes, with output rate `rate >> d`, a frequency stream is decoded if and only if its `k0` is less than `kcut`, where
+**Frequency streams** are skipped in the cd24 route. In the 24-bit and 16-bit routes, with output rate `rate >> d` (`rate` is the master rate of the main header, Section 4), a frequency stream is decoded if and only if its `k0` is less than `kcut`, where
 
 `kcut = 512 >> d`.
 
@@ -384,7 +384,7 @@ In the reference decoder, `k0` is read from the stream header before the record 
 
 The selected M streams form the M signal, and the selected S streams form the S signal (Section 9.5). If **no M stream** is selected, the frequency layer is omitted entirely, including any selected S streams (Section 11.5).
 
-*Informative.* Frequency bins are expressed at the master rate: bin k of 512 is centred at `(k + 1/2) * (rate/2) / 512`. The reference encoder stores one stream per octave (comment in `src/lae_dec.cpp`). The decoder relies only on the `k0 < kcut` test.
+*Informative.* Frequency bins are expressed at the master rate: bin k of 512 is centred at `(k + 1/2) * (rate/2) / 512`. The reference encoder stores one stream per octave, or two with the encoder option `g` (comment in `src/lae_dec.cpp`). The decoder relies only on the `k0 < kcut` test.
 
 ### 5.5 Coefficient-plane geometry
 
@@ -706,7 +706,7 @@ $$
 X[k] = \sqrt{\frac{2}{N}} \sum_{n=0}^{N-1} u[n] \cos\left(\frac{\pi}{N}\left(n + \frac{1}{2}\right)\left(k + \frac{1}{2}\right)\right)
 $$
 
-It MUST be computed exactly as follows. Each product `x*y` is rounded, then each sum or difference is rounded, in the order written.
+In the procedure below, the input `u[n]` of the formula is called `c`, and the output `X[k]` is called `u`. It MUST be computed exactly as follows. Each product `x*y` is rounded, then each sum or difference is rounded, in the order written.
 
 ```
 DCT4(c[0 ... N-1]) -> u[0 ... N-1]:
@@ -762,6 +762,8 @@ o[i] = (int32) llround(v)
 
 The transform MUST be computed with exactly the structure given in Sections 9.3 and 9.4. Any other factorisation generally changes the output bits.
 
+*Informative.* This requirement concerns the arithmetic. An implementation that gives bit-identical results in another way, for example by skipping all-zero frames (Section 9.5), meets it (Section 1.3).
+
 *Informative.* The forward transform used by the encoder works as follows:
 
 1. It windows the 2N samples.
@@ -776,7 +778,7 @@ Each IMDCT signal sums the selected planes before the transform:
 * M: the selected M segments;
 * S: the selected S segments.
 
-The segments of one plane MAY overlap in frequency (an encoder may code the same bins twice, for example to cancel the up-converted CD layer in silent cells); the planes are added coefficient by coefficient. Each plane value is an `int32` with a magnitude of at most 1073741823, and there are at most 8 planes. Their double sum is therefore exact, and its order is irrelevant.
+The segments of one signal (M or S) MAY overlap in frequency (an encoder may code the same bins twice, for example to cancel the up-converted CD layer in silent cells); the coefficient planes of its streams are added coefficient by coefficient. Each plane value is an `int32` with a magnitude of at most 1073741823, and there are at most 8 such planes per signal. Their double sum is therefore exact, and its order is irrelevant.
 
 A plane whose stream has fewer than `m + 1` frames contributes zero to frame `m`. The transform of an all-zero frame contributes only zeros, so it MAY be skipped.
 
@@ -849,7 +851,7 @@ The reference decoder does not detect `int64` overflow, and the result for strea
 
 ## 11. Reconstruction pipeline
 
-All signals in this section are per channel `c` in `{0 = L, 1 = R}`, in FU, and computed in `int64` unless stated otherwise.
+All signals in this section are per channel `c` in `{0 = L, 1 = R}`, in FU and computed in `int64`, unless stated otherwise.
 
 ### 11.1 Route and output rate
 
@@ -1021,8 +1023,8 @@ Passing the self-test does not replace the conformance test of Section 1.3.
 *Informative.* Status of the reference implementation ([docs/BUILD.md](../../docs/BUILD.md)):
 
 * The decoder and the encoder build and run on Windows (MSVC) and on Linux (GCC 13 at `-O2` and `-O0`, Clang 18). The decoder has also been built with GCC as a 32-bit SSE2 build.
-* On Linux x86, the decoder outputs were identical in 256 of 256 comparisons, and the encoder reproduces all 16 conformance vector files byte for byte.
-* On Linux ARM64 (aarch64; GCC 13 at `-O2` and `-O0`, Clang 18 at `-O2`), the decoder outputs were identical in 192 of 192 comparisons, and the encoder (GCC 13, `-O2`) reproduces all 16 conformance vector files byte for byte. Other ARM platforms have not been tested.
+* On Linux x86, the SHA-256 of every decoder output (per build, vector and route) matched the manifest in 256 of 256 comparisons, and the encoder reproduces all 16 conformance vector files byte for byte.
+* On Linux ARM64 (aarch64; GCC 13 at `-O2` and `-O0`, Clang 18 at `-O2`), the SHA-256 of every decoder output matched the manifest in 192 of 192 comparisons, and the encoder (GCC 13, `-O2`) reproduces all 16 conformance vector files byte for byte. Other ARM platforms have not been tested.
 * x87 builds are not supported; the reference decoder's self-test refuses them.
 
 ---
@@ -1043,7 +1045,7 @@ Unless another source is cited, the statements in this section are based on the 
   * The frequency layer starts below the detected CD cut-off: the encoder passes a start frequency of `fc - 1000` Hz to the layer coder (`src/lae_enc.cpp`). `fc` records the cut-off.
   * **Cut-off detection** (`src/routes.cpp`). From averaged cross-spectra of the master and the interpolated CD path, the encoder scans downwards from the base-rate Nyquist frequency to 15 kHz. It sets `fc` just above the highest frequency at which the transfer of the CD path is at least −0.1 dB. Bins in which the master has almost no energy are skipped. If no such frequency is found, `fc = 15000` Hz.
 * **Independent CD input.** The encoder option `cd=<file>` accepts a separately supplied 16-bit two-channel CD at the base rate.
-  * The supplied CD becomes the CD layer bit for bit. The encoder places the master on the time axis of the CD and moves the master by whole master samples and by a fraction of a master sample; the CD is never moved (README, Section 4.3). Nothing about the alignment is stored in the file, and decoding is unchanged.
+  * The supplied CD becomes the CD layer bit for bit. The encoder places the master on the time axis of the CD and moves the master by whole master samples and by a fraction of a master sample; the CD is never moved ([README](../../README.md), Section 4.3). Nothing about the alignment is stored in the file, and decoding is unchanged.
   * All dither flags are then 0.
   * The CD cut-off is found by a coherence test (threshold 0.98) instead of the transfer test; the coherence test does not depend on the gain of the CD.
   * The extension codes the master minus the CD path.
@@ -1051,7 +1053,7 @@ Unless another source is cited, the statements in this section are based on the 
 * **Partition search** (`src/partition.h`).
   * The search runs per root block, in parallel. The number of threads does not affect the encoded stream ([docs/BUILD.md](../../docs/BUILD.md)).
   * The search aims at the D and C share targets of the selected mode (`src/partition_format.h`). The share targets exist only in the encoder.
-  * The decoder needs no mode table. `mi`, `lv`, `wm` and the main-header `eq` are informational.
+  * The decoder needs no mode table. Apart from the range check of `mi` (V10), `mi`, `lv`, `wm` and the main-header `eq` are informational.
   * For given penalties λD and λC, a dynamic program over all sub-rectangles of each root block chooses the cut tree and the tier of each leaf. It minimises the estimated number of bits plus λD per demoted D unit (a D cell in a leaf below tier D) and λC per demoted C unit (a C cell in a leaf below tier C). A unit is one cell (share by cells), the cell's energy relative to the mean energy of all D (or C) cells of the plane (share by energy), or the mean of both (cells + energy). A leaf is tier A only if all its cells are A.
   * The penalties are found by bisection on a logarithmic scale between 10^−3 and 10^4, in 7 steps: first λC with λD = 0, until the C share target is met, then λD. For modes with a C share of 100 % (keep, keep20), λC is fixed at 10^9. With the share measure "cells + energy", the smaller of the two shares must meet the target.
 * **Modes.** There are six modes per scheme (`src/partition_format.h`):
@@ -1092,7 +1094,7 @@ Contributions are accepted under the Apache-2.0 licence (inbound licence). Every
 
 Contributors keep their copyright and are credited in the git history and in the `AUTHORS` file. The author may include contributions in the GPL-licensed reference encoder and in its commercially licensed version.
 
-Commercial licensing and private matters are handled through GitHub: issues, and private vulnerability reporting.
+Questions and commercial licence enquiries are handled through public GitHub issues; do not put confidential information in an issue ([COMMERCIAL.md](../../COMMERCIAL.md)). Security vulnerabilities are reported through the repository's private vulnerability reporting ([SECURITY.md](../../SECURITY.md)).
 
 ### 15.2 Patents
 
@@ -1162,12 +1164,12 @@ The conformance vectors and their hash values are listed in [tests/vectors/MANIF
 
 * The vectors are 2-second excerpts, starting at 5 s, of synthetic signals generated by `src/gen_suite.cpp`.
 * Each vector name gives the material, the master rate, the mode, the scheme (`s1` or `s2`) and, where present, the `zs` option.
-* For each vector, the manifest lists the first 16 hexadecimal digits of the SHA-256 of the encoded file and of the decoded output for each route: 24-bit at the master rate, 16-bit at the master rate (written as a 24-bit file, Section 11.8), cd24 at the base rate, and 24-bit at half the master rate.
+* For each vector, the manifest lists the first 16 hexadecimal digits (and, in its section "Full SHA-256 values", the full values) of the SHA-256 of the encoded file and of the decoded output for each route: 24-bit at the master rate, 16-bit at the master rate (written as a 24-bit file, Section 11.8), cd24 at the base rate, and 24-bit at half the master rate.
 * One octave down is permitted only when `stages >= 2`. The half-rate route is therefore not available for the 88.2 kHz and 96 kHz vectors.
 
 ## Appendix C. Open items
 
-1. Publish the full SHA-256 values of all conformance vectors (Section 1.3).
+1. Publish the full SHA-256 values of all conformance vectors (Section 1.3). Done: the manifest lists them in its section "Full SHA-256 values".
 2. Reproduce `src/mdct_tables.h` as a normative annex (Section 9.2).
 3. Confirm whether a decoder must reject a `fmt ` sample rate that differs from `base` (Section 3.1).
 4. Document the values that the reference encoder writes into the stream-header fields `rate` and `L` (Section 5.3).

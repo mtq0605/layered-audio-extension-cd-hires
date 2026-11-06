@@ -9,7 +9,7 @@
 **Applies to:** LAE Lossless (short name LAES), the lossless tier of the LAE (Layered Audio Extension) format family, payload version 1.
 **Licence of this document:** CC BY 4.0. (c) 2026 mtq0605.
 
-This document specifies the LAES payload, its three carriers (WAV file, FLAC file and CD-Extra disc) and the decoding process. It is written so that an independent implementer can write a conforming decoder without other material. It replaces the informative design document `spec/lossless/DESIGN.md` (2026-10-18) as the normative description; where the two differ, this document applies.
+This document specifies the LAES payload, its three carriers (WAV file, FLAC file and CD-Extra disc) and the decoding process. It aims to let an independent implementer write a conforming decoder without other material. It replaces the design document `spec/lossless/DESIGN.md` (2026-10-18), which is informative: this document is the normative description, and where the two differ, this document applies.
 
 Sections 11 and 12, the appendices marked informative, and all text marked *informative* are not normative. The key words MUST, MUST NOT, SHOULD and MAY are to be interpreted as described in RFC 2119.
 
@@ -20,12 +20,12 @@ The reference implementation is normative wherever this text is silent or ambigu
 | `src/laes_math.h` | normative arithmetic: 128-bit accumulation, symmetric extension, rate-level lifting, reference taps and the reference |
 | `src/halfband.h` | the half-band table `kHalf0` used by the lifting (shared with LAE Lossy) |
 | `src/laes_codec.h` | the layer coder (Section 5) |
-| `src/laes_file.h` | the LAES payload, encoder and decoder (Sections 6 and 7) |
-| `src/laes_flac.h` | the FLAC reader and writer for the FLAC form (Section 8) |
+| `src/laes_file.h` | the LAES payload and its decoder (Sections 6 and 7) |
+| `src/laes_flac.h` | the FLAC reader for the FLAC form (Section 8) |
 | `src/lae_cdx.h` | the CD-Extra extension file and trailer record (Section 9) |
-| `src/laes_tool.cpp` | the command-line tool `laes`: encoder choices, decoder outputs, derived 16-bit master (Sections 10 and 11) |
+| `src/laes_tool.cpp` | the command-line tool `laes`: decoder outputs and derived 16-bit master (Section 10); its encoder choices (Section 11) are informative |
 
-`src/laes_lift.h` contains faster forms of the lifting and the reference. They give identical results (verified against `src/laes_math.h` on test recordings during development) and are informative.
+`src/laes_lift.h` contains faster forms of the lifting and the reference. They give identical results (verified against `src/laes_math.h` on test recordings during development) and are informative. The encoder files (`src/laes_*_enc.h`, for example `src/laes_stream_enc.h`, cited in Section 11.1) are informative, like Section 11.
 
 ---
 
@@ -40,7 +40,7 @@ LAES stores, in one file or on one disc:
 
 Every master is restored **bit for bit**. From each master, the decoder also obtains its **rate levels** by the lifting of Section 3: the master at its rate / 2, / 4 and / 8, down to the base rate. The rate levels are exactly defined integer signals and are not stored separately.
 
-LAES is lossless throughout: nothing in the payload is approximated. A master is stored either as the difference from another signal already in the file (the core master or an earlier master) or in full, whichever the encoder finds smaller (Section 6.4).
+LAES storage is lossless throughout: nothing in the payload is approximated. (The derived 16-bit master of Section 10.1 is an output, not stored content.) A master is stored either as the difference from another signal already in the file (the core master or an earlier master) or in full, whichever the encoder finds smaller (Section 6.4).
 
 ### 1.2 Carriers
 
@@ -69,11 +69,11 @@ A conforming encoder writes payloads that a conforming decoder accepts and that 
 | Term | Meaning |
 |---|---|
 | base rate | 44 100 Hz (CD family) or 48 000 Hz (DVD family) |
-| core master | the signal that an ordinary player plays (Section 1.1). On a CD or DVD, it is what LAE Lossy calls the CD layer; in the FLAC form, it may also have 24 or 32 bits |
+| core master | the signal that an ordinary player plays (Section 1.1). As a 16-bit signal (for example on a CD), it corresponds to what LAE Lossy calls the CD layer; in the WAV and FLAC forms, it may also have 24 or 32 bits |
 | stages | for a master at rate base × 2^S, the number S (0 to 3) |
 | level k | for a master with S stages, the signal at rate base × 2^k, 0 ≤ k ≤ S. Level S is the master itself (after removal of its unused low bits, Section 6.3); level 0 is its **base level** |
 | octave layer k | the detail signal produced when level k is split into level k − 1 (Section 3) |
-| tier | the signal against which a master is stored: the core master or an earlier master in the payload |
+| tier | the signal against which a master is stored: the core master or an earlier master in the payload (not to be confused with the lossy and lossless tiers of the format family) |
 | T | the **time position** of a master relative to its tier, in base-rate samples, given as an integer part and a fraction in units of 2^−32 base-rate sample |
 | w | the number of low bits that are zero in every sample of a master ("unused low bits"); w = 0 if every sample is 0 |
 
@@ -338,7 +338,7 @@ A decoder MUST reject the payload (and play the core master only) if any of the 
 * a layer fails a check of Section 5.4, or the payload ends early;
 * bytes remain between the layers of the last master and the CRC-32.
 
-A master whose reconstruction does not match its SHA-256 MUST NOT be presented as that master, nor its rate levels. The core master and the other masters are unaffected, except for masters whose chain of tiers includes the failed master: these then also fail their SHA-256.
+A master whose reconstruction does not match its SHA-256 MUST NOT be presented as that master, nor its rate levels. The core master and the other masters are unaffected, except for masters whose chain of tiers includes the failed master: these are then reconstructed from wrong values and, barring a SHA-256 collision, also fail their SHA-256.
 
 Reserved fields: writers MUST write 0, and readers MUST ignore them. The core master mode is not compared with the carrier.
 
@@ -351,11 +351,11 @@ An LAES WAV file is a RIFF/WAVE file with the following chunks:
 * `fmt `: integer PCM (format tag 1, or 0xFFFE with the PCM sub-format), 2 channels, the base rate, 16, 24 or 32 bits;
 * `data`: the core master;
 * `LAE `: the LAES payload followed by its CRC-32 (Section 6), with core master mode 0;
-* `LIST` of type `INFO` and `id3 ` (an ID3v2 tag), both optional: tags and pictures. Writers place them after `fmt ` and before `data`. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking a version.
+* `LIST` of type `INFO` and `id3 ` (an ID3v2 tag), both optional: tags and pictures. Writers place them after `fmt ` and before `data`. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking an output (Section 10).
 
 A file MUST contain exactly one `data` chunk and at most one `LAE ` chunk. A reader skips every chunk that it does not use. *Informative:* the reference decoder takes the last chunk of each type and clamps any chunk size that runs past the end of the file.
 
-Any WAV player plays the core master. The first 4 bytes of the `LAE ` chunk identify the format: `LAE1` = LAE Lossy (LAEY), `LAE2` = LAE Lossless (LAES) (this specification). A reader SHOULD tell the user which format it found; an LAEY decoder that encounters `LAE2` reports an LAES file and does not decode it, and a player plays the core master. A WAV file whose single `data` chunk would exceed 4 GiB is outside the scope of version 1.
+Any WAV player plays the core master (a 32-bit core master only in players that support 32-bit PCM). The first 4 bytes of the `LAE ` chunk identify the format: `LAE1` = LAE Lossy (LAEY), `LAE2` = LAE Lossless (LAES) (this specification). A reader SHOULD tell the user which format it found; an LAEY decoder that encounters `LAE2` reports an LAES file and does not decode it, and a player plays the core master. A WAV file whose single `data` chunk would exceed 4 GiB is outside the scope of version 1.
 
 ---
 
@@ -364,18 +364,18 @@ Any WAV player plays the core master. The first 4 bytes of the `LAE ` chunk iden
 An LAES FLAC file is a FLAC stream (RFC 9639) with the following structure:
 
 ```
-"fLaC" | STREAMINFO | VORBIS_COMMENT, PICTURE (optional) | APPLICATION blocks with ID "LAE2" (k ≥ 1) | other metadata blocks (optional) | audio frames = the core master
+"fLaC" | STREAMINFO | VORBIS_COMMENT, PICTURE (optional) | APPLICATION blocks with ID "LAE2" (1 or more) | other metadata blocks (optional) | audio frames = the core master
 ```
 
 * STREAMINFO: 2 channels, the base rate, 16, 24 or 32 bits, the sample count of the core master (MUST NOT be 0) and the MD5 of the core master (MUST be present and correct). A decoder that finds the MD5 missing or wrong MUST NOT use the payload: the core master is not the one for which the payload was made. Whether the decoder still plays the core master is up to the player.
 * The LAES payload (with its CRC-32; core master mode 1) is split into pieces of at most 2^24 − 5 bytes. Each piece is the data of one APPLICATION block whose 4-byte ID is `LAE2` (0x4C 0x41 0x45 0x32), registered by IANA in the FLAC Application Metadata Block IDs registry (RFC 9639, Section 12.2; 2026-10-31). Writers place these blocks after STREAMINFO and after the VORBIS_COMMENT and PICTURE blocks, if any, consecutively with no other block between them. A reader concatenates all APPLICATION blocks with ID `LAE2`, in file order, wherever they stand among the metadata blocks.
-* Tags and pictures (optional): at most one VORBIS_COMMENT block and any number of PICTURE blocks (RFC 9639, Sections 8.6 and 8.8). Writers place them before the `LAE2` blocks, so that a player reads them without skipping the payload. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking a version.
+* Tags and pictures (optional): at most one VORBIS_COMMENT block and any number of PICTURE blocks (RFC 9639, Sections 8.6 and 8.8). Writers place them before the `LAE2` blocks, so that a player reads them without skipping the payload. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking an output (Section 10).
 * The audio frames hold the core master. Any valid FLAC coding of the core master is allowed.
 * No SEEKTABLE or CUESHEET block is written.
 
-Every FLAC decoder that implements RFC 9639 in full plays the core master and skips the APPLICATION blocks (checked 2026-11-05 with libFLAC and FFmpeg). Decoders that implement only part of it may not do so: the built-in FLAC decoder of Windows (Media Foundation, also used by Explorer) does not decode 32-bit FLAC, and it does not recognise a file whose first audio frame starts more than about 4 MiB into the file, as is the case in every LAES FLAC file with masters. Tested decoders and workarounds are given in [COMPATIBILITY.md](../COMPATIBILITY.md).
+Every FLAC decoder that implements RFC 9639 in full plays the core master and skips the APPLICATION blocks (checked 2026-11-05 with libFLAC and FFmpeg). Decoders that implement only part of it may not do so: the built-in FLAC decoder of Windows (Media Foundation, also used by Explorer) does not decode 32-bit FLAC, and it does not recognise a file whose first audio frame starts more than about 4 MiB into the file, as is the case in an LAES FLAC file whose payload is larger than that. Tested decoders and workarounds are given in [COMPATIBILITY.md](../COMPATIBILITY.md).
 
-*Informative:* the FLAC writer of the reference encoder (`src/laes_flac.h`) uses a fixed block size of 4096, two independently coded channels, LPC orders up to 12, a precision of up to 15 and Rice partition orders up to 8. At 44.1 / 48 kHz, this conforms to FLAC's streamable subset. Many older players do not play 32-bit FLAC; the reference encoder therefore uses a 24-bit core master unless instructed otherwise (Section 11.1). The reference decoder decodes only core masters with independently coded channels.
+*Informative:* the FLAC writer of the reference encoder (`src/laes_flac_enc.h`) uses a fixed block size of 4096, two independently coded channels, LPC orders up to 12, a precision of up to 15 and Rice partition orders up to 8. At 44.1 / 48 kHz, this conforms to FLAC's streamable subset. Many older players do not play 32-bit FLAC; the reference encoder therefore does not use a 32-bit core master in the FLAC form unless instructed otherwise (it uses the highest master word length up to 24 bits; Section 11.1). The reference decoder decodes only core masters with independently coded channels.
 
 ---
 
@@ -393,7 +393,7 @@ The trailer record is the one defined in `spec/cdx/SPEC.md`, Section 3.2, with *
 
 ## 10. Decoder outputs
 
-A decoder offers the following outputs for each file:
+The outputs that a decoder may offer for each file (Section 1.3, item 5) are:
 
 | Output | Lossless | Definition |
 |---|---|---|
@@ -451,7 +451,7 @@ For each master, the reference encoder tries storage 1; storage 0 against the co
 
 ### 11.3 Time position
 
-A master derived from the same production as the core master has T = 0. For an independently produced core master (a released CD), the reference tool `laes align` uses the automatic search of the LAE Lossy encoder and stores the measured position as T, including the fraction; the master itself is never moved. An alignment error within −60 dB is accepted. Otherwise, the error is shown and the user decides whether to continue or stop. A whole album is cut at the track boundaries of the CD by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`), which writes the master of each track unmoved, with its own T.
+A master derived from the same production as the core master has T = 0. For an independently produced core master (a released CD), the reference tool `laes align` uses the automatic search of the LAE Lossy encoder and stores the measured position as T, including the fraction; the master itself is never moved. An alignment error (the residual energy after alignment, relative to the energy of the signal, as measured by the LAE Lossy search) of −60 dB or less is accepted. Otherwise, the error is shown and the user decides whether to continue or stop. A whole album is cut at the track boundaries of the CD by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`), which writes the master of each track unmoved, with its own T.
 
 ### 11.4 Measured sizes
 
@@ -460,15 +460,15 @@ Measured on 10-second excerpts of two 2L test recordings at 352.8 kHz (02 and 05
 | Content | LAES FLAC form, compared with |
 |---|---|
 | one 24-bit master with all its rate levels | 93.5–98.4 % of a FLAC of that master alone |
-| 16-, 24- and 32-bit masters of one mix at 352.8 kHz, each with all four rate levels (12 versions) | 99.6–99.8 % of a FLAC of the 32-bit master alone |
+| 16-, 24- and 32-bit masters of one mix at 352.8 kHz, each at all four rates (the master and its three rate levels; 12 versions) | 99.6–99.8 % of a FLAC of the 32-bit master alone |
 | the same 12 versions | about 30 % of 12 separate FLAC files |
 
 ### 11.5 Resources and resuming
 
 The following items describe the reference encoder (`laes enc`). None of them changes the file written: the same masters and options give the same bytes.
 
-* **Masters.** A master is a 16-, 24- or 32-bit stereo WAV file (RIFF, or RF64 beyond 4 GB), read in place, or a FLAC file. A FLAC master is decoded once into the work folder and checked against the MD5 in its STREAMINFO.
-* **Work folder.** Intermediate data is written to `<output>.laes.tmp` next to the output. The folder is removed when the run ends.
+* **Masters.** A master is a 16-, 24- or 32-bit stereo WAV file (RIFF, or RF64 beyond 4 GiB), read in place, or a FLAC file. A FLAC master is decoded once into the work folder and checked against the MD5 in its STREAMINFO.
+* **Work folder.** Intermediate data is written to `<output>.laes.tmp` next to the output. The folder is removed when the run completes; a run that stops keeps it, except with `--disk-stop-remove` (see below).
 * **Memory.** Intermediate signals are processed one piece at a time. The memory budget (`--mem=<GB>`, default 2 GB, less on machines with little memory) determines only the piece length. The core master is held in memory at 4 bytes per sample per channel.
 * **Disk.** Before creating the work folder, the encoder estimates the disk space it needs. If this exceeds the free space, it does not start; `--force-disk` overrides this.
   * While it runs, free space below 2 GB makes it **wait**: nothing is removed, and the run continues by itself once there is room again.
@@ -491,7 +491,7 @@ Measured on a 32-thread machine with the default 2 GB budget, FLAC form. The mas
 | 30:13, 12 masters (16, 24 and 32 bits × 44.1, 88.2, 176.4 and 352.8 kHz) | normal | 2181 s | 1.41 GB | 27.8 GB |
 | | `--small-disk` | 3047 s | 1.53 GB (*) | 15.0 GB |
 
-(*) Measured with a build that derived the core master in one piece; with the current build, the normal run went from 1.53 GB to 1.41 GB.
+(*) Measured with an earlier build that derived the core master in one piece; with that build, the normal run also needed 1.53 GB. The current build lowered the normal run to 1.41 GB; `--small-disk` has not been measured again with it.
 
 Peak memory grows with the length (the core master is held whole); disk use grows with the length and with the number and rates of the masters.
 
@@ -501,7 +501,7 @@ Peak memory grows with the length (the core master is held whole); disk use grow
 
 `laes selftest` runs the following, with synthetic signals only:
 
-* round trips over both carriers, all word lengths, both rate families, fractional and negative T, unused low bits, short and odd lengths, and all three storage values;
+* round trips over the WAV and FLAC carriers, all word lengths, both rate families, fractional and negative T, unused low bits, short and odd lengths, and all three storage values;
 * damage tests: byte flips, flips behind a recomputed CRC, and truncation of the payload and of the FLAC file;
 * random input to the FLAC parsers.
 

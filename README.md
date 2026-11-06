@@ -1513,7 +1513,15 @@ The stages of the reference decoder have been moved unchanged into the library `
 **Bit-exact fast seek.** While decoding, the library records entropy-coder checkpoints about every 4 s. A seek restores a checkpoint and performs a warm restart of every signal stage shortly before the target, so that the output after a seek is bit-identical to sequential decoding.
 
 - A seek backwards, or into a part that has already been decoded, is fast.
-- A seek forward past the decoded part must entropy-decode up to the target, because v5 defines no random-access points (Section 9). On the test machine, this cost about 1.6 s per minute skipped at 352.8 kHz.
+- A seek forward past the decoded part continues from the player's own checkpoints (below) and catches up from there, all entropy streams in parallel. v5 defines no random-access points (Section 9), and none are added: the checkpoints come only from the player's own decoding.
+- **The player's checkpoints (2026-11-06).** The first time `lae_open_*` meets a file, it checks the whole file once:
+  - the SHA-256 of every byte of the file;
+  - every entropy stream decoded from its start to its end, one thread per stream. A stream that does not end exactly at its last byte fails the open, as a damaged chunk does; the CD audio still plays.
+  - On the way, a checkpoint is kept every 30 s, in the player's own folder under that SHA-256: `%APPDATA%\LAE\lae_index\<sha256>.idx` on Windows, `$XDG_CACHE_HOME/lae/lae_index` or `~/.cache/lae/lae_index` elsewhere. The environment variable `LAE_INDEX_DIR` names another folder (`off`: none; an app on Android sets it).
+  - Later opens read this record and skip the check. A missing, damaged or foreign record only makes the next open check again; the output never depends on it.
+  - The folder holds at most 256 MB; the least recently used records are deleted first (only `*.idx` files in that folder).
+  - Nothing is written into, appended to or sent with the media file.
+- Measured on a 13:22 file at 352.8 kHz (x64, 8 cores): the first check took 2.9 s (2.2 s per 10 minutes; 4 cores: 3.2 s per 10 minutes); later opens 0.7 s; a seek to 99 % of the track, never decoded before, took 0.25 s including the first 2 s of reading, against 7.8 s before. Records are about 0.3 MB for 13 minutes. Twelve positions on each of the routes full, 16 and cd24 and at 176.4 kHz were bit-identical to sequential decoding.
 - In development tests on 10–15 s excerpts, 540 random seeks, including positions never decoded before, over all routes and output rates, were all bit-identical; the slowest seek with the following read took 0.2 s.
 
 The usage is given in Section 14.7.
@@ -1913,7 +1921,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - The Synth result above may have the same cause; this has not been checked.
 - **Samples carried by a move.** Where the move of the master carries samples to a place at which no piece takes master samples (the very start or end of the master, or a gap that only the master has), these samples are not kept. The planner reports where this happens and how many samples are concerned; the user may add at least 1 ms (44 CD frames) of digital silence at that place to both the master and the CD (Section 4.5).
 - **Hard-cut masters.** A master whose sound reaches its first or last sample keeps a few frames of digital silence at the ends of the CD layer after a fractional move (Section 4.3).
-- **Forward seeking.** A seek forward past the decoded part requires entropy decoding up to the target, because v5 defines no random-access points (Section 13.6).
+- **Forward seeking.** v5 defines no random-access points, so the library checks a file once when it first meets it and keeps checkpoints in the player's own folder (Section 13.6). That first open takes about 2.2 s per 10 minutes on 8 cores and 3.2 s on 4 cores; machines with fewer cores were not measured. With `LAE_INDEX_DIR=off`, or where no folder is available, every open checks the file again.
 - **Sampling-rate families.** The encoder performs no rational-ratio resampling.
   - A 48 kHz family master is combined with a 48 kHz base. Combining it with a 44.1 kHz CD remains a mastering task.
   - The 48 kHz base layer is intended for DVD, Blu-ray and file distribution; CD-Extra applies to the 44.1 kHz family only.

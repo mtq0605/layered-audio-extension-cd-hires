@@ -71,7 +71,13 @@ LAE_API int LAE_CALL lae_start(lae_track* t, int route, int out_rate, char* err,
 LAE_API int LAE_CALL lae_output_format(const lae_track* t, int* rate, int* bits, uint64_t* frames);
 /* next frames in order; returns frames written (0 at the end) or -1 on a stream error */
 LAE_API int64_t LAE_CALL lae_read(lae_track* t, int32_t* out, int64_t frames);
-/* to an output frame: forward decodes and discards, backward restarts from the beginning. Returns 0 or -1. */
+/* to an output frame, bit-exact (the samples a decode from the start gives there). The entropy streams continue from the nearest
+   checkpoint, in parallel. Checkpoints come from decoding (in memory, about every 4 s) and from the check every lae_open_* runs the first
+   time it meets a file: the SHA-256 of the whole file, every entropy stream decoded to its end (a stream that does not end exactly at its
+   last byte fails the open, as a damaged chunk does), a checkpoint every 30 s. These are kept in the player's own folder under that SHA-256
+   (%APPDATA%\LAE\lae_index\<sha256>.idx on Windows, $XDG_CACHE_HOME/lae/lae_index or ~/.cache/lae/lae_index elsewhere; the environment
+   variable LAE_INDEX_DIR names another folder, "off" none), at most 256 MB (least recently used records deleted first), never in the
+   media file. A missing or damaged record only makes the next open check again. Returns 0 or -1. */
 LAE_API int LAE_CALL lae_seek(lae_track* t, uint64_t frame);
 /* since lae_start: samples held by the decoder's hard limiter, and whether a stream error occurred (both may be NULL) */
 LAE_API int LAE_CALL lae_stats(const lae_track* t, uint64_t* limited, int* stream_error);

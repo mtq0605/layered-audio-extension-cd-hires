@@ -29,7 +29,8 @@ struct Enc { vector<uint8_t> out{ 0 }; uint32_t low = 0, width = 0xFFFFFFFFu;
     void direct(uint32_t v, int n) { while (n-- > 0) { width >>= 1; if ((v >> n) & 1) add(width); normalise(); } }
     void flush() { for (int k = 0; k < 4; k++) { out.push_back((uint8_t)(low >> 24)); low <<= 8; } } };
 struct Dec { const uint8_t* p; size_t n, i = 0; uint32_t width = 0xFFFFFFFFu, code = 0;   // code = value - low
-    uint8_t next() { return i < n ? p[i++] : 0; }
+    size_t over = 0;   // bytes asked for beyond the end (a correct stream ends exactly at its last byte: over stays 0, i reaches n)
+    uint8_t next() { if (i < n) return p[i++]; over++; return 0; }
     void init() { for (int k = 0; k < 5; k++) code = (code << 8) | next(); }
     void normalise() { while (width < RC_TOP) { width <<= 8; code = (code << 8) | next(); } }
     int bit(uint16_t& p0) { uint32_t split = (width >> 11) * p0; int b = code >= split;

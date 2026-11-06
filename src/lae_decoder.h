@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <string>
 #include <memory>
+#include <thread>
 #include "halfband.h"
 #include "part_stream.h"
 #include "mdct_tb.h"
@@ -34,9 +35,11 @@ struct PlaneStream {
     // checkpoints for seeking: the decoder state before the row at frame M0, kept every `every` rows (about 4 s of the stream)
     struct Mark { long M0; Dec dc; std::unique_ptr<Walker<Dec>> w; };
     std::vector<Mark> marks; long every = 1;
+    // checkpoints from the player's own one-time check of this file (every 30 s, kept in the player's folder, never in the file: PL-7)
+    std::vector<Mark> fileMarks; Dec dc0;   // dc0: the state at the start of the stream
     bool open(const uint8_t* p, int32_t nbytes) { if (nbytes < 40) return false; Rd s{p, (size_t)nbytes}; int32_t f[10]; for (int i = 0; i < 10; i++) f[i] = s.i32v();
         h = Hdr{f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]}; if (h.N != N || f[9] != nbytes - 40 || h.K <= 0 || h.k0 < 0 || h.k1 > N || h.k0 >= h.k1) return false;
-        dc.p = p + 40; dc.n = f[9]; dc.init(); w.reset(new Walker<Dec>(h)); rowBuf.assign((size_t)part::ROOTT * N, 0);
+        dc.p = p + 40; dc.n = f[9]; dc.init(); dc0 = dc; w.reset(new Walker<Dec>(h)); rowBuf.assign((size_t)part::ROOTT * N, 0);
         every = h.rate > 0 ? std::max<long>(1, (long)(4.0 * h.rate / ((double)part::ROOTT * N))) : 64; return true; }
     const int32_t* frame(long m) {   // frames are requested in increasing order (seekTo excepted)
         while (!(m >= row0 && m < row0 + rows)) { if (w->done()) return nullptr;
@@ -47,7 +50,45 @@ struct PlaneStream {
     void seekTo(long m) {
         const long cur = row0 >= 0 ? row0 : w->M0; const bool forward = cur <= m; const Mark* best = nullptr;
         for (const Mark& k : marks) { if (k.M0 > m) break; best = &k; }
-        if (best && (!forward || best->M0 > cur)) { dc = best->dc; w.reset(new Walker<Dec>(*best->w)); row0 = -1; rows = 0; } } };
+        for (const Mark& k : fileMarks) { if (k.M0 > m) break; if (!best || k.M0 > best->M0) best = &k; }
+        if (best && (!forward || best->M0 > cur)) { dc = best->dc; w.reset(new Walker<Dec>(h, *best->w)); row0 = -1; rows = 0; } } };
+// ---- the player's one-time check of a file and its saved checkpoints (PL-7: made only by the player's own decoding, kept only in the
+// player's folder under the SHA-256 of the whole file, never written into or sent with the media; fixed interval, not chosen by the encoder)
+static const double FILE_MARK_SECONDS = 30.0;
+struct SavedMark { long M0; size_t i; uint32_t width, code; uint64_t pos; int prevTier, prevE; std::vector<uint32_t> diff; };   // diff: index << 16 | value, for model values != 1024
+// every adaptive model value of a walker, in a fixed order (5560 values)
+template <class W, class F> static void forEachModel(W& w, F f) { size_t k = 0;
+    for (auto& m : w.coefM) { for (auto& v : m.tree) f(k++, v); for (auto& v : m.mant) f(k++, v); }
+    for (auto& m : w.expM) { for (auto& v : m.tree) f(k++, v); for (auto& v : m.mant) f(k++, v); }
+    for (auto& v : w.tierP) f(k++, v); for (auto& v : w.zlP) f(k++, v); for (auto& v : w.expZero) f(k++, v); for (auto& v : w.expSign) f(k++, v); }
+static size_t modelCount(const Hdr& h) { Walker<Dec> w(h); size_t n = 0; forEachModel(w, [&](size_t, uint16_t&) { n++; }); return n; }
+static long fileMarkRows(const Hdr& h) { return h.rate > 0 ? std::max<long>(1, std::lround(FILE_MARK_SECONDS * h.rate / ((double)part::ROOTT * N))) : 64; }
+// decodes the whole stream from its start on the calling thread, saving the state every fileMarkRows rows; true when the stream ends exactly
+// at its last byte with no symbol out of range
+static bool scanStream(const PlaneStream& ps, std::vector<SavedMark>& out) {
+    out.clear(); Dec d = ps.dc0; Walker<Dec> w(ps.h); std::vector<int32_t> buf((size_t)part::ROOTT * N, 0), tok; const long every = fileMarkRows(ps.h);
+    const bool errBefore = g_streamErr; g_streamErr = false;
+    while (!w.done()) {
+        if (w.M0 > 0 && (w.M0 / part::ROOTT) % every == 0) { SavedMark s{w.M0, d.i, d.width, d.code, (uint64_t)w.pos, w.prevTier, w.prevE, {}};
+            forEachModel(w, [&](size_t k, uint16_t& v) { if (v != 1024) s.diff.push_back((uint32_t)k << 16 | v); }); out.push_back(std::move(s)); }
+        tok.clear(); w.row(d, tok, false, buf, w.M0); }
+    const bool ok = !g_streamErr && d.i == d.n && d.over == 0; g_streamErr = errBefore; return ok; }
+static void restoreMarks(PlaneStream& ps, const std::vector<SavedMark>& saved) {
+    ps.fileMarks.clear(); if (!ps.w) return;
+    for (const SavedMark& s : saved) { PlaneStream::Mark m{s.M0, ps.dc0, std::unique_ptr<Walker<Dec>>(new Walker<Dec>(ps.h))};
+        m.dc.i = s.i; m.dc.width = s.width; m.dc.code = s.code; m.dc.over = 0; Walker<Dec>& w = *m.w; w.M0 = s.M0; w.pos = (size_t)s.pos; w.prevTier = s.prevTier; w.prevE = s.prevE;
+        std::vector<uint16_t*> at; forEachModel(w, [&](size_t, uint16_t& v) { at.push_back(&v); });
+        for (uint32_t x : s.diff) if ((x >> 16) < at.size()) *at[x >> 16] = (uint16_t)(x & 0xFFFF);
+        ps.fileMarks.push_back(std::move(m)); } }
+// runs job(i) for i < n, one thread each (at most `threads` at once); the stream-error flags of the threads are joined into the caller's
+template <class F> static void runParallel(size_t n, int threads, F job) {
+    if (n <= 1 || threads <= 1) { for (size_t i = 0; i < n; i++) job(i); return; }
+    std::vector<char> err(n, 0); bool failed = false;
+    for (size_t i0 = 0; i0 < n; i0 += (size_t)threads) { const size_t i1 = std::min(n, i0 + (size_t)threads); std::vector<std::thread> th; std::vector<char> thrown(i1 - i0, 0);
+        for (size_t i = i0; i < i1; i++) th.emplace_back([&, i] { try { g_streamErr = false; job(i); err[i] = g_streamErr ? 1 : 0; } catch (...) { thrown[i - i0] = 1; } });
+        for (auto& t : th) t.join(); for (char c : thrown) if (c) failed = true; }
+    for (char c : err) if (c) g_streamErr = true;
+    if (failed) throw std::bad_alloc(); }
 // ---- IMDCT of a sum of planes (octave segments are disjoint), sample by sample: out(i) = llround(y[N + i]) as mdct::inverse
 struct ImdctStream {
     std::vector<PlaneStream*> parts; long L = 0, K = 0, nextFrame = 0; std::vector<double> y; std::vector<i32> outRing; long outHead = 0;   // signal samples [0, outHead) produced
@@ -177,6 +218,22 @@ struct Decoder {
             for (const PlaneStream::Mark& m : from.marks) to.marks.push_back(PlaneStream::Mark{m.M0, m.dc, std::unique_ptr<Walker<Dec>>(new Walker<Dec>(to.h, *m.w))}); };
         for (int c = 0; c < 2; c++) copy(dS[c], o.dS[c]);
         for (size_t k = 0; k < fS.size() && k < o.fS.size(); k++) copy(fS[k], o.fS[k]); }
+    // every entropy stream of the chunk in a fixed order (depth L, depth R, then the frequency segments); unopened ones have no walker
+    std::vector<PlaneStream*> allStreams() { std::vector<PlaneStream*> v{&dS[0], &dS[1]}; for (auto& f : fS) v.push_back(&f); return v; }
+    // the player's one-time check: every stream decoded from start to end in parallel (route full at the master rate opens all of them),
+    // the checkpoints of FILE_MARK_SECONDS saved on the way. Returns "" or the reason the file fails the check.
+    std::string checkAll(std::vector<std::vector<SavedMark>>& saved, int threads) {
+        std::vector<PlaneStream*> ps = allStreams(); saved.assign(ps.size(), {}); std::vector<char> ok(ps.size(), 1);
+        for (PlaneStream* p : ps) if (!p->w) return "the check needs every stream (route full at the master rate)";
+        const bool errBefore = g_streamErr;
+        runParallel(ps.size(), threads, [&](size_t i) { ok[i] = scanStream(*ps[i], saved[i]) ? 1 : 0; });
+        g_streamErr = errBefore;
+        for (size_t i = 0; i < ps.size(); i++) if (!ok[i]) { saved.clear(); return "LAE chunk damaged (entropy stream " + std::to_string(i) + " does not end at its last byte): refusing to decode; the CD audio itself still plays"; }
+        return ""; }
+    // checkpoints saved by checkAll (now or in an earlier session) for the streams this route decodes
+    void useSaved(const std::vector<std::vector<SavedMark>>& saved) { std::vector<PlaneStream*> ps = allStreams();
+        if (saved.size() != ps.size()) return; for (size_t i = 0; i < ps.size(); i++) restoreMarks(*ps[i], saved[i]); }
+    int seekThreads = (int)std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
     // the read position summed over the streams this route decodes (bytes; it moves back when a seek restores a checkpoint, and two
     // calls with only reads in between differ by the bytes those reads consumed: the extension layers' share of the bitrate)
     uint64_t streamBytes() const { uint64_t n = 0; for (int c = 0; c < 2; c++) for (const PlaneStream* p : dI[c].parts) n += p->dc.i;
@@ -210,6 +267,12 @@ struct Decoder {
             for (size_t k = 0; k < decs[c].size(); k++) decs[c][k]->resetAt(sDec[k]); }
         if (mode != "16") for (int c = 0; c < 2; c++) dI[c].resetAt(sBase / N);
         if (mode != "cd24" && haveF) { mI.resetAt(sMix / N); sI.resetAt(sMix / N); }
+        // the streams catch up from their checkpoints to the first frame each will be asked for, in parallel (the same rows the next read
+        // would decode one stream after another: the output is unchanged)
+        std::vector<std::pair<PlaneStream*, long>> jobs; auto addJobs = [&](ImdctStream& is) { for (PlaneStream* p : is.parts) jobs.push_back({p, is.nextFrame}); };
+        if (mode != "16") for (int c = 0; c < 2; c++) addJobs(dI[c]);
+        if (mode != "cd24" && haveF) { addJobs(mI); addJobs(sI); }
+        runParallel(jobs.size(), seekThreads, [&](size_t i) { if (jobs[i].second < jobs[i].first->h.K) jobs[i].first->frame(jobs[i].second); });
         pos = T; return true; }
     // the frequency layer alone at the base rate (encoder's leak compensation): writes int32 L/R pairs; returns base-rate frames
     long writeLeak(FILE* fl) {

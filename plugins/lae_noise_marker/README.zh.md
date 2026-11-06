@@ -20,7 +20,7 @@ LAE 噪声标定在母带里找出长时间平稳的噪声和固定的窄线，�
 | `SPEC_LAENOISE.md` / `.zh.md` | 标定文件格式 |
 | `LICENSE` | Apache-2.0 |
 
-程序是标准 C++17，可在 Windows、Linux、macOS 上编译。设计上同一个母带在各平台得到逐字节相同的候选和标定文件；已核对的是 Windows x64 / x86 和 Linux x64（GCC、Clang、32 位）。
+程序是标准 C++17，可在 Windows、Linux、macOS 上编译。设计上同一个母带在各平台得到逐字节相同的候选和标定文件；已核对的是 Windows x64 / x86、Linux x64（GCC、Clang、32 位）和 Linux ARM64（GCC、Clang）。
 
 ## 开始之前
 

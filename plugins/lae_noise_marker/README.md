@@ -20,7 +20,7 @@ other software that does remove sound, that is your own choice and responsibilit
 | `LICENSE` | Apache-2.0 |
 
 The program is standard C++17 for Windows, Linux and macOS. It is meant to give the same candidates and the same marking file, byte for
-byte, on every platform; this is checked on Windows x64 and x86 and on Linux x64 (GCC, Clang, 32-bit).
+byte, on every platform; this is checked on Windows x64 and x86, Linux x64 (GCC, Clang, 32-bit) and Linux ARM64 (GCC, Clang).
 
 ## Before you start
 

@@ -16,7 +16,7 @@ version = 1
 
 # Specification texts and documentation.
 [[annotations]]
-path = ["README.md", "README.zh.md", "CHANGELOG.md", "SECURITY.md", "SECURITY.zh.md", "THIRD_PARTY.md", "THIRD_PARTY.zh.md", "spec/**", "docs/**", "plugins/**.md", "plugins/**.png", "java/**.md"]
+path = ["README.md", "README.zh.md", "CHANGELOG.md", "CHANGELOG.zh.md", "SECURITY.md", "SECURITY.zh.md", "THIRD_PARTY.md", "THIRD_PARTY.zh.md", "spec/**", "docs/**", "plugins/**.md", "plugins/**.png", "java/**.md"]
 precedence = "closest"
 SPDX-FileCopyrightText = "2026 mtq0605"
 SPDX-License-Identifier = "CC-BY-4.0"
@@ -61,8 +61,11 @@ path = [
   "NOTICE",
   "AUTHORS",
   "PATENTS.md",
+  "PATENTS.zh.md",
   "COMMERCIAL.md",
+  "COMMERCIAL.zh.md",
   "CONTRIBUTING.md",
+  "CONTRIBUTING.zh.md",
   ".gitignore",
   ".gitattributes",
 ]

@@ -5,6 +5,8 @@ SPDX-License-Identifier: CC0-1.0
 
 # LAE patent pledge
 
+[中文](PATENTS.zh.md)
+
 ## Pledge
 
 > The author has not filed and will not file patent applications on the LAE format, and will not assert any patent claim against any implementation of the LAE specification.

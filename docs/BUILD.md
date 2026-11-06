@@ -5,6 +5,8 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Building LAE
 
+[中文](BUILD.zh.md)
+
 ## 1. Compilers and options
 
 All code is standard C++17 and uses no third-party libraries.

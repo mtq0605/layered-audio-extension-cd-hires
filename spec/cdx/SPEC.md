@@ -1,5 +1,7 @@
 # LAE CD-Extra Encapsulation Specification (CDX)
 
+[中文](SPEC.zh.md)
+
 | | |
 |---|---|
 | Status | draft, version 0 |

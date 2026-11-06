@@ -5,6 +5,8 @@ SPDX-License-Identifier: CC0-1.0
 
 # File sizes by mode, scheme and sample rate
 
+[中文](SIZES.zh.md)
+
 Generated from [loop10_v5_release_candidate.csv](loop10_v5_release_candidate.csv); [README.md](README.md) describes how the data were measured.
 Values are **medians in MB per minute of stereo music** (1 MB = 10^6 bytes; measured on 10-second excerpts, so MB per minute = MB per excerpt × 6). "CD" is the CD layer as
 uncompressed PCM; "depth" and "freq." are the depth layer and the frequency layer; "total" is the median of CD + depth + freq. per excerpt, so it need not equal the sum of the three medians. The CD layer is identical in all modes.

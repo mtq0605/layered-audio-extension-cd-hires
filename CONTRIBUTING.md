@@ -5,6 +5,8 @@ SPDX-License-Identifier: CC0-1.0
 
 # Contributing to LAE (Layered Audio Extension)
 
+[中文](CONTRIBUTING.zh.md)
+
 Thank you for contributing. Please read this document before you open a
 pull request (PR). Contributions that do not follow these rules cannot be
 merged.

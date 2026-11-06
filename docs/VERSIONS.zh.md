@@ -10,10 +10,10 @@
 |---|---|---|---|
 | LAE Lossy（LAEY） | 容器版本 5 | [spec/lossy/SPEC.zh.md](../spec/lossy/SPEC.zh.md) | 正式 |
 | LAE Lossless（LAES） | 有效载荷版本 1 | [spec/lossless/SPEC.zh.md](../spec/lossless/SPEC.zh.md) | 正式 |
-| LAE CD-Extra 封装（CDX） | 版本 0 | [spec/cdx/SPEC.md](../spec/cdx/SPEC.md) | 草案 |
+| LAE CD-Extra 封装（CDX） | 版本 0 | [spec/cdx/SPEC.zh.md](../spec/cdx/SPEC.zh.md) | 草案 |
 | LAENOISE 标记文件 | 版本 1 | [plugins/lae_noise_marker/SPEC_LAENOISE.zh.md](../plugins/lae_noise_marker/SPEC_LAENOISE.zh.md) | 正式 |
 
-FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 注册。
+FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 的 FLAC Application Metadata Block IDs 注册表（RFC 9639，第 12.2 节）中注册。
 
 ## 组件
 
@@ -22,7 +22,7 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 注册。
 | `lae_enc`、`lae_dec`（LAEY 编码器和解码器） | 发布时的提交哈希 | LAEY 容器 v5 |
 | `laes`（LAES 工具） | 发布时的提交哈希 | LAES 有效载荷 v1 |
 | `lae_cdx`（CD-Extra 工具） | 发布时的提交哈希 | CDX v0 |
-| `lae_noise` 和噪声面板 | 发布时的提交哈希 | LAENOISE 1 |
+| `lae_noise` 和噪声面板 `noise_panel.html`（LAE Noise Marker） | 发布时的提交哈希 | LAENOISE v1 |
 | foobar2000 组件 `foo_input_lae` | 0.20 | LAEY v5、LAES v1 |
 | Kodi 插件 `audiodecoder.lae` | 0.2.5 | LAEY v5、LAES v1 |
 | DirectShow 过滤器 `dshow_lae` | 0.2.4 | LAEY v5、LAES v1 |
@@ -31,15 +31,15 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 注册。
 
 ## 兼容性
 
-- 能读取某一格式版本的组件，能读取该版本的所有文件。组件的新版本不会改变已有文件的解码输出。
-- 编码器是确定性的：相同的输入、选项和编码器提交哈希，在所有受支持的平台上得到逐字节相同的文件，因此编码器版本以提交哈希命名。更换编码器提交哈希可能改变编码出的字节，但不会改变格式版本。
-- Java 库与同一提交哈希的 C++ 工具编码出相同的文件、解码出相同的采样。
-- 现有解码器无法读取的格式改动，会提高格式版本号。
+- 能读取某一格式版本的组件，旨在能够读取该版本的所有文件，但以 [spec/COMPATIBILITY.zh.md](../spec/COMPATIBILITY.zh.md) 及该组件 README 中所列的组件和平台已知限制为限。组件的后续发布不会改变已有文件的解码输出。
+- 编码器是确定性的：相同的输入、选项和编码器提交哈希，在所有受支持的平台（[BUILD.zh.md](BUILD.zh.md) 第 3 节所列的构建）上得到逐字节相同的文件。因此，编码器版本以提交哈希标识。更换编码器提交哈希可能改变编码出的字节，但绝不会改变格式版本。
+- Java 库包含 LAEY 和 LAES 的编码器和解码器。它与同一提交哈希的 C++ 工具（`lae_enc`、`lae_dec`、`laes`）编码出相同的文件、解码出相同的采样。
+- 现有解码器无法读取的格式改动，会提高格式版本号。对于 CDX，该规则自其第一个正式版本起适用；版本 0 为草案，仍可能变化。
 
 ## 发布对照表
 
-每个发布增加一行。
+每个发布在本表中增加一行。
 
 | 发布 | 仓库提交哈希 | LAEY | LAES | CDX | LAENOISE | foobar2000 | Kodi | DirectShow | VLC |
 |---|---|---|---|---|---|---|---|---|---|
-| *下一个* | *发布时填写* | v5 | v1 | v0 | 1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |
+| *下一个* | *发布时填写* | v5 | v1 | v0 | v1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |

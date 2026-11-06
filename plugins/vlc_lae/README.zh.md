@@ -1,58 +1,56 @@
 # liblae_plugin.dll：VLC 的 LAE 输入模块
 
-[English](README.md) | **中文**
+[English](README.md) | **中文**（以英文版为准）
 
-VLC 媒体播放器 3.0（Windows 64 位）的输入（demux）模块。它打开 LAE 文件：**LAES**（LAE 无损；WAV、RF64 或 FLAC 形式）及其无损母带，和
-**LAEY**（LAE v5 WAV）。VLC 打开每个文件时都会问各输入模块"这是不是你的"，所以本模块**不论扩展名**（`.lae`、`.flac`、`.wav`）都能接
-LAE 文件，母带不用改名就能放。别的文件它只读结构（毫秒级）就退回，普通 FLAC、WAV 照旧由 VLC 自己的模块放。输出 PCM：双声道，16 位，
-或 24 位、32 位放在 32 位字里，采样率与所放的版本相同，可以跳转。
+本模块是 VLC 媒体播放器 3.0（Windows，64 位）的输入（demux）模块。它打开 LAE 文件：**LAE Lossless (LAES)** 文件（WAV、RF64 或 FLAC 形式）及其无损母带，以及 **LAE Lossy (LAEY)** 文件（WAV，容器版本 5）。VLC 打开每个文件时，都会向每个输入模块询问该文件。本模块接受**任意扩展名**（`.lae`、`.flac`、`.wav`）的 LAE 文件，因此母带无须重命名即可播放。对于其他文件，本模块只读取其结构即予拒绝，耗时为毫秒级，普通 FLAC 和 WAV 文件仍由 VLC 自身的模块播放。本模块输出双声道 PCM，样本为 16 位，或为置于 32 位字中的 24 位或 32 位样本，采样率与所播放内容的采样率相同，并支持跳转。
 
-## 安装（当前用户，不要管理员权限）
+## 安装（当前用户，无须管理员权限）
 
-运行 `lae_vlc_setup-<版本>.exe`：模块放到 `%LOCALAPPDATA%\Programs\LAE\VLC`，把这个文件夹加进你的环境变量 `VLC_PLUGIN_PATH`（VLC 3
-也从这里列的文件夹加载模块；原有的条目保留），并在 Windows 的"已安装的应用"里加一项（在那里卸载）。装好后重新打开 VLC。
+运行 `lae_vlc_setup-<version>.exe`。安装程序：
 
-也可以手动：把 `liblae_plugin.dll` 复制到 VLC 的 `plugins\demux` 文件夹（已安装的 VLC 需要管理员权限）。
+- 将模块放入 `%LOCALAPPDATA%\Programs\LAE\VLC`；
+- 将该文件夹添加到您的环境变量 `VLC_PLUGIN_PATH` 中（VLC 3 也从该变量所列的文件夹中加载模块；原有条目保留）；
+- 在 Windows 的已安装应用列表中添加一项，可从该处卸载本模块。
 
-## 放什么
+安装后重新启动 VLC。
 
-VLC > 工具 > 偏好设置 > 显示设置：全部 > 输入/编解码器 > 分流器 > LAE（都不设 = 母带，按它自己的采样率）：
+也可以手动安装本模块：将 `liblae_plugin.dll` 复制到 VLC 的 `plugins\demux` 文件夹中。对于已安装的 VLC，此操作需要管理员权限。
+
+## 播放内容
+
+设置位于 VLC > 工具 > 偏好设置 > 显示设置：全部 > 输入/编解码器 > 分流器 > LAE。若未作任何设置，则按母带自身的采样率播放母带。对于 LAES，限制范围内的母带和采样率档位依次按采样率、字长排序，母带排在采样率档位（降至较低采样率的母带）之前，并播放排在首位者，与其他 LAE 播放器相同。对于 LAES，"CD 层 + 位深层"播放基础采样率下的最佳选择，"仅 CD 层"播放核心母带。
 
 | 设置 | 含义 |
 |---|---|
-| What plays（`--lae-layers`） | 全部层 / 母带；CD 层 + 深度层（基础采样率）；只要 CD 层 |
+| What plays（`--lae-layers`） | 全部层 / 母带；CD 层 + 位深层（基础采样率）；仅 CD 层 |
 | Highest sample rate（`--lae-maxrate`） | 不限、192 kHz、96 kHz 或 48 kHz |
 | Highest word length（`--lae-maxbits`） | LAES：不限、16、24 或 32 位 |
 
 ## 规则（与其他 LAE 播放器相同）
 
-- 母带只有在完整解码并且 SHA-256 相符之后才按母带放。一个文件内容第一次打开时，一遍校验全部母带，带进度对话框。结果按整个文件的
-  SHA-256 记在 `%APPDATA%\LAE\laes_verified.txt`，这是和 foobar2000、Kodi、DirectShow 插件共用的文件夹，所以在任一播放器里校验过的文件，
-  在这里直接播放。
-- 跳转从包含该时间的块开始。块位置记在 `%APPDATA%\LAE\laes_index\`（每 16 块一个，几十 kB），从不写进媒体文件。
+- 母带只有在完整解码且与其 SHA-256 哈希值相符之后，才作为该母带播放。某一文件内容首次打开时，在一遍处理中校验全部母带，并显示进度对话框。若某一母带校验失败，则播放核心母带。校验结果存储在 `%APPDATA%\LAE` 中的文件 `laes_verified.txt` 里，以整个文件的 SHA-256 哈希值为键（每次打开时首先计算该哈希值，大文件需数秒）。文件夹 `%APPDATA%\LAE` 与 foobar2000、Kodi 和 DirectShow 播放器共用，因此在其中任一播放器中校验过的文件，在 VLC 中可立即播放。
+- 跳转从包含目标时间的块开始。块位置（每 16 块记录一个；数十 kB）存储在 `%APPDATA%\LAE\laes_index\` 中，从不写入媒体文件。
 
 ## 测试（Windows 11，VLC 3.0.24 64 位，2026-11-04）
 
-用 VLC 的串流输出（`--sout "#std{access=file,mux=wav,...}"`）把模块交出的数据原样写成 WAV，与 `laes_tool dec` / `lae_dec` 逐样本比较：
+使用 VLC 的串流输出（`--sout "#std{access=file,mux=wav,...}"`）将本模块的输出原样写入 WAV 文件，并与 `laes dec` / `lae_dec` 的输出逐样本比较：
 
-- 15 秒的 LAES 文件（`.lae`，母带 352.8 kHz / 24 位）：完全相同。采样率上限设 96 kHz：放 88.2 kHz 档，完全相同。
-- Grand（10:09，FLAC 形式，仍叫 `.flac`，4 个母带）：第一次打开校验了全部 4 个母带，然后放母带 1（352.8 kHz / 32 位），完全相同。
-  从 300 秒开始放：从那个采样起完全相同。
-- LAEY 文件（`.wav`）：与 `lae_dec` 完全相同（全部层，352.8 kHz）。
-- 普通 WAV：不接，由 VLC 自己的 WAV 模块放。
-- VLC 的串流输出每个文件都丢掉最后 40～50 毫秒（用它自己的 WAV 模块也一样）；比较覆盖到那里为止。
-- VLC 正常播放时会用自己的重采样器让声卡跟上时钟，所以送到声卡的不是逐位相同的。这是 VLC 对所有格式的做法；本模块交出的样本是精确的。
+- 一个 15 秒的 LAES 文件（`.lae`；母带 352.8 kHz / 24 位）：完全相同。将采样率上限设为 96 kHz 时，播放母带的 88.2 kHz 采样率档位：完全相同。
+- Grand（LAE 发布版本中的一首演示曲目；10:09；FLAC 形式，仍命名为 `.flac`；4 个母带）：首次打开时校验了全部 4 个母带，随后播放母带 1（352.8 kHz / 32 位）：完全相同。从 300 s 处开始播放：自该样本起完全相同。
+- 一个 LAEY 文件（`.wav`）：与 `lae_dec` 的输出完全相同（全部层，352.8 kHz）。
+- 一个普通 WAV 文件：本模块不接受；由 VLC 自身的 WAV 模块播放。
+- VLC 的串流输出会丢弃每个文件的最后 40-50 ms，使用其自身的 WAV 模块时亦然。比较覆盖至该点之前的全部内容。
+- 正常播放时，VLC 运行其自身的重采样器以使声卡保持时钟同步，因此到达声卡的信号并非逐位精确。VLC 对所有格式均如此处理；本模块输出的样本是精确的。
 
-## 编译
+## 构建
 
 ```bat
-plugins\vlc_lae\build_vlc.cmd <VLC sdk 文件夹> <输出文件夹>
-plugins\vlc_lae\build_setup.cmd <VLC sdk 文件夹> <输出文件夹>
+plugins\vlc_lae\build_vlc.cmd <VLC sdk folder> <output folder>
+plugins\vlc_lae\build_setup.cmd <VLC sdk folder> <output folder>
 ```
 
-VS2022 Build Tools，x64。`sdk` 文件夹（头文件和 `libvlccore.lib`）在 VLC 64 位的 7z 包里（`vlc-3.0.x-win64.7z`；zip 包里没有）。LAE 解码器用
-各自核对过的编译选项（`lae_api` `/fp:precise`，`laes_api` `/fp:strict`）。模块对应一个 VLC 系列（3.0），VLC 4 需要重新编译。
+构建需要 VS2022 Build Tools（x64）。`sdk` 文件夹（头文件和 `libvlccore.lib`）包含在 VLC 的 64 位 7z 包（`vlc-3.0.x-win64.7z`）中，zip 包中则没有。LAE 解码器使用各自经过验证的编译器选项进行编译（`lae_api` 使用 `/fp:precise`，`laes_api` 使用 `/fp:strict`）。本模块的每次构建只对应一个 VLC 系列（3.0）；VLC 4 将需要重新构建。
 
 ## 许可
 
-源文件是 Apache-2.0。模块二进制文件含有 VLC 插件头文件里的代码（LGPL-2.1-or-later），整体按 LGPL-3.0-or-later 分发。安装程序是 Apache-2.0。
+源文件采用 Apache-2.0 许可。模块二进制文件包含来自 VLC 插件头文件的代码（LGPL-2.1-or-later），其整体按 LGPL-3.0-or-later 分发。安装程序（`setup/setup.cpp`）采用 Apache-2.0 许可；其所安装的模块保持上述许可。

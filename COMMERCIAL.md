@@ -5,6 +5,8 @@ SPDX-License-Identifier: CC0-1.0
 
 # Commercial licence for the LAE encoder
 
+[中文](COMMERCIAL.zh.md)
+
 ## Which files are dual-licensed
 
 The encoder-side sources carry the SPDX expression

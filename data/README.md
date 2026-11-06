@@ -5,6 +5,8 @@ SPDX-License-Identifier: CC0-1.0
 
 # Measurement data
 
+[中文](README.zh.md)
+
 ## Contents
 
 - [SIZES.md](SIZES.md): Readable size tables (MB per minute) for every mode, scheme and sample rate, generated from the CSV file described below.

@@ -1,5 +1,7 @@
 # Changelog
 
+[中文](CHANGELOG.zh.md)
+
 This file records the notable changes to LAE (Layered Audio Extension), its lossy tier LAE Lossy (LAEY) and its lossless tier LAE Lossless (LAES), newest first.
 
 ## Unreleased

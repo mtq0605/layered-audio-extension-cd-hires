@@ -1,59 +1,64 @@
-# lae_source.ax —— DirectShow 的 LAE 源滤镜
+# lae_source.ax：DirectShow 的 LAE 源滤镜
 
-[English](README.md) | **中文**
+[English](README.md) | **中文**（以英文版为准）
 
-给 PotPlayer、MPC-BE、MPC-HC、Windows Media Player（旧版）等 DirectShow 播放器用的源滤镜（Windows x64）。打开 LAE 文件：**LAES**
-（LAE 无损；WAV、RF64 或 FLAC 形式）及其中的无损母带，以及 **LAEY**（LAE v5 WAV）。输出未压缩 PCM（2 声道；16 位，或 24 / 32 位的
-WAVE_FORMAT_EXTENSIBLE），采样率就是所放内容自己的，支持跳转。按 DirectShow 接口文档为本项目编写（不用 base classes，没有第三方代码）。
+`lae_source.ax` 是供 PotPlayer、MPC-BE、MPC-HC、Windows Media Player（旧版）及其他 DirectShow 播放器使用的 DirectShow 源滤镜（Windows x64）。已测试 PotPlayer 和 MPC-BE（见[测试](#tested-windows-11)），未测试 MPC-HC 和 Windows Media Player。它可打开两类 LAE 文件：
 
-## 安装（当前用户，不需要管理员权限）
+- **LAES**（LAE 无损；WAV、RF64 或 FLAC 形式），包括其中的无损母带。
+- **LAEY**（LAE 有损；WAV，容器版本 5）。
 
-运行 `lae_dshow_setup-<版本>.exe`：把滤镜放到 `%LOCALAPPDATA%\Programs\LAE\DirectShow`、注册，并在 Windows 的"应用"列表里加一项（在那里卸载）。或者手动：
+该滤镜输出未压缩 PCM，支持跳转，采样率为所播放内容的采样率（见[播放内容](#what-plays)）：
+
+- 2 声道（LAE 文件为立体声）。
+- 16 位样本，或以 WAVE_FORMAT_EXTENSIBLE 形式置于 32 位容器中的 24 位和 32 位样本。
+
+不采用打包为 3 字节的 24 位样本，因为 MPC-BE 的音频链路会将其变为噪声。该滤镜依据 DirectShow 接口文档为本项目编写，未使用 base classes，也未使用第三方代码。
+
+## 安装（当前用户，无需管理员权限）
+
+运行 `lae_dshow_setup-<version>.exe`。安装程序将滤镜放入 `%LOCALAPPDATA%\Programs\LAE\DirectShow`，完成注册，并在 Windows 的已安装应用列表中添加一项。可在该列表中卸载滤镜。也可以手动注册滤镜：
 
 ```bat
 regsvr32 lae_source.ax
 ```
 
-注册滤镜（COM 类、DirectShow 滤镜目录、扩展名 `.lae` 的源）；没有管理员权限时只注册到当前用户（`HKCU\Software\Classes`）。`.flac` / `.wav` 形式的 LAE 文件在任何播放器里照样放核心母带（可以是 CD 兼容的）；要放母带，可以改名为
-`.lae`，或者在播放器里加上这个滤镜：
+该命令注册 COM 类、DirectShow 滤镜目录中的条目，并将该滤镜注册为 `.lae` 扩展名的源。无管理员权限时，注册仅对当前用户有效（`HKCU\Software\Classes`）。
+
+扩展名为 `.flac` 或 `.wav` 的 LAE 文件在任何播放器中仍播放其核心母带（可以是 CD 兼容的）。若要播放其母带，可将文件改名为 `.lae`，或在播放器中添加该滤镜：
 
 - PotPlayer（64 位）：参数选项（F5）→ 滤镜 → 全局滤镜优先权 → 添加外部滤镜 → `lae_source.ax` → 强制使用（已测试）。
 - MPC-BE / MPC-HC（64 位）：选项 → 外部滤镜 → 添加滤镜 → LAE source → 优先。
 
-卸载：`regsvr32 /u lae_source.ax`。
+注销滤镜时，运行 `regsvr32 /u lae_source.ax`。
 
-## 放哪一个
+## 播放内容
 
-注册表 `HKCU\Software\LAE\DirectShow` 下的 DWORD 值（都不设 = 母带本身的采样率）：
+播放由 `HKCU\Software\LAE\DirectShow` 下的 DWORD 注册表值控制。若未设置任何值，滤镜以母带自身的采样率播放母带。在 LAES 文件中下列限制所允许的母带和采样率档位中，滤镜播放采样率最高者，其次为字长最长者，母带优先于采样率档位；若 `maxbits` 小于核心母带的字长且无其他内容符合条件，则以基础采样率播放 16 位派生母带。
 
 | 值 | 含义 |
 |---|---|
-| `layers` | 0 全部层 / 母带；1 CD 层 + 深度层（基础采样率）；2 只放 CD 层 |
-| `maxrate` | 最高采样率（Hz），0 = 不限（例如声卡或渲染器接受不了更高时设 96000） |
-| `maxbits` | LAES：最高位深，0 = 不限，16、24 或 32 |
+| `layers` | 0：全部层 / 母带；1：CD 层和位深层（基础采样率）；2：仅 CD 层 |
+| `maxrate` | 最高采样率，单位 Hz；0 = 不限（例如，对于无法接受更高采样率的声卡或渲染器，设为 96000） |
+| `maxbits` | 仅适用于 LAES：最高字长；0 = 不限，16、24 或 32 |
 
 ## 规则（与 foobar2000 插件相同）
 
-- 母带要整个解码一遍、和 SHA-256 一致，才按母带播放。每份文件内容第一次打开时，一遍校验全部母带，带一个小进度窗口（Grand，10 分钟、
-  4 个母带：测试机上约 1 分钟）；结果按整个文件的 SHA-256 记在 `%APPDATA%\LAE\laes_verified.txt`，以后打开只要几秒（文件检查）。
-- 跳转从包含该时间的块开始；块位置存在 `%APPDATA%\LAE\laes_index\`（每 16 块记一个，几十 kB；从不写进音频文件）。
+- 母带仅在完整解码且其 SHA-256 一致之后，才作为该母带播放。某一文件内容首次打开时，一次性校验全部母带，并显示一个小进度窗口。对于 Grand（10 分钟，4 个母带），在测试机上约需 1 分钟。结果按整个文件的 SHA-256 存储于 `%APPDATA%\LAE\laes_verified.txt`，因此以后打开仅需几秒（文件检查）。
+- 跳转从包含所请求时间的块开始。块位置（每 16 个块记录一次，数十 kB）存储于 `%APPDATA%\LAE\laes_index\`，从不写入媒体文件。
 
-## 测试（Windows 11，用系统自带音频渲染器的 DirectShow 图）
+## 测试（Windows 11）
 
-- 一个 15 秒的 LAES 文件和 Grand（10:09，4 个母带，FLAC 形式）：载入、播放、跳到 60 % 立即生效；Grand 第一次打开校验全部母带（63 秒），
-  第二次 3 秒打开。
-- PotPlayer 64 位（2026-11-03）：作为外部滤镜加入（强制使用）；15 秒的 LAES 文件以 352.8 kHz / 24 bit 放出母带（PotPlayer 显示 PCM 16934 kb/s）；
-  播放中跳转正常。系统自带的音频渲染器不接受 352.8 kHz（可用 maxrate 限制）。
-- MPC-BE 1.9.2 x64（便携版，2026-11-03），外部滤镜设为优先：24 位打包成 3 字节时它的音频链路放出噪声（声卡回录：每秒约 15000 次过零，音乐约 750）；改为 24 位放在 32 位容器里后正常放音乐（回录每秒约 700–830 次，与 PotPlayer 相同）。交出的字节与解出的母带一致（24 位为 ×256）。
+- 使用测试程序 `test_dshow.cpp`（以 `IGraphBuilder::Render` 构建的 DirectShow 图；未记录其所选用的渲染器），对一个 15 秒的 LAES 文件和 Grand（10:09，4 个母带，FLAC 形式）进行测试：两者均能载入、播放，并立即跳转至 60 %。Grand 首次打开时校验全部母带（63 秒）；第二次打开用时 3 秒。
+- PotPlayer 64 位（2026-11-03），将滤镜作为外部滤镜添加（强制使用）：一个 15 秒的 LAES 文件以 352.8 kHz / 24 bit 播放其母带（PotPlayer 显示 PCM 16934 kb/s），播放中跳转正常。若播放器的音频渲染器不接受 352.8 kHz，可设置 `maxrate`。
+- MPC-BE 1.9.2 x64（便携版，2026-11-03），将滤镜作为外部滤镜设为优先：采用打包为 3 字节的 24 位样本时，其音频链路播放出噪声。声卡回录显示每秒约 15000 次过零，而非约 750 次。采用置于 32 位容器中的 24 位样本时，可正常播放音乐，回录中每秒约 700-830 次过零，与 PotPlayer 相同。输出的字节与解码所得母带一致（24 位为 x 256）。
 
 ## 编译
 
 ```bat
-plugins\dshow_lae\build_dshow.cmd <输出文件夹>
+plugins\dshow_lae\build_dshow.cmd <output folder>
 ```
 
-VS2022 生成工具，x64；Windows SDK 自带的 DirectShow 头文件和 `strmiids.lib`。LAE 解码器用各自验证过的选项（liblae `/fp:precise`，
-LAES 解码器 `/fp:strict`）。
+要求：VS2022 Build Tools（x64），以及 Windows SDK 中的 DirectShow 头文件和 `strmiids.lib`。LAE 解码器以各自经过验证的选项编译：liblae 使用 `/fp:precise`，LAES 解码器使用 `/fp:strict`。
 
 ## 许可
 

@@ -20,9 +20,14 @@ SPDX-License-Identifier: CC0-1.0
   Audio Extension), in every published version. This includes:
   - LAE Lossy (LAEY), specified in
     [spec/lossy/SPEC.md](spec/lossy/SPEC.md);
-  - LAE Lossless (LAES), whose design document is published in
-    [spec/lossless/DESIGN.md](spec/lossless/DESIGN.md). Its normative
-    specification is not yet written.
+  - LAE Lossless (LAES), specified in
+    [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (its earlier design
+    document [spec/lossless/DESIGN.md](spec/lossless/DESIGN.md) is
+    superseded);
+  - the CD-Extra encapsulation, specified in
+    [spec/cdx/SPEC.md](spec/cdx/SPEC.md);
+  - the LAENOISE marking file, specified in
+    [plugins/lae_noise_marker/SPEC_LAENOISE.md](plugins/lae_noise_marker/SPEC_LAENOISE.md).
 - **"Any implementation"** means any implementation, complete or partial,
   made by anyone for any purpose. This includes commercial and
   closed-source implementations. It applies whether or not the

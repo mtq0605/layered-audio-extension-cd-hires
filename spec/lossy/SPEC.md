@@ -5,7 +5,7 @@
 
 **English** | [中文](SPEC.zh.md)
 
-**Status:** Draft for public review.
+**Status:** Stable, container version 5.
 **Applies to:** LAE Lossy (LAEY), the lossy tier of the LAE (Layered Audio Extension) format family, container version 5.
 **Licence of this document:** CC BY 4.0 (see Section 15). Copyright (c) 2026 mtq0605.
 

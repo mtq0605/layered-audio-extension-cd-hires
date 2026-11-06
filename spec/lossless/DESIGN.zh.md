@@ -873,7 +873,7 @@ LAE Lossy 中仅为管理量化误差而存在的工具在无损等级中不起�
 
 ## 参考文献
 
-- **[SPEC]** LAE Lossy 规范（SPEC.md），供公开评审的草案，容器版本 5。
+- **[SPEC]** LAE Lossy 规范（SPEC.md），正式，容器版本 5。
 - **[LAEY]** LAE：CD 的分层高解析度扩展。LAE Lossy 工作论文，容器版本 5，2026-10-17。
 - **[FLAC]** FLAC，Free Lossless Audio Codec。格式规范（元数据块、APPLICATION 块、STREAMINFO MD5）。
 - **[RIFF]** Resource Interchange File Format / WAVE。

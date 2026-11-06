@@ -871,7 +871,7 @@ Both tiers can be carried in the same container.
 
 ## References
 
-- **[SPEC]** LAE Lossy specification (SPEC.md), draft for public review, container version 5.
+- **[SPEC]** LAE Lossy specification (SPEC.md), stable, container version 5.
 - **[LAEY]** LAE: A Layered High-Resolution Extension of the Compact Disc. LAE Lossy working paper, container version 5, 2026-10-17.
 - **[FLAC]** FLAC, Free Lossless Audio Codec. Format specification (metadata blocks, APPLICATION block, STREAMINFO MD5).
 - **[RIFF]** Resource Interchange File Format / WAVE.

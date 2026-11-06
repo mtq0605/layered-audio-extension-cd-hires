@@ -19,7 +19,7 @@
 
 自首次发布（v5-2026-10-18）以来，仓库新增了：编码器对独立 CD 的对齐；整盘规划器；CD-Extra 封装工具 `lae_cdx`；带有 C 接口的解码器库；foobar2000 组件；无损层级 LAES；VLC、Kodi 和 DirectShow 插件；Java 库；以及噪声标记（见上方版本表和 [CHANGELOG.zh.md](CHANGELOG.zh.md)）。容器仍为版本 5。比特流、解码过程和有损规范均未改变。
 
-**规范性文本：**比特流和解码过程由 [spec/lossy/SPEC.zh.md](spec/lossy/SPEC.zh.md) 规定，该文件目前是供公开评审的草案。若 SPEC.md 未作规定或存在歧义，以参考解码器为规范依据。本文为资料性文本。
+**规范性文本：**比特流和解码过程由 [spec/lossy/SPEC.zh.md](spec/lossy/SPEC.zh.md) 规定，该文件对容器版本 5 为正式版。若 SPEC.md 未作规定或存在歧义，以参考解码器为规范依据。本文为资料性文本。
 
 扩展在 CD-Extra 上、在单独文件中以及在数据流中的封装不属于容器版本 5 的范围。其规范以草案形式发布于 [spec/cdx/SPEC.zh.md](spec/cdx/SPEC.zh.md)。
 

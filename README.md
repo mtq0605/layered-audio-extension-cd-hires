@@ -19,7 +19,7 @@ All versions use LAEY container version 5 and the same decoding process: LAEY fi
 
 Since the first release (v5-2026-10-18), the repository has added: alignment of an independent CD in the encoder; a whole-disc planner; the CD-Extra encapsulation tool `lae_cdx`; a decoder library with a C interface; the foobar2000 component; the lossless tier LAES; the VLC, Kodi and DirectShow plug-ins; the Java library; and noise marking (see the Versions table above and [CHANGELOG.md](CHANGELOG.md)). The container remains version 5. The bitstream, the decoding process and the lossy specification are unchanged.
 
-**Normative text:** the bitstream and the decoding process are specified in [spec/lossy/SPEC.md](spec/lossy/SPEC.md), which is currently a draft for public review. Where SPEC.md is silent or ambiguous, the reference decoder is normative. This document is informative.
+**Normative text:** the bitstream and the decoding process are specified in [spec/lossy/SPEC.md](spec/lossy/SPEC.md), which is stable for container version 5. Where SPEC.md is silent or ambiguous, the reference decoder is normative. This document is informative.
 
 The encapsulation of the extension on CD-Extra, in separate files and in streams, lies outside container version 5. It is specified, as a draft, in [spec/cdx/SPEC.md](spec/cdx/SPEC.md).
 

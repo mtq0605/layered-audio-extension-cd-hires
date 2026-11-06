@@ -54,6 +54,36 @@ src/laes_stream_enc.h | mtq0605 | original | -
 src/laes_tool.cpp    | mtq0605 | original | -
 src/laes_selftest.h  | mtq0605 | original | -
 
+# Java library (java/src/com/lae/): ports of the encoder files above, same licence. Delivered and checked byte-identical with the C++ tools.
+
+java/src/com/lae/laes/CStd.java            | mtq0605 | original (C standard library helpers for the port) | -
+java/src/com/lae/laes/CodecEnc.java        | mtq0605 | original (port of src/laes_codec_enc.h) | -
+java/src/com/lae/laes/FlacEnc.java         | mtq0605 | original (port of src/laes_flac_enc.h) | -
+java/src/com/lae/laes/LaesEncoder.java     | mtq0605 | original (port of src/laes_tool.cpp, encoder) | -
+java/src/com/lae/laes/LaesTags.java        | mtq0605 | original (port of src/laes_tags.h) | -
+java/src/com/lae/laes/LaesTool.java        | mtq0605 | original (port of src/laes_tool.cpp, command line) | -
+java/src/com/lae/laes/LaeyAutoAligner.java | mtq0605 | original (port of src/laes_tool.cpp, automatic alignment) | -
+java/src/com/lae/laes/Par.java             | mtq0605 | original (worker threads for the port) | -
+java/src/com/lae/laes/StreamEnc.java       | mtq0605 | original (port of src/laes_stream_enc.h) | -
+java/src/com/lae/laey/BaseBlk.java         | mtq0605 | original (port of src/base_blk.cpp) | -
+java/src/com/lae/laey/BaseLayer.java       | mtq0605 | original (port of src/base_layer.cpp) | -
+java/src/com/lae/laey/BlkIo.java           | mtq0605 | original (port of src/blk_io.h) | -
+java/src/com/lae/laey/CdAlign.java         | mtq0605 | original (port of src/cd_align.cpp) | -
+java/src/com/lae/laey/EncEnv.java          | mtq0605 | original (port of src/lae_enc.cpp, environment) | -
+java/src/com/lae/laey/EncIo.java           | mtq0605 | original (port of src/enc_io.h) | -
+java/src/com/lae/laey/Fmt.java             | mtq0605 | original (text formatting for the port) | -
+java/src/com/lae/laey/LaeCd.java           | mtq0605 | original (port of src/lae_enc.cpp, independent CD) | -
+java/src/com/lae/laey/LaeEncTool.java      | mtq0605 | original (port of src/lae_enc.cpp, command line) | -
+java/src/com/lae/laey/LaeEncoder.java      | mtq0605 | original (port of src/lae_enc.cpp) | -
+java/src/com/lae/laey/LaeRetag.java        | mtq0605 | original (port of src/lae_enc.cpp, lae_enc tag) | -
+java/src/com/lae/laey/LaeyEncoder.java     | mtq0605 | original (encoder front end for the port) | -
+java/src/com/lae/laey/LossyBlk.java        | mtq0605 | original (port of src/lossy_blk.cpp) | -
+java/src/com/lae/laey/PadBlk.java          | mtq0605 | original (port of src/pad_blk.cpp) | -
+java/src/com/lae/laey/PartBlk.java         | mtq0605 | original (port of src/part_blk.cpp) | -
+java/src/com/lae/laey/Partition.java       | mtq0605 | original (port of src/partition.h) | -
+java/src/com/lae/laey/RoutesBlk.java       | mtq0605 | original (port of src/routes_blk.cpp) | -
+java/src/com/lae/laey/WavIn.java           | mtq0605 | original (port of src/wav_in.h) | -
+
 ## Use of AI tools
 
 # Parts of the code and of the documentation were drafted with an AI

@@ -12,6 +12,7 @@
 |---|---|---|
 | 编译器（MSVC、GCC、Clang）的 C++17 标准库和 C 运行库 | 编译器厂商的运行库条款 | 链接使用；Windows 版本静态链接 Microsoft C 运行库（`/MT`） |
 | Windows 系统库（`kernel32`、`user32`、`shell32`、`ole32`、`advapi32`） | 随 Windows 提供 | 仅在 Windows 上链接 |
+| Windows 光盘镜像服务 IMAPI2 | 随 Windows 提供 | `tools/laes_disc.ps1` 通过 COM 调用，不随附分发 |
 
 以下为独立实现，未使用所提及项目的代码：
 

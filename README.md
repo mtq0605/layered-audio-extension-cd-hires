@@ -1775,7 +1775,25 @@ Installation, settings and building are described in the README of each plug-in 
 
 Building requires third-party SDKs or headers that are not part of this repository: the foobar2000 SDK, the VLC 3.0 SDK, or Kodi's `kodi-dev-kit` headers ([THIRD_PARTY.md](THIRD_PARTY.md)). The LAE decoders are compiled with their own verified options.
 
-### 14.9 Demonstration audio and verification
+### 14.9 Streaming export and data discs (LAES)
+
+`laes_export` (`src/laes_export.cpp`) is a tool for streaming services. The service keeps the LAES file and sends each listener a plain FLAC file of the choice that listener asked for (the core master, a master or a rate level), so the listener needs no LAES decoder. The tool decodes only what is asked for; it does not choose a quality by itself and does not follow the listener's playback.
+
+```
+laes_export <in> --list
+laes_export <in> <choice> <out.flac> [--from=<s>] [--len=<s>] [--index=<record>]
+laes_export <in> <choice> --seg=<s> --dir=<folder> [--index=<record>]
+```
+
+A whole-track export of a master is checked against its SHA-256 before anything is written. Every output is an ordinary FLAC file whose samples are exactly those of the choice, with their MD5 in STREAMINFO and tags that name the source (`LAES_CHOICE`, `LAES_FILE_SHA256`, `LAES_MASTER_SHA256`, `LAES_FIRST_FRAME`). `laes_export` contains the FLAC writer of the encoder and is licensed like the encoder.
+
+`tools/laes_disc.ps1` (Windows) makes a DVD or BD data-disc image of an album of LAES files with the disc-image service of Windows (IMAPI2): the files unchanged, a playlist and a SHA-256 list. It is a data disc, not BD-Video or DVD-Audio. Any player that reads FLAC or WAV files from a disc plays the core master of each file; an LAES player plays the masters.
+
+```
+powershell -ExecutionPolicy Bypass -File tools\laes_disc.ps1 -Album <folder> -Out <image.iso> -Disc DVD5|DVD9|BD25|BD50|BD100 [-Label <name>] [-Export <laes_export.exe>]
+```
+
+### 14.10 Demonstration audio and verification
 
 Each release attaches three works by the author (*Grand*, *Tolled*, *LAES demo*) in every form, together with the masters they were made from, so that anyone can check the formats independently:
 
@@ -1845,7 +1863,7 @@ The alignment of an independent CD and the encapsulation use the following publi
 | Player plug-in sources (`plugins/`) | Apache License 2.0. The built Kodi add-on is distributed under GPL-3.0-or-later, because it is built with Kodi's GPL headers. Third-party code in built packages: [THIRD_PARTY.md](THIRD_PARTY.md). |
 | Java library (`java/`) | As for the C++ sources: decoders and shared helpers Apache-2.0; encoder files GPL-3.0-or-later or a commercial licence |
 | Demonstration audio and masters attached to releases | All rights reserved: listening and verification only ([AUDIO_LICENSE.md](AUDIO_LICENSE.md)). The code and documentation licences do not apply. |
-| Reference encoder (encoder-side sources in `src/`, including the alignment `src/cd_align.cpp` and the planner `src/cd_plan.cpp`) | GNU General Public License v3.0 or later (GPL-3.0-or-later), or a commercial licence from the author ([COMMERCIAL.md](COMMERCIAL.md)) |
+| Reference encoder (encoder-side sources in `src/`, including the alignment `src/cd_align.cpp`, the planner `src/cd_plan.cpp`, the LAES tool `src/laes_tool.cpp` and the streaming export `src/laes_export.cpp`) | GNU General Public License v3.0 or later (GPL-3.0-or-later), or a commercial licence from the author ([COMMERCIAL.md](COMMERCIAL.md)) |
 | Test scripts, build files, CI configuration | Apache License 2.0 |
 | Conformance vectors, test data and the vector manifest; measurement data in `data/` | Creative Commons Zero v1.0 Universal (CC0-1.0). The vectors are generated signals only; no third-party recordings are included. |
 | Project files (`LICENSE`, `NOTICE`, `AUTHORS`, `PATENTS.md`, `COMMERCIAL.md`, `CONTRIBUTING.md`, `REUSE.toml`) | CC0-1.0 |

@@ -15,6 +15,7 @@ their location as an argument. When a built binary of such a component is distri
 |---|---|---|
 | C++17 standard library and C runtime of the compiler (MSVC, GCC, Clang) | Compiler vendor's runtime terms | Linked; the Windows builds link the Microsoft C runtime statically (`/MT`) |
 | Windows system libraries (`kernel32`, `user32`, `shell32`, `ole32`, `advapi32`) | Part of Windows | Linked on Windows only |
+| Windows disc-image service IMAPI2 | Part of Windows | Used by `tools/laes_disc.ps1` through COM; nothing is distributed |
 
 Independent implementations, no code taken from the projects named:
 

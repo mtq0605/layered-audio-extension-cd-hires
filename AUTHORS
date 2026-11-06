@@ -53,6 +53,7 @@ src/laes_flac_enc.h  | mtq0605 | original (FLAC writer from RFC 9639; no libFLAC
 src/laes_stream_enc.h | mtq0605 | original | -
 src/laes_tool.cpp    | mtq0605 | original | -
 src/laes_selftest.h  | mtq0605 | original | -
+src/laes_export.cpp  | mtq0605 | original (streaming export; contains the FLAC writer of src/laes_flac_enc.h) | -
 
 # Java library (java/src/com/lae/): ports of the encoder files above, same licence. Delivered and checked byte-identical with the C++ tools.
 

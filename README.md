@@ -1811,7 +1811,7 @@ laes verify Grand_LAES.flac Grand_352k8_32bit.wav Grand_352k8_24bit.wav Grand_17
 
 `laes verify` reports `IDENTICAL` for every master that equals the decoded master sample for sample. `laes dec` writes the core master as `core.wav`; for `Grand_LAES.wav` and `Grand_LAES.lae`, it equals the CD master `Grand_44k1_16bit.flac` sample for sample. The release notes list the SHA-256 of every file and of the samples of every master.
 
-**LAEY.** The CD layer of an LAEY file derived from a master is the encoder's own derivation; the full decode is compared with the master by measurement (`cmp_wav`). The disc images are restored to the LAEY files with `lae_cdx read` (Section 10.8), and the restored files are compared byte for byte with the included LAEY files.
+**LAEY.** The CD layer of an LAEY file derived from a master is the encoder's own derivation; the full decode is compared with the master by measurement (`cmp_wav`). The disc images are restored to the LAEY files with `lae_cdx read` (Section 10.8), and the restored files are compared with the included LAEY files: their `data` chunk (the CD layer) and `LAE ` chunk are identical byte for byte (the tags are not stored on the disc).
 
 The audio is not covered by the code or documentation licences: it may be downloaded, listened to and used to test and verify the formats, and for no other purpose ([AUDIO_LICENSE.md](AUDIO_LICENSE.md)).
 

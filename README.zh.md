@@ -1811,7 +1811,7 @@ laes verify Grand_LAES.flac Grand_352k8_32bit.wav Grand_352k8_24bit.wav Grand_17
 
 对于每个与解码所得母带逐采样相等的母带，`laes verify` 报告 `IDENTICAL`。`laes dec` 将核心母带写为 `core.wav`；对于 `Grand_LAES.wav` 和 `Grand_LAES.lae`，它与 CD 母带 `Grand_44k1_16bit.flac` 逐采样相等。发布说明列出每个文件以及每个母带采样的 SHA-256。
 
-**LAEY。**由母带派生的 LAEY 文件的 CD 层是编码器自身的派生结果；完整解码通过测量（`cmp_wav`）与母带比较。光盘镜像用 `lae_cdx read`（第 10.8 节）还原为 LAEY 文件，并将还原所得文件与随附的 LAEY 文件逐字节比较。
+**LAEY。**由母带派生的 LAEY 文件的 CD 层是编码器自身的派生结果；完整解码通过测量（`cmp_wav`）与母带比较。光盘镜像用 `lae_cdx read`（第 10.8 节）还原为 LAEY 文件，并将还原所得文件与随附的 LAEY 文件比较：二者的 `data` 块（CD 层）和 `LAE ` 块逐字节相同（标签不存储在光盘上）。
 
 这些音频不受代码或文档许可证的约束：可以下载、收听，并用于测试和验证这些格式，不得用于其他用途（[AUDIO_LICENSE.md](AUDIO_LICENSE.zh.md)）。
 

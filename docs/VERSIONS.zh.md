@@ -42,4 +42,4 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 的 FLAC Applicat
 
 | 发布 | 仓库提交哈希 | LAEY | LAES | CDX | LAENOISE | foobar2000 | Kodi | DirectShow | VLC |
 |---|---|---|---|---|---|---|---|---|---|
-| *下一个* | *发布时填写* | v5 | v1 | v0 | v1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |
+| v5-2026-11-07 | 标签 `v5-2026-11-07` | v5 | v1 | v0 | v1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |

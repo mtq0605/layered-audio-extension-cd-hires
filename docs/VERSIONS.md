@@ -49,4 +49,4 @@ Each release adds one row to this table.
 
 | Release | Repository commit | LAEY | LAES | CDX | LAENOISE | foobar2000 | Kodi | DirectShow | VLC |
 |---|---|---|---|---|---|---|---|---|---|
-| *next* | *set at release* | v5 | v1 | v0 | v1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |
+| v5-2026-11-07 | tag `v5-2026-11-07` | v5 | v1 | v0 | v1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |

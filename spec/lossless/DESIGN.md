@@ -4,6 +4,8 @@ Specification text: CC BY 4.0. (c) 2026 mtq0605.
 
 **Design status: planned; the normative specification will follow.**
 
+**Superseded:** the normative description of LAES is now [SPEC.md](SPEC.md) (stable, payload version 1). This document is kept as the design record of 2026-10-18.
+
 This document is informative. It discloses the design of LAE Lossless as of 2026-10-18. The outline is stable, but details may still change. Decisions that have not yet been taken are marked **open** and are collected in Section 11.
 
 ---
@@ -31,14 +33,14 @@ LAE has two tiers. Both share one layer model and one set of container principle
 | LAE Lossy | LAEY | Extension layers are coded with quantisation. The error is bounded and known to the decoder. |
 | LAE Lossless | LAES | Every layer is coded exactly. A decoder that holds all layers reproduces the master bit for bit. |
 
-In essence, LAE Lossless is LAE Lossy adjusted and optimised for exactness. It keeps the following elements of LAE Lossy unchanged:
+In essence, LAE Lossless is LAE Lossy adjusted and optimised for exactness. It keeps the following elements of LAE Lossy:
 
 - the CD layer;
-- the split into a depth layer at the base rate and octave layers at the higher rates;
+- the split into a depth layer at the base rate and layers for the higher rates (in LAE Lossless, critically sampled octave layers instead of one frequency layer; Section 12);
 - the container principles;
 - the encoder's analysis tools.
 
-The one change is in the coding of the extension layers, which becomes exact instead of quantised.
+The main change is in the coding of the extension layers, which becomes exact instead of quantised; the other differences are listed in Section 12.
 
 Parts shared with LAE Lossy are not repeated here; the text refers instead to the LAE Lossy specification, SPEC.md. This applies in particular to:
 
@@ -70,7 +72,7 @@ The notation follows SPEC.md and the LAE Lossy working paper.
 | $R = R_0 2^n$ | Master rate. |
 | $x$ | Master signal at rate $R$, as 24-bit integers. |
 | $\mathcal{D}$, $\mathcal{U}$ | Integer half-band decimation and interpolation by $2^n$ (SPEC.md Section 10). |
-| $b = \mathcal{D}(x)$ | Unclipped 24-bit base word at rate $R_0$. |
+| $b = \mathcal{D}(x)$ | Unclipped base word at rate $R_0$, in 24-bit units; it may exceed the 24-bit range (Section 4.3). |
 | $c$ | 16-bit CD samples (CD16, Level 0). |
 | $d$ | Regenerated TPDF dither; non-zero only in flagged blocks. |
 | $v$ | CD path in 24-bit units, as defined in SPEC.md. Every decoder can compute it from $c$ and the dither flags alone. |
@@ -146,7 +148,7 @@ Lossy files are always flagged as lossy and are never called lossless. Only a fi
 
 ### 3.1 Two axes
 
-The extension forms a two-dimensional grid. Both axes double their quantity at every step.
+The extension forms a two-dimensional grid. The rate axis doubles the rate at every step; the depth axis adds plane groups at fixed bit positions.
 
 **Depth axis (base rate).** The axis starts at the 16-bit CD layer, which is the 16-bit level. Plane groups at fixed bit positions below the CD LSB refine it:
 
@@ -204,7 +206,7 @@ The following guarantees hold:
 
 1. **Full grid.** With all layers present, the output equals $x$ in every sample.
 2. **Base-rate prefixes.** With the CD layer and the plane groups up to $P_k$ present, the output equals the base word $b$ at the corresponding level: $b_{18}$, $b_{20}$ or $b$ (Section 5.2).
-3. **Other subsets.** Every layer present is decoded exactly. The reference signal of an intermediate rate point, such as 88.2 kHz / 24 bit, is defined as part of the octave-layer framing (open, item O3). The natural candidate is the master reduced by the integer half-band chain of SPEC.md.
+3. **Other subsets.** Every layer present is decoded exactly. The reference signal of an intermediate rate point, such as 88.2 kHz / 24 bit, is defined as part of the octave-layer framing (open, item O2). The natural candidate is the master reduced by the integer half-band chain of SPEC.md.
 
 The encoder has no precision, noise or mode choice that affects the decoded result. Its choices affect only:
 
@@ -348,13 +350,14 @@ Because the coding is exact, this noise is coded like any other content. The los
 
 ### 6.4 Unused low bits
 
-Masters often carry fewer significant bits than their word length. All seven measured masters have 22 significant bits, so $w = 2$. FLAC strips such bits. A lossless layer must do the same, or it pays for zeros that carry no information.
+Masters often carry fewer significant bits than their word length. All seven recordings of the main set (Table 10.1) have 22 significant bits, so $w = 2$. FLAC strips such bits. A lossless layer must do the same, or it pays for zeros that carry no information.
 
 The prototype (Section 10.6) uses the following mechanism:
 
 1. **Detection.** $w$ is detected as the number of trailing zero bits common to all samples of the track.
 2. **Grid rounding.** The prediction derived from the lower layers is rounded, half up, onto the master's grid of multiples of $2^w$:
 $$u' = 2^w \left\lfloor \left(u + 2^{w-1}\right) / 2^w \right\rfloor .$$
+   For $w = 0$, no rounding is needed: $u' = u$.
 3. **Shifting.** The residual $x - u'$, which is then a multiple of $2^w$, is shifted right by $w$ before coding.
 4. **Reconstruction.** The decoder computes $u' + 2^w \cdot (\text{decoded residual})$.
 
@@ -380,7 +383,7 @@ The bit-exact prototype used a full-rate difference layer in place of critically
    - The odd output samples are
      $$y[2i+1] = \left\lfloor \left( \sum_t h_t \left(x[i-t] + x[i+1+t]\right) + 2^{29} \right) / 2^{30} \right\rfloor ,$$
      where $h_t$ are the stored odd taps. The divisor $2^{30}$ realises the interpolation gain of 2.
-   - Indices outside the signal are mirrored: $-i$ for $i < 0$, and $2(L-1) - i$ for $i \ge L$.
+   - Indices outside the signal are mirrored: $-i$ for $i < 0$, and $2(L-1) - i$ for $i \ge L$. (In this step, $x$ denotes the input of the stage and $L$ its length.)
 3. **Difference.** The difference from the master is formed on the master's grid, with unused bits removed (Section 6.4).
 4. **Stereo.** The difference is mapped to integer M/S.
 5. **Coding.** The difference is coded exactly.
@@ -391,7 +394,7 @@ The prototype established the exactness of this whole chain of integer operation
 
 ### 6.7 Framing (open)
 
-The following questions together form the open item "octave-layer framing" (O3):
+The following questions together form the open octave-layer framing (items O1 to O3 of Section 11):
 
 - how the octave split is realised in integers, such that each octave layer is critically sampled and every partial reconstruction is exact;
 - the segmentation in time;
@@ -495,7 +498,7 @@ The complete DCT-IV program has 6193 elementary operations per 512-coefficient b
 
 The prediction loop involves no rounding other than the deterministic integer evaluation of the predictor, so no transform rounding noise enters the residual.
 
-**Measured result** (estimate; Section 10.6). An order-32 time-domain linear predictor was applied to the full-rate difference layer of the bit-exact prototype, and the residual was costed by a Laplacian entropy per partition, without side information. The resulting estimate was about 103.7 % of the master's FLAC size, compared with 110.3 % for option (a) on the same layer.
+**Measured result** (estimate; Section 10.6). An order-32 time-domain linear predictor was applied to the full-rate difference layer of the bit-exact prototype, and the residual was costed by a Laplacian entropy per partition, without side information. The resulting estimate for the whole file (CD16, depth residual and difference layer) was about 103.7 % of the master's FLAC size, compared with 110.3 % when option (a) codes the difference layer (Table 10.6, variants 3 and 2; the depth residual is coded with the integer MDCT in both).
 
 **Assessment.** This is the simplest option and is fully FLAC-like. It can be realised with the same subframe and residual-coding structure as FLAC.
 
@@ -565,7 +568,7 @@ The encoder may use the analysis tools of LAE Lossy, namely the noise-floor esti
 1. **Classification never affects losslessness.** A class selects only how exact values are coded, never which values are reconstructed. Every class decodes to the exact values.
 2. **Every class coder is total.** The coders of classes B, C and D accept every value that can occur in the layer, and every such value round-trips exactly. A value outside the typical range of its tier costs more bits, but never precision. The mechanism, for example escape coding, is open (item K2).
 3. **Class A is admissible only for exact zero.** The encoder may assign class A only to a block whose values are all exactly zero.
-4. **Choice by trial encoding.** The encoder chooses the class of a block by trial encoding, selecting the cheapest class. A misjudged class can therefore cost only bytes.
+4. **Choice by trial encoding.** One possible encoder strategy is to choose the class of a block by trial encoding, selecting the cheapest class. Whatever class an encoder chooses, a poor choice can cost only bytes (constraint 1).
 
 ### 8.4 Comparison with LAE Lossy
 
@@ -772,13 +775,13 @@ The reference is the master's FLAC file at compression level 12, 21,996,137 byte
 
 Variant 2 combines two changes, the removal of unused bits and M/S; their individual contributions were not separated.
 
-**Interpretation.** The gap between variants 2 and 3 comes from the rounding noise of the integer MDCT, about 1.3 LSB per coefficient. This noise is of the same order as the very low ultrasonic noise floor of these masters. Time-domain prediction has no such rounding.
+**Interpretation.** The gap between variants 2 and 3 comes at least partly from the rounding noise of the integer MDCT (variant 3 also does not count side information), about 1.3 LSB per coefficient. This noise is of the same order as the very low ultrasonic noise floor of these masters. Time-domain prediction has no such rounding.
 
 The prototype uses a full-rate difference layer, not the critically sampled octave layers of the design (Section 6.2).
 
 ### 10.7 Container encapsulation
 
-In the CD-layer tests of LAE Lossy, an extension payload was wrapped into a FLAC file and into a WAV chunk. The FLAC file grew by 5,000,008 bytes. The results were:
+In the CD-layer tests of LAE Lossy, an extension payload was wrapped into a FLAC file and into a WAV chunk (a test of the encapsulation only; carriage in FLAC is not specified for LAE Lossy). The FLAC file grew by 5,000,008 bytes. The results were:
 
 - the audio MD5 of the CD layer was identical before and after wrapping, in both containers;
 - the payload round-tripped intact.
@@ -804,7 +807,7 @@ In the CD-layer tests of LAE Lossy, an extension payload was wrapped into a FLAC
 
 - **O1** — The integer realisation of critically sampled octave layers that keeps every partial reconstruction exact.
 - **O2** — The reference signals of intermediate rate points, for example 88.2 kHz / 24 bit.
-- **O3** — Octave-layer framing: time segmentation, signalling of unused low bits, subdivision of octave columns by depth, and independence of octave layers from the depth plane groups.
+- **O3** — Octave-layer framing: time segmentation, signalling of unused low bits, subdivision of octave columns by depth, and how the framing keeps the octave layers independent of the depth plane groups (Section 6.2).
 
 **Classes**
 

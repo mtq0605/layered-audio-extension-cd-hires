@@ -9,7 +9,7 @@ LAEY can omit noise that you mark in the ultrasonic band of a master. This takes
    narrow lines and lets you choose which to mark. It writes a marking file (`.laenoise`). It never removes or exports sound.
 3. **Encode.** `lae_enc <master.wav> <out.wav> [mode] noise=<marks.laenoise> [g | g=b | g=c | g=d]`.
 
-Without `noise=` and `g`, the encoder writes exactly the same file as before, byte for byte.
+Without `noise=` and `g`, the encoder writes exactly the same file as the encoder before these options were added (2026-11-04), byte for byte.
 
 ## `noise=`
 
@@ -81,7 +81,7 @@ Measured on the LAE demo master at 352.8 kHz, mode 3, 90 s, with one marked rect
 | `g` alone (75 s of synthesised notes with silence between them) | +5.2 % | +15.7 % |
 
 - The cost grows with the marked area and with the amount of silence in the master, not with the length of the piece.
-- On that excerpt, `g` alone produced no measurable change relative to the master. `g` is recommended when you have marked cells.
+- On the 75 s excerpt of synthesised notes (`g` alone), `g` produced no measurable change relative to the master. `g` is recommended when you have marked cells.
 - After every encode with `g`, the encoder prints the size of the G streams in MB. This is the amount you would save without `g`.
 - Cells that are neither deleted nor silent are unchanged. The CD layer is unchanged. Encoding time is about the same (73–79 s for
   the 90 s excerpt, with or without `g`).

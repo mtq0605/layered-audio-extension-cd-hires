@@ -6,11 +6,12 @@ SPDX-License-Identifier: CC0-1.0
 # File sizes by mode, scheme and sample rate
 
 Generated from [loop10_v5_release_candidate.csv](loop10_v5_release_candidate.csv); [README.md](README.md) describes how the data were measured.
-Values are **medians in MB per minute of stereo music** (1 MB = 10^6 bytes; 10-second excerpts x 6). "CD" is the CD layer as
-uncompressed PCM; "depth" and "freq." are the depth layer and the frequency layer; "total" = CD + depth + freq. The CD layer is identical in all modes.
+Values are **medians in MB per minute of stereo music** (1 MB = 10^6 bytes; measured on 10-second excerpts, so MB per minute = MB per excerpt × 6). "CD" is the CD layer as
+uncompressed PCM; "depth" and "freq." are the depth layer and the frequency layer; "total" is the median of CD + depth + freq. per excerpt, so it need not equal the sum of the three medians. The CD layer is identical in all modes.
+The schemes `s1`, `s2` and the modes `max` … `keep20` are the encoder settings of the [README](../README.md), Section 11.
 
-- The figures were measured on the v5 release candidate; with the published encoder, frequency-layer sizes are 0.01-0.3 % smaller.
-- **Recordings** (88.2-192 kHz, anonymised) provide the representative figures. **Synthetic** signals are stress tests (sweeps, noise,
+- The figures were measured on the release candidate of the codec for container version 5 (the "v5 release candidate", see [README.md](README.md)); with the published encoder, frequency-layer sizes are 0.01-0.3 % smaller.
+- **Recordings** (88.2-192 kHz, anonymised) provide the representative figures (the 192 kHz table rests on one recording only). **Synthetic** signals are stress tests (sweeps, noise,
   square waves, transients, etc.); they show extremes rather than typical music, and they are the only data at 352.8 and 384 kHz.
 
 ## Recordings

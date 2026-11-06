@@ -3,8 +3,9 @@
 [中文](README.zh.md)
 
 LAE Noise Marker detects steady noise and fixed narrow lines in a master and lets the user mark the parts to be removed. It writes a
-marking file (`.laenoise`; see [SPEC_LAENOISE.md](SPEC_LAENOISE.md)). The LAE encoder reads this file and codes the marked cells
-as silence.
+marking file (`.laenoise`; see [SPEC_LAENOISE.md](SPEC_LAENOISE.md)). The LAE Lossy (LAEY) encoder reads this file and codes the
+marked cells of its frequency layer as silence (a cell is one MDCT frame × 8 bins of that layer's grid; see
+[SPEC_LAENOISE.md](SPEC_LAENOISE.md), Section 3). Marks in the CD band are only listed. Noise marking applies to LAEY only.
 
 **LAE Noise Marker only identifies and marks.** It never removes sound and has no export function: no command or button writes a
 cleaned copy of the master. Listening previews are at most 10 seconds per position. If the user connects the marking file to
@@ -19,9 +20,9 @@ other software that does remove sound, that is the user's own choice and respons
 | `SPEC_LAENOISE.md` / `.zh.md` | Specification of the marking file format |
 | `LICENSE` | Apache-2.0 |
 
-The program is written in standard C++17 for Windows, Linux and macOS. It is intended to produce the same candidates and the same
-marking file, byte for byte, on every platform; this is checked on Windows x64 and x86, Linux x64 (GCC, Clang, 32-bit) and Linux ARM64
-(GCC, Clang).
+The program is written in standard C++17 for Windows, Linux and macOS (macOS has not been checked). It is intended to produce the same candidates and the same
+marking file, byte for byte, on every platform; this is checked on Windows x64 and x86, Linux x86-64 (GCC, Clang), Linux x86 32-bit and
+Linux ARM64 (GCC, Clang).
 
 ## Before you start
 
@@ -50,15 +51,17 @@ lae_noise preview master.wav candidates.laenoise previews
 ```
 
 For every candidate, three files are written to `previews`: `pos_NNN_original.wav` (the span unchanged), `pos_NNN_silenced.wav`
-(the span with the marked cells silenced) and `pos_NNN_marked.wav` (only the content that would be silenced). `preview_check.txt`
-confirms that nothing outside the marked cells is changed.
+(the span with the cells of that candidate silenced) and `pos_NNN_marked.wav` (only the content that would be silenced). Each preview
+covers at most the first 10 s of the span, with 1 s of context on each side. `preview_check.txt`, written to the same folder,
+confirms that nothing outside those cells is changed. `lae_noise preview-all master.wav <file.laenoise> <folder> <t0 s> <t1 s>` writes
+one excerpt with every position silenced together (`all_original.wav`, `all_silenced.wav`, `all_marked.wav`), with the same check.
 
 **3. Select in the panel.** Open `noise_panel.html` and load `spectro.json`, `candidates.laenoise` and the `previews` folder.
 - Every candidate is initially unchecked; check those to be removed.
 - To add a region manually, drag a rectangle on the spectrogram or enter the times and frequencies. The region snaps inward to
   whole cells.
 - Use the three buttons in each row to listen to the previews.
-- **Save marking file** writes only the checked positions.
+- **Save marking file** writes only the checked positions, for example as `master.laenoise`.
 
 The panel never processes sound; it only plays the preview files.
 
@@ -76,8 +79,10 @@ This command lists the positions and confirms that the file belongs to this mast
 lae_enc master.wav out.wav 3 noise=master.laenoise
 ```
 
-The encoder codes the marked cells in its frequency layer (the ultrasonic band above the CD layer) as silence. Marks in the CD band
-are listed by the encoder and left as they are. With the optional `g` (or `g=b`, `g=c`, `g=d`), the encoder also removes the
+Here `3` is the encoder mode ([README](../../README.md), Section 11); `g` is added as a further argument, for example
+`lae_enc master.wav out.wav 3 noise=master.laenoise g`. The encoder codes the marked cells in its frequency layer (the ultrasonic
+band above the CD layer) as silence. Marks in the CD band (below the start of the frequency layer) are listed by the encoder; the
+audio there is not changed. With the optional `g` (or `g=b`, `g=c`, `g=d`), the encoder also removes the
 upsampling images of the CD layer that remain in those cells. This makes the file larger, and the encoder prints the increase.
 
 **6. Measure (optional).**
@@ -86,7 +91,8 @@ upsampling images of the CD layer that remain in those cells. This makes the fil
 lae_noise level decoded.wav master.laenoise
 ```
 
-This command reports the level of the marked cells in any file of the same length: the master, a decoded file or a copy.
+This command reports the level of the marked cells in any file of the same length: the master, a decoded file or a copy. Unlike
+the encoder and `show`, it checks only the length and the rate, not the SHA-256, so that it can measure a decoded file.
 
 ## Without the panel
 
@@ -96,6 +102,6 @@ range snaps inward to whole cells, and the snapped range is printed.
 ## Building
 
 The program is written in standard C++17 and requires no other libraries. With MSVC, use `/fp:strict`; with GCC or Clang, use
-`-ffp-contract=off`; on 32-bit x86, use SSE2. Build `src/lae_noise.cpp`, which includes the scanner.
+`-ffp-contract=off`; on 32-bit x86, use SSE2. Build `src/lae_noise.cpp` of the LAE repository, which includes the scanner.
 
 Licence: this text, CC-BY-4.0; the program and the panel, Apache-2.0.

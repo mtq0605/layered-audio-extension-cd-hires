@@ -14,7 +14,7 @@ where it has one, and otherwise by the commit of this repository from which it w
 | LAE CD-Extra encapsulation (CDX) | version 0 | [spec/cdx/SPEC.md](../spec/cdx/SPEC.md) | Draft |
 | LAENOISE marking file | version 1 | [plugins/lae_noise_marker/SPEC_LAENOISE.md](../plugins/lae_noise_marker/SPEC_LAENOISE.md) | Stable |
 
-The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IANA.
+The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IANA, in the FLAC Application Metadata Block IDs registry (RFC 9639, Section 12.2).
 
 ## Components
 
@@ -23,7 +23,7 @@ The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IAN
 | `lae_enc`, `lae_dec` (LAEY encoder and decoder) | commit of the release | LAEY container v5 |
 | `laes` (LAES tool) | commit of the release | LAES payload v1 |
 | `lae_cdx` (CD-Extra tool) | commit of the release | CDX v0 |
-| `lae_noise` and the noise panel | commit of the release | LAENOISE 1 |
+| `lae_noise` and the noise panel `noise_panel.html` (LAE Noise Marker) | commit of the release | LAENOISE v1 |
 | foobar2000 component `foo_input_lae` | 0.20 | LAEY v5, LAES v1 |
 | Kodi add-on `audiodecoder.lae` | 0.2.5 | LAEY v5, LAES v1 |
 | DirectShow filter `dshow_lae` | 0.2.4 | LAEY v5, LAES v1 |
@@ -35,9 +35,10 @@ The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IAN
 - Every component that reads a format version reads every file of that version. A later release of a component does not change
   the decoded output of an existing file.
 - Encoders are deterministic: the same input, options and encoder commit produce the same file, byte for byte, on every supported
-  platform. Encoder versions are therefore identified by commit. A change of encoder commit can change the encoded bytes, but it
+  platform (the builds listed in [BUILD.md](BUILD.md), Section 3). Encoder versions are therefore identified by commit. A change of encoder commit can change the encoded bytes, but it
   never changes the format version.
-- The Java library produces the same encoded files and the same decoded samples as the C++ tools of the same commit.
+- The Java library contains encoders and decoders for LAEY and LAES. It produces the same encoded files and the same decoded samples
+  as the C++ tools (`lae_enc`, `lae_dec`, `laes`) of the same commit.
 - A format change that existing decoders cannot read raises the format version.
 
 ## Release table
@@ -46,4 +47,4 @@ Each release adds one row to this table.
 
 | Release | Repository commit | LAEY | LAES | CDX | LAENOISE | foobar2000 | Kodi | DirectShow | VLC |
 |---|---|---|---|---|---|---|---|---|---|
-| *next* | *set at release* | v5 | v1 | v0 | 1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |
+| *next* | *set at release* | v5 | v1 | v0 | v1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |

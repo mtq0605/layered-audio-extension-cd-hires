@@ -60,25 +60,25 @@ laes enc <out.flac | out.wav | out.lae> (--derive-core | --core=<core.wav>) <mas
 
 - `--derive-core`: the core master is derived from the masters. It is the base level (44.1 or 48 kHz) of a master, at the word length set by `--core-bits`.
   - Default word length: 16 bits for the WAV form; for the FLAC form, the longest word length among the masters, up to a maximum of 24 bits.
-  - `--core-bits=16|24|32` selects a different word length. A master with exactly that word length yields the core master unchanged; otherwise, the master with the longest word length is reduced with TPDF dither. The exact rule is given in [SPEC.md](SPEC.md), Section 11.1, so that anyone can check it.
+  - `--core-bits=16|24|32` selects a different word length, in either form (a 32-bit core master is allowed in the FLAC form too; see [COMPATIBILITY.md](../COMPATIBILITY.md) for players). If a master has exactly that word length, its base level is used as the core master without requantisation; otherwise, the master with the longest word length is reduced with TPDF dither. The exact rule is given in [SPEC.md](SPEC.md), Section 11.1, so that anyone can check it.
 - `--core=<core.wav>`: the core master is supplied, for example as the 16-bit WAV of a released CD or DVD track. A master produced independently of it then requires its time position on that core master (see below).
 
 ### Masters
 
-- A master is a 16-, 24- or 32-bit stereo WAV file (RIFF, or RF64 beyond 4 GB) or a FLAC file, at 1, 2, 4 or 8 times 44.1 or 48 kHz. A file can contain up to 16 masters.
+- A master is a 16-, 24- or 32-bit stereo WAV file (RIFF, or RF64 beyond 4 GiB) or a FLAC file, at 1, 2, 4 or 8 times 44.1 or 48 kHz. A file can contain up to 16 masters.
 - The order on the command line does not matter: the tool chooses the order and the way each master is stored, selecting whichever is smallest.
 - `<master>@T`: the time position of the master on the time line of the core master, in base-rate samples (a decimal number, for example `master.wav@-0.37`). The default is 0, which is correct for a derived core master.
-- `<master>@auto`: for a master produced independently of the given core master (for example, the hi-res master of a released CD). The tool measures T against `--core` with the same search as `laes align`. If the alignment error is above −60 dB, the tool displays it and asks for confirmation; `--accept` accepts it without asking. If it is not accepted, nothing is written. Two conditions apply: the core master given with `--core` is 16-bit (CD or DVD), and the master to be aligned is supplied as a WAV file, because the search reads WAV; a FLAC master is refused. A derived core master does not need `@auto`: its masters are at T = 0.
+- `<master>@auto`: for a master produced independently of the given core master (for example, the hi-res master of a released CD). The tool measures T against `--core` with the same search as `laes align`, which needs `lae_enc` next to `laes` or given with `--lae-enc=<path>`. If the alignment error is above −60 dB, the tool displays it and asks for confirmation; `--accept` accepts it without asking. If it is not accepted, nothing is written. Two conditions apply: the core master given with `--core` is 16-bit (CD or DVD), and the master to be aligned is supplied as a WAV file, because the search reads WAV; a FLAC master is refused. A derived core master does not need `@auto`: its masters are at T = 0.
 
 ### Form and file name
 
 | Name | Form |
 |---|---|
 | `out.flac` | FLAC form: the core master in the FLAC audio frames, the other masters in `LAE2` APPLICATION blocks. |
-| `out.wav` | WAV form: the core master in `data`, the other masters in an `LAE ` chunk (RF64 beyond 4 GB). |
+| `out.wav` | WAV form: the core master in `data`, the other masters in an `LAE ` chunk (RF64 beyond 4 GiB). |
 | `out.lae` | The format's own name: `--form=flac` (default) or `--form=wav`. |
 
-- Players identify LAES files by their content, not by their name.
+- The LAE plug-ins identify LAES files by their content, not by their name; the name only routes the file to a decoder.
 - With `.flac` and `.wav`, any player plays the core master.
 - `.lae` files are opened only by players that recognise the name (with an LAE plug-in) or that inspect the content.
 
@@ -123,7 +123,7 @@ None of these options changes the file: the same masters and options produce the
 | `--cover=<image>` | The front cover. |
 | `--picture=<type>:<image>` | A further picture; any number may be given: 4 back cover, 5 leaflet page, 6 medium (disc label), 7 lead artist, 8 artist, … (the picture types of ID3v2 and FLAC, 0 to 20). |
 
-- **Images:** JPEG or PNG, stored byte for byte (never re-encoded). There is no minimum size. A single image may be up to about 16 MB (the FLAC limit for one metadata block), and all images together up to 256 MB. Very large images make some phone players slow to open the file.
+- **Images:** JPEG or PNG, stored byte for byte (never re-encoded). There is no minimum size. A single image may be up to about 16 MB (the FLAC limit for one metadata block; the same limit applies in the WAV form), and all images together up to 256 MB. Very large images make some phone players slow to open the file.
 - **Text:** UTF-8, so any language can be used. The key itself is ASCII.
 - **Location of the tags:** one set of tags describes the core master and every master.
 
@@ -134,7 +134,7 @@ None of these options changes the file: the same masters and options produce the
 
 - WAV `INFO` supports only some keys: `TITLE` → `INAM`, `ARTIST` → `IART`, `ALBUM` → `IPRD`, `DATE` → `ICRD`, `COPYRIGHT` → `ICOP`, `COMMENT` → `ICMT`, `GENRE` → `IGNR`, `TRACKNUMBER` → `ITRK`. Every key is written to `id3 `; keys without a dedicated ID3 frame are written to `TXXX`.
 - Older software that reads WAV `INFO` in the system code page displays non-ASCII text incorrectly. `id3 ` is always UTF-8, and players that read both should prefer it.
-- The tool identifies itself in the tags as `laes (LAE Lossless)`, without a version number, so that the same input always produces the same file.
+- When tags are written, the tool identifies itself in them as `laes (LAE Lossless)`, without a version number, so that the same input always produces the same file.
 - Tags never take part in the checks: the SHA-256 of each master covers only the samples, and tags never determine which version is played.
 
 Example:
@@ -151,7 +151,7 @@ laes tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<i
 
 - Writes a **new** file whose tags and pictures are exactly those given. Without tag options, the new file has no tags at all.
 - The old tags are discarded. The audio bytes, the payload and every other block or chunk are copied byte for byte.
-- The result is byte-for-byte identical to re-encoding the masters with these tags.
+- The result is byte-for-byte identical to re-encoding the same masters with the same options and the same version of the tool, with these tags.
 - The new file is then fully decoded, and every master is checked against its stored SHA-256. The audio bytes and the payload are also compared with those of the old file. Any difference causes the new file to be removed.
 - The old file is never modified. If `<out>` already exists, nothing is done.
 - Supports the FLAC form and the WAV form (including RF64). LAEY files (`LAE1`) are tagged with `lae_enc tag`.
@@ -193,7 +193,7 @@ Decodes every master in the file and compares it bit for bit with the given file
 laes align <cd.wav> <master.wav> [--lae-enc=<path>] [--accept]
 ```
 
-For a core master that was produced independently, such as a released CD, this command measures the time position T of the master on the CD's time line, including the fractional part. It uses the automatic search of the LAE Lossy encoder (`lae_enc`, which is found next to `laes` or given with `--lae-enc`). An alignment error within −60 dB passes; otherwise, the error is displayed and you decide. The command writes nothing; it prints `use <master>@<T>` for use with `laes enc`. A whole album is cut into tracks by the LAE Lossy planner (`lae_enc plan … laes`).
+For a core master that was produced independently, such as a released CD, this command measures the time position T of the master on the CD's time line, including the fractional part. It uses the automatic search of the LAE Lossy encoder (`lae_enc`, which is found next to `laes` or given with `--lae-enc`). An alignment error of −60 dB or lower passes; otherwise, the error is displayed and you decide, or `--accept` accepts it without asking. The command writes nothing; when the alignment is accepted, it prints `use <master>@<T>` for use with `laes enc` (exit code 0). A whole album is cut into tracks by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`).
 
 ## Test helpers
 
@@ -207,5 +207,5 @@ For a core master that was produced independently, such as a released CD, this c
 ## Text, file names and exit codes
 
 - **Text:** on Windows, all arguments, file names, tags and console output are handled as UTF-8 within the tool. Tags and paths in any language work from cmd, PowerShell and scripts, regardless of the system code page. On other systems, the arguments are taken as given (UTF-8 on typical systems).
-- **Exit codes:** 0: success; 1: invalid arguments; 2: the operation failed (a file could not be read or written, a check failed, or the disk was full). After exit code 2, `laes enc` and `laes tag` have written nothing.
+- **Exit codes:** 0: success; 1: invalid arguments; 2: the operation failed (a file could not be read or written, a check failed, or the disk was full). After exit code 2, `laes enc` and `laes tag` have not written `<out>` (a stopped `laes enc` may keep its work folder `<out>.laes.tmp` for resuming). If `<out>` already exists, `laes tag` stops with exit code 1.
 - **Messages** are in English; the disk and resume messages also include a line in Chinese.

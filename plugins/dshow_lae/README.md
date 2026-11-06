@@ -2,14 +2,14 @@
 
 **English** | [中文](README.zh.md)
 
-`lae_source.ax` is a DirectShow source filter for PotPlayer, MPC-BE, MPC-HC, Windows Media Player (legacy) and other DirectShow players (Windows x64). It opens two kinds of LAE file:
+`lae_source.ax` is a DirectShow source filter for PotPlayer, MPC-BE, MPC-HC, Windows Media Player (legacy) and other DirectShow players (Windows x64). PotPlayer and MPC-BE were tested (see [Tested](#tested-windows-11-directshow-graph-with-the-standard-audio-renderer)); MPC-HC and Windows Media Player were not. It opens two kinds of LAE file:
 
 - **LAES** (LAE Lossless; WAV, RF64 or FLAC form), with its lossless masters.
 - **LAEY** (LAE Lossy; WAV, container version 5).
 
 The filter delivers uncompressed PCM, with seeking, at the sample rate of what is played (see [What plays](#what-plays)):
 
-- 2 channels.
+- 2 channels (LAE files are stereo).
 - 16-bit samples, or 24-bit and 32-bit samples in 32-bit containers as WAVE_FORMAT_EXTENSIBLE.
 
 24-bit samples packed in 3 bytes are not used because MPC-BE's audio path turned them into noise. The filter was written for this project from the DirectShow interface documentation, without base classes or third-party code.
@@ -33,7 +33,7 @@ To unregister the filter, run `regsvr32 /u lae_source.ax`.
 
 ## What plays
 
-Playback is controlled by DWORD registry values under `HKCU\Software\LAE\DirectShow`. If no value is set, the filter plays the master at its own sample rate.
+Playback is controlled by DWORD registry values under `HKCU\Software\LAE\DirectShow`. If no value is set, the filter plays the master at its own sample rate. Among the masters and rate levels of an LAES file that the limits below allow, it plays the one with the highest sample rate, then the longest word length, a master before a rate level; if `maxbits` is below the word length of the core master and nothing else fits, it plays the derived 16-bit master at the base rate.
 
 | Value | Meaning |
 |---|---|

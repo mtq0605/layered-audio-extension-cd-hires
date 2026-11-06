@@ -9,7 +9,7 @@ This is a pure-Java implementation of the LAE encoders and decoders for Android 
 | Package | Contents |
 |---|---|
 | `com.lae.core` | Shared helpers: deterministic maths (`LMath`, the Java form of `src/lae_math.h`), half-band filters, alignment hash, little-endian I/O |
-| `com.lae.laey` | LAE Lossy (LAEY): decoder, encoder (including independent-CD alignment, `noise=` and `g`), command-line tool `LaeEncTool` |
+| `com.lae.laey` | LAE Lossy (LAEY): decoder, encoder (including independent-CD alignment and the options `noise=` and `g`: noise marking and its second coding pass, [docs/NOISE.md](../docs/NOISE.md)), command-line tool `LaeEncTool` |
 | `com.lae.laes` | LAE Lossless (LAES): decoder, player front end (`Play`), encoder, tags and pictures, command-line tool `LaesTool` |
 
 The library does not include CD-Extra packaging (`lae_cdx`), disc images or the whole-disc planner (`lae_enc plan`).
@@ -30,7 +30,7 @@ To check that no API newer than Android 7.0 is used, compile the sources a secon
 
 ## Command-line use
 
-The two tools take the same arguments and print the same messages as the C++ tools:
+The two tools take the same arguments and print the same messages as the C++ tools, with the exceptions given below the examples:
 
 ```bash
 java -cp out/classes com.lae.laes.LaesTool enc out.flac --derive-core master.wav
@@ -44,7 +44,7 @@ java -cp out/classes com.lae.laes.LaesTool dec in.flac outdir
 java -cp out/classes com.lae.laey.LaeEncTool master.wav out.wav
 ```
 
-`LaesTool` supports `enc`, `dec` and `verify`. `LaeEncTool` supports the encoding options of `lae_enc` except `plan`. For the full argument lists, see the headers of `LaesTool.java` and `LaeEncTool.java`. Where `lae_enc` asks a question on the console (`bits=24`, `cdaccept`, `cdedge=`), the Java tool does not ask: it stops with the same message, and the option must be given.
+`LaesTool` supports `enc`, `dec` and `verify`. `LaeEncTool` supports the encoding options of `lae_enc`; the whole-disc planner (`lae_enc plan`) is not included. For the full argument lists, see the headers of `LaesTool.java` and `LaeEncTool.java`. Where `lae_enc` asks a question on the console (`bits=24`, `cdaccept`, `cdedge=`), the Java tool does not ask: it stops with the message that `lae_enc` prints when it runs without a console, and the option must be given on the command line.
 
 ## Equivalence with the C++ tools
 
@@ -52,4 +52,4 @@ The Java code is a port of the C++ reference in `src/`, which is not changed by 
 
 ## Licence
 
-The licences are the same as for the C++ code. The decoders and shared helpers are licensed under Apache-2.0. The encoder files are licensed under GPL-3.0-or-later or under a commercial licence (see [COMMERCIAL.md](../COMMERCIAL.md)). Each file names its licence in its SPDX header.
+The licences are the same as for the C++ code. The decoders and shared helpers are licensed under Apache-2.0. The encoder files are licensed under GPL-3.0-or-later or under a commercial licence (see [COMMERCIAL.md](../COMMERCIAL.md)). The player front end `Play` is a decoder file (Apache-2.0); the tag and picture code (`LaesTags`, `LaeRetag`) and the command-line tools (`LaesTool`, `LaeEncTool`) are encoder files. Each file names its licence in its SPDX header.

@@ -23,7 +23,7 @@ foobar2000 takes either the x86 DLL from the root of the package or the x64 DLL 
 To update, install the new package in the same way; foobar2000 replaces the old version when it restarts. Do not install an older package afterwards, as it replaces the newer one.
 
 Manual installation (foobar2000 1.x, 32-bit): copy `foo_input_lae.dll` into the `components` folder of foobar2000 and restart foobar2000.
-The component is listed under Preferences → Components (shown in grey when it is placed in the program folder; this is normal).
+The component is listed under Preferences → Components (shown in grey when it lies in the `components` folder of the foobar2000 program folder rather than in the user profile; this is normal).
 
 ![Component list](images/01_components.png)
 
@@ -81,7 +81,7 @@ The same settings are also available under Preferences → Advanced → Decoding
   `lae_cd_layer` (the format of the CD layer).
 - Bit rate: LAE has a variable bit rate. The CD layer is fixed (1411.2 kbps in the 44.1 kHz family); the extension layers (depth layer and frequency layer) are entropy-coded and require more data for complex content and
   less for quiet content. During playback, the status bar shows the bit rate actually used, updated once per second (the CD layer plus the extension bytes read in that second); during the first second, and in the file properties,
-  the average for the whole file (file size ÷ duration) is shown. When only the CD layer plays, the bit rate is fixed at 1411. For the test excerpts, the extension layers averaged between about 10 kbps and about 2150 kbps.
+  the average for the whole file (file size ÷ duration) is shown. When only the CD layer plays, the bit rate is fixed at 1411 kbps (1411.2 kbps, displayed rounded). For the test excerpts, the extension layers averaged between about 10 kbps and about 2150 kbps.
 
   ![Live bit rate](images/12_live_bitrate.png)
 
@@ -93,7 +93,7 @@ When the extension is damaged (below, a test file in which one byte was delibera
 ![Status bar of a damaged file](images/09_damaged_status.png)
 ![Console of a damaged file](images/10_damaged_console.png)
 
-## LAEY rules (the same as for the reader)
+## LAEY rules (the same as for the decoder `lae_dec`)
 
 - Before playback, the whole file is checked (the CRC of the extension chunk and the structure of the header and the streams). A file that fails the check is played entirely as the CD layer, and a single line in the console gives the reason;
   the status bar then shows the format that is actually playing (44.1 kHz / 16 bit), and the properties gain an entry `lae_route` that contains the reason.
@@ -102,15 +102,15 @@ When the extension is damaged (below, a test file in which one byte was delibera
 - During decoding, the floating-point state is fixed (round to nearest, denormals not flushed to zero, x87 at 53-bit precision); afterwards, the x87 and SSE states are restored separately.
 - Memory: for each track, only the CD layer and the extension block are kept, which is about the size of the file (version 0.1 required 3.6 times as much when opening a file). A 32-bit foobar2000 can use at most 4 GB,
   so a 352.8 kHz LAEY track longer than about one hour requires the 64-bit foobar2000 (the x64 build in the same package).
-- Seeking: a forward seek past the part not yet played must entropy-decode up to the target. On the test machine (i9-13900HX), this takes about 1.6 s per minute skipped at 352.8 kHz;
+- Seeking: a forward seek into a part not yet played must entropy-decode up to the target. On the test machine (i9-13900HX), this takes about 1.6 s per minute skipped at 352.8 kHz;
   a backward seek, or a seek into a part already played, is fast. Container version 5 has no seek table; this is a limitation of the format itself.
 
 ## LAES (lossless)
 
 ### What plays
 
-If no choice has been made for the track, the settings decide: "CD layer only" plays the core master; "CD layer + depth layer" plays the highest choice at the base rate; otherwise, the highest rate up to
-"Highest output sample rate" is played, then the longest word length up to "LAES: highest bit depth". Masters take precedence over rate levels; the derived 16-bit masters (lossless relative to their definition, not relative to their source master) are used only when nothing else fits.
+If no choice has been made for the track, the settings decide: "CD layer only" plays the core master (which can be CD-compatible only when it is 16 bit at 44.1 kHz); "CD layer + depth layer" plays the highest choice at the base rate; otherwise, the highest rate up to
+"Highest output sample rate" is played, then the longest word length up to "LAES (lossless): highest bit depth". Masters take precedence over rate levels; the derived 16-bit masters (lossless relative to their definition, not relative to their source master) are used only when nothing else fits.
 
 Right-click a track and select **LAES: choose what plays…** to choose the core master, a master or a rate level for that track. The choice overrides the settings, is stored per path (`laes_choices.txt`),
 and takes effect immediately during playback: the new choice starts at the current position (with a short silence of about 0.2 s and no repetition of what has already been heard). "Automatic" reverts to the settings.
@@ -191,7 +191,7 @@ Building requires two foobar2000 SDKs (not included in this repository):
 plugins\foo_input_lae\build_fb2k.cmd <SDK-2019-12-27 folder> <SDK-2026-10-01 folder> <output folder>
 ```
 
-The VS2022 Build Tools are used (x86 and x64 compilers). The script builds both DLLs and packs them into `foo_input_lae.fb2k-component` (x86 at the root, x64 in `x64\`).
+The VS2022 Build Tools are used (x86 and x64 compilers). The script builds both DLLs and packs them into `foo_input_lae.fb2k-component` (x86 at the root, x64 in `x64\`); releases name this package `foo_input_lae-<version>.fb2k-component`.
 The code of the old SDK is compiled with `/d2notypeopt`, as that SDK instructs; the x64 component is compiled with C++20 and `/permissive`, as the new SDK requires.
 The decoders use their own verified options: liblae uses `/fp:precise`, and the LAES decoder uses `/fp:strict` (its reference taps are computed in double precision).
 

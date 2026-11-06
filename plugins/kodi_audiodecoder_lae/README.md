@@ -8,8 +8,8 @@ This add-on plays LAE files in Kodi 21 (Omega). It supports **LAES** (LAE Lossle
 
 Kodi passes to a decoder add-on only files with the extensions that the add-on declares. It does not allow the add-on to return a file to Kodi's built-in decoder. An add-on that declared `.flac` or `.wav` would therefore have to decode every FLAC and WAV file itself. For this reason, this add-on declares only the format's own extension, **`.lae`**:
 
-- To play the masters of an LAE file (`.flac` or `.wav`) in Kodi, rename the file to `.lae`.
-- With the extension `.flac` or `.wav`, the file is played by Kodi's built-in decoder, which plays the core master. The core master can be CD-compatible (this is how LAE is intended to work in any player).
+- To play the masters of an LAE file (`.flac` or `.wav`, including the RF64 form) in Kodi, rename the file to `.lae`.
+- With the extension `.flac` or `.wav`, the file is played by Kodi's built-in decoder, which plays the core master (the CD layer for LAEY). The core master can be CD-compatible (this is how LAE is intended to work in any player).
 
 ## Installation
 
@@ -25,12 +25,12 @@ The settings are under Add-ons → My add-ons → Audio decoder → LAE decoder 
 | Highest sample rate | No limit; 192 kHz; 96 kHz |
 | LAES: highest word length | No limit; 16; 24; 32 bit |
 
-For LAES, the highest sample rate within the limit is selected first, then the longest word length. Masters take precedence over rate levels (as in the foobar2000 component).
+For LAES, the highest sample rate within the limit is selected first, then the longest word length. Masters take precedence over rate levels (a rate level is a master brought down to half, a quarter or an eighth of its rate), as in the foobar2000 component.
 
 ## Rules (as in the foobar2000 component)
 
-- A master is played as that master only after it has been decoded completely and has matched the SHA-256 stored in the file. The first time a file's content is played, all its masters are checked in a single pass, with a progress window (Grand: 10 min, 4 masters, about 2 minutes on the test machine). The result is stored under the SHA-256 of the whole file in `laes_verified.txt` (on Windows in `%APPDATA%\LAE`, shared with the other LAE players; on other platforms in the add-on's data folder), so that later plays start immediately. A master that fails the check is not played; the core master is played instead.
-- Seeking starts at the block that contains the target time. The block positions are stored in `laes_index\<SHA-256>.idx` (every 16th block; tens of kB; never written into the media file).
+- A master is played as that master only after it has been decoded completely and has matched the SHA-256 stored in the file. The first time a file's content is played, all its masters are checked in a single pass, with a progress window (Grand, a demonstration piece of the LAE releases: 10 min, 4 masters, about 2 minutes on the test machine). The result is stored under the SHA-256 of the whole file in `laes_verified.txt` (on Windows in `%APPDATA%\LAE`, shared with the other LAE players; on other platforms in the add-on's data folder), so that later plays start immediately. A master that fails the check is not played; the core master is played instead.
+- Seeking starts at the block that contains the target time. The block positions are stored in `laes_index\<SHA-256>.idx` (on Windows in `%APPDATA%\LAE`; on other platforms in the add-on's data folder) (every 16th block; tens of kB; never written into the media file).
 - Output: 16-bit, 24-bit (in 32-bit containers) or 32-bit integer PCM, at the sample rate of the selected master or layer, without modification.
 
 ## Tested (Kodi 21.3 x64, portable copy)
@@ -44,7 +44,7 @@ For LAES, the highest sample rate within the limit is selected first, then the l
 plugins\kodi_audiodecoder_lae\build_kodi.cmd <kodi-dev-kit include folder> <output folder>
 ```
 
-The kodi-dev-kit headers are taken from the Kodi repository (`xbmc/addons/kodi-dev-kit/include`, tag `21.3-Omega`). Requirements: VS2022 Build Tools, x64. The LAE decoders are compiled with their own verified flags (liblae: `/fp:precise`; LAES decoder: `/fp:strict`).
+The kodi-dev-kit headers are taken from the Kodi repository (`xbmc/addons/kodi-dev-kit/include`, tag `21.3-Omega`). Requirements: VS2022 Build Tools, x64. The LAE decoders are compiled with their own flags, the ones verified for them in [docs/BUILD.md](../../docs/BUILD.md), Section 1 (liblae: `/fp:precise`; LAES decoder: `/fp:strict`).
 
 ## Licence
 

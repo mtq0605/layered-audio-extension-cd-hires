@@ -58,6 +58,8 @@ are distributed under the following licences.
 | Conformance vectors, test data and the vector manifest in `tests/`; `data/` | `CC0-1.0` |
 | `LICENSE`, `NOTICE`, `AUTHORS`, `PATENTS.md`, `COMMERCIAL.md`, `CONTRIBUTING.md`, `REUSE.toml` | `CC0-1.0` |
 
+The other sources in `src/` follow the rules for decoder-side files (Sections 3 and 4): they carry the Apache-2.0 header and do not depend on encoder-side files.
+
 **New files.** For each new source file, state in the PR whether it
 belongs to the decoder side or to the encoder side. The maintainer decides
 the final assignment.
@@ -72,9 +74,9 @@ following:
 
 Adding your e-mail address is optional.
 
-**SPDX headers.** Every file carries an SPDX header, except conformance
-vectors and data files, which are covered by `REUSE.toml`. Use the header
-that matches the file.
+**SPDX headers.** Every file carries an SPDX header or is covered by
+`REUSE.toml` (for example conformance vectors, data files, images and
+Markdown files without a header). Use the header that matches the file.
 
 Decoder-side sources, tools and test scripts:
 
@@ -90,7 +92,9 @@ Encoder-side sources:
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
 ```
 
-Specification and documentation (Markdown):
+Specification and documentation (Markdown; project files under CC0-1.0
+use the same form with `CC0-1.0`, and other Apache-2.0 files use the
+Apache-2.0 header in the comment syntax of the file):
 
 ```markdown
 <!--
@@ -118,7 +122,7 @@ PR.
 ## 4. Provenance rules (no third-party code)
 
 1. **No copied code.** Do not copy, translate or closely paraphrase code
-   from any other project. This includes:
+   from any other source. This includes:
    - other codecs and audio libraries;
    - permissive and public-domain code;
    - code from Q&A sites;
@@ -169,7 +173,7 @@ PR.
      collections.
 2. **Reproducible generation.** Every committed vector must be
    reproducible from code in the repository. State the command that
-   produced it.
+   produced it in the PR.
 
 ## 7. Pull request checklist
 

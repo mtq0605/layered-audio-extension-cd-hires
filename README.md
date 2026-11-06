@@ -13,11 +13,11 @@
 
 All versions use LAEY container version 5 and the same decoding process: LAEY files of any version play with the decoder of any version. LAES files (from v5-2026-10-30 onwards) are read with `laes`; the core master of the FLAC form plays in any FLAC player. All changes: [CHANGELOG.md](CHANGELOG.md).
 
-**LAES (LAE Lossless) in brief:** a single ordinary FLAC or WAV file holds a **core master** and further **lossless masters** (up to 352.8 / 384 kHz; 16, 24 or 32 bit). A player without LAE support plays the core master, which at 16 bit can be CD-compatible. A player with LAE support plays any of the masters, each verified bit for bit against its SHA-256 hash. In one test, the file was 44–47 % smaller than the same masters stored as separate FLAC files. Introduction, advantages and limitations, and comparison with FLAC and WAV: [spec/lossless/OVERVIEW.md](spec/lossless/OVERVIEW.md); the `laes` tool: [spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.md).
+**LAES (LAE Lossless) in brief:** a single ordinary FLAC or WAV file holds a **core master** and further **lossless masters** (up to 352.8 / 384 kHz; 16, 24 or 32 bit). A player without LAE support plays the core master, which at 16 bit can be CD-compatible. A player with LAE support plays any of the masters, each verified bit for bit against its SHA-256 hash. In one test (two 10-second excerpts, [spec/lossless/OVERVIEW.md](spec/lossless/OVERVIEW.md)), the file was 44–47 % smaller than the same masters stored as separate FLAC files. Introduction, advantages and limitations, and comparison with FLAC and WAV: [spec/lossless/OVERVIEW.md](spec/lossless/OVERVIEW.md); the `laes` tool: [spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.md).
 
-**Status:** this document is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), the normative specification is [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (draft for public review, 2026-10-29) and the reference tool is `laes`; the earlier design document ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)) is superseded.
+**Status:** this document is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), the normative specification is [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (stable, payload version 1, 2026-11-07) and the reference tool is `laes`; the earlier design document ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)) is superseded.
 
-This revision of the repository adds the following: alignment of an independent CD in the encoder; a whole-disc planner; the CD-Extra encapsulation tool `lae_cdx`; a decoder library with a C interface; and a foobar2000 component. The container remains version 5. The bitstream, the decoding process and the lossy specification are unchanged.
+Since the first release (v5-2026-10-18), the repository has added: alignment of an independent CD in the encoder; a whole-disc planner; the CD-Extra encapsulation tool `lae_cdx`; a decoder library with a C interface; the foobar2000 component; the lossless tier LAES; the VLC, Kodi and DirectShow plug-ins; the Java library; and noise marking (see the Versions table above and [CHANGELOG.md](CHANGELOG.md)). The container remains version 5. The bitstream, the decoding process and the lossy specification are unchanged.
 
 **Normative text:** the bitstream and the decoding process are specified in [spec/lossy/SPEC.md](spec/lossy/SPEC.md), which is currently a draft for public review. Where SPEC.md is silent or ambiguous, the reference decoder is normative. This document is informative.
 
@@ -29,7 +29,7 @@ The encapsulation of the extension on CD-Extra, in separate files and in streams
 - Conformance vectors: [tests/vectors/MANIFEST.md](tests/vectors/MANIFEST.md)
 - Measurement data: [data/](data/), described in [data/README.md](data/README.md)
 - CD-Extra and file encapsulation (draft): [spec/cdx/SPEC.md](spec/cdx/SPEC.md)
-- LAE Lossless (LAES) specification (draft): [spec/lossless/SPEC.md](spec/lossless/SPEC.md)
+- LAE Lossless (LAES) specification (stable, payload version 1): [spec/lossless/SPEC.md](spec/lossless/SPEC.md)
 - foobar2000 component: [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md)
 - Licences: [LICENSE](LICENSE). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Patent pledge: [PATENTS.md](PATENTS.md). Commercial encoder licence: [COMMERCIAL.md](COMMERCIAL.md)
 
@@ -40,7 +40,7 @@ The encapsulation of the extension on CD-Extra, in separate files and in streams
 - The decoder library is `src/lae_decoder.h`. Its C interface is `liblae` (`src/lae_api.h`).
 - The foobar2000 component is `foo_input_lae`.
 - The RIFF chunk ID is `LAE ` (with a trailing space). The chunk begins with the magic `LAE1`.
-- LAE files are distributed with the extension `.wav`, so that every player plays the CD layer. Tested decoders and the known limitations of some of them: [spec/COMPATIBILITY.md](spec/COMPATIBILITY.md).
+- LAEY files are distributed with the extension `.wav`, so that every player plays the CD layer; LAES files also have a FLAC form (`.flac`). Tested decoders and the known limitations of some of them: [spec/COMPATIBILITY.md](spec/COMPATIBILITY.md).
 - The extension file defined by the encapsulation specification has the file-name extension `.lax` (`.LAX` on a CD). It ends with an 80-byte trailer that begins with the identifier `LTVT` (Section 10.6).
 - `.lae` is the format's own file-name extension. The layout of a `.lae` file is not specified for container version 5.
 
@@ -48,7 +48,7 @@ The encapsulation of the extension on CD-Extra, in separate files and in streams
 
 ## Abstract
 
-LAE allows a single file to carry a high-resolution master, of up to 24 bit and up to 352.8/384 kHz, together with a 16-bit Compact Disc layer. Every existing WAV player reproduces the CD layer bit for bit.
+LAE Lossy (LAEY) allows a single file to carry a high-resolution master, of up to 24 bit and up to 352.8/384 kHz, together with a 16-bit Compact Disc layer (LAE Lossless also carries 32-bit masters). Ordinary WAV players reproduce the CD layer bit for bit (tested decoders: [spec/COMPATIBILITY.md](spec/COMPATIBILITY.md)).
 
 - **44.1 kHz family.** CD-Extra encapsulation with the tool `lae_cdx` (at present it produces a CD-Extra disc image). The disc carries the CD layer unchanged in its audio session and the extension in its data session, so that every CD player reproduces the CD layer.
 - **48 kHz family (96/192/384 kHz masters).** These masters have a 48 kHz base layer intended for DVD, Blu-ray and file distribution.
@@ -116,7 +116,7 @@ LAE addresses this problem under one constraint: **the CD layer is an ordinary, 
    - Noise present in the master is treated as part of the music and coded like any other content. This includes the noise floor, inaudible random noise and deliberately added noise.
    - Only content that is certainly not information is zeroed automatically: digital silence, and rounding-level residue below one 24-bit LSB.
 
-   A planned export interface will allow the user to mark noise regions for removal (Section 17.2).
+   LAE Noise Marker and the encoder option `noise=` let the user mark noise regions, which the encoder then codes as silence (Section 8.6).
 
 4. **Both sampling-rate families.** One algorithm serves the 44.1 kHz and 48 kHz families. Only the octave rate tiers are fixed (88.2/176.4/352.8 kHz and 96/192/384 kHz); everything else is adaptive.
 
@@ -347,7 +347,7 @@ The CD's samples are never changed, and the CD layer remains bit-exact. Because 
 
 **Search.** The search compares waveforms only. It follows a fixed coarse-to-fine cascade.
 
-1. **Level 0.** The CD's sound is split into two halves at 1/16 of the CD rate. The whole allowed range is scanned by cross-correlation, and the range around the peak is scanned once more.
+1. **Level 0.** The CD's sound is divided into two blocks (its two halves in time), at 1/16 of the CD rate. The whole allowed range is scanned by cross-correlation, and the range around the peak is scanned once more.
 2. **Further levels.** Each further level halves the blocks and doubles the rate. It searches a fixed small range around the previous peak: ±32 level samples at the first such level, ±8 at the others.
 3. **Last level.** The last level compares, at the master rate and by waveform residual, the whole master samples within two CD samples of the previous peak.
 
@@ -416,7 +416,7 @@ The encoder neither compares the two results nor chooses between them; the user 
 - **Whole samples.** The master is moved by whole master samples, and only across digital silence (all-zero samples).
 - **Length matching.** Whichever side is longer at the start plays first, and whichever side is longer at the end ends later. The shorter side receives digital silence. Neither side loses a non-silent sample.
 - **Sub-sample lead.** If the master's sound starts less than one CD sample before the CD's, one CD frame of digital silence is put in front of the CD layer. The CD's own samples are unchanged.
-- **Sound only the master has (2026-11-03).** If the master has sound, of one CD sample or more, before the CD starts or after it ends, the encoder reports where and for how long, and nothing is encoded until the user chooses one of two options. In an interactive console, the encoder asks; when it is called by a script, the option is required (`cdaccept` alone is not sufficient, because the two options give different results):
+- **Sound only the master has (since v5-NEXT).** If the master has sound, of one CD sample or more, before the CD starts or after it ends, the encoder reports where and for how long, and nothing is encoded until the user chooses one of two options. In an interactive console, the encoder asks; when it is called by a script, the option is required (`cdaccept` alone is not sufficient, because the two options give different results):
   - `cdedge=pad`: digital silence is added to the CD layer at that end, as many CD frames as cover the master's sound. The master is kept whole and the CD's own samples are unchanged, but the CD layer in the LAE file, and on a disc made from it, is longer than the given CD by that silence.
   - `cdedge=cut`: the master is cut where the CD starts or ends. Its sound beyond the CD is **not** kept in the LAE file; if the master is still sounding at the cut, high-resolution playback ends abruptly there. The CD layer is exactly the given CD.
   - Either option is one pad or one cut per piece at the one offset, with no fade and no mixing. Nothing about it is stored in the file; the alignment report (`<output>.align.txt`) records the choice and the amounts. The source files are only read; padding and cutting are applied to the encoder's own copy.
@@ -503,7 +503,7 @@ With `cdalign=<p1>,<p2>,…`, one value is given per piece:
 
 After cutting, each piece is checked again by the encoder's rules. Pieces that fall into the confirmation band are listed, and the planner writes files only after confirmation, either in the console or with `cdaccept`. These pieces must then also be encoded with `cdaccept`.
 
-**Samples without a piece.** A move can carry samples to a place where no piece takes master samples: the very start or end of the master, or a gap that only the master has. The planner reports where this happens and how many samples are affected. It also states that adding at least 1 ms (44 CD frames) of digital silence at that place to both the master and the CD, with the later track markers moving accordingly, preserves these samples. The user decides.
+**Samples without a piece.** A move can carry samples to a place where no piece takes master samples: the very start or end of the master, or a gap that only the master has. The planner reports where this happens and how many samples are affected. It also states that adding 44 CD frames (about 1 ms) of digital silence at that place to both the master and the CD, with the later track markers moving accordingly, preserves these samples. The user decides.
 
 If the master's sound starts less than one CD sample before track 1, one frame of digital silence is put in front of the CD layer of track 1. This frame falls in the pregap, and session 1 of the disc is unchanged.
 
@@ -647,7 +647,7 @@ The effect of the compensation depends on the route:
 Measured during development:
 
 - on the synthetic `electronic` excerpt, the CD-band error improved from −96 to −109 dBFS;
-- real recordings were unchanged;
+- the real recordings tested were unchanged;
 - the extension size grew by 0–1 %.
 
 Section 12.5 reports the effect averaged over 12 sources.
@@ -703,7 +703,7 @@ Each leaf is assigned one of four classes.
 
 | Class | Meaning | Coded |
 |---|---|---|
-| A | Certainly not information: digital silence, and rounding-level residue below one 24-bit LSB. Planned: noise explicitly removed by the user. | Nothing; reconstructed as exact zero |
+| A | Certainly not information: digital silence, and rounding-level residue below one 24-bit LSB. Also: noise explicitly marked by the user (`noise=`, Section 8.6). | Nothing; reconstructed as exact zero |
 | B | Content requiring the lowest precision tier | Exponent + coefficients at TB = 2 |
 | C | Intermediate | TB = 4 |
 | D | Content requiring the highest depth | TB = 8 |
@@ -860,7 +860,7 @@ Class-A leaves carry no coefficients. All of their coefficients are reconstructe
 Two optional encoder settings use class A; the format and the decoders are unchanged ([docs/NOISE.md](docs/NOISE.md)).
 
 - **`noise=<marking file>`.** The user marks noise in the aligned master with LAE Noise Marker (`plugins/lae_noise_marker/`), which only identifies and marks it. In the frequency layer, the encoder treats the master as zero in the marked cells; a cell marked in all of its bins is class A. Marks below the frequency layer (in the CD band) are listed and left unchanged.
-- **G.** In a class-A cell, the decoded output is the up-converted CD layer alone, that is, its image components, about 120 dB below the music (the stopband of the half-band filters). Elsewhere, the frequency layer cancels them. `g` codes the frequency layer a second time with −G, only in first-pass class-A cells that were deleted or in which the master itself is silent; the second streams are summed with the first (Section 9.5 of the specification allows the overlap). `g=b`, `g=c` and `g=d` select the step of that pass.
+- **G** (ground noise of imaging; [docs/NOISE.md](docs/NOISE.md)). In a class-A cell, the decoded output is the up-converted CD layer alone, that is, its image components, about 120 dB below the music (the stopband of the half-band filters). Elsewhere, the frequency layer cancels them. `g` codes the frequency layer a second time with −G, only in first-pass class-A cells that were deleted or in which the master itself is silent; the second streams are summed with the first (Section 9.5 of the specification allows the overlap). `g=b`, `g=c` and `g=d` select the step of that pass.
 - Without either setting, the encoder output is unchanged, byte for byte.
 
 ---
@@ -1008,7 +1008,7 @@ A track may be published without an extension, for example when capacity is insu
 **Deliverables.** The tool delivers:
 
 - an image for writing in one pass: `IMAGE.CUE`, `AUDIO.BIN` (session 1 from LBA 0 to A2, 16-bit little-endian stereo, whole sectors) and the data track as `DATA.BIN` (2352 bytes per sector) or `DATA.ISO` (2048 bytes per sector);
-- a kit for writing in two steps: a CUE sheet for session 1 only, and a command that regenerates session 2 for the start address actually reported by the drive. The address reported by READ TRACK INFORMATION (MMC [17]) is checked against the TOC value B0 and against A2 + 11,400; if the three disagree, the tool stops;
+- a kit for writing in two steps: a CUE sheet for session 1 only, and a command that regenerates session 2 for the start address actually reported by the drive. The address reported by READ TRACK INFORMATION (MMC [17]) is checked against the TOC value B0 and against A2 + 11,400; if any of the three differs from the others, the tool stops;
 - burning and acceptance instructions (`BURN.TXT`) with a layout table giving the LBA of each INDEX 01, A2 and the start of the data track.
 
 The CUE sheet contains no CRC, MD5 or other hash.
@@ -1029,7 +1029,7 @@ There is no file header, and $n$ is the file length minus 80. The file extension
 | 0 | 4 | Identifier | ASCII `LTVT` |
 | 4 | 2 | Version | 1 |
 | 6 | 2 | Length | 80 |
-| 8 | 2 | Extension block type | 1 = LAEY container v5; 2 = reserved for LAES; other values reserved |
+| 8 | 2 | Extension block type | 1 = LAEY container v5; 2 = LAES extension block ([spec/lossless/SPEC.md](spec/lossless/SPEC.md), Section 9); other values reserved |
 | 10 | 2 | Track number | On a CD, the audio track number in the TOC (1–98) |
 | 12 | 4 | Sampling rate | Rate of the CD layer: 44100 on a CD; 44100 or 48000 elsewhere |
 | 16 | 4 | ncd | Number of samples of the CD layer, $1 \le \mathrm{ncd} < 2^{28}$ |
@@ -1068,7 +1068,7 @@ The 48 kHz family may be used for all forms described in this section.
 
 ### 10.8 Reading rips and files
 
-The reader of `lae_cdx` (reader code: `src/lae_cdx_read.h`) treats every input in the same way: whole-disc rips (BIN or WAV, with or without a CUE sheet), per-track rips (with or without a CUE sheet), a single file and LAE streams. Rips may come from any ripping program and may be made with any offset setting. The input must be 16-bit stereo PCM WAV.
+The reader of `lae_cdx` (reader code: `src/lae_cdx_read.h`) treats every input in the same way: whole-disc rips (BIN or WAV, with or without a CUE sheet), per-track rips (with or without a CUE sheet), a single file and LAE streams. Rips may come from any ripping program and may be made with any offset setting. The input must be 16-bit stereo PCM (WAV, or BIN for whole-disc rips with a CUE sheet).
 
 **Disc stream and TOC.** The reader assembles its input into a disc stream. The TOC is taken, in order of priority, from:
 
@@ -1458,14 +1458,14 @@ The verified builds are listed in [docs/BUILD.md](docs/BUILD.md), Section 3.
 - **Windows, MSVC 2022.** The x64 `/O2`, x64 `/Od` and x86 SSE2 builds of the decoder produce identical results. The MSVC encoder produced the reference vector files.
 - **Linux x86, decoder.** The decoder was built with GCC 13 x86-64 (`-O2` and `-O0`), Clang 18 x86-64 (`-O2`) and GCC 13 x86 32-bit (SSE2). 256 of 256 decoder results were identical to the reference.
 - **Linux x86, encoder.** The encoder built with GCC 13 x86-64 (`-O2` and `-O0`) reproduces all 16 conformance vector files byte for byte.
-- **Decoder library.** `lae_dec`, which now calls the decoder library, and `liblae` in x64 and x86 builds each reproduced 64 of 64 conformance outputs (16 vectors × 4 routes).
+- **Decoder library.** `lae_dec`, which now calls the decoder library, and `liblae` in x64 and x86 builds each reproduced 64 of 64 conformance outputs (16 vectors × the 4 outputs of the manifest; for the 8 vectors at 88.2 and 96 kHz, the half-rate output is correctly refused).
 - **Linux ARM64.** On aarch64, the decoder built with GCC 13 (`-O2` and `-O0`) and Clang 18 (`-O2`) passed the start-up self-test, and 192 of 192 decoder results were identical to the reference. The encoder built with GCC 13 (`-O2`) reproduces all 16 conformance vector files byte for byte.
 - **Not covered.** Other ARM systems, such as 32-bit ARM and macOS on ARM, have not been tested. x87 builds are not supported (Section 13.1).
 
 The following results were also measured during development:
 
 - with the `zs` option, optimised and unoptimised decodes were byte-identical;
-- in the release-candidate round, 83 of 83 comparisons between optimised and unoptimised decoders were byte-identical (column `o2_equals_od` of the published data, which omit the recordings at 352.8 kHz).
+- in the release-candidate round, 83 of 83 comparisons between optimised and unoptimised decoders were byte-identical; 78 of them are in column `o2_equals_od` of the published data, which omit the 5 recordings at 352.8 kHz.
 
 ### 13.4 Other invariants
 
@@ -1513,7 +1513,7 @@ The stages of the reference decoder have been moved unchanged into the library `
 - **Threads.** One track must not be used by two threads at once. Different tracks may be decoded in different threads simultaneously; in testing, two tracks decoded in two threads gave output bit-identical to that obtained by decoding them separately.
 - **Floating-point state.** The decoder requires strict IEEE-754 binary64 arithmetic in a fixed order (Section 13.1). Hosts whose threads may run with a different floating-point state should set MXCSR to `0x1F80` around every call and restore it afterwards. `lae_selftest()` checks the calling thread; if it fails, the host should play the CD layer only. `lae_start()` runs the self-test again.
 
-**Bit-exact fast seek.** During decoding, the library records entropy-coder checkpoints about every 4 s. A seek restores a checkpoint and performs a warm restart of every signal stage shortly before the target, so that the output after a seek is bit-identical to that of sequential decoding.
+**Bit-exact fast seek.** During decoding, the library records entropy-coder checkpoints about every 4 s, in memory for the current session (the player's stored checkpoints, every 30 s, are described below). A seek restores a checkpoint and performs a warm restart of every signal stage shortly before the target, so that the output after a seek is bit-identical to that of sequential decoding.
 
 - A seek backwards, or into a part that has already been decoded, is fast.
 - A seek forwards past the decoded part continues from the player's own checkpoints (see below) and catches up from there, with all entropy streams in parallel. v5 defines no random-access points (Section 9), and none are added: the checkpoints come only from the player's own decoding.
@@ -1569,7 +1569,7 @@ g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_dec src
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_enc src/lae_enc.cpp
 ```
 
-The build command for `lae_cdx` (Windows, MSVC; the same flags as for `lae_enc`) is `cl /nologo /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /bigobj src/lae_cdx.cpp`. `liblae` is compiled from `src/lae_api.cpp` with `/fp:precise`; the verified flags are given in `plugins/foo_input_lae/build_fb2k.cmd`.
+The build command for `lae_cdx` (Windows, MSVC; flags as in [docs/BUILD.md](docs/BUILD.md), Section 1) is `cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /bigobj src/lae_cdx.cpp`. `liblae` is compiled from `src/lae_api.cpp` with `/fp:precise`; the verified flags are given in `plugins/foo_input_lae/build_fb2k.cmd`.
 
 Further build notes:
 
@@ -1619,9 +1619,9 @@ Notes on the encoder:
 - With `cd=`, the encoder prints the alignment results. Without `cdalign=`, these are the two search results and the line `ALIGN_SUGGEST …`, and the exit code is 1. With `cdalign=`, it prints the lines `PLACE …`, `ALIGN_RECHECK …` and `PHASE t=<whole> phi=0 move=<move> offset=<offset>`. After a successful encode, it writes the movement report `<output>.align.txt` (Section 4.3).
 - The first 4 bytes of the `LAE ` chunk identify the format: `LAE1` = LAEY (this tier), `LAE2` = LAES (the lossless tier, with a separate specification). `lae_dec` reports the format it finds: it decodes `LAE1` and, for `LAE2`, states that the file is an LAES file and names the tool to use.
 - The encoder uses as many threads as there are logical cores. The environment variable `PARTTHREADS` overrides this; `PARTTHREADS=1` makes the whole encoder single-threaded. The thread count does not affect the result.
-- **Memory plan.** At start-up, the encoder reads the physical memory once and, from the track length, decides whether the two layers of a pair (depth L and R, frequency M and S) are coded simultaneously or one after the other; it prints the plan (`memory plan: …`) and follows it for the whole encode. Simultaneous coding is chosen only on 64-bit builds and only when it fits within the memory limit. By default, the limit is min(1/2, max(1/4, physical memory − 28 GB)), so that the system and other programs retain room: 4 GB on a 16 GB machine, 8 GB on 32 GB, 20 GB on 48 GB and 32 GB on 64 GB. `mem=<GB>` sets the limit manually, for example `mem=20` on a 32 GB machine used only for audio. The block length follows from the limit and is at most about 32 s: longer blocks are not faster and only consume memory. The output file does not depend on the plan, the limit or the block length.
+- **Memory plan.** At start-up, the encoder reads the physical memory once and, from the track length, decides whether the two layers of a pair (depth L and R, frequency M and S) are coded simultaneously or one after the other; it prints the plan (`memory plan: …`) and follows it for the whole encode. Simultaneous coding is chosen only on 64-bit builds and only when it fits within the memory limit. By default, the limit is min(1/2 × physical memory, max(1/4 × physical memory, physical memory − 28 GB)), so that the system and other programs retain room: 4 GB on a 16 GB machine, 8 GB on 32 GB, 20 GB on 48 GB and 32 GB on 64 GB. `mem=<GB>` sets the limit manually, for example `mem=20` on a 32 GB machine used only for audio. The block length follows from the limit and is at most about 32 s: longer blocks are not faster and only consume memory. The output file does not depend on the plan, the limit or the block length.
 - **Block-wise encoding (2026-10-29).** The encoder reads the master and codes the track block by block (about 32 s per block); the decisions that depend on the whole track (floors, tone and transient marks, mean energies, code-length statistics, mode proportions) are accumulated from all blocks before any block is coded. The output is byte-identical to that of the former whole-track encoder. Memory use does not grow with track length, apart from small per-cell records (3 bytes per cell): a 10-minute 352.8 kHz master needs about 0.5 GB. Large intermediate data are written to the work folder on disk (see disk space below).
-- **Disk space (measured 2026-10-30).** The work folders are on the drive of the output file and are removed at the end; keep the following amount of free space there, in addition to the space for the output itself:
+- **Disk space (measured 2026-10-30; the `lae_enc` figure 2026-11-05).** The work folders are on the drive of the output file and are removed at the end; keep the following amount of free space there, in addition to the space for the output itself:
   - `lae_enc` (since 2026-11-05): the work folder `<output>.tmp` reached 8.0 GB for a 10.16-minute 352.8 kHz 32-bit master (about 0.8 GB per minute at 352.8 kHz, and half that at 176.4 kHz; formerly 13.2 GB). With `g`, about 15 % more is needed; with `cd=`, about 5 % more. The encoder prints the largest size its work folder reached.
   - `laes enc`: the work folder `<output>.laes.tmp` reached 38.6 GB for the same 10 minutes with four masters (about 3.8 GB per minute), and the same with `--mem=20` and `--mem=2`.
   - `lae_enc` checks the free space before it starts; if the disk becomes full during a run, both tools stop cleanly and leave no output file.
@@ -1653,7 +1653,7 @@ lae_dec <input.wav> <output.wav> [full | 16 | cd24] [output rate]
 
 In the `full` and `16` routes, the output rate may be the master rate or any lower octave down to twice the base rate; other rates are rejected. Frequency streams above the selected octave are neither read nor decoded.
 
-The decoder is single-threaded and streaming:
+The decoder (`lae_dec`, `src/lae_decoder.h`) is single-threaded and streaming (the player library `liblae` adds the multithreaded first-open check and catch-up of Section 13.6):
 
 - it decodes one row of root blocks (8 frames) at a time and overlap-adds frame by frame;
 - the resampling stages pull samples through short sliding windows;
@@ -1895,8 +1895,8 @@ The bitstream defined in SPEC.md is frozen for container version 5.
 
 ### 17.1 Format and tiers
 
-- **LAE Lossless (LAES).** Specified in [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (draft, 2026-10-29); reference tool `laes`. Every master (16, 24 or 32 bit, at the base rate × 1, 2, 4 or 8) and each of its rate levels is reconstructed bit for bit. The carriers are a WAV file, a FLAC file (APPLICATION blocks with ID `LAE2`) and CD-Extra (extension block type 2). How many masters fit on a CD-Extra disc depends on the album length. Files larger than 4 GiB use the RF64 form (spec/lossless/SPEC.md, Section 7). Future work: LAES playback in the foobar2000 component and streaming decoding.
-- **Containers.** The WAV container and CD-Extra packaging are implemented. The encapsulation specification is a draft; it is to be revised after the measurements of a real burn (Section 17.3). The `.lae` file layout remains unspecified.
+- **LAE Lossless (LAES).** Specified in [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (stable, payload version 1, 2026-11-07); reference tool `laes`. Every master (16, 24 or 32 bit, at the base rate × 1, 2, 4 or 8) and each of its rate levels is reconstructed bit for bit. The carriers are a WAV file, a FLAC file (APPLICATION blocks with ID `LAE2`) and CD-Extra (extension block type 2). How many masters fit on a CD-Extra disc depends on the album length. Files larger than 4 GiB use the RF64 form (spec/lossless/SPEC.md, Section 7). Future work: streaming decoding.
+- **Containers.** The WAV container and CD-Extra packaging are implemented. The encapsulation specification is a draft; it is to be revised after the measurements of a real burn (Section 17.3). The `.lae` file layout of LAEY remains unspecified; an LAES `.lae` file is an LAES file in the FLAC or WAV form (`laes enc --form`).
 - **Channels.** Only stereo is supported.
 
 ### 17.2 Encoder
@@ -1906,13 +1906,8 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - Strictly periodic synthetic signals (tones, sawtooth waves, loops) surrounded by digital silence can be matched one whole period away. For this reason, every position is confirmed by the user (Section 4.3).
   - When the sound is longer than about 3.6 minutes, level 0 of the search uses a lower sampling rate; an improvement is planned.
   - Beyond about 1 hour 55 minutes of sound, no search is performed, and the position must be given with `cdalign=`.
-- **Differing content.** Sound that only the master has, at the start or the end, is encoded only after the user chooses `cdedge=pad` or `cdedge=cut` (see Placement). Sound that only the CD has stops the encoder. The planner (`lae_enc plan`) still stops on sound that only one side has. Combining other differing material is future work.
-- **Noise-removal export interface.** This interface is not yet implemented. It is intended to:
-  - present waveform and spectrum views;
-  - provide audition;
-  - let the user remove selected noise regions (class A).
-
-  Until it exists, all noise in the master is retained.
+- **Differing content.** Sound that only the master has, at the start or the end, is encoded only after the user chooses `cdedge=pad` or `cdedge=cut` (Section 4.3, Placement). Sound that only the CD has stops the encoder. The planner (`lae_enc plan`) still stops on sound that only one side has. Combining other differing material is future work.
+- **Noise marking.** Implemented since v5-NEXT: LAE Noise Marker (`plugins/lae_noise_marker/`) presents spectrum views and short previews and writes a marking file, and the encoder codes the marked cells of the frequency layer as class A (`noise=`, Section 8.6; [docs/NOISE.md](docs/NOISE.md)). Without `noise=`, all noise in the master is retained.
 - **Closed-loop re-validation.** The structure-preservation tests of the label closed loop, using injected tones and clicks, are to be repeated on v5.
 - **Detector documentation.** The statistics of the transient detector are to be documented (Section 7.4).
 
@@ -1926,7 +1921,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - the effect of the CD-ROM XA marker in the data session, which the tool does not currently write;
   - compatibility tests with real CD players and of reading the data session on Windows, macOS and Linux.
 - **lae_cdx.** The memory peak for an image of a whole 74-minute disc is about 3.5–4 GB. The specification also defines FLAC base-layer files and a TOC read from the drive; `lae_cdx` does not yet implement them: the reader refuses FLAC input, and it takes the TOC from a CUE sheet or from the order and lengths of the files.
-- **Player component.** A 64-bit build for foobar2000 2.x is pending. The component cannot yet open CD-Extra rips directly.
+- **Player component.** The component cannot yet open CD-Extra rips directly.
 - **Measurements and tests pending.**
   - Characterisation of the half-band filters for the specification.
   - Builds and self-test fingerprints on other ARM systems (32-bit ARM, macOS on ARM).
@@ -1962,7 +1957,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - A fix requires changes to the encoder only: in this strip, only the frequency layer's quantisation error, not its content, would be subtracted. The format and all decoders would remain unchanged.
   - This fix has not been made: no real recordings with such content are available, the gain on music is nil, and a changed encoder would require new conformance vectors. Contributions are welcome.
   - The Synth result above may have the same cause; this has not been checked.
-- **Samples carried by a move.** Where the move of the master carries samples to a place at which no piece takes master samples (the very start or end of the master, or a gap that only the master has), these samples are not kept. The planner reports where this happens and how many samples are affected; the user may add at least 1 ms (44 CD frames) of digital silence at that place to both the master and the CD (Section 4.5).
+- **Samples carried by a move.** Where the move of the master carries samples to a place at which no piece takes master samples (the very start or end of the master, or a gap that only the master has), these samples are not kept. The planner reports where this happens and how many samples are affected; the user may add 44 CD frames (about 1 ms) of digital silence at that place to both the master and the CD (Section 4.5).
 - **Hard-cut masters.** A master whose sound reaches its first or last sample retains a few frames of digital silence at the ends of the CD layer after a fractional move (Section 4.3).
 - **Forward seeking.** v5 defines no random-access points, so the library checks a file once when it first encounters it and keeps checkpoints in the player's own folder (Section 13.6). This first open takes about 2.2 s per 10 minutes on 8 cores and 3.2 s on 4 cores; machines with fewer cores have not been measured. With `LAE_INDEX_DIR=off`, or where no folder is available, every open checks the file again.
 - **Sampling-rate families.** The encoder performs no rational-ratio resampling.

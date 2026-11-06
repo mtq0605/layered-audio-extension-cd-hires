@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cmath>
+#include <cstring>
 #include "lae_math.h"   // log2 / cospi / log10 identical on every platform (2026-11-03)
 #include <vector>
 #include <algorithm>
@@ -23,6 +24,7 @@
 #include "enc_io.h"
 #include "fft.h"
 #include "partition.h"
+#include "noise_marks.h"   // noise=: the marking file (2026-11-04)
 using namespace std;
 typedef int32_t i32; typedef int64_t i64; static const int N = mdct::N;
 struct Ev { double f, t0, t1, db; int W; };
@@ -48,20 +50,20 @@ struct Source { FILE* f = nullptr; long long frames = 0; int mode = 0; std::stri
             else { const long l = l0 >> 8, r = r0 >> 8; v = mode == 1 ? r : mode == 2 ? (i64)(l - r) : mode == 3 ? (i64)(r + ((l - r) >> 1)) : (i64)l; }
             out[(size_t)(i - a)] = v; } } };
 // ---- a plane of K rows x N int32 in a temporary file (X or the reconstructed plane)
-struct PlaneFile { FILE* f = nullptr; std::string path; long long K = 0;
-    void create(const std::string& p, long long k) { path = p; K = k; f = encio::open(p.c_str(), "w+b"); }
+struct PlaneFile { FILE* f = nullptr; std::string path; long long K = 0; long long W = N;   // W values per row (N; fewer for the per-cell records of g)
+    void create(const std::string& p, long long k, long long w = N) { path = p; K = k; W = w; f = encio::open(p.c_str(), "w+b"); }
     ~PlaneFile() { if (f) { fclose(f); remove(path.c_str()); } }
     void seek(long long m) {
 #ifdef _WIN32
-        if (_fseeki64(f, m * N * 4, SEEK_SET)) encio::fail("seek failed: " + path);
+        if (_fseeki64(f, m * W * 4, SEEK_SET)) encio::fail("seek failed: " + path);
 #else
-        if (fseeko(f, (off_t)(m * N * 4), SEEK_SET)) encio::fail("seek failed: " + path);
+        if (fseeko(f, (off_t)(m * W * 4), SEEK_SET)) encio::fail("seek failed: " + path);
 #endif
     }
-    void write(long long m0, const int32_t* d, long long rows) { if (rows <= 0) return; seek(m0); if (encio::testFail(path.c_str()) || fwrite(d, 4, (size_t)(rows * N), f) != (size_t)(rows * N)) encio::fail("write failed (disk full?): " + path); }
+    void write(long long m0, const int32_t* d, long long rows) { if (rows <= 0) return; seek(m0); if (encio::testFail(path.c_str()) || fwrite(d, 4, (size_t)(rows * W), f) != (size_t)(rows * W)) encio::fail("write failed (disk full?): " + path); }
     void read(long long m0, long long m1, std::vector<int32_t>& out) {   // rows outside [0, K) read as zero
-        out.assign((size_t)((m1 - m0) * N), 0); const long long a = std::max(m0, 0LL), b = std::min(m1, K); if (a >= b) return; seek(a);
-        if (fread(out.data() + (size_t)((a - m0) * N), 4, (size_t)((b - a) * N), f) != (size_t)((b - a) * N)) encio::fail("read failed: " + path); } };
+        out.assign((size_t)((m1 - m0) * W), 0); const long long a = std::max(m0, 0LL), b = std::min(m1, K); if (a >= b) return; seek(a);
+        if (fread(out.data() + (size_t)((a - m0) * W), 4, (size_t)((b - a) * W), f) != (size_t)((b - a) * W)) encio::fail("read failed: " + path); } };
 // ---- MDCT of frames [m0, m1) (frame m covers padded samples [mN, mN + 2N) of [N zeros | signal | zeros]); the same arithmetic as mdct::forward
 static void forwardFrames(Source& src, long long L, long long m0, long long m1, std::vector<int32_t>& X, long long limit = -1) {
     X.assign((size_t)((m1 - m0) * N), 0); if (m1 <= m0) return; std::vector<i64> x; src.read(m0 * N - N, m1 * N + N, x, limit);
@@ -71,6 +73,15 @@ static void forwardFrames(Source& src, long long L, long long m0, long long m1, 
         for (int n = 0; n < 2 * N; n++) z[n] = (double)(i32)p[n] * mdct::WIN[n];
         for (int n = 0; n < N / 2; n++) { u[n] = -z[3 * N / 2 - 1 - n] - z[3 * N / 2 + n]; u[N / 2 + n] = z[n] - z[N - 1 - n]; }
         mdct::dct4(u, c); for (int k = 0; k < N; k++) X[(size_t)((m - m0) * N + k)] = (i32)std::llround(c[k]); } }
+// the same transform with the coefficients before rounding (noise= and g: the master's plane and the layer's are subtracted exactly)
+static void forwardFramesD(Source& src, long long L, long long m0, long long m1, std::vector<double>& X) {
+    X.assign((size_t)((m1 - m0) * N), 0.0); if (m1 <= m0) return; std::vector<i64> x; src.read(m0 * N - N, m1 * N + N, x);
+    for (long long i = 0; i < (long long)x.size(); i++) { const long long g = m0 * N - N + i; if (g < 0 || g >= L) x[(size_t)i] = 0; }
+    double z[2 * N], u[N];
+    for (long long m = m0; m < m1; m++) { const i64* p = x.data() + (size_t)((m - m0) * N);
+        for (int n = 0; n < 2 * N; n++) z[n] = (double)(i32)p[n] * mdct::WIN[n];
+        for (int n = 0; n < N / 2; n++) { u[n] = -z[3 * N / 2 - 1 - n] - z[3 * N / 2 + n]; u[N / 2 + n] = z[n] - z[N - 1 - n]; }
+        mdct::dct4(u, X.data() + (size_t)((m - m0) * N)); } }
 // samples [a, b) of the inverse MDCT of the plane rows (the same overlap-add order as mdct::inverse: frame m - 1, then frame m)
 static void inverseRange(PlaneFile& Q, long long K, long long L, long long a, long long b, std::vector<i32>& y) {
     y.assign((size_t)(b - a), 0); if (b <= a) return;
@@ -139,6 +150,7 @@ int main(int argc, char** argv) {
     const long long K = mdct::frames((long)L); const int GW = 32;
     double baseNyq = fmod(rate, 44100.0) == 0 ? 22050.0 : 24000.0; double k0frac = getenv("K0FRAC") ? atof(getenv("K0FRAC")) : 0.75;
     int k0 = fullBand ? 0 : (int)floor(k0frac * baseNyq / (rate / 2 / N));
+    if (!fullBand && getenv("NOISE") && *getenv("NOISE")) k0 -= k0 % nmk::CW;   // noise=: the layer starts on the marking grid (cells = whole marked columns; at most 7 bins lower)
     vector<int> gS, gW; { int k = k0; int first = (GW - k0 % GW) % GW; if (first) { gS.push_back(k); gW.push_back(first); k += first; } for (; k + GW <= N; k += GW) { gS.push_back(k); gW.push_back(GW); } }
     int ng = (int)gS.size(); vector<int> kb2g(N, -1); for (int g = 0; g < ng; g++) for (int j = 0; j < gW[g]; j++) kb2g[gS[g] + j] = g;
     const long seg = max(1L, (long)(rate / N)); const long long nseg = (K + seg - 1) / seg;
@@ -150,13 +162,45 @@ int main(int argc, char** argv) {
     PlaneFile Xf; Xf.create(tmpBase + ".X", K); PlaneFile Qf; Qf.create(tmpBase + ".Q", K);
     const bool masterRef = fullBand && getenv("MASTERREF"); Source msrc; long long nm = 0;
     if (masterRef) { const char* cc = getenv("CHSEL"); msrc.open(getenv("MASTERREF"), (cc && cc[0] == 'R') ? 5 : 4); nm = msrc.frames; }
+    // noise= and g (frequency layer only, 2026-11-04; docs/NOISE.md). G = the up-converted CD layer's part of a cell
+    // = the master's coefficients - the layer's (both before rounding). noise=: the marked coefficients get the master taken as zero
+    // (round(-G)), a cell marked in all its bins is A. g: an A cell whose G lies above the 24-bit rounding floor codes -G instead.
+    // Neither: nothing here runs and the output is the earlier one, byte for byte.
+    const char* nzPath = fullBand ? nullptr : getenv("NOISE"); const bool gMode = !fullBand && getenv("GMODE") && *getenv("GMODE"); const char gLv = gMode ? getenv("GMODE")[0] : 'd';   // g strength: b, c or d (2026-11-05)
+    const bool nzOn = (nzPath && *nzPath) || gMode; Source nsrc; std::vector<std::vector<std::pair<int, int>>> nzRows;   // per frame: the marked bins [k0, k1)
+    if (nzOn) { const char* mp = getenv("NOISEM"); if (!mp || !*mp) encio::fail("noise= / g: NOISEM (the padded master) is not set"); nsrc.open(mp, sel == 'S' ? 2 : 3);
+        if (nsrc.frames != L) encio::fail("noise= / g: the padded master and the layer differ in length"); }
+    if (nzPath && *nzPath) { nmk::Marks mk; if (!nmk::readMarks(nzPath, mk)) encio::fail(std::string("cannot read the marking file ") + nzPath);
+        const long off = getenv("NOISEPAD") ? atol(getenv("NOISEPAD")) / N : 0; nzRows.assign((size_t)K, {});   // frame m of the master = frame m + P / N here
+        for (auto& p : mk.pos) for (long m = p.m0; m < p.m1; m++) { const long long mm = m + off; if (mm >= 0 && mm < K) nzRows[(size_t)mm].push_back({p.c0 * nmk::CW, p.c1 * nmk::CW}); } }
+    auto marked = [&](long long m, int k) { if (nzRows.empty()) return false; for (auto& r : nzRows[(size_t)m]) if (k >= r.first && k < r.second) return true; return false; };
+    // the 24-bit rounding of the decoded output per coefficient of this plane (orthonormal MDCT, so white noise keeps its variance):
+    // L and R each 1/12 LSB^2; M = r + (l - r) / 2 -> 1/24; S = l - r -> 1/6
+    const double gSig2 = sel == 'S' ? 1.0 / 6.0 : 1.0 / 24.0;
+    vector<int> edges{k0};
+    if (getenv("OCTSPLIT")) for (double f = 2 * baseNyq; f < rate / 2 - 1; f *= 2) { int b = (int)lround(f / (rate / 2 / N)); if (b > edges.back()) edges.push_back(b); }
+    edges.push_back(N); const int nsg = (int)edges.size() - 1;
+    // g: round(-G) per coefficient (XT), and per segment cell the energies of G and of the master (CE; disk 2026-11-05)
+    PlaneFile XTf, CEf; vector<int> binCell(N, -1), cellOff(nsg, 0); int ncTot = 0;
+    if (gMode) { for (int si = 0; si < nsg; si++) { cellOff[si] = ncTot; const int nc = part::numCells(edges[si], edges[si + 1]);
+            for (int k = edges[si]; k < edges[si + 1]; k++) binCell[k] = ncTot + (k - edges[si]) / part::CW; ncTot += nc; }
+        XTf.create(tmpBase + ".XT", K); CEf.create(tmpBase + ".CE", K, 4 * ncTot); }   // CE: two doubles per cell (the sums as the earlier full planes gave them)
     // ---- scan A: transform (to the X file), floors Fl / FlM, the layer signal's periodogram and its tone events
     vector<double> Fl((size_t)ng * nseg), FlM; if (masterRef) FlM.assign((size_t)ng * nseg, 0.0);
     SDet RD; RD.init(rate, L, fullBand); SDetect detA; detA.init(RD, false); long long nextRow = 0;
     auto rowsUpTo = [&](long long sampleEnd, SDetect& det, auto&& sig) {   // feeds every periodogram row whose samples end before sampleEnd
         while (nextRow < RD.nfr && nextRow * (RD.NF / 2) + RD.NF <= sampleEnd) { std::vector<double> xs; sig(nextRow * (RD.NF / 2), xs); std::vector<float> p, r; RD.row(xs.data(), p); det.feed(std::move(p), std::move(r)); nextRow++; } };
     auto xsig = [&](long long a, std::vector<double>& xs) { std::vector<i64> v; src.read(a, a + RD.NF, v); xs.assign(v.begin(), v.end()); };
-    for (long long j = 0; j < nblk; j++) { long long m0, m1; blk(j, m0, m1); std::vector<int32_t> X; forwardFrames(src, L, m0, m1, X); Xf.write(m0, X.data(), m1 - m0);
+    for (long long j = 0; j < nblk; j++) { long long m0, m1; blk(j, m0, m1); std::vector<int32_t> X;
+        if (!nzOn) forwardFrames(src, L, m0, m1, X);
+        else { std::vector<double> CF, CM; forwardFramesD(src, L, m0, m1, CF); forwardFramesD(nsrc, L, m0, m1, CM); X.resize(CF.size());
+            std::vector<int32_t> XT, CE; std::vector<double> ce; if (gMode) { XT.resize(CF.size()); ce.assign((size_t)((m1 - m0) * 2 * ncTot), 0.0); }
+            for (long long m = m0; m < m1; m++) for (int k = 0; k < N; k++) { const size_t i = (size_t)((m - m0) * N + k); const double t = CF[i] - CM[i];   // -G
+                X[i] = marked(m, k) ? (i32)std::llround(t) : (i32)std::llround(CF[i]);
+                if (gMode) { XT[i] = (i32)std::llround(t); const int ci = binCell[k];
+                    if (ci >= 0) { const double g = (float)(-t), mc = (float)CM[i]; double* r = &ce[(size_t)((m - m0) * 2 * ncTot)]; r[ci] += g * g; r[ncTot + ci] += mc * mc; } } }
+            if (gMode) { CE.resize(ce.size() * 2); memcpy(CE.data(), ce.data(), ce.size() * 8); XTf.write(m0, XT.data(), m1 - m0); CEf.write(m0, CE.data(), m1 - m0); } }
+        Xf.write(m0, X.data(), m1 - m0);
         for (long long s = m0 / seg; s < (m1 + seg - 1) / seg && s < nseg; s++) for (int g = 0; g < ng; g++) { vector<double> r;
             for (long long m = s * seg; m < min(K, (s + 1) * seg); m++) { double e = 0; for (int jj = 0; jj < gW[g]; jj++) { double v = X[(size_t)((m - m0) * N + gS[g] + jj)]; e += v * v; } r.push_back(sqrt(e / gW[g])); }
             sort(r.begin(), r.end()); double fTime = r[r.size() / 10];
@@ -175,9 +219,6 @@ int main(int argc, char** argv) {
     int mi = part::modeIndex(pm); if (mi < 0) { printf("unknown mode %s (max, 1, 3, 5, keep, keep20)\n", pm); return 1; }
     const part::Mode& MD = part::MODES[mi]; bool eq = getenv("PARTEQ") != nullptr; int wm = getenv("PARTW") ? atoi(getenv("PARTW")) : 0;
     if (mi >= part::MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
-    vector<int> edges{k0};
-    if (getenv("OCTSPLIT")) for (double f = 2 * baseNyq; f < rate / 2 - 1; f *= 2) { int b = (int)lround(f / (rate / 2 / N)); if (b > edges.back()) edges.push_back(b); }
-    edges.push_back(N); const int nsg = (int)edges.size() - 1;
     struct Seg { int k0, k1, nc; vector<uint8_t> cE, lab, fl; double lam[2] = {0, 0}; part::MeanE me; part::Result tot; long leaves = 0; };
     vector<Seg> segs(nsg); for (int si = 0; si < nsg; si++) { Seg& S = segs[si]; S.k0 = edges[si]; S.k1 = edges[si + 1]; S.nc = part::numCells(S.k0, S.k1);
         S.cE.assign((size_t)(K * S.nc), 0); S.lab.assign((size_t)(K * S.nc), 0); S.fl.assign((size_t)(K * S.nc), 0); }
@@ -221,7 +262,12 @@ int main(int argc, char** argv) {
                 else if (mx < 4.5 * fl && !st) { need = 0; nz = true; }
                 else need = (int)ceil(e - lmath::log2(C * fl));
                 int t = 1; while (t < 3 && TIERS[t] < need) t++;
-                S.lab[cid] = (uint8_t)t; S.fl[cid] = (uint8_t)(f | (nz ? 4 : 0)); } } }
+                S.lab[cid] = (uint8_t)t; S.fl[cid] = (uint8_t)(f | (nz ? 4 : 0)); } }
+        if (!nzRows.empty()) {   // noise=: a cell marked in every bin is deleted (A); the main pass is otherwise unchanged (g codes G in a pass of its own)
+            for (int si = 0; si < nsg; si++) { Seg& S = segs[si];
+                for (long long m = m0; m < m1; m++) for (int c = 0; c < S.nc; c++) { size_t cid = (size_t)(m * S.nc + c); int kb = S.k0 + c * part::CW; int nb = std::min(S.k1, kb + part::CW) - kb;
+                    bool all = true; for (int jj = 0; jj < nb && all; jj++) all = marked(m, kb + jj);
+                    if (all) { S.fl[cid] = (uint8_t)((S.fl[cid] & 2) | 1); S.lab[cid] = 0; } } } } }
     meanScan();
     // ---- DP scans
     part::Costs cost; for (int t = 0; t < 4; t++) for (int b = 0; b <= 32; b++) cost.bl[t][b] = 1.0 + b;
@@ -244,10 +290,10 @@ int main(int argc, char** argv) {
                         for (int jj = 0; jj < nb; jj++) { double q = floor(fabs((double)X[(size_t)m * N + kb + jj]) / ldexp(1.0, sh) + 0.5 - part::deadzone()); uint32_t qa = q > 0 ? (uint32_t)q : 0; int b = 0; while (qa >> b) b++; (*h)[lf.tier][min(b, 32)]++; } } }
                 if (full) { for (long long m = 0; m < m1 - m0; m++) for (int k = 0; k < R.bw; k++) Qall[(size_t)(m * N + R.k0 + k)] += R.Q[(size_t)(m * R.bw + k)];
                     if (dumps) { FILE* df = (*dumps)[si]; if (!R.stream.empty() && fwrite(R.stream.data(), 4, R.stream.size(), df) != R.stream.size()) encio::fail("write failed (disk full?): dump");
-                        // the segment's plane (its own bins, zeros elsewhere) follows in the plane file of this segment, row by row
-                        FILE* pf = (*dumps)[nsg + si]; std::vector<int32_t> row(N, 0);
-                        for (long long m = 0; m < m1 - m0; m++) { std::fill(row.begin(), row.end(), 0); for (int k = 0; k < R.bw; k++) row[(size_t)(R.k0 + k)] = R.Q[(size_t)(m * R.bw + k)];
-                            if (fwrite(row.data(), 4, N, pf) != (size_t)N) encio::fail("write failed (disk full?): plane"); } } } }
+                        // the segment's plane follows in the plane file of this segment, row by row: only its own bins k0 .. k1 - 1 (disk, 2026-11-05;
+                        // the other bins of a row are zero and part_blk checks that the decoded row has nothing there)
+                        FILE* pf = (*dumps)[nsg + si];
+                        if (m1 > m0 && R.bw > 0 && fwrite(R.Q.data(), 4, (size_t)((m1 - m0) * R.bw), pf) != (size_t)((m1 - m0) * R.bw)) encio::fail("write failed (disk full?): plane"); } } }
             if (full) Qf.write(m0, Qall.data(), m1 - m0); } };
     vector<int> allSeg(nsg); std::iota(allSeg.begin(), allSeg.end(), 0);
     for (auto& S : segs) { S.lam[0] = 1e9; S.lam[1] = 1e9; }
@@ -322,9 +368,12 @@ int main(int argc, char** argv) {
             if (++s.step < 7) { double nm2 = sqrt(s.lo * s.hi); (forD ? s.lamD : s.lamC) = nm2; continue; }
             (forD ? s.lamD : s.lamC) = s.hi; if (s.phase == 1) s.phase = 2; else s.done = true; } }
     for (int si = 0; si < nsg; si++) { segs[si].lam[0] = sr[si].lamD; segs[si].lam[1] = sr[si].lamC; }
-    // ---- final pass: every segment's stream and plane, block by block, appended in time order
+    // ---- final pass: every segment's stream and plane, block by block, appended in time order. Stream files first .. first + nsg - 1
+    // (no suffix when the layer has one stream only); g adds a second pass of nsg streams after the first.
+    const int nOut = gMode ? 2 * nsg : nsg;
+    auto finalPass = [&](int first) {
     vector<FILE*> files(2 * nsg, nullptr); vector<std::string> dumpPath(nsg), planePath(nsg); vector<long> hdrAt(nsg, 0);
-    for (int si = 0; si < nsg; si++) { std::string suf = nsg > 1 ? "." + to_string(si) : "";
+    for (int si = 0; si < nsg; si++) { std::string suf = nOut > 1 ? "." + to_string(first + si) : "";
         dumpPath[si] = std::string(getenv("DUMP") ? getenv("DUMP") : (tmpBase + ".dump")) + suf; planePath[si] = std::string(getenv("PLANE") ? getenv("PLANE") : (tmpBase + ".plane")) + suf;
         files[si] = encio::open(dumpPath[si].c_str(), "wb"); files[nsg + si] = encio::open(planePath[si].c_str(), "wb");
         int32_t hdr[11] = {0x50415254, (int32_t)K, N, segs[si].k0, segs[si].k1, (int32_t)rate, (int32_t)L, part::CW + 256 * part::ruleRef(), mi, eq ? 1 : 0, 0};
@@ -345,12 +394,39 @@ int main(int argc, char** argv) {
 #endif
         ok = ok && fwrite(&ntok, 4, 1, files[si]) == 1 && !encio::testFail(dumpPath[si].c_str()); ok = (fclose(files[si]) == 0) && ok;
         bool okp = !encio::testFail(planePath[si].c_str()); okp = (fclose(files[nsg + si]) == 0) && okp;
-        if (!ok || !okp) { remove(dumpPath[si].c_str()); remove(planePath[si].c_str()); encio::fail("write failed (disk full?): " + (ok ? planePath[si] : dumpPath[si])); } }
+        if (!ok || !okp) { remove(dumpPath[si].c_str()); remove(planePath[si].c_str()); encio::fail("write failed (disk full?): " + (ok ? planePath[si] : dumpPath[si])); } } };
+    finalPass(0);
     { part::Share cn, en; double bits = 0; for (int si = 0; si < nsg; si++) { auto& R = tot[si]; cn.dTot += R.cnt.dTot; cn.dKept += R.cnt.dKept; cn.cTot += R.cnt.cTot; cn.cKept += R.cnt.cKept;
           en.dTot += R.en.dTot; en.dKept += R.en.dKept; en.cTot += R.en.cTot; en.cKept += R.en.cKept; bits += R.bits; }
       auto pc = [](double a, double b) { return b > 0 ? 100.0 * a / b : 100.0; };
       printf("PART FINAL mode %s (share by %s): est %.1f kb/s | kept D: %.1f%% of cells, %.1f%% of energy | kept C: %.1f%% of cells, %.1f%% of energy\n", MD.name, wm == 2 ? "cells+energy" : (wm ? "energy" : "cells"),
              bits / (L / rate) / 1000, pc(cn.dKept, cn.dTot), pc(en.dKept, en.dTot), pc(cn.cKept, cn.cTot), pc(en.cKept, en.cTot)); }
-    if (getenv("SEGCOUNT")) encio::writeText(getenv("SEGCOUNT"), to_string(nsg) + "\n");
+    if (gMode) {   // g (2026-11-04/05): the same layer coded a second time, G only (docs/NOISE.md): g exists for the
+        // up-converted CD layer's noise and touches nothing else. Its plane holds round(-G) in the cells the first pass made A where G lies above
+        // the 24-bit floor and the master is taken as zero there: marked in every bin (deleted), or silent itself (master at or below the floor).
+        // An A cell whose master is not silent (for example a master whose ultrasonic part is the up-converted CD) is left as it is. A cell
+        // needing at most 4 bits is C, a larger one D; neither is demoted (lambda 1e9), so every G cell is coded with step 1 (C: block exponent <= 4, D: always). Its
+        // streams follow the first pass's, segment by segment with the same bins; the decoder adds a plane's streams (SPEC 9.5).
+        vector<Seg> gsegs(nsg); long gC = 0, gD = 0, gKept = 0;
+        for (int si = 0; si < nsg; si++) { Seg& T = gsegs[si]; const Seg& S = segs[si]; T.k0 = S.k0; T.k1 = S.k1; T.nc = S.nc; T.lam[0] = T.lam[1] = 1e9;
+            T.cE.assign((size_t)(K * T.nc), 0); T.lab.assign((size_t)(K * T.nc), 0); T.fl.assign((size_t)(K * T.nc), 1); }
+        // the G plane goes into the coefficient file itself: the first pass is finished and nothing reads its plane again (disk, 2026-11-05)
+        for (long long j = 0; j < nblk; j++) { long long m0, m1; blk(j, m0, m1); std::vector<int32_t> XT, CE; XTf.read(m0, m1, XT); CEf.read(m0, m1, CE);
+            std::vector<int32_t> XG(XT.size(), 0); std::vector<double> ce(CE.size() / 2); memcpy(ce.data(), CE.data(), ce.size() * 8);
+            for (int si = 0; si < nsg; si++) { const Seg& S = segs[si]; Seg& T = gsegs[si];
+                for (long long m = m0; m < m1; m++) for (int c = 0; c < S.nc; c++) { size_t cid = (size_t)(m * S.nc + c); if (!(S.fl[cid] & 1)) continue;
+                    int kb = S.k0 + c * part::CW; int nb = std::min(S.k1, kb + part::CW) - kb; double mx = 0; bool all = !nzRows.empty();
+                    const double* r = &ce[(size_t)((m - m0) * 2 * ncTot)]; const double ge = r[cellOff[si] + c], me = r[ncTot + cellOff[si] + c];
+                    for (int jj = 0; jj < nb; jj++) { const size_t i = (size_t)((m - m0) * N + kb + jj); mx = max(mx, fabs((double)XT[i])); if (all && !marked(m, kb + jj)) all = false; }
+                    if (!(ge > gSig2 * nb)) continue;   // G at or below the 24-bit floor: stays A
+                    if (!all && me > gSig2 * nb) { gKept++; continue; }   // not deleted and the master is not silent here: left as it is
+                    const int e = (int)ceil(lmath::log2(mx + 1)); T.cE[cid] = (uint8_t)e; T.lab[cid] = (uint8_t)(gLv == 'b' ? 1 : gLv == 'c' ? 2 : (e <= 4 ? 2 : 3)); T.fl[cid] = 2;   // 2 = no zero level: zeros stay zero (no filling)
+                    (e <= 4 ? gC : gD)++;
+                    for (int jj = 0; jj < nb; jj++) { const size_t i = (size_t)((m - m0) * N + kb + jj); XG[i] = XT[i]; } } }
+            Xf.write(m0, XG.data(), m1 - m0); }
+        std::swap(segs, gsegs); meanScan();
+        finalPass(nsg);
+        printf("g: second pass of this layer: %ld G cells coded as C, %ld as D; %ld A cells left as they are (master not silent there)\n", gC, gD, gKept); }
+    if (getenv("SEGCOUNT")) encio::writeText(getenv("SEGCOUNT"), to_string(nOut) + "\n");
     printf("runtime %.1f s\n", chrono::duration<double>(chrono::steady_clock::now() - T0).count());
     return 0; }

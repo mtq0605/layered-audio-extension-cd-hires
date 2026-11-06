@@ -6,7 +6,7 @@
 //   output: WAV whose audio is the CD layer (16 bit at 44.1/48 kHz, plays everywhere) + a "LAE " chunk with
 //           the depth layer (L, R) and the frequency layer (M, S), each range-coded with partition levels
 // usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2 (scheme), default s1] [zs] [cd=<CD.wav>] [energy] [equal]
-//                [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>]
+//                [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d]
 //        lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdaccept]   the CD's split markers onto the master (cd_plan.cpp)
 //   mode = share of the scanned D (and C) content kept at its tier (see the MODES table in partition_format.h); energy = measure the
 //   share by energy instead of cell count; equal = halving cuts only. The frequency layer is stored per octave (independent streams).
@@ -24,6 +24,11 @@
 //   bits=24: a 32-bit master is encoded from its top 24 bits (without it the encoder asks on a console, or stops otherwise).
 //   mem=<GB>: memory budget for coding two layers at once (default: half the physical memory); above it they are coded one after the
 //   other. The output file does not depend on it.
+//   noise=<marks.laenoise> (2026-11-04): the cells the user marked (lae_noise / noise_panel.html, on this master, already aligned) are deleted:
+//   in the frequency layer the master is taken as zero there, and a cell marked in all its bins is A. Cells below the frequency layer's
+//   start (k0 = CD cut-off - 1 kHz) lie in the CD layer: listed, not deleted. g: every A cell (marked or silent) whose G - the up-converted
+//   CD layer's part of it, about 120 dB below the music (docs/NOISE.md) - lies above the 24-bit rounding floor codes
+//   -G, so the decoded output there is silent down to the 24-bit floor. Neither option: the output is the earlier one, byte for byte.
 // The encoder decodes every layer again and refuses to write the file unless the decoded coefficient planes are identical.
 // Fail-safe: every file operation is checked, every module result is checked, the output is first written as <out>.part, read back
 // and verified, decoded end to end, and only then renamed to <out>. On any failure, including an internal error, an out-of-memory
@@ -76,6 +81,8 @@ extern "C" __declspec(dllimport) int __stdcall GlobalMemoryStatusEx(LaeMemStatus
 #include "fft.h"
 #include "mdct_tb.h"   // global, shared by the lossy and decoder modules (both namespaces use ::mdct)
 #include "frac_delay.h"   // global: the v6 phase delay, shared by the route split, the alignment and the decoder (::lae_fd)
+#include "noise_marks.h"   // global: the marking file of noise= (::nmk), read by the encoder and by the layer coder
+#include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 // ---- per-thread module settings and output: two layers (L and R, M and S) are coded at once, each in its own thread. A layer thread
 // keeps its own copy of the variables a layer sets (env() below) and its own printed text, which is shown after the pair in the usual
 // order, so the log reads as if the layers ran one after the other. Outside a layer thread both go to the process as before.
@@ -130,7 +137,7 @@ static void closeAll() {
 static void cleanup() { if (cleaned) return; cleaned = true; closeAll(); std::error_code ec;   // the .part only while it is unfinished; the work folder always
     if (partMine) std::filesystem::remove(part, ec); if (tmpMine && !getenv("KEEPTMP") && !keepTmp) std::filesystem::remove_all(tmp, ec); }
 static void oldNote() { if (hadOld) printf("note: the existing %s was NOT written by this run\n", out.c_str()); }
-static void emergency(const char* why) { if (finished) return; finished = true; printf("ENCODER STOPPED: %s; nothing written\n", why); oldNote(); fflush(stdout); cleanup(); }
+static void emergency(const char* why) { if (finished) return; finished = true; printf("ENCODER STOPPED: %s; nothing written\n", why); oldNote(); fflush(stdout); cleanup(); lae_u8::restoreConsole(); }   // _exit follows: no atexit, so the console is set back here (win_utf8.h)
 static void onTerminate() { emergency("internal error or out of memory (in a worker thread)"); fflush(stdout); _exit(2); }
 static void onExit() { if (!finished) emergency("a module ended the program"); }
 static void onSignal(int) { emergency("interrupted"); fflush(stdout); _exit(130); }
@@ -166,7 +173,7 @@ static void physMemory(unsigned long long& total, unsigned long long& avail) {  
 // module variables come from this program only: anything inherited from the calling environment is removed (the encoder and the planner)
 static void clearModuleEnv() {
     for (const char* k : {"ZSIGN", "RULE_F", "RULE_D", "DITHERFLAGS", "BASE24", "CDEXT", "CUTOFFOUT", "PART", "PARTEQ", "PARTW", "CHSEL", "DUMP", "PLANE", "SEGCOUNT",
-                          "PARTBYTES", "FULLBAND", "MASTERREF", "DEPTHADAPT", "K0FRAC", "OCTSPLIT", "LEAKIN", "LEAKOUT", "CLIPMAP"}) if (getenv(k)) env(k, ""); }
+                          "PARTBYTES", "FULLBAND", "MASTERREF", "DEPTHADAPT", "K0FRAC", "OCTSPLIT", "LEAKIN", "LEAKOUT", "CLIPMAP", "NOISE", "NOISEPAD", "NOISEM", "GMODE"}) if (getenv(k)) env(k, ""); }
 static std::vector<uint8_t> slurp(const std::string& p) { return encio::readAll<uint8_t>(p.c_str()); }   // a missing or unreadable file stops the encoder
 static bool exists(const std::string& p) { std::error_code ec; return std::filesystem::exists(p, ec); }
 static long long fileSize(const std::string& p) { std::error_code ec; auto n = std::filesystem::file_size(p, ec); return ec ? -1 : (long long)n; }
@@ -186,13 +193,14 @@ namespace m_plan {
 }
 
 static int encode(int argc, char** argv) {
-    if (argc < 3) { printf("usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2, default s1] [zs] [cd=<independent CD.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>]\n"); return 1; }
+    if (argc < 3) { printf("usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2, default s1] [zs] [cd=<independent CD.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d]\n"); return 1; }
     auto T0 = std::chrono::steady_clock::now();
     const std::string outPath = argv[2], partPath = outPath + ".part", tmp = outPath + ".tmp";
     encrun::out = outPath; encrun::part = partPath; encrun::tmp = tmp; encrun::hadOld = exists(outPath);
     auto oldNote = []() { encrun::oldNote(); };
     if (!mdct::selftestOK() || !alignhash::md5SelfTest() || encio::testFail("selftest")) { printf("encoder self-test FAILED: this build does not compute the IMDCT in the IEEE-754 order the format requires, or its MD5 is wrong (see docs/BUILD.md); nothing encoded\n"); return 4; }
     const char* modeName = argc > 3 ? argv[3] : "3"; int mi = part::modeIndex(modeName); if (mi < 0) { printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }
+    const char* noisePath = nullptr; bool gOpt = false; char gLevel = 'd';   // noise=<marks.laenoise>, g = g=d / g=c / g=b (2026-11-04/05)
     bool equal = false, zsOpt = false, cdCheck = false, cdAccept = false, bits24 = false, manual = false, resume = false; int wm = 0, scheme = 1, cdEdge = -1; const char* cdPath = nullptr; long long manualT = 0; unsigned long long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once (default: half the physical memory); cdEdge: cdedge=pad / cut (m_align::EDGE_*), -1 not given
     std::string manualText; int manualSg = 1; long long manualI = 0, manualF = 0, manualFs = 1, manualPlace = 0, manualPhi = 0;   // cdalign=<o>: o = sg * (I + F / Fs) master samples
     double manualMove = 0;   // the fraction (master samples, |f| <= 1/2) the master is moved by when it is placed at manualT
@@ -200,6 +208,7 @@ static int encode(int argc, char** argv) {
         if (!strcmp(a, "equal")) equal = true; else if (!strcmp(a, "energy")) wm = 1; else if (!strcmp(a, "s2")) scheme = 2; else if (!strcmp(a, "s1")) scheme = 1;
         else if (!strcmp(a, "zs")) zsOpt = true; else if (!strncmp(a, "cd=", 3) && a[3]) cdPath = a + 3; else if (!strcmp(a, "cdcheck")) cdCheck = true;
         else if (!strcmp(a, "cdaccept")) cdAccept = true; else if (!strcmp(a, "cdedge=pad")) cdEdge = m_align::EDGE_PAD; else if (!strcmp(a, "cdedge=cut")) cdEdge = m_align::EDGE_CUT; else if (!strcmp(a, "bits=24")) bits24 = true; else if (!strcmp(a, "resume")) resume = true;
+        else if (!strncmp(a, "noise=", 6) && a[6]) noisePath = a + 6; else if (!strcmp(a, "g") || !strcmp(a, "g=d")) { gOpt = true; gLevel = 'd'; } else if (!strcmp(a, "g=c")) { gOpt = true; gLevel = 'c'; } else if (!strcmp(a, "g=b")) { gOpt = true; gLevel = 'b'; }
         else if (!strncmp(a, "mem=", 4)) { const double g = atof(a + 4); if (!(g > 0) || g > 1e6) { printf("mem=%s: give the memory budget in GB (for example mem=8)\n", a + 4); return 1; } memBudget = (unsigned long long)(g * 1073741824.0); }
         else if (!strcmp(a, "cdalign=none")) { printf("cdalign=none was removed (2026-10-22): every CD is checked. A small remaining difference can be accepted with cdaccept, a known offset given with cdalign=<offset>; nothing encoded\n"); return 1; }
         else if (!strncmp(a, "cdalign=", 8)) {   // master samples, whole or with a fraction (v6): digits, optionally '.' and up to 9 digits
@@ -210,11 +219,12 @@ static int encode(int argc, char** argv) {
             if (!ni || !ok || *p || I > 2000000000LL) { printf(strchr(v, ',') ? "cdalign=%s: write the fraction with a point (for example cdalign=3.5)\n"
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
-        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> resume)\n", a); return 1; } }
+        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d resume)\n", a); return 1; } }
     encrun::keepTmp = resume;
     if ((cdCheck || cdAccept || manual || cdEdge >= 0) && !cdPath) { printf("cdcheck, cdalign, cdaccept and cdedge= need cd=<CD.wav>\n"); return 1; }
     if (mi >= part::MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
-    if (exists(partPath)) { printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath.c_str()); return 1; }
+    const bool partLeft = exists(partPath);   // with resume, decided once the work folder's notes are read (below)
+    if (partLeft && !resume) { printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath.c_str()); return 1; }
     const std::string marker = (std::filesystem::path(tmp) / "lae_enc.tmp").string();
     if (exists(tmp) && !exists(marker)) { printf("%s already exists and is not an lae_enc work folder: remove it or choose another output name; nothing encoded\n", tmp.c_str()); return 1; }
     clearModuleEnv();   // opt-in diagnostics excepted
@@ -257,6 +267,18 @@ static int encode(int argc, char** argv) {
         if (Lm > maxFrames) { printf("%s is %.2f minutes long; at %d Hz %s allows at most %.2f minutes%s: nothing encoded\n", what, Lm / (60.0 * w.rate), w.rate, who, maxFrames / (60.0 * w.rate), hint); oldNote(); return false; }
         return true; };
     if (!lengthOk("the master")) return 1;
+    nmk::Marks noiseMk; const long long LmIn = Lm;   // noise=: the marking file belongs to this master (SHA-256, length, rate) and lies inside its grid
+    if (noisePath) {
+        if (!nmk::readMarks(noisePath, noiseMk)) { printf("cannot read the marking file %s: nothing encoded\n", noisePath); oldNote(); return 1; }
+        if (noiseMk.frames != Lm || fabs(noiseMk.rate - w.rate) > 0.5) { printf("the marking file %s is for another master (length or rate differ): nothing encoded\n", noisePath); oldNote(); return 1; }
+        WavStream nws; if (!nws.open(argv[1])) { printf("cannot read %s for the SHA-256 check of noise=: nothing encoded\n", argv[1]); oldNote(); return 1; }
+        if (nmk::masterSha(nws) != noiseMk.sha) { printf("the marking file %s is for another master (SHA-256 differs): nothing encoded\n", noisePath); oldNote(); return 1; }
+        const long Kn = mdct::frames((long)Lm);
+        for (size_t i = 0; i < noiseMk.pos.size(); i++) { const nmk::Pos& p = noiseMk.pos[i];
+            if (p.m0 < 0 || p.m1 > Kn || p.m0 >= p.m1 || p.c0 < 0 || p.c1 > nmk::NCOL || p.c0 >= p.c1) { printf("the marking file %s: position %zu lies outside the grid: nothing encoded\n", noisePath, i + 1); oldNote(); return 1; } }
+        printf("noise: %zu position(s) from %s (the master's SHA-256 matches); the marked cells are deleted in the frequency layer\n", noiseMk.pos.size(), noisePath); }
+    if (gOpt) printf("g: on, strength %c (%s) - deleted or silent A cells code -G where G lies above the 24-bit rounding floor (docs/NOISE.md)\n",
+                     gLevel, gLevel == 'd' ? "step 1, down to the 24-bit floor" : gLevel == 'c' ? "C steps: block peak - 4 bit" : "B steps: block peak - 2 bit");
     auto fitsLength = [&](long long n) { long long mf = 2000000000LL - 2LL * P;   // the limits of lengthOk, without its messages
         if (const char* e = getenv("LAE_TESTMAXFRAMES")) { long long v = atoll(e); if (v > 0) mf = std::min(mf, v); }
         return n >= (long long)w.rate && n <= mf; };
@@ -264,9 +286,20 @@ static int encode(int argc, char** argv) {
       if (made || exists(marker)) encrun::tmpMine = true; encio::writeText(marker.c_str(), "lae_enc work folder (removed at the end of each run)\n"); }
     auto T = [&](const std::string& n) { return (std::filesystem::path(tmp) / n).string(); };
     struct Guard { ~Guard() { encrun::cleanup(); } } guard;   // removes the work folder always, the .part on failure
-    auto spaceOk = [&](unsigned long long reuse = 0) {   // free space for the intermediates (about 65-85 bytes per padded master frame, measured; about 20 for cdcheck) + the output; reuse = work files about to be overwritten
-        std::error_code ec; auto sp = std::filesystem::space(tmp, ec); const double perFrame = cdCheck ? 45.0 : (cdPath ? 121.0 : 105.0); if (!ec) sp.available += reuse;   // including the coefficient and plane files of two layers at once; cd=: the master kept once more for the second search and a new copy while it is placed
-        unsigned long long needB = (unsigned long long)((Lm + 2 * P) * perFrame) + (64ull << 20), hardB = (unsigned long long)((Lm + 2 * P) * perFrame * 0.7);
+    // disk (2026-11-05): the work folder's largest size, sampled every 0.25 s while the encoder runs and printed at the end (joined before the
+    // work folder is removed: declared after the guard)
+    struct DiskPoll { std::atomic<bool> stop{false}; std::atomic<unsigned long long> peak{0}; std::thread th;
+        void start(const std::string& dir) { th = std::thread([this, dir]() { while (!stop) { unsigned long long s = 0; std::error_code ec;
+            for (auto it = std::filesystem::directory_iterator(dir, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) { std::error_code e2; const auto n = it->file_size(e2); if (!e2) s += n; }
+            if (s > peak) peak = s; std::this_thread::sleep_for(std::chrono::milliseconds(250)); } }); }
+        ~DiskPoll() { stop = true; if (th.joinable()) th.join(); } } diskPoll;
+    try { diskPoll.start(tmp); } catch (...) {}   // no thread: no measurement, the encoding is the same
+    auto spaceOk = [&](unsigned long long reuse = 0) {   // free space for the intermediates + the output; reuse = work files about to be overwritten
+        // bytes per padded master frame (2026-11-05, measured with the work folder sampled while encoding: 28 plain, 29 with cd=, 32 with g on 15-s excerpts, 37 on
+        // Grand (10 min, two layers at once); about 20 for cdcheck); the margins cover the alignment's copies of the master with cd= and the blocks of two layers coded at once
+        std::error_code ec; auto sp = std::filesystem::space(tmp, ec); const double perFrame = (cdCheck ? 45.0 : (cdPath ? 55.0 : 45.0)) + (gOpt && !cdCheck ? 12.0 : 0.0);
+        if (!ec) sp.available += reuse;
+        unsigned long long needB = (unsigned long long)((Lm + 2 * P) * perFrame) + (64ull << 20), hardB = (unsigned long long)((Lm + 2 * P) * perFrame * 0.85);   // stop below the measured peak
         if ((!ec && sp.available < hardB) || encio::testFail("diskspace")) { printf("not enough free disk space next to %s: about %.0f MB needed, %.0f MB free: nothing encoded\n", outPath.c_str(), needB / 1e6, ec ? 0.0 : sp.available / 1e6); oldNote(); return false; }
         if (!ec && sp.available < needB) printf("WARNING: free disk space is tight (%.0f MB free, about %.0f MB needed); every write is checked, so a full disk stops the run cleanly\n", sp.available / 1e6, needB / 1e6);
         return true; };
@@ -281,6 +314,8 @@ static int encode(int argc, char** argv) {
     if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | options");   // not the block length: it does not change any result
         for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume")) key += std::string(" ") + argv[i];
         key += " | master " + masterMd5;
+        if (noisePath) { const std::string t = encio::readText(noisePath); uint64_t h = 1469598103934665603ull; for (unsigned char ch : t) { h ^= ch; h *= 1099511628211ull; }   // FNV-1a of the marking file
+            char hs[32]; snprintf(hs, sizeof hs, "%016llx", (unsigned long long)h); key += std::string(" | noise ") + hs; }
         if (cdPath) { wavio::Wav cw; key += " | CD " + (wavio::readCD(cdPath, cw) ? alignhash::cdMd5(cw.pcm16.data(), cw.pcm16.size() / 2) : std::string("unreadable")); }   // cd=: the alignment runs again every time; the steps after it continue
         std::string old; if (exists(manifest)) old = encio::readText(manifest.c_str());
         const std::string head = "key " + key + "\n";
@@ -289,6 +324,11 @@ static int encode(int argc, char** argv) {
             printf("resume: continuing the earlier run (%zu step(s) already done)\n", doneSteps.size()); }
         else { if (!old.empty()) printf("resume: the work folder belongs to another run (other master, options or encoder build): starting from the beginning\n");
             encio::writeText(manifest.c_str(), head); } }
+    if (partLeft) {   // resume (2026-11-05): a run killed after writing its .part leaves it; the run with the same key writes it again
+        if (resume && doneSteps.count("part")) { std::error_code ec; std::filesystem::remove(partPath, ec);
+            if (ec || exists(partPath)) { printf("cannot remove the unfinished %s of the earlier run: nothing encoded\n", partPath.c_str()); return 1; }
+            printf("resume: the unfinished %s of the earlier run is written again\n", partPath.c_str()); }
+        else { printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath.c_str()); return 1; } }
     auto isDone = [&](const std::string& s) { std::lock_guard<std::mutex> g(stepMu); return doneSteps.count(s) > 0; };
     auto markDone = [&](const std::string& s) { if (!resume) return; std::lock_guard<std::mutex> g(stepMu); doneSteps.insert(s);
         FILE* f = fopen(manifest.c_str(), "ab"); bool okw = f && fprintf(f, "done %s\n", s.c_str()) > 0; if (f && fclose(f)) okw = false;
@@ -299,12 +339,14 @@ static int encode(int argc, char** argv) {
         if (call(m_baseblk::main, {"base", T("m.raw"), std::to_string(w.rate), std::to_string((int)base), T("b16.s16")})) { printf("CD layer derivation failed\n"); oldNote(); return false; } env("BASE24", "");
         return true; };
     auto stamp = [&](const char* w) { if (getenv("TIMING")) printf("[enc %.1f s] %s\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count(), w); };
-    if (!cdPath && isDone("derive")) printf("resume: CD layer derivation already done\n"); else { if (!derive()) return 2; if (!cdPath) markDone("derive"); }   // cd=: the alignment may place and move the master and derive again
+    if (!cdPath && isDone("derive")) { printf("resume: CD layer derivation already done\n"); env("DITHERFLAGS", T("dither.flags")); }   // the second route split reads the dither flags derive() names (fixed 2026-11-05: a resumed run gave another depth layer)
+    else { if (!derive()) return 2; if (!cdPath) markDone("derive"); }   // cd=: the alignment may place and move the master and derive again
     stamp("padding + CD layer derived");
     // independent CD: the fraction of a master sample is measured in units of 2^-22 CD sample (U1 per master sample) and applied to the master
     // itself when it is placed (2026-10-23); the file stays v5 and the decoder is unchanged
     const int64_t U1 = lae_fd::unitsPerMaster(stages);
     std::string alignNote, alignReport;   // alignReport: the text of <out>.align.txt (the actual move), written only beside the finished file
+    long long placeT = 0;   // the whole offset the master was placed at (noise= needs 0: the marking was made on the aligned master)
     if (cdPath) {   // independent CD: it becomes the CD layer bit for bit; the extension codes master - CD. No dither of ours to regenerate.
         wavio::Wav c; if (!wavio::readCD(cdPath, c) || c.bits != 16 || c.ch != 2 || c.rate != (int)base) { printf("independent CD must be a 16-bit stereo WAV at %d Hz\n", (int)base); oldNote(); return 1; }
         std::vector<uint8_t> b = slurp(T("b16.s16")); long nb0 = (long)b.size() / 4, pb0 = P >> stages, need = nb0 - 2 * pb0, have = (long)c.pcm16.size() / 2;
@@ -472,6 +514,7 @@ static int encode(int argc, char** argv) {
             else alignNote = (rep.verdict == 1 ? "independent CD: WARNING, " + rep.why : std::string("independent CD: alignment confirmed")) + placed;
             {   // the movement report (a separate text file; plain text for the user's records, read by no program)
                 const double off = (double)rpT - rpMv, us = 1e6 / (double)w.rate;
+                placeT = rpT;
                 alignReport = fmt("LAE alignment report (independent CD)\nmaster: %s\nCD: %s\noutput: %s\n", argv[1], cdPath, outPath.c_str())
                     + fmt("whole offset: %+lld master samples\n", rpT)
                     + (rpMv != 0 ? fmt("fraction moved: %+.7f master samples (%+.4f microseconds): the master's waveform taken that much later\n", rpMv, rpMv * us) : std::string("fraction moved: none\n"))
@@ -490,6 +533,10 @@ static int encode(int argc, char** argv) {
         encio::writeVec(T("b16.s16").c_str(), b);
         std::vector<uint8_t> df = slurp(T("dither.flags")); std::fill(df.begin(), df.end(), 0); encio::writeVec(T("dither.flags").c_str(), df);
         printf("independent CD: %s (%ld samples) used as the CD layer\n", cdPath, have); }
+    { std::error_code ec; std::filesystem::remove(T("m0.raw"), ec); std::filesystem::remove(T("m0.orig"), ec); }   // disk (2026-11-05): every later step reads the padded master m.raw
+    if (noisePath && (placeT != 0 || Lm != LmIn)) {   // the user (2026-11-04): alignment and its confirmation come first, the marking is made on the aligned master
+        printf("noise=: the master was placed on the CD's time line here (whole offset %+lld master samples, length %lld -> %lld frames), so the marked cells no longer lie on the grid they were marked on.\n"
+               "  Make the marking on the aligned master (lae_enc plan writes it) and encode that one with cdalign=0; nothing encoded\n", placeT, LmIn, Lm); oldNote(); return 1; }
     env("CDEXT", cdPath ? "1" : "");   // cut-off detection by coherence for an independent CD (routes.cpp)
     env("CUTOFFOUT", T("cutoff.txt"));
     if (isDone("routes")) printf("resume: route split already done\n");
@@ -514,6 +561,7 @@ static int encode(int argc, char** argv) {
         for (int i = 0; i < nseg; i++) { std::string suf = nseg > 1 ? "." + std::to_string(i) : "";
             env("PARTBYTES", T(tag + ".bin" + suf));
             if (call(m_partblk::main, {"part", T(tag + ".lae" + suf), T(tag + ".plane" + suf)})) ok = false;
+            { std::error_code ec; std::filesystem::remove(T(tag + ".plane" + suf), ec); }   // disk (2026-11-05): the plane is only for this check
             env("PARTBYTES", ""); if (!ok) return out; out.push_back(slurp(T(tag + ".bin" + suf))); }
         markDone(step); return out; };
     typedef std::vector<std::vector<uint8_t>> Streams;
@@ -569,7 +617,21 @@ static int encode(int argc, char** argv) {
     const bool skipD1 = isDone("leak"); Streams dL, dR; if (!skipD1) layerPair("T.s32", (int)base, "L", "dL", "R", "dR", dL, dR, planD.both); stamp("depth layers");
     env("FULLBAND", ""); env("MASTERREF", ""); env("DEPTHADAPT", "");
     char kf[32]; snprintf(kf, sizeof kf, "%.6f", (fc - 1000.0) / (base / 2)); env("K0FRAC", kf); env("OCTSPLIT", "1");
+    if (noisePath) {   // cells below k0 lie in the CD layer: listed, not deleted (the user, 2026-11-04: the default stays as before)
+        const double k0f = atof(kf); int k0b = (int)floor(k0f * (base / 2) / (w.rate / 2.0 / mdct::N)); k0b -= k0b % nmk::CW; long below = 0;   // as lossy_blk.cpp computes k0 with noise=
+        for (size_t i = 0; i < noiseMk.pos.size(); i++) { const nmk::Pos& p = noiseMk.pos[i]; if (p.c0 * nmk::CW >= k0b) continue; below++; const bool whole = p.c1 * nmk::CW <= k0b;
+            printf("noise: position %zu (%.3f-%.3f s, %.1f-%.1f Hz) lies %s below %.1f Hz, the frequency layer's start: in the CD layer, not deleted%s\n", i + 1,
+                   nmk::frameT0(p.m0, w.rate), nmk::frameT0(p.m1, w.rate), nmk::colHz(p.c0, w.rate), nmk::colHz(p.c1, w.rate), whole ? "wholly" : "partly", k0b * (w.rate / 2.0 / mdct::N), whole ? "" : " there (deleted above it)"); }
+        if (below) printf("noise: %ld position(s) reach below the frequency layer's start; deleting there would change the CD layer (not done)\n", below);
+        env("NOISE", noisePath); env("NOISEPAD", std::to_string(P)); }
+    if (noisePath || gOpt) env("NOISEM", T("m.raw")); if (gOpt) env("GMODE", std::string(1, gLevel));
     Streams fM, fS; if (ok) layerPair("F.s32", w.rate, "M", "fM", "S", "fS", fM, fS, planF.both); env("K0FRAC", ""); env("OCTSPLIT", ""); stamp("frequency layers");
+    env("NOISE", ""); env("NOISEPAD", ""); env("NOISEM", ""); env("GMODE", "");
+    if (ok) { std::error_code ec; std::filesystem::remove(T("F.s32"), ec); }   // disk (2026-11-05): the frequency layers are coded (and noted as done); nothing reads F.s32 again
+    if (gOpt && ok && fM.size() == fS.size() && fM.size() % 2 == 0) {   // the user is told what g costs (2026-11-04): the G streams are the second half of each plane's streams
+        unsigned long long all = 0, gb = 0; const size_t half = fM.size() / 2;
+        for (size_t i = 0; i < fM.size(); i++) { const unsigned long long b = fM[i].size() + fS[i].size(); all += b; if (i >= half) gb += b; }
+        printf("g: the G streams take %.2f MB of the frequency layer's %.2f MB (%.1f %%); without g the file would be about that much smaller\n", gb / 1e6, all / 1e6, all ? 100.0 * gb / all : 0.0); }
     if (!ok || (!skipD1 && (dL.size() != 1 || dR.size() != 1)) || fM.empty() || fM.size() != fS.size()) { printf("ENCODER SELF-CHECK FAILED: a decoded layer differs from the encoder's plane or a layer could not be coded; nothing written\n"); oldNote(); return 2; }
     // CD layer: padded base trimmed by P >> stages at each end; the trimmed edges go into the LAE chunk (the decoder needs them).
     // The CD samples are not held in memory: they are copied from b16.s16 piece by piece when the file is written and checked.
@@ -609,7 +671,7 @@ static int encode(int argc, char** argv) {
     // written to <out>.part and read back: the file on disk must hold exactly this CD layer and this chunk
     auto writeFile = [&]() { std::vector<std::vector<uint8_t>> small; std::vector<Piece> pc; const size_t laeN = chunkPieces(small, pc);
         if (!wavio::fits32(cdBytes, 8ULL + laeN + 1)) { printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return (size_t)0; }
-        encrun::partMine = true;
+        encrun::partMine = true; markDone("part");   // resume: this run owns the .part from here on
         bool okw = false; { FILE* f = fopen(partPath.c_str(), "wb"); if (f) { okw = fileBytes(pc, laeN, [&](const uint8_t* p, size_t n) { return fwrite(p, 1, n, f) == n; }); okw = fclose(f) == 0 && okw; } }
         if (!okw || encio::testFail("partwrite")) { printf("cannot write %s\n", partPath.c_str()); return (size_t)0; }
         bool okr = false; { FILE* f = fopen(partPath.c_str(), "rb"); if (f) { std::vector<uint8_t> g; unsigned long long total = 0;
@@ -630,7 +692,7 @@ static int encode(int argc, char** argv) {
         markDone("leak"); }
         if (isDone("routes2")) printf("resume: second route split already done\n");
         else { char fcs[32]; snprintf(fcs, sizeof fcs, "%.0f", fc); env("LEAKIN", T("leak.s32"));
-          int rc = call(m_routesblk::main, {"routes", T("m.raw"), std::to_string(w.rate), T("b16.s16"), T("b24.s32"), T("T.s32"), T("F2.s32"), fcs}); env("LEAKIN", "");
+          int rc = call(m_routesblk::main, {"routes", T("m.raw"), std::to_string(w.rate), T("b16.s16"), T("b24.s32"), T("T.s32"), "-", fcs}); env("LEAKIN", "");
           stamp("leak decoded + route split again");
           if (rc || encio::testFail("routes2")) { printf("leak compensation FAILED in the route split: nothing written\n"); oldNote(); return 2; }
           markDone("routes2"); }
@@ -658,6 +720,7 @@ static int encode(int argc, char** argv) {
     if (!alignReport.empty()) { const std::string rp = outPath + ".align.txt"; FILE* f = fopen(rp.c_str(), "wb");
         bool ok = f && fwrite(alignReport.data(), 1, alignReport.size(), f) == alignReport.size(); if (f && fclose(f)) ok = false;
         printf(ok ? "alignment report: %s\n" : "WARNING: the alignment report %s could not be written (the LAE file itself is complete)\n", rp.c_str()); }
+    if (diskPoll.peak > 0) printf("work folder: largest %.2f GB (%.0f bytes per master frame; sampled every 0.25 s)\n", diskPoll.peak / 1e9, diskPoll.peak / (double)(Lm + 2 * P));
     size_t sd = dL[0].size() + dR[0].size(), sf = 0; for (auto& s : fM) sf += s.size(); for (auto& s : fS) sf += s.size();
     std::string extra; if (!note32.empty()) extra += " | " + note32; if (!alignNote.empty()) extra += " | " + alignNote;
     printf("LAE encode OK: %s | CD %d Hz cut-off %.0f Hz | scheme %d, mode %s (share by %s) %s | CD PCM %zu B, depth %zu B, frequency %zu B in %zu octave segment(s), chunk %zu B | beyond full scale before limiter %s | %.1f s%s\n",
@@ -673,6 +736,7 @@ int main(int argc, char** argv) {
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);   // no error-report dialog that would block a scripted run
     std::signal(SIGBREAK, encrun::onSignal);
 #endif
+    lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h); after signal(), so Ctrl+C sets the console back first
     int rc;
     try { rc = argc > 1 && !strcmp(argv[1], "plan") ? m_plan::planMain(argc, argv) : encode(argc, argv); }
     catch (const encio::Fail& e) { encrun::emergency(e.what()); return 2; }

@@ -46,12 +46,15 @@ int main(int argc, char** argv) {
     e.flush();
     TokIn tref; tref.r = &dumpR; tref.n = tin.n; TokCheck tchk; tchk.ref = &tref;
     std::unique_ptr<blkio::Reader<int32_t, 1>> encR; bool planeOk = true;
-    if (argc > 2) { encR.reset(new blkio::Reader<int32_t, 1>(argv[2])); if ((long long)encR->frames != (long long)h.K * h.N) planeOk = false; }
+    const int pbw = h.k1 - h.k0;   // the encoder's plane file holds only the segment's own bins (lossy_blk.cpp, 2026-11-05)
+    if (argc > 2) { encR.reset(new blkio::Reader<int32_t, 1>(argv[2])); if (pbw <= 0 || (long long)encR->frames != (long long)h.K * pbw) planeOk = false; }
     std::unique_ptr<blkio::Writer> outW; if (argc > 3) { outW.reset(new blkio::Writer(argv[3])); int32_t ph[5] = {0x504C4E45, (int32_t)h.K, h.k0, h.rate, (int32_t)h.L}; outW->put(ph, 5); }
     bool pdSame = true; { blkio::Reader<int32_t, 1> peR(pePath.c_str()); Dec dc; dc.p = e.out.data(); dc.n = e.out.size(); dc.init(); Walker<Dec> w(h); vector<int32_t> pe, en;
         while (!w.done()) { const long f0 = w.M0; const long rf = w.rowFrames(); row.assign((size_t)rf * h.N, 0); w.row(dc, tchk, false, row, f0);
             peR.read(f0 * h.N, (f0 + rf) * h.N, pe); if (pe != row) pdSame = false;
-            if (encR && planeOk) { encR->read(f0 * h.N, (f0 + rf) * h.N, en); if (en != row) planeOk = false; }
+            if (encR && planeOk) { encR->read(f0 * pbw, (f0 + rf) * pbw, en);   // own bins equal, every other bin of the decoded row zero
+                for (long t = 0; t < rf && planeOk; t++) for (int k = 0; k < h.N; k++) { const int32_t v = row[(size_t)(t * h.N + k)];
+                    if (k >= h.k0 && k < h.k1 ? v != en[(size_t)(t * pbw + k - h.k0)] : v != 0) { planeOk = false; break; } } }
             if (outW) outW->put(row); } }
     if (outW) outW->finish();
     bool ok = tchk.same && tchk.cnt == tin.n && pdSame;

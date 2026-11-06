@@ -14,6 +14,7 @@
 #include <string>
 #include "wavio.h"
 #include "lae_decoder.h"
+#include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 // Exports used only by the encoder (leak compensation, limiter map): active only when the encoder compiles this decoder in.
 #ifdef LAE_ENCODER_HOOKS
 static const char* hookPath(const char* name) { return getenv(name); }
@@ -22,6 +23,7 @@ static const char* hookPath(const char*) { return nullptr; }
 #endif
 
 int main(int argc, char** argv) {
+    lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
     if (argc < 3) { printf("usage: lae_dec <in.wav> <out.wav> [full|16|cd24] [output rate]\n"); return 1; }
     std::string mode = argc > 3 ? argv[3] : "full";
     if (!mdct::selftestOK()) { printf("decoder self-test FAILED: this build does not follow the IEEE-754 order the format requires (see docs/BUILD.md); refusing to decode\n"); return 4; }

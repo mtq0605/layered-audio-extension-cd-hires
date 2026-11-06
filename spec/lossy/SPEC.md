@@ -776,7 +776,7 @@ Each IMDCT signal sums the selected planes before the transform:
 * M: the selected M segments;
 * S: the selected S segments.
 
-The segments are intended to be disjoint in frequency. Each plane value is an `int32` with magnitude at most 1073741823, and there are at most 8 planes. Their double sum is therefore exact, and its order is irrelevant.
+The segments of one plane MAY overlap in frequency (an encoder may code the same bins twice, for example to cancel the up-converted CD layer in silent cells); the planes are added coefficient by coefficient. Each plane value is an `int32` with magnitude at most 1073741823, and there are at most 8 planes. Their double sum is therefore exact, and its order is irrelevant.
 
 A plane whose stream has fewer than `m + 1` frames contributes zero to frame `m`. The transform of an all-zero frame contributes only zeros, so it MAY be skipped.
 

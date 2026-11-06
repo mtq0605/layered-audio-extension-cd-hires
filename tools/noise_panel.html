@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LAE Noise Marker</title>
+<!-- SPDX-FileCopyrightText: 2026 mtq0605 -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- LAE Noise Marker panel (2026-11-04; Chinese and English since 2026-11-06). Displays and saves only; it never
+     processes audio: previews are made beforehand by lae_noise preview, the page just plays those files.
+     Spectrogram and waveform in separate panes, never overlaid; selections only on the spectrogram, as rectangles whose time
+     and frequency both come from the user's drag or numbers; every candidate starts unchecked, no select-all.
+     Positions snap inward to the encoder's cells (frames of N = 512, columns of 8 bins), as lae_noise mark does. -->
+<style>
+:root { --bg: #ffffff; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --accent: #0a66c2; --sel: #e8590c; --panel: #f5f5f7; }
+@media (prefers-color-scheme: dark) { :root { --bg: #1c1c1e; --fg: #f2f2f7; --muted: #a1a1a6; --line: #3a3a3c; --accent: #4ea1ff; --sel: #ff922b; --panel: #2c2c2e; } }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+h1 { font-size: 18px; margin: 0 0 12px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 10px; }
+label.file { display: inline-flex; gap: 6px; align-items: center; }
+input[type=number] { width: 7em; }
+.pane { position: relative; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); margin-bottom: 8px; overflow: hidden; }
+canvas { display: block; width: 100%; }
+#spec { height: 320px; cursor: crosshair; } #wave { height: 90px; }
+.axis { font-size: 12px; color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: right; white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--bg); } td.l, th.l { text-align: left; }
+tr.hi td { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.listwrap { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+button { font: inherit; padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); cursor: pointer; }
+button:disabled { opacity: .4; cursor: default; }
+.note { color: var(--muted); font-size: 12px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+</style>
+</head>
+<body>
+<div class="top"><h1 data-t="title"></h1><button id="bLang" title="中文 / English"></button></div>
+<div class="row">
+  <label class="file"><span data-t="fSpec"></span><input type="file" id="fSpec" accept=".json"></label>
+  <label class="file"><span data-t="fCand"></span><input type="file" id="fCand" accept=".laenoise,.txt"></label>
+  <label class="file"><span data-t="fMarks"></span><input type="file" id="fMarks" accept=".laenoise,.txt"></label>
+  <label class="file"><span data-t="fPrev"></span><input type="file" id="fPrev" webkitdirectory multiple></label>
+</div>
+<div class="row axis" id="info"></div>
+<div class="row">
+  <span data-t="view"></span>
+  <label><span data-t="start"></span> <input type="number" id="vT0" step="0.1" value="0"> <span data-t="s"></span></label>
+  <label><span data-t="length"></span> <input type="number" id="vLen" step="1" value="30"> <span data-t="s"></span></label>
+  <label><span data-t="level"></span> <input type="number" id="dbLo" step="5" value="-150"> <span data-t="to"></span> <input type="number" id="dbHi" step="5" value="-40"> dBFS/kHz</label>
+</div>
+<div class="pane"><canvas id="spec"></canvas></div>
+<div class="row axis" id="specAxis"></div>
+<div class="pane"><canvas id="wave"></canvas></div>
+<div class="row">
+  <span data-t="manualIn"></span>
+  <label><input type="number" id="mT0" step="0.01"> – <input type="number" id="mT1" step="0.01"> <span data-t="s"></span></label>
+  <label><input type="number" id="mF0" step="1"> – <input type="number" id="mF1" step="1"> Hz</label>
+  <button id="bAdd" data-t="add"></button>
+  <span class="note" data-t="dragHint"></span>
+</div>
+<div class="listwrap"><table id="list"><thead><tr><th class="l" data-t="hMark"></th><th>#</th><th data-t="hStart"></th><th data-t="hEnd"></th><th data-t="hLen"></th><th data-t="hF0"></th><th data-t="hF1"></th><th data-t="hLevel"></th><th data-t="hLine"></th><th class="l" data-t="hListen"></th><th class="l" data-t="hSrc"></th></tr></thead><tbody></tbody></table></div>
+<div class="row" style="margin-top:10px">
+  <button id="bSave" disabled data-t="save"></button>
+  <span class="note" id="saveNote"></span>
+</div>
+<p class="note" data-t="listenNote" data-html="1"></p>
+<p class="note" data-t="scope"></p>
+<audio id="player"></audio>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+// interface text, Chinese and English (2026-11-06); the marking file itself has no language
+const TEXT = {
+  zh: { title: "LAE 噪声标定", fSpec: "显示数据（lae_noise spectro）", fCand: "候选（lae_noise scan）", fMarks: "已存的标定（可选）", fPrev: "预览文件夹（lae_noise preview）",
+    openFirst: "先打开显示数据。", view: "视图", start: "开始", length: "长度", s: "秒", level: "电平", to: "到", manualIn: "手动输入", add: "加入（吸附到格子）",
+    dragHint: "也可以在频谱图上拖一个矩形。", hMark: "标定", hStart: "开始 秒", hEnd: "结束 秒", hLen: "长度 秒", hF0: "Hz 从", hF1: "Hz 到", hLevel: "电平", hLine: "窄线 Hz",
+    hListen: "试听", hSrc: "来源", save: "保存标定文件（只含勾选的）", cand: "候选", manual: "手动", original: "原始", silenced: "静音后", marked: "被静音的部分",
+    listenNote: "试听：候选的预览文件由 <code>lae_noise preview 母带 候选.laenoise 文件夹</code> 预先生成，每个位置最长 10 秒，只供试听。手动加的区域要先保存，再对保存的文件运行 <code>lae_noise preview</code>，然后重新打开预览文件夹。页面本身不处理任何声音。",
+    scope: "LAE 噪声标定只识别和标定，不删除，也不导出声音。标定文件只记母带的 SHA-256、长度、采样率和格子矩形；LAE 编码器用 noise= 读它。",
+    info: (m, r, len, cw, ms, st) => `${m}：${r} Hz，${len} 秒；格子 ${cw} Hz × ${ms} ms；显示步长 ${st} 帧`,
+    axis: (t0, t1, k, cw) => `横轴 ${t0} – ${t1} 秒；纵轴 0 – ${k} kHz（每行一列格子，${cw} Hz）；实线 = 已勾选，虚线 = 候选`,
+    checked: n => `已勾选 ${n} 个位置`, wrongCand: "候选文件不是这个母带的（SHA-256、长度或采样率不同）。", wrongMarks: "标定文件不是这个母带的（SHA-256、长度或采样率不同）。",
+    noCell: "这个范围里没有完整的格子。" },
+  en: { title: "LAE Noise Marker", fSpec: "Display data (lae_noise spectro)", fCand: "Candidates (lae_noise scan)", fMarks: "Saved marks (optional)", fPrev: "Preview folder (lae_noise preview)",
+    openFirst: "Open the display data first.", view: "View", start: "Start", length: "Length", s: "s", level: "Level", to: "to", manualIn: "Enter by hand", add: "Add (snaps to cells)",
+    dragHint: "Or drag a rectangle on the spectrogram.", hMark: "Mark", hStart: "Start s", hEnd: "End s", hLen: "Length s", hF0: "From Hz", hF1: "To Hz", hLevel: "Level", hLine: "Line Hz",
+    hListen: "Listen", hSrc: "Source", save: "Save marking file (checked only)", cand: "candidate", manual: "manual", original: "Original", silenced: "Silenced", marked: "Removed part",
+    listenNote: "Listening: the candidates' preview files are made beforehand with <code>lae_noise preview master candidates.laenoise folder</code>, at most 10 s per position, for listening only. For a region added by hand, save first, run <code>lae_noise preview</code> on the saved file, then open the preview folder again. The page itself does not process any sound.",
+    scope: "LAE Noise Marker only identifies and marks; it neither removes nor exports any sound. A marking file holds only the master's SHA-256, length, sample rate and rectangles of cells; the LAE encoder reads it with noise=.",
+    info: (m, r, len, cw, ms, st) => `${m}: ${r} Hz, ${len} s; cell ${cw} Hz × ${ms} ms; display step ${st} frames`,
+    axis: (t0, t1, k, cw) => `Across: ${t0} – ${t1} s; up: 0 – ${k} kHz (one row per column of cells, ${cw} Hz); solid = checked, dashed = candidate`,
+    checked: n => `${n} position${n === 1 ? "" : "s"} checked`, wrongCand: "This candidate file belongs to a different master (SHA-256, length or sample rate differ).",
+    wrongMarks: "This marking file belongs to a different master (SHA-256, length or sample rate differ).", noCell: "There is no whole cell in this range." } };
+const defaultLang = () => /^zh/i.test(navigator.language || "") ? "zh" : "en";
+let lang = defaultLang(); try { const v = localStorage.getItem("laeNoiseLang"); if (v === "zh" || v === "en") lang = v; } catch (e) {}
+const T = k => TEXT[lang][k];
+function applyLang() { document.documentElement.lang = lang;
+  document.querySelectorAll("[data-t]").forEach(el => { const v = T(el.dataset.t); if (el.dataset.html) el.innerHTML = v; else el.textContent = v; });
+  $("bLang").textContent = lang === "zh" ? "English" : "中文"; document.title = T("title"); if (D) showInfo(); else $("info").textContent = T("openFirst"); render(); }
+let D = null;            // display data
+let rows = [];           // {m0, m1, c0, c1, lv, at, src, on, idx}
+let files = {};          // preview file name -> File
+let drag = null, hover = -1;
+const N = () => D.N, CW = () => D.cw;
+const frameT0 = m => (m * N() - N() / 2) / D.rate;
+const colHz = c => c * CW() * D.rate / (2 * N());
+const K = () => Math.floor((D.frames + N() - 1) / N()) + 1;
+function snapTime(t0, t1) { return [Math.max(0, Math.ceil((t0 * D.rate + N() / 2) / N())), Math.min(K(), Math.floor((t1 * D.rate - N() / 2) / N()) + 1)]; }
+function snapFreq(f0, f1) { const w = colHz(1); return [Math.max(0, Math.ceil(f0 / w - 1e-9)), Math.min(D.ncol, Math.floor(f1 / w + 1e-9))]; }
+function parseMarks(text) { const out = { sha: "", frames: 0, rate: 0, pos: [] };
+  for (const raw of text.split(/\r?\n/)) { const note = raw.includes("#") ? raw.slice(raw.indexOf("#") + 1) : ""; const line = raw.split("#")[0].trim();
+    let m;
+    if ((m = line.match(/^master sha256 (\S+) frames (\d+) rate ([\d.]+)/))) { out.sha = m[1]; out.frames = +m[2]; out.rate = +m[3]; }
+    else if ((m = line.match(/^pos (\d+) (\d+) (\d+) (\d+)/))) { const lv = note.match(/level (-?[\d.]+)/), at = note.match(/narrow at ([\d.]+) Hz/);
+      out.pos.push({ m0: +m[1], m1: +m[2], c0: +m[3], c1: +m[4], lv: lv ? +lv[1] : NaN, at: at ? +at[1] : NaN }); } }
+  return out; }
+function sameMaster(mk) { return D && mk.sha === D.sha256 && mk.frames === D.frames && Math.abs(mk.rate - D.rate) < 0.5; }
+function sortRows() { rows.sort((a, b) => a.m0 - b.m0 || a.c0 - b.c0 || (b.m1 - b.m0) - (a.m1 - a.m0) || b.c1 - a.c1); }
+function key(r) { return [r.m0, r.m1, r.c0, r.c1].join(","); }
+
+function showInfo() { $("info").textContent = T("info")(D.master, D.rate, (D.frames / D.rate).toFixed(2), colHz(1).toFixed(1), (N() / D.rate * 1000).toFixed(2), D.step); }
+$("fSpec").onchange = async e => { const f = e.target.files[0]; if (!f) return; D = JSON.parse(await f.text());
+  showInfo();
+  $("vLen").value = Math.min(30, Math.ceil(D.frames / D.rate)); $("bSave").disabled = false; rows = []; render(); };
+$("fCand").onchange = async e => { const f = e.target.files[0]; if (!f || !D) return; const mk = parseMarks(await f.text());
+  if (!sameMaster(mk)) { alert(T("wrongCand")); return; }
+  rows = rows.filter(r => r.src !== "cand");
+  mk.pos.forEach((p, i) => rows.push({ ...p, src: "cand", on: false, idx: i + 1 })); sortRows(); render(); };
+$("fMarks").onchange = async e => { const f = e.target.files[0]; if (!f || !D) return; const mk = parseMarks(await f.text());
+  if (!sameMaster(mk)) { alert(T("wrongMarks")); return; }
+  const have = new Map(rows.map(r => [key(r), r]));
+  for (const p of mk.pos) { const r = have.get(key(p)); if (r) r.on = true; else rows.push({ ...p, src: "manual", on: true, idx: 0 }); }
+  sortRows(); render(); };
+$("fPrev").onchange = e => { files = {}; for (const f of e.target.files) files[f.name] = f; render(); };
+for (const id of ["vT0", "vLen", "dbLo", "dbHi"]) $(id).oninput = () => render();
+
+function addManual(t0, t1, f0, f1) { if (!D) return; const [m0, m1] = snapTime(Math.min(t0, t1), Math.max(t0, t1)), [c0, c1] = snapFreq(Math.min(f0, f1), Math.max(f0, f1));
+  if (m0 >= m1 || c0 >= c1) { alert(T("noCell")); return; }
+  const r = { m0, m1, c0, c1, lv: NaN, at: NaN, src: "manual", on: true, idx: 0 }; if (rows.some(x => key(x) === key(r))) return;
+  rows.push(r); sortRows(); render(); }
+$("bAdd").onclick = () => addManual(+$("mT0").value, +$("mT1").value, +$("mF0").value, +$("mF1").value);
+
+// ---- drawing
+function view() { const t0 = Math.max(0, +$("vT0").value || 0), len = Math.max(0.5, +$("vLen").value || 30); return [t0, t0 + len]; }
+function color(v, lo, hi) { const x = Math.max(0, Math.min(1, (v - lo) / (hi - lo)));   // dark blue -> yellow
+  const r = Math.round(255 * Math.min(1, Math.max(0, 1.5 * x - 0.3))), g = Math.round(255 * Math.min(1, x * 1.1)), b = Math.round(255 * Math.max(0, 0.55 - x * 0.6));
+  return [r, g, b]; }
+function fit(cv) { const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); return dpr; }
+function render() {
+  const sp = $("spec"), wv = $("wave"); const dpr = fit(sp); fit(wv); const g = sp.getContext("2d"), w = wv.getContext("2d");
+  g.clearRect(0, 0, sp.width, sp.height); w.clearRect(0, 0, wv.width, wv.height); renderList(); if (!D || !sp.width || !sp.height) return;   // not laid out (hidden): nothing to draw
+  const [t0, t1] = view(), W = sp.width, H = sp.height, lo = +$("dbLo").value, hi = +$("dbHi").value;
+  const stepT = D.step * N() / D.rate, tFirst = frameT0(1);
+  const img = g.createImageData(W, H);
+  for (let x = 0; x < W; x++) { const t = t0 + (t1 - t0) * (x + 0.5) / W, s = Math.floor((t - tFirst) / stepT); if (s < 0 || s >= D.steps) continue;
+    const col = D.lv[s];
+    for (let y = 0; y < H; y++) { const c = Math.floor((H - 1 - y) / H * D.ncol); const [r, gg, b] = color(col[c] / 10, lo, hi); const o = (y * W + x) * 4; img.data[o] = r; img.data[o + 1] = gg; img.data[o + 2] = b; img.data[o + 3] = 255; } }
+  g.putImageData(img, 0, 0);
+  const tx = t => (t - t0) / (t1 - t0) * W, fy = f => H - f / (D.rate / 2) * H;
+  rows.forEach((r, i) => { const x0 = tx(frameT0(r.m0)), x1 = tx(frameT0(r.m1)), y0 = fy(colHz(r.c1)), y1 = fy(colHz(r.c0)); if (x1 < 0 || x0 > W) return;
+    g.lineWidth = (i === hover ? 3 : 1.5) * dpr; g.strokeStyle = r.on ? getComputedStyle(document.body).getPropertyValue("--sel") : "#ffffff";
+    g.setLineDash(r.on ? [] : [4 * dpr, 3 * dpr]); g.strokeRect(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)); });
+  g.setLineDash([]);
+  if (drag) { g.strokeStyle = "#ffffff"; g.lineWidth = 1 * dpr; g.strokeRect(Math.min(drag.x0, drag.x1), Math.min(drag.y0, drag.y1), Math.abs(drag.x1 - drag.x0), Math.abs(drag.y1 - drag.y0)); }
+  $("specAxis").textContent = T("axis")(t0.toFixed(2), t1.toFixed(2), (D.rate / 2000).toFixed(1), colHz(1).toFixed(0));
+  // waveform pane (separate, never overlaid)
+  const WW = wv.width, WH = wv.height; w.strokeStyle = getComputedStyle(document.body).getPropertyValue("--accent"); w.beginPath();
+  for (let x = 0; x < WW; x++) { const t = t0 + (t1 - t0) * (x + 0.5) / WW, s = Math.floor((t - tFirst) / stepT); if (s < 0 || s >= D.steps) continue;
+    w.moveTo(x + 0.5, WH / 2 - D.wmax[s] / 1000 * WH / 2); w.lineTo(x + 0.5, WH / 2 - D.wmin[s] / 1000 * WH / 2); }
+  w.stroke(); }
+function fmt(v, d) { return Number.isFinite(v) ? v.toFixed(d) : ""; }
+function renderList() { const tb = $("list").tBodies[0]; tb.innerHTML = "";
+  rows.forEach((r, i) => { const tr = document.createElement("tr"); if (i === hover) tr.className = "hi";
+    const nm = r.idx ? String(r.idx).padStart(3, "0") : "";
+    const play = (kind, label) => { const f = nm && files[`pos_${nm}_${kind}.wav`]; return `<button data-i="${i}" data-k="${kind}" ${f ? "" : "disabled"}>${label}</button>`; };
+    tr.innerHTML = `<td class="l"><input type="checkbox" data-i="${i}" ${r.on ? "checked" : ""}></td><td>${i + 1}</td><td>${fmt(frameT0(r.m0), 3)}</td><td>${fmt(frameT0(r.m1), 3)}</td>` +
+      `<td>${fmt(frameT0(r.m1) - frameT0(r.m0), 2)}</td><td>${fmt(colHz(r.c0), 1)}</td><td>${fmt(colHz(r.c1), 1)}</td><td>${fmt(r.lv, 1)}</td><td>${fmt(r.at, 2)}</td>` +
+      `<td class="l">${play("original", T("original"))} ${play("silenced", T("silenced"))} ${play("marked", T("marked"))}</td><td class="l">${T(r.src)}${r.idx ? " " + r.idx : ""}</td>`;
+    tr.onmouseenter = () => { hover = i; render(); }; tb.appendChild(tr); });
+  tb.querySelectorAll("input[type=checkbox]").forEach(cb => cb.onchange = () => { rows[+cb.dataset.i].on = cb.checked; render(); });
+  tb.querySelectorAll("button").forEach(b => b.onclick = () => { const r = rows[+b.dataset.i], f = files[`pos_${String(r.idx).padStart(3, "0")}_${b.dataset.k}.wav`]; if (!f) return;
+    const p = $("player"); if (p.src) URL.revokeObjectURL(p.src); p.src = URL.createObjectURL(f); p.play(); });
+  const n = rows.filter(r => r.on).length; $("saveNote").textContent = T("checked")(n); }
+// drag a rectangle on the spectrogram: time and frequency both from the drag
+$("spec").onmousedown = e => { if (!D) return; const r = e.target.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; drag = { x0: (e.clientX - r.left) * dpr, y0: (e.clientY - r.top) * dpr }; drag.x1 = drag.x0; drag.y1 = drag.y0; };
+window.onmousemove = e => { if (!drag) return; const r = $("spec").getBoundingClientRect(), dpr = window.devicePixelRatio || 1; drag.x1 = (e.clientX - r.left) * dpr; drag.y1 = (e.clientY - r.top) * dpr; render(); };
+window.onmouseup = () => { if (!drag) return; const d = drag; drag = null; const sp = $("spec"), [t0, t1] = view();
+  if (Math.abs(d.x1 - d.x0) < 4 || Math.abs(d.y1 - d.y0) < 4) { render(); return; }
+  const tOf = x => t0 + (t1 - t0) * x / sp.width, fOf = y => (sp.height - y) / sp.height * D.rate / 2;
+  addManual(tOf(d.x0), tOf(d.x1), fOf(d.y0), fOf(d.y1)); };
+window.onresize = () => render();
+$("bLang").onclick = () => { lang = lang === "zh" ? "en" : "zh"; try { localStorage.setItem("laeNoiseLang", lang); } catch (e) {} applyLang(); };
+// save the checked positions as a marking file (geometry only)
+$("bSave").onclick = () => { if (!D) return; const sel = rows.filter(r => r.on); let s = `LAENOISE 1\nmaster sha256 ${D.sha256} frames ${D.frames} rate ${D.rate}\n`;
+  s += `grid mdct ${N()} cell ${CW()}   # frame m = samples [mN-N, mN+N), its hop [mN-N/2, mN+N/2); column c = bins 8c..8c+7\n`;
+  sel.forEach((r, i) => { s += `pos ${r.m0} ${r.m1} ${r.c0} ${r.c1}   # ${i + 1}: ${frameT0(r.m0).toFixed(3)}-${frameT0(r.m1).toFixed(3)} s, ${colHz(r.c0).toFixed(1)}-${colHz(r.c1).toFixed(1)} Hz\n`; });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([s], { type: "text/plain" })); a.download = D.master.replace(/\.wav$/i, "") + ".laenoise"; a.click(); };
+applyLang();
+</script>
+</body>
+</html>

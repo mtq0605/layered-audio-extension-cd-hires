@@ -852,6 +852,14 @@ The option remains off by default.
 
 Class-A leaves carry no coefficients. All of their coefficients are reconstructed as exact zero.
 
+### 8.6 Marked noise and G (encoder options)
+
+Two optional encoder settings use class A; the format and the decoders are unchanged ([docs/NOISE.md](docs/NOISE.md)).
+
+- **`noise=<marking file>`.** The user marks noise in the aligned master with LAE Noise Marker (`plugins/lae_noise_marker/`), which only identifies and marks. In the frequency layer the encoder takes the master as zero in the marked cells; a cell marked in all its bins is class A. Marks below the frequency layer (in the CD band) are listed and left unchanged.
+- **G.** In a class-A cell the decoded output is the up-converted CD layer alone: its image components, about 120 dB below the music (the half-band filters' stopband). Elsewhere the frequency layer cancels them. `g` codes the frequency layer a second time with −G, only in first-pass A cells that were deleted or where the master itself is silent; the second streams are summed with the first (Section 9.5 of the specification allows the overlap). `g=b`, `g=c` and `g=d` choose the step of that pass.
+- Without either setting the encoder's output is unchanged, byte for byte.
+
 ---
 
 ## 9 Entropy Coding
@@ -1559,7 +1567,7 @@ All options, the verified builds and the check scripts are given in [docs/BUILD.
 ### 14.2 Encoding
 
 ```
-lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [resume]
+lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [resume]
 ```
 
 | Argument | Meaning |
@@ -1578,7 +1586,9 @@ lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [
 | `energy` | Measure retention proportions by energy (modes `max`, `keep` and `keep20` use their own metric) |
 | `equal` | Use equal (halving) cuts only |
 | `mem=<GB>` | Memory budget for coding the two layers of a pair at the same time (see the memory plan below) |
-| `resume` | Continue an interrupted run: the finished steps are kept in the work folder `<output>.tmp` and are not repeated when the same master is encoded again with the same options and `resume`; otherwise the run starts from the beginning. With `cd=`, the alignment is done again (it gives the same result) and the steps after it continue. The output is the same as that of an uninterrupted run. |
+| `noise=<file>` | Code the cells marked in this marking file (LAE Noise Marker, `plugins/lae_noise_marker/`) as silence in the frequency layer (Section 8.6, [docs/NOISE.md](docs/NOISE.md)). The file must belong to this master. Marks in the CD band are listed, not deleted. |
+| `g`, `g=b`, `g=c`, `g=d` | Code the frequency layer a second time to cancel G, the up-converted CD layer, in deleted and silent cells (Section 8.6). `g` = `g=d` (step 1); `g=c` and `g=b` are coarser and smaller. Optional; the encoder prints what it costs. |
+| `resume` | Continue an interrupted run: the finished steps are kept in the work folder `<output>.tmp` and are not repeated when the same master is encoded again with the same options and `resume`; otherwise the run starts from the beginning. A run stopped after it wrote `<output>.part` writes that file again. With `cd=`, the alignment is done again (it gives the same result) and the steps after it continue. The output is the same as that of an uninterrupted run. |
 
 Notes on the encoder:
 
@@ -1590,7 +1600,7 @@ Notes on the encoder:
 - **Memory plan.** At the start the encoder reads the physical memory once and, from the track length, decides whether the two layers of a pair (depth L and R, frequency M and S) are coded at the same time or one after the other; it prints the plan (`memory plan: …`) and follows it for the whole encode. Two at once is chosen only on 64-bit builds and only when it fits the memory limit. The limit is min(1/2, max(1/4, physical memory − 28 GB)) by default, so that the system and other programs keep room: 4 GB on a 16 GB machine, 8 GB on 32 GB, 20 GB on 48 GB, 32 GB on 64 GB. `mem=<GB>` sets it by hand, for example `mem=20` on a 32 GB machine used only for audio. The block length follows from the limit and is at most about 32 s: longer blocks are not faster and only take memory. The output file does not depend on the plan, the limit or the block length.
 - **Block-wise encoding (2026-10-29).** The encoder reads the master and codes the track block by block (about 32 s per block); the decisions that depend on the whole track (floors, tone and transient marks, mean energies, code-length statistics, mode proportions) are added up from all blocks before any block is coded. The output is byte-identical to the former whole-track encoder. Memory does not grow with the track length apart from small per-cell records (3 bytes per cell): a 10-minute 352.8 kHz master needs about 0.5 GB. Large intermediate data go to the work folder on disk (see disk space below).
 - **Disk space (measured 2026-10-30).** The work folders are on the drive of the output file and are removed at the end; keep this much free space there, plus the output itself:
-  - `lae_enc`: the work folder `<output>.tmp` reached 13.2 GB for a 10.16-minute 352.8 kHz 32-bit master (about 1.3 GB per minute at 352.8 kHz, half that at 176.4 kHz). With `cd=` about 15 % more (estimated; that master's CD has 3.3 s less sound at the end, so the encoder refused it as designed and nothing was measured to the end).
+  - `lae_enc` (since 2026-11-05): the work folder `<output>.tmp` reached 8.0 GB for a 10.16-minute 352.8 kHz 32-bit master (about 0.8 GB per minute at 352.8 kHz, half that at 176.4 kHz; formerly 13.2 GB). With `g` about 15 % more, with `cd=` about 5 %. The encoder prints the largest size its work folder reached.
   - `laes enc`: the work folder `<output>.laes.tmp` reached 38.6 GB for the same 10 minutes with four masters (about 3.8 GB per minute), the same with `--mem=20` and `--mem=2`.
   - `lae_enc` checks the free space before it starts; if the disk becomes full during a run, both tools stop cleanly and leave no output file.
 - **Length.** The limit is that of the v5 container: about 94 minutes at 352.8 kHz, 173 minutes at 192 kHz, with or without `cd=`.

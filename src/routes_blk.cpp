@@ -7,6 +7,7 @@
 // usage and environment as routes.cpp
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <cstdint>
 #include <cmath>
 #include "lae_math.h"   // log2 / sinpi / cospi identical on every platform (2026-11-03)
@@ -118,7 +119,8 @@ int main(int argc, char** argv) {
         long lo, hi; blkio::cover(a - NT, b - 1 + NT, Lb, lo, hi); const WinD r = rWin(lo, hi + 1, c);
         parFor(b - a, [&](long i0, long i1) { for (long i = a + i0; i < a + i1; i++) { double acc = 0; for (int k = -NT; k <= NT; k++) acc += h[k + NT] * r.at(mir(i + k)); T.d[(size_t)(i - a)] = llround(acc); } });
         return T; };
-    blkio::Writer Tf(argv[5]), Ff(argv[6]); vector<int32_t> Tout, Fout, m;
+    blkio::Writer Tf(argv[5]); std::unique_ptr<blkio::Writer> Ff; if (strcmp(argv[6], "-")) Ff.reset(new blkio::Writer(argv[6]));   // "-": the frequency layer signal is not written (the second split after leak compensation needs only T)
+    vector<int32_t> Tout, Fout, m;
     for (long A = 0; A < L; A += BM) { const long B = min(L, A + BM); const long ta = A >> stages, tb = B == L ? Lb : (B >> stages);
         Tout.assign((size_t)(max(0L, tb - ta)) * 2, 0); Fout.assign((size_t)(B - A) * 2, 0); mr.read(A, B, m);
         auto chanTF = [&](int c) { WinD Tw; bool haveT = false;   // the T window the up-conversion asked for (it covers this block's T samples)
@@ -128,6 +130,6 @@ int main(int argc, char** argv) {
                 for (long i = ta; i < tb; i++) Tout[(size_t)(i - ta) * 2 + c] = (int32_t)max(-8388608.0, min(8388607.0, Tw.at(i))) * 256; }
             for (long i = A; i < B; i++) { const double ui = i < e ? u.at(i) : 0.0; long long d = (long long)(m[(size_t)(i - A) * 2 + c] >> 8) - llround(ui); d = max(-8388608LL, min(8388607LL, d)); Fout[(size_t)(i - A) * 2 + c] = (int32_t)(d * 256); } };
         twoWay(chanTF);
-        Tf.put(Tout); Ff.put(Fout); }
-    Tf.finish(); Ff.finish();
+        Tf.put(Tout); if (Ff) Ff->put(Fout); }
+    Tf.finish(); if (Ff) Ff->finish();
     return 0; }

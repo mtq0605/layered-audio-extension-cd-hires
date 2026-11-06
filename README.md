@@ -1170,7 +1170,7 @@ The figures in Tables 11.3a–11.5 and 12.2 were measured during development, on
 
 The CD layer is uncompressed 16-bit stereo PCM: 10.58 MB/min at 44.1 kHz and 11.52 MB/min at 48 kHz (1 MB = 10^6 bytes). Carrying the base layer in FLAC (Section 10.7) would reduce this.
 
-**Table 11.3a — Real recordings, mode 3, median MB per minute (release-candidate round).** (U): not part of the published data. The rows at 88.2 kHz and the 176.4 kHz scheme 2 row were recomputed on 2026-11-07 from the published data (medians of the recordings at that rate without the DSD-converted one, which is in Table 11.3b, as in the other rows); the earlier figures could not be traced to the data.
+**Table 11.3a — Real recordings, mode 3, median MB per minute (release-candidate round).** (U): not part of the published data. Each row is the median over the recordings at that rate, without the DSD-converted recording (Table 11.3b).
 
 | Master rate | Scheme | Depth layer | Frequency layer | Extension total | Extension / CD |
 |---|---|---|---|---|---|

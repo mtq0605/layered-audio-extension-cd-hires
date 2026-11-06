@@ -49,7 +49,7 @@ An LAE Lossy file is a RIFF/WAVE file with two parts:
 * **CD layer.** The `data` chunk holds ordinary 16-bit two-channel PCM at a base rate of 44 100 Hz or 48 000 Hz. Any WAV player can play it unchanged.
 * **Extension.** A chunk with identifier `LAE ` follows the audio. It carries two layers:
   * a **depth layer**, which extends the CD layer towards 24-bit resolution at the base rate, with one plane per channel L and R;
-  * a **frequency layer**, which extends the bandwidth up to a master rate of base × 2, × 4 or × 8. It is stored as mid/side (M, S) planes, split into one stream per frequency segment.
+  * a **frequency layer**, which extends the bandwidth up to a master rate of base × 2, × 4 or × 8. It is stored as mid/side (M, S) planes, split into streams by frequency segment: one per segment, or two where the encoder option `g` adds a second pass (Section 9.5).
 
 **Distribution and file extensions.**
 

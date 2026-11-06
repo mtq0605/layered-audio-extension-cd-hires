@@ -239,7 +239,7 @@ By construction, $x = \mathcal{U}(v + T) + F$: the three parts add back to the m
 |---|---|---|---|---|---|
 | CD | 16-bit PCM in the WAV `data` chunk | 0–22.05 kHz (48 kHz family: 0–24 kHz) | 44.1 / 48 kHz | 16 bit; TPDF dither only where needed, never on digital silence | Any player |
 | Depth | Residual of the 24-bit base relative to the CD path; one stream per channel (L, R) | 0–22.05 kHz (48 kHz family: 0–24 kHz) | 44.1 / 48 kHz | Default B18/C20/D24; keep20 B20/C22/D24 | LAE decoder |
-| Frequency | All content above the CD cut-off; M/S channels; one stream per octave segment per channel | From 1 kHz below $f_c$ to the master Nyquist frequency | Master rate | Scheme 1 B18/C20/D24; scheme 2 B16/C20/D24 | LAE decoder |
+| Frequency | All content above the CD cut-off; M/S channels; one stream per octave segment per channel (two with the encoder option `g`, Section 8.6) | From 1 kHz below $f_c$ to the master Nyquist frequency | Master rate | Scheme 1 B18/C20/D24; scheme 2 B16/C20/D24 | LAE decoder |
 
 The depth layer and the frequency layer are independent. Together they form the complete high-resolution signal. The resolution of the output depends on which of them is decoded.
 

@@ -32,6 +32,7 @@
 - CD-Extra 与文件封装（草案）：[spec/cdx/SPEC.zh.md](spec/cdx/SPEC.zh.md)
 - LAE Lossless（LAES）规范（正式，有效载荷版本 2）：[spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)
 - foobar2000 组件：[plugins/foo_input_lae/README.zh.md](plugins/foo_input_lae/README.zh.md)
+- LAEY 扩展包（用法）：[docs/PACKS.zh.md](docs/PACKS.zh.md)
 - 许可证：[LICENSE](LICENSE)。贡献指南：[CONTRIBUTING.zh.md](CONTRIBUTING.zh.md)。专利承诺：[PATENTS.zh.md](PATENTS.zh.md)。商业编码器许可证：[COMMERCIAL.zh.md](COMMERCIAL.zh.md)
 
 **标识符和文件：**
@@ -1627,7 +1628,7 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 | `--cover=<image>` | 正面封面，JPEG 或 PNG，逐字节存储 |
 | `--picture=<type>:<image>` | 其他任意图片，使用 ID3 / FLAC 图片类型（4 封底、5 小册子、6 介质、8 艺术家等） |
 | `--form=wav`、`--form=flac` | 输出文件的形式（第 10.1 节）。必须与 `.wav` 或 `.flac` 的文件名一致；只有 `.lae` 可以自由选择。不写时，WAV 形式与以前版本的输出逐字节相同。 |
-| `master2=<file>` … `master9=<file>` | 另加的母带，每个都对着与主体相同的 CD 层（用 `cd=` 给出）编成一个扩展包（[spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md) 第 5.6 节）。每个都需要给出它在 CD 层上的位置 `master<n>align=<offset>`（写法同 `cdalign=`）；不给时报告两次搜索的结果，不写出任何文件。`master<n>accept` 和 `master<n>edge=pad|cut` 对该母带的作用与 `cdaccept`、`cdedge=` 相同。相对 CD 有速度漂移的母带（例如磁带的抖晃），没有手动给出的位置和确认就不继续。另加的母带目前还不能与 `noise=`、`resume` 或 `cdcheck` 同时使用。 |
+| `master2=<file>` … `master9=<file>` | 另加的母带，每个都对着与主体相同的 CD 层（由第一个母带派生，或用 `cd=` 给出的 CD）编成一个扩展包（[spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md) 第 5.6 节）。每个都需要给出它在 CD 层上的位置 `master<n>align=<offset>`（写法同 `cdalign=`）；不给时报告两次搜索的结果，不写出任何文件。`master<n>accept` 和 `master<n>edge=pad|cut` 对该母带的作用与 `cdaccept`、`cdedge=` 相同。相对 CD 有速度漂移的母带（例如磁带的抖晃），没有手动给出的位置和确认就不继续。另加的母带目前还不能与 `noise=`、`resume` 或 `cdcheck` 同时使用。 |
 | `master<n>name=<name>` | 包 n 的名称，在选择包的地方显示（UTF-8，最多 255 字节）；`master1name=` 给主体起名。名称只用于显示。不写时输出不变。 |
 | `lae_enc tag` | 无需重新编码即可为已有 LAE 文件设置新标签：写出一个新文件，带有给定的标签（若未给出则不带标签）、相同的 CD 音频和相同的 `LAE ` 块，并检查两者逐字节相同；输入不变。 |
 

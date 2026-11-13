@@ -32,6 +32,7 @@ The encapsulation of the extension on CD-Extra, in separate files and in streams
 - CD-Extra and file encapsulation (draft): [spec/cdx/SPEC.md](spec/cdx/SPEC.md)
 - LAE Lossless (LAES) specification (stable, payload version 2): [spec/lossless/SPEC.md](spec/lossless/SPEC.md)
 - foobar2000 component: [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md)
+- LAEY extension packs (usage): [docs/PACKS.md](docs/PACKS.md)
 - Licences: [LICENSE](LICENSE). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Patent pledge: [PATENTS.md](PATENTS.md). Commercial encoder licence: [COMMERCIAL.md](COMMERCIAL.md)
 
 **Identifiers and files:**
@@ -1627,7 +1628,7 @@ The output name decides the form: `.wav` the WAV form, `.flac` the FLAC form, `.
 | `--cover=<image>` | The front cover, JPEG or PNG, stored byte for byte |
 | `--picture=<type>:<image>` | Any other picture, with the ID3 / FLAC picture type (4 back cover, 5 leaflet, 6 medium, 8 artist, …) |
 | `--form=wav`, `--form=flac` | The form of the output file (Section 10.1). It must agree with a `.wav` or `.flac` name; only `.lae` leaves the choice open. Without it, the WAV form is byte-identical to the output of earlier versions. |
-| `master2=<file>` … `master9=<file>` | Further masters, each coded as an extension pack against the same CD layer as the main body (given with `cd=`; [spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 5.6). Each needs its position on the CD layer, `master<n>align=<offset>` (written like `cdalign=`); without it, both searches are reported and nothing is written. `master<n>accept` and `master<n>edge=pad|cut` act like `cdaccept` and `cdedge=` for that master. A master whose speed drifts against the CD (for example, tape wow and flutter) is not continued without a position given by hand and a confirmation. Further masters cannot yet be combined with `noise=`, `resume` or `cdcheck`. |
+| `master2=<file>` … `master9=<file>` | Further masters, each coded as an extension pack against the same CD layer as the main body (the CD layer derived from the first master or, with `cd=`, the given CD; [spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 5.6). Each needs its position on the CD layer, `master<n>align=<offset>` (written like `cdalign=`); without it, both searches are reported and nothing is written. `master<n>accept` and `master<n>edge=pad|cut` act like `cdaccept` and `cdedge=` for that master. A master whose speed drifts against the CD (for example, tape wow and flutter) is not continued without a position given by hand and a confirmation. Further masters cannot yet be combined with `noise=`, `resume` or `cdcheck`. |
 | `master<n>name=<name>` | The name of pack n, shown where a pack is chosen (UTF-8, at most 255 bytes); `master1name=` names the main body. Names are for display only. Without them, the output is unchanged. |
 | `lae_enc tag` | New tags for an existing LAE file without re-encoding: writes a new file with the given tags (if none are given, with no tags), the same CD audio and the same `LAE ` chunk, and checks that both are byte-identical; the input is not changed. |
 

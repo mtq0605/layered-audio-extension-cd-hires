@@ -9,7 +9,7 @@
 | 格式 | 版本 | 规范 | 状态 |
 |---|---|---|---|
 | LAE Lossy（LAEY） | 容器版本 5 | [spec/lossy/SPEC.zh.md](../spec/lossy/SPEC.zh.md) | 正式 |
-| LAE Lossless（LAES） | 有效载荷版本 1 | [spec/lossless/SPEC.zh.md](../spec/lossless/SPEC.zh.md) | 正式 |
+| LAE Lossless（LAES） | 有效载荷版本 2（版本 1 的文件仍然有效） | [spec/lossless/SPEC.zh.md](../spec/lossless/SPEC.zh.md) | 正式 |
 | LAE CD-Extra 封装（CDX） | 版本 0 | [spec/cdx/SPEC.zh.md](../spec/cdx/SPEC.zh.md) | 草案 |
 | LAENOISE 标记文件 | 版本 1 | [plugins/lae_noise_marker/SPEC_LAENOISE.zh.md](../plugins/lae_noise_marker/SPEC_LAENOISE.zh.md) | 正式 |
 
@@ -19,15 +19,16 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 的 FLAC Applicat
 
 | 组件 | 版本 | 读 / 写 |
 |---|---|---|
-| `lae_enc`、`lae_dec`（LAEY 编码器和解码器） | 发布时的提交哈希 | LAEY 容器 v5 |
-| `laes`（LAES 工具） | 发布时的提交哈希 | LAES 有效载荷 v1 |
+| `lae_enc`、`lae_dec`（LAEY 编码器和解码器） | 发布时的提交哈希 | LAEY 容器 v5，WAV 和 FLAC 形式，扩展包 |
+| `laes`（LAES 工具） | 发布时的提交哈希 | LAES 有效载荷 v1 和 v2 |
 | `lae_cdx`（CD-Extra 工具） | 发布时的提交哈希 | CDX v0 |
+| `lae_udec`（统一解码器）和 `liblae` | 发布时的提交哈希；`liblae` API 9 | LAEY v5（两种形式、扩展包）、LAES v1 和 v2 |
 | `lae_noise` 和噪声面板 `noise_panel.html`（LAE Noise Marker） | 发布时的提交哈希 | LAENOISE v1 |
-| foobar2000 组件 `foo_input_lae` | 0.20 | LAEY v5、LAES v1 |
-| Kodi 插件 `audiodecoder.lae` | 0.2.5 | LAEY v5、LAES v1 |
-| DirectShow 过滤器 `dshow_lae` | 0.2.4 | LAEY v5、LAES v1 |
-| VLC 模块 `vlc_lae` | 0.1.4 | LAEY v5、LAES v1 |
-| Java 库（`java/`） | 发布时的提交哈希 | LAEY v5、LAES v1 |
+| foobar2000 组件 `foo_input_lae` | 0.30 | LAEY v5、LAES v1 和 v2 |
+| Kodi 插件 `audiodecoder.lae` | 0.2.12 | LAEY v5、LAES v1 和 v2 |
+| DirectShow 过滤器 `dshow_lae` | 0.2.11 | LAEY v5、LAES v1 和 v2 |
+| VLC 模块 `vlc_lae` | 0.1.11 | LAEY v5、LAES v1 和 v2 |
+| Java 库（`java/`） | 发布时的提交哈希 | LAEY v5、LAES v1 和 v2 |
 
 ## 兼容性
 
@@ -43,3 +44,4 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 的 FLAC Applicat
 | 发布 | 仓库提交哈希 | LAEY | LAES | CDX | LAENOISE | foobar2000 | Kodi | DirectShow | VLC |
 |---|---|---|---|---|---|---|---|---|---|
 | v5-2026-11-07 | 标签 `v5-2026-11-07` | v5 | v1 | v0 | v1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |
+| {NEXT_VERSION} | 标签 `{NEXT_VERSION}` | v5 | v2 | v0 | v1 | 0.30 | 0.2.12 | 0.2.11 | 0.1.11 |

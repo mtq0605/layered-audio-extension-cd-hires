@@ -4,6 +4,15 @@
 
 This is an input (demux) module for VLC media player 3.0 (Windows, 64-bit). It opens LAE files: **LAE Lossless (LAES)** files (in WAV, RF64 or FLAC form) with their lossless masters, and **LAE Lossy (LAEY)** files (WAV, container version 5). VLC queries every input module about each file that it opens. This module accepts LAE files with **any extension** (`.lae`, `.flac`, `.wav`), so the masters play without the files being renamed. It rejects other files after reading only their structure, which takes milliseconds, and VLC's own modules continue to play plain FLAC and WAV files. The module delivers 2-channel PCM, with 16-bit samples or with 24-bit or 32-bit samples in 32-bit words, at the sample rate of what is played, and it supports seeking.
 
+## Changes in this update
+
+- LAEY files in the FLAC form are opened as well ([spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4); files are recognised by content.
+- LAEY extension packs (Section 5.6 of the same specification): the option "LAEY extension pack" (`lae-pack`, 0 = the first) selects the pack; a file without that pack plays the first one, with a message in the log. No pack is chosen automatically.
+- The option "LAEY layers" (`lae-layers`) offers "All layers", "Frequency layer only", "Bit-depth layer only" and "CD/core layer only".
+- LAES payload version 2 ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3): when nothing else is set, the default master stored in the file plays; without one, the core master.
+- A master plays only after it and its chain of tiers have matched their SHA-256 values; the result is kept per file content. A derived 16-bit version starts at the seek position, bit for bit.
+- Two standalone builds, English (`-en`) and Chinese (`-zh`). VLC 3.0 shows module options in English only.
+
 ## Installation (current user, no administrator rights)
 
 Run `lae_vlc_setup-<version>.exe`. The installer:

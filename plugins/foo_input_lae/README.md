@@ -13,7 +13,15 @@ A WAV or FLAC file without an LAE extension is rejected immediately and passed u
 - Files: LAEY: `.wav` (with an `LAE ` chunk after the `data` chunk) and `.lae` (the same file with a different extension). LAES: `.wav` (with an `LAE ` chunk that begins with `LAE2`) and `.flac` (with `LAE2` APPLICATION blocks).
 - Decoders: liblae (`src/lae_api.*`) and the LAES decoder (`src/laes_*.h`, `src/laes_api.cpp`) from this repository (Apache-2.0), compiled into the DLL. No other files are required.
 
-The screenshots were taken in the Chinese-localised edition of foobar2000 1.5.1 (a clean portable installation containing only the test files). When the system language is Chinese, all text of the component is in Chinese; otherwise, it is in English. The English text is used below.
+The screenshots were taken in the Chinese-localised edition of foobar2000 1.5.1 (a clean portable installation containing only the test files). The component is built in two standalone versions, English (`-en`) and Chinese (`-zh`); each shows all of its text in its own language, whatever the system language. The English text is used below.
+
+## Changes in this update
+
+- **LAEY in the FLAC form** (`.flac`, or `.lae` holding the FLAC form; [spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4). Files are recognised by content, never by name.
+- **LAEY extension packs** (Section 5.6 of the same specification). The context menu entry "LAEY: Select layers…" lists the packs of a file by the names stored in it (a pack without a name: "Pack {n}"), each with its master sample rate; inside a pack, the entries are "All layers", "Frequency layer only" and "Bit-depth layer only", each with its sample rate and bit depth; "CD/core layer only" stays on the first level. The tier without the bit-depth layer is labelled 16-bit. The choice is kept by foobar2000 per file and is never written into the file; no pack is chosen automatically.
+- **LAES payload version 2** ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Sections 6.2 and 10.3): master names, the menu order and the default master stored in the file. "LAES: Select master…" lists the core master and the masters on the first level (number, name, sample rate, bit depth, length, "Lossless", the default marked); the rate levels and derived 16-bit versions of a master are in its own submenu ("Derived from master {n} "{name}" · {rate} / {bits}"). When nothing is chosen, the default master of the file plays; without one, the core master.
+- A master plays only after it and every master in its chain of tiers have matched their SHA-256 values; the result is kept per file content. A master that failed stays in the menu, marked "(unavailable: SHA-256 mismatch)".
+- A derived 16-bit version starts at the seek position, bit for bit as when decoded from the start.
 
 ## Installation
 
@@ -60,11 +68,12 @@ If the WAV decoder comes first, an LAE `.wav` file plays only its CD layer.
 
 | Menu item | What plays |
 |---|---|
-| All layers (master rate) | All layers, decoded to the master rate, for example 352.8 kHz / 24 bit (default). |
-| All layers, up to 192 kHz | All layers, decoded to the highest rate step not above 192 kHz (352.8 kHz master → 176.4 kHz). |
-| All layers, up to 96 kHz | All layers, decoded to the highest rate step not above 96 kHz (352.8 kHz master → 88.2 kHz). |
-| CD layer + depth layer (24 bit) | 44.1 kHz / 24 bit. |
-| CD layer only (16 bit) | The CD layer unchanged, 44.1 kHz / 16 bit. |
+| All layers · master sample rate | All layers, decoded to the master rate, for example 352.8 kHz / 24-bit (default). |
+| All layers · up to 176.4 / 192 kHz | All layers, decoded to the highest rate step not above 192 kHz (352.8 kHz master → 176.4 kHz). |
+| All layers · up to 88.2 / 96 kHz | All layers, decoded to the highest rate step not above 96 kHz (352.8 kHz master → 88.2 kHz). |
+| Frequency layer only · master sample rate (and the same two limits) | The CD/core layer and the frequency layer, without the bit-depth layer: 16-bit precision, delivered in 24-bit words. |
+| Bit-depth layer only · 24-bit | The CD/core layer and the bit-depth layer at the base rate, for example 44.1 kHz / 24-bit. |
+| CD/core layer only · 16-bit | The CD/core layer unchanged, for example 44.1 kHz / 16-bit. |
 
 A selection made during playback takes effect immediately and continues from the current position; the track does not restart. The first field of the status bar names the layers that are playing:
 

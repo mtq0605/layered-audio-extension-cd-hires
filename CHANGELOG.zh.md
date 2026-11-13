@@ -4,6 +4,19 @@
 
 本文件记录 LAE（Layered Audio Extension）及其有损层级 LAE Lossy（LAEY）和无损层级 LAE Lossless（LAES）的重要变更，按时间由新到旧排列。
 
+## {NEXT_DATE}（{NEXT_VERSION}）
+
+- **LAEY 的 FLAC 形式（2026-11-10）。**LAEY 文件可以是 FLAC 文件：CD 层就是 FLAC 音频，左右声道独立编码；扩展（与 `LAE ` 块的主体逐字节相同）放在音频之前 ID 为 `LAE1` 的 APPLICATION 块中（[spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md) 第 3.4 节）。输出文件名为 `.flac` 或带 `--form=flac` 时，`lae_enc` 写出这种形式；`.lae` 和 `.wav` 的文件名得到 WAV 形式，与以前的编码器逐字节相同。`lae_dec`、`liblae`、各插件和 Java 库都读取两种形式，并按内容区分。容器版本仍是 5。
+- **LAEY 扩展包（2026-11-11 和 11-12）。**一个文件除主体外，还可以有最多八个另加的扩展，每个由各自的母带对着同一个 CD 层生成，互相独立（第 5.6 节）。编码器选项 `master2=` … `master9=`，以及 `master<n>align=`、`master<n>name=`、`master<n>accept`、`master<n>edge=`；`master1name=` 给主体起名（可选的 `LNAM` 记录）。不支持扩展包的解码器播放主体；`lae_dec pack=<n>` 和 `liblae`（`lae_select_pack`）解码别的包，包只由用户选择。不用这些选项时，输出与以前的编码器逐字节相同。测试：`tests/check_packs.sh`。
+- **LAES 有效载荷版本 2（2026-11-11 和 11-12）。**最多 255 个母带；每个母带有名称、菜单位置和关掉其派生 16 位版本的标志；头部有默认母带和核心母带标志（[spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md) 第 6.1、6.2 和 10 节）。能写成版本 1 的有效载荷照旧写成版本 1，与以前逐字节相同。派生 16 位版本改为每个来源（核心母带、每个母带及其每个采样率档位）各一个，并且能从任意帧开始，逐位相同（GF(2) 矩阵幂）。第 10.3 节规定了选择和显示；第 1.3 节要求母带及其参照链的 SHA-256 全部相符后才播放该母带。母带超过 16 个时，编码器先在四段短片段上给候选排序。
+- **`laes`（2026-11-11 和 11-12）。**`laes enc` 新增 `--name=`、`--no-derive`、`--default=` 和 `--menu-order=`；新命令 `laes names`（不重新编码即可修改名称、菜单顺序、默认项和派生版本标志；`--in-place` 可直接修改默认项和核心母带标志）、`laes add`（加入新母带，原有部分逐字节不变）和 `laes extract`（把选中的母带写成新文件）；`laes dec --pick=` 支持范围、`master:<k>` 和 `name:<text>`，有多个母带符合时显示勾选列表（[spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.zh.md)）。
+- **统一解码器 `lae_udec` 和 `liblae` API 9（2026-11-10 至 11-12）。**`lae_any_*` 和 `lae_probe_*`（API 6，`src/lae_any.cpp`）用同一个接口打开 LAEY 和 LAES 文件，并按内容判断格式；API 7 增加 LAES 的母带名称和顺序，API 8 增加 LAEY 扩展包，API 9 增加默认母带。`lae_udec info | dec | verify` 列出文件的每一项及其格式的各项检查，并能解码任一项（README 第 13.6 节）。
+- **播放器插件。**foobar2000 `foo_input_lae` 0.30、VLC 0.1.11、Kodi 0.2.12 和 DirectShow 0.2.11：支持 LAEY 的 FLAC 形式和扩展包（按存储的名称列出，各带自己的层），LAES 的母带名称、菜单顺序和文件的默认母带，派生版本从跳转位置开始播放，长参照链播放更快。每个插件都有英文（`-en`）和中文（`-zh`）两个独立版本。不含位深层的档位标为 16 位。v5-2026-11-07 的插件（0.20、0.1.4、0.2.5、0.2.4）已撤下。
+- **Java 库。**移植了 LAEY 的 FLAC 形式、扩展包和 `master1name=`，以及 LAES 有效载荷版本 2（名称、菜单顺序、默认母带、不提供派生版本的标志、最多 255 个母带），与 C++ 工具逐字节相同。仅 Java 有：`lae_dup()`（在已打开的文件上再开一个曲目），以及面向手机、播放器前端 `Play` 最多 16 个母带的上限（[java/README.md](java/README.zh.md)）。
+- **`lae_noise scan` 快了约 10 倍（2026-11-13），**输出逐字节相同。
+- **ABX 测试工具 `lae_abx`（2026-11-12，`tools/lae_abx/`）。**Windows 上独立运行的 ABX 听音测试：用 `lae_udec` 解码两个音源（MP3 用 Windows Media Foundation），转到相同采样率并对齐，写出带两个文件 SHA-256 的记录。
+- **测试工具。**`src/cd_variant.cpp`（用于对齐测试、定义精确的 CD 变体）、`tests/check_packs.sh` 和 `tests/check_flacform.sh`；`src/gen_suite.cpp` 可以只生成一个类别（字节相同）。
+
 ## 2026-11-07（v5-2026-11-07）
 
 - **测试信号生成器在各平台上输出一致（2026-11-07）。** `src/gen_suite.cpp` 使用 `src/lae_math.h` 而非 C 库的 `sin`、`cos`、`exp`、`pow` 和 `log` 计算其信号，因此 Windows、Linux 和 ARM64 生成逐字节相同的源信号。扫频源和电子乐源发生变化，其 8 个一致性测试向量已重新生成（`tests/vectors/MANIFEST.md`）；transients 和 imd 向量不变。编码器一致性检查现在在源信号不同时判为失败，而不再仅报告。解码器不受影响。

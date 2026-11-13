@@ -6,18 +6,19 @@
 
 | 版本 | 日期 | 内容 | 文件 | 下载 |
 |---|---|---|---|---|
-| **v5-2026-11-07**（当前） | 2026-11-07 | LAEY 容器版本 5 和 LAES 有效载荷版本 1；解码不变。新增：删除已标记的噪声以及 `g`（编码器选项）；LAEY 和 LAES 文件中的标签和图片；CD-Extra 光盘镜像中的 CD-TEXT；`liblae` 中的快速首次定位；所有平台上逐位相同的编码器输出；VLC、Kodi 和 DirectShow 插件；Java 库；以及供验证用的演示音频及其母带（[docs/VERSIONS.zh.md](docs/VERSIONS.zh.md)）。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-11-07) · [发布文件](https://github.com/mtq0605/layered-audio-extension-cd-hires/releases/tag/v5-2026-11-07) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-11-07.zip) |
+| **{NEXT_VERSION}**（当前） | {NEXT_DATE} | LAEY 容器版本 5，所有已有文件的解码不变；LAES 有效载荷版本 2。新增：LAEY 的 FLAC 形式（`.flac`、`.lae`）；LAEY 扩展包（对着同一个 CD 层最多再加八个母带）及其名称；LAES 有效载荷版本 2（最多 255 个母带、母带名称、菜单顺序、默认母带、可关闭的派生版本）以及工具 `laes names`、`laes add`、`laes extract`；统一解码器 `lae_udec` 和 `liblae` API 9；支持扩展包和默认母带的插件，各有英文版和中文版；CD-Extra 演示光盘；ABX 测试工具 `lae_abx`。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/{NEXT_VERSION}) · [发布文件](https://github.com/mtq0605/layered-audio-extension-cd-hires/releases/tag/{NEXT_VERSION}) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/{NEXT_VERSION}.zip) |
+| v5-2026-11-07 | 2026-11-07 | LAEY 容器版本 5 和 LAES 有效载荷版本 1；解码不变。新增：删除已标记的噪声以及 `g`（编码器选项）；LAEY 和 LAES 文件中的标签和图片；CD-Extra 光盘镜像中的 CD-TEXT；`liblae` 中的快速首次定位；所有平台上逐位相同的编码器输出；VLC、Kodi 和 DirectShow 插件；Java 库；以及供验证用的演示音频及其母带（[docs/VERSIONS.zh.md](docs/VERSIONS.zh.md)）。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-11-07) · [发布文件](https://github.com/mtq0605/layered-audio-extension-cd-hires/releases/tag/v5-2026-11-07) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-11-07.zip) |
 | v5-2026-10-30 | 2026-10-30 | LAEY：容器版本 5，解码不变；编码器快 3–4 倍，并改为分块处理（输出逐字节相同，内存占用大幅减少）。新增无损层级 LAE Lossless（LAES，`LAE2`）：独立的规范、工具 `laes`，以及 WAV、FLAC 和 CD-Extra 载体。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-30) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-30.zip) |
 | v5-2026-10-24 | 2026-10-24 | 容器版本 5。新增独立 CD 对齐、整盘规划器、CD-Extra 封装（`lae_cdx`）、解码器库 `liblae` 和 foobar2000 组件。解码不变。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-24) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-24.zip) |
 | v5-2026-10-18 | 2026-10-18 | 容器版本 5；首次公开发布：规范、参考编码器和参考解码器、16 个一致性测试向量。 | [浏览](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-18) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-18.zip) |
 
-所有版本均使用 LAEY 容器版本 5 和相同的解码过程：任一版本的 LAEY 文件均可用任一版本的解码器播放。LAES 文件（自 v5-2026-10-30 起）用 `laes` 读取；FLAC 形式的核心母带可在任何 FLAC 播放器中播放。全部改动见 [CHANGELOG.zh.md](CHANGELOG.zh.md)。
+所有版本均使用 LAEY 容器版本 5 和相同的解码过程：任一版本的 LAEY 文件均可用任一版本的解码器播放。{NEXT_VERSION} 以前的解码器播放带扩展包的 LAEY 文件时播放其第一个包（主体），并且不读取 FLAC 形式。LAES 文件（自 v5-2026-10-30 起）用 `laes` 读取；FLAC 形式的核心母带可在任何 FLAC 播放器中播放。有效载荷版本 2 的 LAES 文件（自 {NEXT_VERSION} 起；只在用到其新功能时才写成版本 2）在该版本以前的解码器中只播放核心母带。全部改动见 [CHANGELOG.zh.md](CHANGELOG.zh.md)。
 
 **LAES（LAE Lossless）简介：**单个普通 FLAC 或 WAV 文件即可容纳一个**核心母带**以及更多**无损母带**（最高 352.8 / 384 kHz；16、24 或 32 位）。不支持 LAE 的播放器播放核心母带；核心母带为 16 位时，可以是 CD 兼容的。支持 LAE 的播放器可播放其中任一母带，每个母带均依据其 SHA-256 哈希逐位验证。在一项测试中（两段 10 秒片段，[spec/lossless/OVERVIEW.zh.md](spec/lossless/OVERVIEW.zh.md)），该文件比将相同母带存为各自独立的 FLAC 文件小 44–47 %。简介、优点与局限，以及与 FLAC 和 WAV 的比较见 [spec/lossless/OVERVIEW.zh.md](spec/lossless/OVERVIEW.zh.md)；`laes` 工具见 [spec/lossless/LAES_TOOL.zh.md](spec/lossless/LAES_TOOL.zh.md)。
 
-**状态：**本文是容器版本 5 的工作论文，也是代码仓库首页。该格式系列名为 **LAE**（**Layered Audio Extension**）。本文介绍有损层级 **LAE Lossy**（简称 **LAEY**）。对于无损层级 **LAE Lossless**（简称 **LAES**），其规范性规范为 [spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)（正式，有效载荷版本 1，2026-11-07），参考工具为 `laes`；早先的设计文档（[spec/lossless/DESIGN.zh.md](spec/lossless/DESIGN.zh.md)）已被取代。
+**状态：**本文是容器版本 5 的工作论文，也是代码仓库首页。该格式系列名为 **LAE**（**Layered Audio Extension**）。本文介绍有损层级 **LAE Lossy**（简称 **LAEY**）。对于无损层级 **LAE Lossless**（简称 **LAES**），其规范性规范为 [spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)（正式，有效载荷版本 2，2026-11-12），参考工具为 `laes`；早先的设计文档（[spec/lossless/DESIGN.zh.md](spec/lossless/DESIGN.zh.md)）已被取代。
 
-自首次发布（v5-2026-10-18）以来，仓库新增了：编码器对独立 CD 的对齐；整盘规划器；CD-Extra 封装工具 `lae_cdx`；带有 C 接口的解码器库；foobar2000 组件；无损层级 LAES；VLC、Kodi 和 DirectShow 插件；Java 库；以及噪声标记（见上方版本表和 [CHANGELOG.zh.md](CHANGELOG.zh.md)）。容器仍为版本 5。比特流、解码过程和有损规范均未改变。
+自首次发布（v5-2026-10-18）以来，仓库新增了：编码器对独立 CD 的对齐；整盘规划器；CD-Extra 封装工具 `lae_cdx`；带有 C 接口的解码器库；foobar2000 组件；无损层级 LAES；VLC、Kodi 和 DirectShow 插件；Java 库；噪声标记；LAEY 的 FLAC 形式和扩展包；LAES 有效载荷版本 2；以及统一解码器 `lae_udec`（见上方版本表和 [CHANGELOG.zh.md](CHANGELOG.zh.md)）。容器仍为版本 5。已有文件的比特流和解码过程均未改变；有损规范增加了 FLAC 形式和扩展包（第 3.4 和 5.6 节）。
 
 **规范性文本：**比特流和解码过程由 [spec/lossy/SPEC.zh.md](spec/lossy/SPEC.zh.md) 规定，该文件对容器版本 5 为正式版。若 SPEC.md 未作规定或存在歧义，以参考解码器为规范依据。本文为资料性文本。
 
@@ -29,20 +30,20 @@
 - 一致性测试向量：[tests/vectors/MANIFEST.md](tests/vectors/MANIFEST.md)
 - 测量数据：[data/](data/)，说明见 [data/README.zh.md](data/README.zh.md)
 - CD-Extra 与文件封装（草案）：[spec/cdx/SPEC.zh.md](spec/cdx/SPEC.zh.md)
-- LAE Lossless（LAES）规范（正式，有效载荷版本 1）：[spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)
+- LAE Lossless（LAES）规范（正式，有效载荷版本 2）：[spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)
 - foobar2000 组件：[plugins/foo_input_lae/README.zh.md](plugins/foo_input_lae/README.zh.md)
 - 许可证：[LICENSE](LICENSE)。贡献指南：[CONTRIBUTING.zh.md](CONTRIBUTING.zh.md)。专利承诺：[PATENTS.zh.md](PATENTS.zh.md)。商业编码器许可证：[COMMERCIAL.zh.md](COMMERCIAL.zh.md)
 
 **标识符和文件：**
 
-- 可执行文件为 `lae_enc`、`lae_dec` 和 `lae_cdx`。LAE Lossless 的工具为 `laes`（编码器、解码器、对齐、自检）。
+- 可执行文件为 `lae_enc`、`lae_dec` 和 `lae_cdx`。LAE Lossless 的工具为 `laes`（编码器、解码器、对齐、自检）。`lae_udec` 用同一个接口解码两种格式；它按内容识别格式，并列出文件提供的每一项。
 - 在 WAV 形式中，LAES 文件的 `LAE ` 块以魔数 `LAE2` 开头；FLAC 形式将同一有效载荷承载于 ID 为 `LAE2` 的 APPLICATION 块中（[spec/lossless/SPEC.zh.md](spec/lossless/SPEC.zh.md)）。
 - 解码器库为 `src/lae_decoder.h`。其 C 接口为 `liblae`（`src/lae_api.h`）。
 - foobar2000 组件为 `foo_input_lae`。
 - RIFF 块 ID 为 `LAE `（末尾带一个空格）。该块以魔数 `LAE1` 开头。
-- LAEY 文件以 `.wav` 扩展名分发，以使所有播放器都能播放 CD 层；LAES 文件另有 FLAC 形式（`.flac`）。已测试的解码器及其中部分解码器的已知局限见 [spec/COMPATIBILITY.zh.md](spec/COMPATIBILITY.zh.md)。
+- LAEY 和 LAES 文件都有 WAV 形式（`.wav`）和 FLAC 形式（`.flac`）；任何 WAV 或 FLAC 播放器都能播放其 CD 层（LAEY）或核心母带（LAES）。FLAC 形式中，扩展放在 ID 为 `LAE1`（LAEY，[spec/lossy/SPEC.zh.md](spec/lossy/SPEC.zh.md) 第 3.4 节）或 `LAE2`（LAES）的 APPLICATION 块中。已测试的解码器及其中部分解码器的已知局限见 [spec/COMPATIBILITY.zh.md](spec/COMPATIBILITY.zh.md)。
 - 封装规范所定义的扩展文件使用文件扩展名 `.lax`（在 CD 上为 `.LAX`）。该文件以一个 80 字节的尾部记录结束，该尾部记录以标识符 `LTVT` 开头（第 10.6 节）。
-- `.lae` 是该格式专用的文件扩展名。容器版本 5 未规定 `.lae` 文件的布局。
+- `.lae` 是该格式专用的文件扩展名。`.lae` 文件装的是 WAV 形式或 FLAC 形式；读取方按内容区分，从不按文件名区分。
 
 ---
 
@@ -900,17 +901,19 @@ A 类叶节点不携带系数。其所有系数都重建为精确的零。
 
 ### 10.1 封装
 
-在容器 v5 中，LAE 文件为 RIFF/WAV 文件：
+在容器 v5 中，LAE 文件有两种形式（[SPEC.md](spec/lossy/SPEC.zh.md) 第 3.1 和 3.4 节）：
 
-- 其 `data` 块为 CD 层；
-- 扩展位于单独的块中，块 ID 为 `LAE `（末尾带一个空格）。
+- **WAV 形式**（默认）：RIFF/WAV 文件，其 `data` 块为 CD 层；扩展位于单独的块中，块 ID 为 `LAE `（末尾带一个空格）。
+- **FLAC 形式**（自 {NEXT_VERSION} 起）：FLAC 文件，其音频帧为 CD 层，左右声道独立编码；扩展（与 `LAE ` 块的主体逐字节相同）切分到 ID 为 `LAE1`（已在 IANA 登记）的 APPLICATION 元数据块中，放在音频帧之前。标签和图片位于这些块之前。两种形式的每条路径都解出相同的样本；在一段 10 秒的测试中，FLAC 形式的大小是 WAV 形式的 61 %。
 
-播放器忽略未知块并播放 CD 层。文件以 `.wav` 扩展名分发。`.lae` 是该格式专用的扩展名；容器 v5 未规定 `.lae` 文件的布局。
+播放器忽略未知的块并播放 CD 层。`.wav` 表示 WAV 形式，`.flac` 表示 FLAC 形式。`.lae` 是该格式专用的扩展名，两种形式都可以；参考编码器未给 `--form=flac` 时写 WAV 形式。Windows 自带的 FLAC 解码器打不开音频起点位于文件约 4 MiB 之后的 FLAC 文件，因此大多数 FLAC 形式的 LAEY 文件在那里无法播放（[spec/COMPATIBILITY.zh.md](spec/COMPATIBILITY.zh.md)）。
+
+**扩展包**（自 {NEXT_VERSION} 起；[SPEC.md](spec/lossy/SPEC.zh.md) 第 5.6 节）。一个文件可以有一个 CD 层和最多九个互相独立的扩展：主体和最多八个另加的包，每个包由各自的母带对着同一个 CD 层生成，并可以有名称。解码器用 CD 层加恰好一个包解码，包由用户选择，从不自动选择。不支持扩展包的解码器照旧播放主体。
 
 WAV 文件之外的封装在 v5 容器之外由封装规范定义（第 10.5–10.9 节）：
 
 - **CD-Extra。**封装到 CD-Extra（44.1 kHz 系列）已在工具 `lae_cdx` 中实现。音频会话承载 CD 层，数据会话承载扩展。
-- **单独文件与数据流。**该规范还定义了另外两种分发形式：附带扩展文件的基础层文件（FLAC 或 WAV），以及 LAE 流。扩展不承载于 FLAC 文件内部。
+- **单独文件与数据流。**该规范还定义了另外两种分发形式：附带扩展文件的基础层文件（FLAC 或 WAV），以及 LAE 流。在这两种形式中，扩展单独成一个文件；把两者放在同一个文件里的，是上面的 FLAC 形式。
 
 ### 10.2 扩展块布局
 
@@ -1060,7 +1063,7 @@ CUE 表不包含 CRC、MD5 或其他哈希。
 - **基础层文件**，为 FLAC [1] 或 WAV，恰好承载该音轨的 CD 层；
 - **扩展文件**，与基础层文件同名，扩展名为 `.lax`。若该音轨也以 CD 发布，此文件与光盘上的 `TRACKnn.LAX` 逐字节相同。
 
-普通播放器播放基础层文件。扩展和尾部记录绝不放入 FLAC 文件内部。当解码后的基础层有 ncd 个采样且其整轨 MD5 等于尾部记录中的 MD5 时，读取器将这两个文件配对。配对后的音轨重新封装为规范化 v5 WAV，与编码器的输出逐字节相同。
+普通播放器播放基础层文件。扩展文件及其尾部记录绝不放入基础层文件内部（第 10.1 节的 FLAC 形式是另一种单文件形式）。当解码后的基础层有 ncd 个采样且其整轨 MD5 等于尾部记录中的 MD5 时，读取器将这两个文件配对。配对后的音轨重新封装为规范化 v5 WAV，与编码器的输出逐字节相同。
 
 **LAE 流。**LAE 流逐条音轨传送 CD 层（逐采样，FLAC、WAV 或原始 PCM）和扩展文件（逐字节）。流中不包含任何头部、索引、位置或偏移。CD 层经过有损重新编码（例如 AAC 或 MP3）的流不是 LAE 流：扩展绝不应用于有损解码的音频，此时只播放基础层。
 
@@ -1505,9 +1508,20 @@ LAE Lossy 的可听频带由 CD 层加上波形编码的细化组成。尚未发
 
 参考解码器的各处理级已原样移入库 `src/lae_decoder.h`，该库提供 `Decoder` 类。命令行解码器 `lae_dec` 调用该库。该库采用流式处理：除保存在内存中的 CD 层和扩展块外，其内存占用不随音轨长度增长。
 
-**C 接口。**`liblae`（`src/lae_api.h`，API 版本 3）是面向播放器和插件的 C 接口，提供 x64 和 x86 构建。
+**C 接口。**`liblae`（`src/lae_api.h`，API 版本 9）是面向播放器和插件的 C 接口，提供 x64 和 x86 构建。每个 API 版本只增加函数，因此为较早版本编写的宿主无需改动即可使用：
 
-- **打开。**音轨可以从 v5 WAV 文件、内存中 v5 WAV 文件的字节、通过宿主回调读取的文件，或从基础层（作为 PCM 的 CD 层）及其扩展文件打开。仅当基础层的整轨 MD5 与扩展文件一致，或在基础层中按内容找到该音轨且随后一致时，才接受该基础层。
+| API | 新增 |
+|---|---|
+| 2–3 | `lae_open_reader`（通过宿主回调读取）、`lae_stream_bytes` |
+| 4–5 | `laes_*` 函数（LAE Lossless）、`laes_index_save` / `laes_index_load` |
+| 6 | `lae_probe_*` 和 `lae_any_*`：两种格式共用的接口，只按内容判断格式（`src/lae_any.cpp`） |
+| 7 | LAES 有效载荷版本 2：`laes_master_name`、`laes_master_flags`、`laes_choice_from`、`laes_master_number` |
+| 8 | LAEY 扩展包：`lae_pack_count`、`lae_pack_info`、`lae_select_pack`、`lae_selected_pack`、`lae_any_choice_pack` |
+| 9 | `laes_default_choice`（文件中存储的默认母带，没有时为核心母带）、`laes_core_flags` |
+
+命令行工具 `lae_udec`（`src/lae_udec.cpp`）建立在 `lae_any_*` 函数之上：它按规范的顺序列出文件提供的每一项及其格式的各项检查，并能解码任一项。
+
+- **打开。**音轨可以从 WAV 形式或 FLAC 形式的 v5 文件、内存中 v5 WAV 文件的字节、通过宿主回调读取的文件，或从基础层（作为 PCM 的 CD 层）及其扩展文件打开。仅当基础层的整轨 MD5 与扩展文件一致，或在基础层中按内容找到该音轨且随后一致时，才接受该基础层。
 - **路径与输出。**调用方选择第 3.4 节四种路径之一以及一个输出采样率。输出始终为两个交错声道的 `int32` 值：路径 `cd24`、`16` 和 `full` 为 24 位范围，CD 路径为 16 位范围。
 - **统计信息。**该库报告被硬限幅器限制的采样数、是否发生数据流错误，以及已消耗的熵编码字节数。最后一项可用于显示实时码率。
 - **线程。**同一条音轨不得同时由两个线程使用。不同音轨可同时在不同线程中解码；测试中，在两个线程中解码两条音轨，所得输出与分别解码时逐位相同。
@@ -1535,13 +1549,15 @@ LAE Lossy 的可听频带由 CD 层加上波形编码的细化组成。尚未发
 
 | 组成部分 | 宿主 | 版本 | 文档 |
 |---|---|---|---|
-| `foo_input_lae` | foobar2000 1.4、1.5 和 2.x，32 位和 64 位 | 0.20 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.zh.md) |
-| `liblae_plugin.dll` | VLC 3.0，Windows 64 位 | 0.1.4 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.zh.md) |
-| `audiodecoder.lae` | Kodi 21（Omega），Windows 64 位 | 0.2.5 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.zh.md) |
-| `lae_source.ax` | DirectShow 播放器（PotPlayer、MPC-BE、MPC-HC、Windows Media Player），Windows 64 位 | 0.2.4 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.zh.md) |
+| `foo_input_lae` | foobar2000 1.4、1.5 和 2.x，32 位和 64 位 | 0.30 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.zh.md) |
+| `liblae_plugin.dll` | VLC 3.0，Windows 64 位 | 0.1.11 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.zh.md) |
+| `audiodecoder.lae` | Kodi 21（Omega），Windows 64 位 | 0.2.12 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.zh.md) |
+| `lae_source.ax` | DirectShow 播放器（PotPlayer、MPC-BE、MPC-HC、Windows Media Player），Windows 64 位 | 0.2.11 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.zh.md) |
 | Java 库 | Java 8，Android API 24 及以上 | — | [java/README.md](java/README.zh.md) |
 
 - **文件。**不带 LAE 扩展的 WAV 或 FLAC 文件交由宿主自身的解码器处理。不支持 LAE 的播放器播放 LAEY 文件的 CD 层和 LAES 文件的核心母带。
+- **选择。**LAEY 扩展包按文件中存储的名称列出，各带自己的层；LAES 母带按文件的菜单顺序列出编号和名称，采样率级别和派生版本放在各母带的子菜单中（[spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md) 第 10.3 节）。没有选择时，播放文件的默认母带（没有时为核心母带），LAEY 文件播放主体。选择由播放器按文件保存，从不写入文件。
+- **语言。**每个插件都有英文（`-en`）和中文（`-zh`）两个独立版本。
 - **标签。**这些插件读取两种形式的标签：FLAC 中的 Vorbis 注释，以及 WAV 中的 RIFF `LIST/INFO` 块和 `id3 ` 块。
 - **VLC。**VLC 可能将音轨末尾缩短约 40 ms；这是 VLC 自身的行为。
 - **Java。**Java 库是编码器和解码器的纯 Java 移植，不含本地代码。其结果与同一提交哈希的 C++ 工具的结果逐字节相同。
@@ -1582,9 +1598,11 @@ g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_enc src
 ### 14.2 编码
 
 ```
-lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [resume]
+lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [--form=wav | --form=flac] [master1name=<name>] [master2=<file> master2align=<offset> [master2name=<name>] [master2accept] [master2edge=pad|cut] ... master9=…] [resume]
 lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]
 ```
+
+输出文件名决定形式：`.wav` 为 WAV 形式，`.flac` 为 FLAC 形式，`.lae` 未给 `--form=flac` 时为 WAV 形式（[spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md) 第 3.4 节）。`lae_enc tag` 保持输入文件的形式。
 
 | 参数 | 含义 |
 |---|---|
@@ -1608,6 +1626,9 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 | `--tag=KEY=VALUE` | 标签，使用常见名称：`TITLE`、`ARTIST`、`ALBUM`、`ALBUMARTIST`、`DATE`、`GENRE`、`TRACKNUMBER`、`COMPOSER`、`COPYRIGHT`、`COMMENT` 等（UTF-8；同一名称可重复）。写为位于 `fmt ` 和 `data` 之间的 RIFF `LIST/INFO` 块和 `id3 ` 块（ID3v2.4）；CD 音频和 `LAE ` 块不变。 |
 | `--cover=<image>` | 正面封面，JPEG 或 PNG，逐字节存储 |
 | `--picture=<type>:<image>` | 其他任意图片，使用 ID3 / FLAC 图片类型（4 封底、5 小册子、6 介质、8 艺术家等） |
+| `--form=wav`、`--form=flac` | 输出文件的形式（第 10.1 节）。必须与 `.wav` 或 `.flac` 的文件名一致；只有 `.lae` 可以自由选择。不写时，WAV 形式与以前版本的输出逐字节相同。 |
+| `master2=<file>` … `master9=<file>` | 另加的母带，每个都对着与主体相同的 CD 层（用 `cd=` 给出）编成一个扩展包（[spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md) 第 5.6 节）。每个都需要给出它在 CD 层上的位置 `master<n>align=<offset>`（写法同 `cdalign=`）；不给时报告两次搜索的结果，不写出任何文件。`master<n>accept` 和 `master<n>edge=pad|cut` 对该母带的作用与 `cdaccept`、`cdedge=` 相同。相对 CD 有速度漂移的母带（例如磁带的抖晃），没有手动给出的位置和确认就不继续。另加的母带目前还不能与 `noise=`、`resume` 或 `cdcheck` 同时使用。 |
+| `master<n>name=<name>` | 包 n 的名称，在选择包的地方显示（UTF-8，最多 255 字节）；`master1name=` 给主体起名。名称只用于显示。不写时输出不变。 |
 | `lae_enc tag` | 无需重新编码即可为已有 LAE 文件设置新标签：写出一个新文件，带有给定的标签（若未给出则不带标签）、相同的 CD 音频和相同的 `LAE ` 块，并检查两者逐字节相同；输入不变。 |
 
 标签选项也可以不带前导 `--` 书写（`tag=`、`cover=`、`picture=`）。不使用这些选项时，输出不变。
@@ -1642,8 +1663,13 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 ### 14.3 解码
 
 ```
-lae_dec <input.wav> <output.wav> [full | 16 | cd24] [output rate]
+lae_dec <input.wav | input.flac | input.lae> <output.wav> [full | 16 | cd24] [output rate] [pack=<n>]
+lae_udec info <file>
+lae_udec dec <file> <output.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>]
+lae_udec verify <file>
 ```
+
+`lae_dec` 读取两种形式，按内容区分。`pack=<n>` 解码扩展包 n（默认 0 为主体）；文件中没有该包时拒绝。`lae_udec` 同样读取 LAEY 和 LAES 文件：`info` 列出文件提供的每一项及其编号、名称和该格式的各项检查；`dec` 解码一项，用编号或名称给出（例如 `full_352800`、`pack1_full_176400`、`master_2_352800_32`），不给 `--pick` 时解码母带采样率的 full 路径（LAEY）或文件的默认母带（LAES）；`verify` 执行该格式的全部检查，不写出任何内容。有多个 LAES 母带符合时显示勾选列表，与 `laes dec` 相同。
 
 | 路径 | 使用的层 | 输出 |
 |---|---|---|
@@ -1765,6 +1791,8 @@ lae_close(t);
 - `lae_seek(t, frame)` 以逐位精确的方式定位到某个输出帧（第 13.6 节）。
 - `lae_stats` 返回限幅计数和数据流错误标志；`lae_stream_bytes` 返回已消耗的熵编码字节数。
 - `lae_open_memory`、`lae_open_reader`、`lae_open_pair` 和 `lae_open_pair_files` 从内存、通过宿主读取回调，或从基础层及其扩展文件打开音轨。
+- `lae_open_file` 也能打开 FLAC 形式。`lae_pack_count`、`lae_pack_info` 和 `lae_select_pack` 列出并选择文件的扩展包；选择对下一次 `lae_start` 生效。
+- 要用同一个接口处理两种格式：`lae_probe_file` 按内容判断格式，`lae_any_open_file`、`lae_any_get_info`、`lae_any_get_choice`、`lae_any_start` 和 `lae_any_read` 打开文件、列出各项并解码其中一项（把 `src/lae_any.cpp`、`src/lae_api.cpp` 和 `src/laes_api.cpp` 一起链接）。
 - 宿主要求 `lae_api_version()` 不低于其构建时所依据的版本。
 
 完整接口的说明见 `src/lae_api.h`。

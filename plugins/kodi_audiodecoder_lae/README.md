@@ -4,6 +4,15 @@
 
 This add-on plays LAE files in Kodi 21 (Omega). It supports **LAES** (LAE Lossless) files in WAV, RF64 or FLAC form, including their lossless masters, and **LAEY** (LAE Lossy) files in container version 5 WAV form.
 
+## Changes in this update
+
+- LAEY files in the FLAC form are decoded as well ([spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4). As before, Kodi passes only files with the extension `.lae` to the add-on.
+- LAEY extension packs (Section 5.6 of the same specification): the setting "LAEY extension pack" (Pack 1 … Pack 9) selects the pack; a file without that pack plays pack 1. No pack is chosen automatically.
+- The setting "LAEY layers" offers "All layers", "Frequency layer only", "Bit-depth layer only" and "CD/core layer only".
+- LAES payload version 2 ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3): when nothing else is set, the default master stored in the file plays; without one, the core master.
+- A master plays only after it and its chain of tiers have matched their SHA-256 values; the result is kept per file content. A derived 16-bit version starts at the seek position, bit for bit.
+- Two packages, English (`-en`) and Chinese (`-zh`), each with one language (`lang_pkg.ps1`, called by `build_kodi.cmd`).
+
 ## Files: the extension `.lae`
 
 Kodi passes to a decoder add-on only files with the extensions that the add-on declares. It does not allow the add-on to return a file to Kodi's built-in decoder. An add-on that declared `.flac` or `.wav` would therefore have to decode every FLAC and WAV file itself. For this reason, this add-on declares only the format's own extension, **`.lae`**:

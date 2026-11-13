@@ -14,6 +14,14 @@ The filter delivers uncompressed PCM, with seeking, at the sample rate of what i
 
 24-bit samples packed in 3 bytes are not used because MPC-BE's audio path turned them into noise. The filter was written for this project from the DirectShow interface documentation, without base classes or third-party code.
 
+## Changes in this update
+
+- LAEY files in the FLAC form are opened as well ([spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4); files are recognised by content.
+- LAEY extension packs (Section 5.6 of the same specification): the registry value `pack` (DWORD, 0 = the first pack) in `HKCU\Software\LAE\DirectShow` selects the pack; a file without that pack plays the first one. No pack is chosen automatically.
+- LAES payload version 2 ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3): when nothing else is set, the default master stored in the file plays; without one, the core master.
+- A master plays only after it and its chain of tiers have matched their SHA-256 values; the result is kept per file content (in `%APPDATA%\LAE`, shared with the other LAE plug-ins). A derived 16-bit version starts at the seek position, bit for bit.
+- Two standalone builds of the filter and its installer, English (`-en`) and Chinese (`-zh`).
+
 ## Installation (current user, no administrator rights)
 
 Run `lae_dshow_setup-<version>.exe`. The installer puts the filter in `%LOCALAPPDATA%\Programs\LAE\DirectShow`, registers it and adds an entry to the list of installed apps in Windows. Remove the filter from that list. Alternatively, register the filter manually:

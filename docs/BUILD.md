@@ -57,6 +57,12 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_CRT_SECURE_NO_WARNINGS src\
 laes selftest
 ```
 
+Example (Windows, the unified decoder `lae_udec`, which links `liblae` statically with the decoders of both formats):
+
+```bat
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_udec.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_udec.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
+```
+
 `liblae` (the LAE Lossy decoder, `src/lae_api.cpp`) is compiled with `/fp:precise`, which meets the floating-point rules of [spec/lossy/SPEC.md](../spec/lossy/SPEC.md), Section 2.2 (no contraction on MSVC). The LAE Lossless decoder of the plug-ins (`src/laes_api.cpp`) is compiled with `/fp:strict`. The verified flags are given in the build scripts of the plug-ins, for example `plugins/foo_input_lae/build_fb2k.cmd`.
 
 ### Auxiliary programs
@@ -67,7 +73,9 @@ The repository also contains the following programs. The header comment of each 
 - `tools/gen_halfband.cpp` and `tools/gen_mdct_tables.cpp` generate `src/halfband.h` and `src/mdct_tables.h`, respectively.
 - `tools/test_mdct_tb.cpp` is a test program for `src/mdct_tb.h`.
 - `tools/lae_math_check.cpp` checks the encoder's functions in `src/lae_math.h` against the C library and prints their platform checksum.
-- `src/gen_suite.cpp` generates the synthetic test signals.
+- `src/gen_suite.cpp` generates the synthetic test signals (optionally a single category).
+- `src/cd_variant.cpp` derives exactly defined test variants of a CD or master (shift, padding, cut, gain, polarity, channel swap, fade, and others) for the alignment and extension-pack tests (`tests/check_packs.sh`).
+- `tools/lae_abx/lae_abx.cpp` is the stand-alone ABX listening test (Windows x64). It needs `lae_udec.exe` next to it. Build (x64): `cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`.
 - `src/cut_wav.cpp` and `src/cmp_wav.cpp` are WAV utilities. `src/cmp_wav.cpp` computes the error measures defined in README Section 12.1.
 
 ## 2. Start-up self-test

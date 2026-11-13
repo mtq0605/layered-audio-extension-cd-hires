@@ -50,6 +50,16 @@ java -cp out/classes com.lae.laey.LaeEncTool master.wav out.wav
 
 Java 代码移植自 `src/` 中的 C++ 参考实现，移植不改动该实现。移植的每一步均通过以下方式检验：用两种实现对相同输入进行编码和解码，并逐字节比较结果。可能影响输出的浮点运算步骤使用 `LMath`，它精确复现 C++ 工具的 `lmath::`。
 
+LAEY 解码接口（`LaeyDecoder`）有两个只在 Java 中提供、面向手机的调用，都不改变输出：
+
+- `lae_open_file(path, cdCacheBytes)`：CD 层按需从文件读取，不整个放进内存。
+- `lae_dup()`：在已经打开的文件上再开一个曲目。CD 层和 LAE 块共用，不重新读取，也不重新计算哈希；已解出的跳转检查点一并沿用。它的路径、扩展包和解码状态各自独立，因此播放器可以在第二个线程中准备新路径，旧路径同时继续播放。
+
+Java 移植有两处行为不同：
+
+- 播放器前端 `Play` 只对母带不超过 16 个的 LAES 文件提供各母带（`Play.maxMasters`）；母带更多的文件播放核心母带，并报告原因。设这个上限，是因为较长的参照链所需内存超过手机的内存（在 PC 上实测：参照链中每个母带约需 1 MB 堆内存）。格式允许 255 个母带，设备条件允许时可以提高这个上限。
+- 有多个母带符合 `--pick=<rate>:<bits>` 或 `--pick=name:<text>` 时，`LaesTool` 列出候选、不写出任何内容，与 C++ 工具不在控制台中运行时相同；它没有勾选列表。
+
 ## 许可
 
 许可与 C++ 代码相同。解码器和公共工具采用 Apache-2.0 许可。编码器文件采用 GPL-3.0-or-later 许可或商业许可（见 [COMMERCIAL.md](../COMMERCIAL.zh.md)）。播放器前端 `Play` 属于解码器文件（Apache-2.0）；标签和图片代码（`LaesTags`、`LaeRetag`）以及命令行工具（`LaesTool`、`LaeEncTool`）属于编码器文件。每个文件在其 SPDX 文件头中写明其许可。

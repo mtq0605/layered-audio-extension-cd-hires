@@ -6,18 +6,19 @@
 
 | Version | Date | Contents | Files | Download |
 |---|---|---|---|---|
-| **v5-2026-11-07** (current) | 2026-11-07 | LAEY container version 5 and LAES payload version 1; decoding unchanged. New: deletion of marked noise and `g` (encoder options); tags and pictures in LAEY and LAES files; CD-TEXT in CD-Extra images; fast first seek in `liblae`; bit-identical encoder output on every platform; the VLC, Kodi and DirectShow plug-ins; the Java library; and demonstration audio with its masters for verification ([docs/VERSIONS.md](docs/VERSIONS.md)). | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-11-07) · [release files](https://github.com/mtq0605/layered-audio-extension-cd-hires/releases/tag/v5-2026-11-07) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-11-07.zip) |
+| **{NEXT_VERSION}** (current) | {NEXT_DATE} | LAEY container version 5, decoding unchanged for every existing file; LAES payload version 2. New: the LAEY FLAC form (`.flac`, `.lae`); LAEY extension packs (up to eight further masters against the same CD layer) and pack names; LAES payload version 2 (up to 255 masters, master names, menu order, a default master, derived versions that can be turned off) and the tools `laes names`, `laes add` and `laes extract`; the unified decoder `lae_udec` and `liblae` API 9; plug-ins with extension packs and default masters, each in an English and a Chinese build; CD-Extra demonstration discs; the ABX test tool `lae_abx`. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/{NEXT_VERSION}) · [release files](https://github.com/mtq0605/layered-audio-extension-cd-hires/releases/tag/{NEXT_VERSION}) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/{NEXT_VERSION}.zip) |
+| v5-2026-11-07 | 2026-11-07 | LAEY container version 5 and LAES payload version 1; decoding unchanged. New: deletion of marked noise and `g` (encoder options); tags and pictures in LAEY and LAES files; CD-TEXT in CD-Extra images; fast first seek in `liblae`; bit-identical encoder output on every platform; the VLC, Kodi and DirectShow plug-ins; the Java library; and demonstration audio with its masters for verification ([docs/VERSIONS.md](docs/VERSIONS.md)). | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-11-07) · [release files](https://github.com/mtq0605/layered-audio-extension-cd-hires/releases/tag/v5-2026-11-07) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-11-07.zip) |
 | v5-2026-10-30 | 2026-10-30 | LAEY: container version 5, decoding unchanged; the encoder is 3–4 times faster and works block by block (byte-identical output, much less memory). New lossless tier LAE Lossless (LAES, `LAE2`): its own specification, the tool `laes`, and WAV, FLAC and CD-Extra carriers. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-30) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-30.zip) |
 | v5-2026-10-24 | 2026-10-24 | Container version 5. Adds independent-CD alignment, the whole-disc planner, CD-Extra encapsulation (`lae_cdx`), the decoder library `liblae` and the foobar2000 component. Decoding unchanged. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-24) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-24.zip) |
 | v5-2026-10-18 | 2026-10-18 | Container version 5; first public release: specification, reference encoder and reference decoder, 16 conformance vectors. | [browse](https://github.com/mtq0605/layered-audio-extension-cd-hires/tree/v5-2026-10-18) | [zip](https://github.com/mtq0605/layered-audio-extension-cd-hires/archive/refs/tags/v5-2026-10-18.zip) |
 
-All versions use LAEY container version 5 and the same decoding process: LAEY files of any version play with the decoder of any version. LAES files (from v5-2026-10-30 onwards) are read with `laes`; the core master of the FLAC form plays in any FLAC player. All changes: [CHANGELOG.md](CHANGELOG.md).
+All versions use LAEY container version 5 and the same decoding process: LAEY files of any version play with the decoder of any version. A decoder from before {NEXT_VERSION} plays an LAEY file with extension packs with its first pack (the main body), and it does not read the FLAC form. LAES files (from v5-2026-10-30 onwards) are read with `laes`; the core master of the FLAC form plays in any FLAC player. An LAES file in payload version 2 (from {NEXT_VERSION}; written only when its new features are used) plays only its core master in decoders from before that version. All changes: [CHANGELOG.md](CHANGELOG.md).
 
 **LAES (LAE Lossless) in brief:** a single ordinary FLAC or WAV file holds a **core master** and further **lossless masters** (up to 352.8 / 384 kHz; 16, 24 or 32 bit). A player without LAE support plays the core master, which at 16 bit can be CD-compatible. A player with LAE support plays any of the masters, each verified bit for bit against its SHA-256 hash. In one test (two 10-second excerpts, [spec/lossless/OVERVIEW.md](spec/lossless/OVERVIEW.md)), the file was 44–47 % smaller than the same masters stored as separate FLAC files. Introduction, advantages and limitations, and comparison with FLAC and WAV: [spec/lossless/OVERVIEW.md](spec/lossless/OVERVIEW.md); the `laes` tool: [spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.md).
 
-**Status:** this document is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), the normative specification is [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (stable, payload version 1, 2026-11-07) and the reference tool is `laes`; the earlier design document ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)) is superseded.
+**Status:** this document is the working paper and repository front page for container version 5. The format family is named **LAE** (**Layered Audio Extension**). This document describes the lossy tier, **LAE Lossy** (short name **LAEY**). For the lossless tier, **LAE Lossless** (short name **LAES**), the normative specification is [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (stable, payload version 2, 2026-11-12) and the reference tool is `laes`; the earlier design document ([spec/lossless/DESIGN.md](spec/lossless/DESIGN.md)) is superseded.
 
-Since the first release (v5-2026-10-18), the repository has added: alignment of an independent CD in the encoder; a whole-disc planner; the CD-Extra encapsulation tool `lae_cdx`; a decoder library with a C interface; the foobar2000 component; the lossless tier LAES; the VLC, Kodi and DirectShow plug-ins; the Java library; and noise marking (see the Versions table above and [CHANGELOG.md](CHANGELOG.md)). The container remains version 5. The bitstream, the decoding process and the lossy specification are unchanged.
+Since the first release (v5-2026-10-18), the repository has added: alignment of an independent CD in the encoder; a whole-disc planner; the CD-Extra encapsulation tool `lae_cdx`; a decoder library with a C interface; the foobar2000 component; the lossless tier LAES; the VLC, Kodi and DirectShow plug-ins; the Java library; noise marking; the LAEY FLAC form and extension packs; LAES payload version 2; and the unified decoder `lae_udec` (see the Versions table above and [CHANGELOG.md](CHANGELOG.md)). The container remains version 5. The bitstream and the decoding process of existing files are unchanged; the lossy specification adds the FLAC form and extension packs (Sections 3.4 and 5.6).
 
 **Normative text:** the bitstream and the decoding process are specified in [spec/lossy/SPEC.md](spec/lossy/SPEC.md), which is stable for container version 5. Where SPEC.md is silent or ambiguous, the reference decoder is normative. This document is informative.
 
@@ -29,20 +30,20 @@ The encapsulation of the extension on CD-Extra, in separate files and in streams
 - Conformance vectors: [tests/vectors/MANIFEST.md](tests/vectors/MANIFEST.md)
 - Measurement data: [data/](data/), described in [data/README.md](data/README.md)
 - CD-Extra and file encapsulation (draft): [spec/cdx/SPEC.md](spec/cdx/SPEC.md)
-- LAE Lossless (LAES) specification (stable, payload version 1): [spec/lossless/SPEC.md](spec/lossless/SPEC.md)
+- LAE Lossless (LAES) specification (stable, payload version 2): [spec/lossless/SPEC.md](spec/lossless/SPEC.md)
 - foobar2000 component: [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md)
 - Licences: [LICENSE](LICENSE). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md). Patent pledge: [PATENTS.md](PATENTS.md). Commercial encoder licence: [COMMERCIAL.md](COMMERCIAL.md)
 
 **Identifiers and files:**
 
-- The executables are `lae_enc`, `lae_dec` and `lae_cdx`. The LAE Lossless tool is `laes` (encoder, decoder, alignment, self-test).
+- The executables are `lae_enc`, `lae_dec` and `lae_cdx`. The LAE Lossless tool is `laes` (encoder, decoder, alignment, self-test). `lae_udec` decodes both formats through one interface; it recognises the format by content and lists every choice that a file offers.
 - In the WAV form, the `LAE ` chunk of an LAES file begins with the magic `LAE2`; the FLAC form carries the same payload in APPLICATION blocks with the ID `LAE2` ([spec/lossless/SPEC.md](spec/lossless/SPEC.md)).
 - The decoder library is `src/lae_decoder.h`. Its C interface is `liblae` (`src/lae_api.h`).
 - The foobar2000 component is `foo_input_lae`.
 - The RIFF chunk ID is `LAE ` (with a trailing space). The chunk begins with the magic `LAE1`.
-- LAEY files are distributed with the extension `.wav`, so that every player plays the CD layer; LAES files also have a FLAC form (`.flac`). Tested decoders and the known limitations of some of them: [spec/COMPATIBILITY.md](spec/COMPATIBILITY.md).
+- LAEY and LAES files each have a WAV form (`.wav`) and a FLAC form (`.flac`); every WAV or FLAC player plays the CD layer (LAEY) or the core master (LAES). In the FLAC form, the extension is carried in APPLICATION blocks with the ID `LAE1` (LAEY, [spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 3.4) or `LAE2` (LAES). Tested decoders and the known limitations of some of them: [spec/COMPATIBILITY.md](spec/COMPATIBILITY.md).
 - The extension file defined by the encapsulation specification has the file-name extension `.lax` (`.LAX` on a CD). It ends with an 80-byte trailer that begins with the identifier `LTVT` (Section 10.6).
-- `.lae` is the format's own file-name extension. The layout of a `.lae` file is not specified for container version 5.
+- `.lae` is the format's own file-name extension. A `.lae` file holds the WAV form or the FLAC form; readers tell them apart by content, never by name.
 
 ---
 
@@ -900,17 +901,19 @@ This section is a summary. The normative description is given in [SPEC.md](spec/
 
 ### 10.1 Carriage
 
-In container v5, the LAE file is a RIFF/WAV file:
+In container v5, the LAE file has one of two forms ([SPEC.md](spec/lossy/SPEC.md), Sections 3.1 and 3.4):
 
-- its `data` chunk is the CD layer;
-- the extension resides in a separate chunk with chunk ID `LAE ` (with a trailing space).
+- **WAV form** (the default): a RIFF/WAV file whose `data` chunk is the CD layer; the extension resides in a separate chunk with chunk ID `LAE ` (with a trailing space).
+- **FLAC form** (since {NEXT_VERSION}): a FLAC file whose audio frames are the CD layer, coded with independent left and right channels; the extension, byte for byte the body of the `LAE ` chunk, is split into APPLICATION metadata blocks with ID `LAE1` (registered with IANA) placed before the audio frames. Tags and pictures come before those blocks. Every route decodes to the same samples from both forms; in a 10-second test, the FLAC form was 61 % of the size of the WAV form.
 
-Players ignore the unknown chunk and play the CD layer. Files are distributed with the extension `.wav`. `.lae` is the format's own extension; the layout of a `.lae` file is not specified for container v5.
+Players ignore the unknown chunk or blocks and play the CD layer. `.wav` names the WAV form and `.flac` the FLAC form. `.lae` is the format's own extension and may hold either form; the reference encoder writes the WAV form unless `--form=flac` is given. Windows' built-in FLAC decoder does not open FLAC files whose audio starts more than about 4 MiB into the file, so most LAEY files in the FLAC form do not play there ([spec/COMPATIBILITY.md](spec/COMPATIBILITY.md)).
+
+**Extension packs** (since {NEXT_VERSION}; [SPEC.md](spec/lossy/SPEC.md), Section 5.6). One file may hold one CD layer and up to nine mutually independent extensions: the main body and up to eight further packs, each made from its own master against the same CD layer and each with an optional name. A decoder decodes the CD layer with exactly one pack, chosen by the user and never automatically. A decoder without pack support plays the main body, as before.
 
 Encapsulation beyond the WAV file is defined outside the v5 container, by the encapsulation specification (Sections 10.5–10.9):
 
 - **CD-Extra.** Packaging onto CD-Extra (44.1 kHz family) is implemented in the tool `lae_cdx`. The audio session holds the CD layer, and the data session holds the extension.
-- **Separate files and streams.** That specification also defines two further forms of distribution: a base-layer file (FLAC or WAV) accompanied by an extension file, and the LAE stream. The extension is not carried inside a FLAC file.
+- **Separate files and streams.** That specification also defines two further forms of distribution: a base-layer file (FLAC or WAV) accompanied by an extension file, and the LAE stream. In these forms, the extension travels in its own file; a single file that carries both is the FLAC form above.
 
 ### 10.2 Extension chunk layout
 
@@ -1060,7 +1063,7 @@ The fields are defined as follows:
 - a **base-layer file**, FLAC [1] or WAV, holding exactly the track's CD layer;
 - an **extension file** with the same name and the extension `.lax`. When the track is also published on CD, this file is byte-identical to `TRACKnn.LAX` on the disc.
 
-Ordinary players play the base-layer file. The extension and the trailer are never placed inside a FLAC file. A reader pairs the two files when the decoded base layer has ncd samples and its whole-track MD5 equals the MD5 in the trailer. A paired track is repackaged into the canonical v5 WAV, byte-identical to the encoder's output.
+Ordinary players play the base-layer file. The extension file and its trailer are never placed inside the base-layer file (the FLAC form of Section 10.1 is a separate, single-file form). A reader pairs the two files when the decoded base layer has ncd samples and its whole-track MD5 equals the MD5 in the trailer. A paired track is repackaged into the canonical v5 WAV, byte-identical to the encoder's output.
 
 **LAE stream.** An LAE stream delivers, track by track, the CD layer sample for sample (FLAC, WAV or raw PCM) and the extension file byte for byte. A stream carries no header, index, position or offset. A stream whose CD layer has been re-encoded lossily (for example in AAC or MP3) is not an LAE stream: the extension is never applied to lossily decoded audio, and only the base layer is played.
 
@@ -1505,9 +1508,20 @@ A conforming decoder must reproduce the listed hashes for every vector and route
 
 The stages of the reference decoder have been moved unchanged into the library `src/lae_decoder.h`, which provides a `Decoder` class. The command-line decoder `lae_dec` calls the library. The library is streaming: its memory use does not grow with track length, apart from the CD layer and the extension chunk, which are held in memory.
 
-**C interface.** `liblae` (`src/lae_api.h`, API version 3) is the C interface for players and plug-ins. It is built for x64 and x86.
+**C interface.** `liblae` (`src/lae_api.h`, API version 9) is the C interface for players and plug-ins. It is built for x64 and x86. Each API version only adds functions, so a host written for an earlier version works unchanged:
 
-- **Opening.** A track can be opened from a v5 WAV file, from the bytes of a v5 WAV file in memory, from a file read through a host callback, or from a base layer (the CD layer as PCM) together with its extension file. A base layer is accepted only when its whole-track MD5 matches the extension file, or when the track is found in it by content and then matches.
+| API | Added |
+|---|---|
+| 2–3 | `lae_open_reader` (reading through a host callback), `lae_stream_bytes` |
+| 4–5 | the `laes_*` functions (LAE Lossless), `laes_index_save` / `laes_index_load` |
+| 6 | `lae_probe_*` and `lae_any_*`: one interface for both formats, which decides the format by content alone (`src/lae_any.cpp`) |
+| 7 | LAES payload version 2: `laes_master_name`, `laes_master_flags`, `laes_choice_from`, `laes_master_number` |
+| 8 | LAEY extension packs: `lae_pack_count`, `lae_pack_info`, `lae_select_pack`, `lae_selected_pack`, `lae_any_choice_pack` |
+| 9 | `laes_default_choice` (the default master stored in the file, otherwise the core master), `laes_core_flags` |
+
+The command-line tool `lae_udec` (`src/lae_udec.cpp`) is built on the `lae_any_*` functions: it lists every choice a file offers, in the order of the specifications, together with the checks of its format, and decodes any choice.
+
+- **Opening.** A track can be opened from a v5 file in the WAV or the FLAC form, from the bytes of a v5 WAV file in memory, from a file read through a host callback, or from a base layer (the CD layer as PCM) together with its extension file. A base layer is accepted only when its whole-track MD5 matches the extension file, or when the track is found in it by content and then matches.
 - **Routes and output.** The caller chooses one of the four routes of Section 3.4 and an output rate. The output is always two interleaved channels as `int32` values: in the 24-bit range for the routes `cd24`, `16` and `full`, and in the 16-bit range for the CD route.
 - **Statistics.** The library reports the number of samples held by the hard limiter, whether a stream error occurred, and the number of entropy-coded bytes consumed. The last of these allows a live bit rate to be displayed.
 - **Threads.** One track must not be used by two threads at once. Different tracks may be decoded in different threads simultaneously; in testing, two tracks decoded in two threads gave output bit-identical to that obtained by decoding them separately.
@@ -1535,13 +1549,15 @@ Four player plug-ins and a Java library decode both LAE formats: LAEY (container
 
 | Component | Host | Version | Documentation |
 |---|---|---|---|
-| `foo_input_lae` | foobar2000 1.4, 1.5 and 2.x, 32-bit and 64-bit | 0.20 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md) |
-| `liblae_plugin.dll` | VLC 3.0, Windows 64-bit | 0.1.4 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.md) |
-| `audiodecoder.lae` | Kodi 21 (Omega), Windows 64-bit | 0.2.5 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.md) |
-| `lae_source.ax` | DirectShow players (PotPlayer, MPC-BE, MPC-HC, Windows Media Player), Windows 64-bit | 0.2.4 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.md) |
+| `foo_input_lae` | foobar2000 1.4, 1.5 and 2.x, 32-bit and 64-bit | 0.30 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md) |
+| `liblae_plugin.dll` | VLC 3.0, Windows 64-bit | 0.1.11 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.md) |
+| `audiodecoder.lae` | Kodi 21 (Omega), Windows 64-bit | 0.2.12 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.md) |
+| `lae_source.ax` | DirectShow players (PotPlayer, MPC-BE, MPC-HC, Windows Media Player), Windows 64-bit | 0.2.11 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.md) |
 | Java library | Java 8, Android API 24 and later | — | [java/README.md](java/README.md) |
 
 - **Files.** A WAV or FLAC file without an LAE extension is left to the host's own decoder. Players without LAE support play the CD layer of an LAEY file and the core master of an LAES file.
+- **Choices.** LAEY extension packs are listed by the names stored in the file, each with its own layers; LAES masters are listed with their numbers and names in the menu order of the file, with rate levels and derived versions in each master's submenu ([spec/lossless/SPEC.md](spec/lossless/SPEC.md), Section 10.3). When nothing is chosen, the default master of the file plays (otherwise the core master), and the main body of an LAEY file. A choice is kept by the player per file and never written into the file.
+- **Languages.** Each plug-in is built in two standalone versions, English (`-en`) and Chinese (`-zh`).
 - **Tags.** The plug-ins read the tags of both forms: Vorbis comments in FLAC, and RIFF `LIST/INFO` and `id3 ` chunks in WAV.
 - **VLC.** VLC may shorten the end of a track by about 40 ms; this is VLC's own behaviour.
 - **Java.** The Java library is a pure-Java port of the encoders and decoders, without native code. Its results are byte-identical to those of the C++ tools of the same commit.
@@ -1582,9 +1598,11 @@ All options, the verified builds and the check scripts are given in [docs/BUILD.
 ### 14.2 Encoding
 
 ```
-lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [resume]
+lae_enc <master.wav> <output.wav> [mode] [s1 | s2] [zs] [cd=<cd.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [--form=wav | --form=flac] [master1name=<name>] [master2=<file> master2align=<offset> [master2name=<name>] [master2accept] [master2edge=pad|cut] ... master9=…] [resume]
 lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]
 ```
+
+The output name decides the form: `.wav` the WAV form, `.flac` the FLAC form, `.lae` the WAV form unless `--form=flac` is given ([spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 3.4). `lae_enc tag` keeps the form of its input.
 
 | Argument | Meaning |
 |---|---|
@@ -1608,6 +1626,9 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 | `--tag=KEY=VALUE` | A tag, with the usual names: `TITLE`, `ARTIST`, `ALBUM`, `ALBUMARTIST`, `DATE`, `GENRE`, `TRACKNUMBER`, `COMPOSER`, `COPYRIGHT`, `COMMENT`, … (UTF-8; a name may be repeated). Written as a RIFF `LIST/INFO` chunk and an `id3 ` chunk (ID3v2.4) between `fmt ` and `data`; the CD audio and the `LAE ` chunk do not change. |
 | `--cover=<image>` | The front cover, JPEG or PNG, stored byte for byte |
 | `--picture=<type>:<image>` | Any other picture, with the ID3 / FLAC picture type (4 back cover, 5 leaflet, 6 medium, 8 artist, …) |
+| `--form=wav`, `--form=flac` | The form of the output file (Section 10.1). It must agree with a `.wav` or `.flac` name; only `.lae` leaves the choice open. Without it, the WAV form is byte-identical to the output of earlier versions. |
+| `master2=<file>` … `master9=<file>` | Further masters, each coded as an extension pack against the same CD layer as the main body (given with `cd=`; [spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 5.6). Each needs its position on the CD layer, `master<n>align=<offset>` (written like `cdalign=`); without it, both searches are reported and nothing is written. `master<n>accept` and `master<n>edge=pad|cut` act like `cdaccept` and `cdedge=` for that master. A master whose speed drifts against the CD (for example, tape wow and flutter) is not continued without a position given by hand and a confirmation. Further masters cannot yet be combined with `noise=`, `resume` or `cdcheck`. |
+| `master<n>name=<name>` | The name of pack n, shown where a pack is chosen (UTF-8, at most 255 bytes); `master1name=` names the main body. Names are for display only. Without them, the output is unchanged. |
 | `lae_enc tag` | New tags for an existing LAE file without re-encoding: writes a new file with the given tags (if none are given, with no tags), the same CD audio and the same `LAE ` chunk, and checks that both are byte-identical; the input is not changed. |
 
 The tag options may also be written without the leading `--` (`tag=`, `cover=`, `picture=`). Without them, the output is unchanged.
@@ -1642,8 +1663,13 @@ Encoder performance, measured during development:
 ### 14.3 Decoding
 
 ```
-lae_dec <input.wav> <output.wav> [full | 16 | cd24] [output rate]
+lae_dec <input.wav | input.flac | input.lae> <output.wav> [full | 16 | cd24] [output rate] [pack=<n>]
+lae_udec info <file>
+lae_udec dec <file> <output.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>]
+lae_udec verify <file>
 ```
+
+`lae_dec` reads both forms and tells them apart by content. `pack=<n>` decodes extension pack n (0, the default, is the main body); a file without that pack is refused. `lae_udec` reads LAEY and LAES files alike: `info` lists every choice the file offers, with its number, name and the checks of its format; `dec` decodes one choice, given by its number or its name (for example `full_352800`, `pack1_full_176400`, `master_2_352800_32`), and without `--pick` the full route at the master rate (LAEY) or the default master of the file (LAES); `verify` runs every check of the format and writes nothing. When several LAES masters match, a tick list is shown, as in `laes dec`.
 
 | Route | Layers | Output |
 |---|---|---|
@@ -1765,6 +1791,8 @@ lae_close(t);
 - `lae_seek(t, frame)` seeks bit-exactly to an output frame (Section 13.6).
 - `lae_stats` returns the limiter count and the stream-error flag; `lae_stream_bytes` returns the number of entropy-coded bytes consumed.
 - `lae_open_memory`, `lae_open_reader`, `lae_open_pair` and `lae_open_pair_files` open a track from memory, through a host read callback, or from a base layer together with its extension file.
+- `lae_open_file` also opens the FLAC form. `lae_pack_count`, `lae_pack_info` and `lae_select_pack` list and select the extension packs of a file; the selection applies to the next `lae_start`.
+- For both formats through one interface, `lae_probe_file` tells the format from the content, and `lae_any_open_file`, `lae_any_get_info`, `lae_any_get_choice`, `lae_any_start` and `lae_any_read` open the file, list its choices and decode one (link `src/lae_any.cpp`, `src/lae_api.cpp` and `src/laes_api.cpp` together).
 - A host requires `lae_api_version()` to be at least the version against which it was built.
 
 The full interface is documented in `src/lae_api.h`.

@@ -50,6 +50,16 @@ java -cp out/classes com.lae.laey.LaeEncTool master.wav out.wav
 
 The Java code is a port of the C++ reference in `src/`, which is not changed by the port. Each step of the port is checked by encoding and decoding the same inputs with both implementations and comparing the results byte for byte. Floating-point steps that can affect the output use `LMath`, which reproduces `lmath::` of the C++ tools exactly.
 
+The LAEY decoder interface (`LaeyDecoder`) has two additions that exist only in Java and are intended for phones. Neither changes the output:
+
+- `lae_open_file(path, cdCacheBytes)` reads the CD layer from the file on demand instead of holding it in memory.
+- `lae_dup()` makes a second track over a file that is already open. It shares the CD layer and the LAE chunk, which are not read or hashed again, and the seek checkpoints decoded so far. Its route, extension pack and decoding state are its own, so that a player can prepare a new route in a second thread while the old one continues to play.
+
+Two differences in behaviour are specific to the Java port:
+
+- The player front end `Play` offers the masters of LAES files with at most 16 masters (`Play.maxMasters`); a file with more masters plays its core master, and the reason is reported. The limit exists because a long chain of tiers needs more memory than a phone has (measured on a PC: about 1 MB of heap per master in the chain). The format allows 255 masters, and the limit can be raised when devices allow it.
+- When several masters match `--pick=<rate>:<bits>` or `--pick=name:<text>`, `LaesTool` lists the candidates and writes nothing, as the C++ tool does outside a console; it has no tick list.
+
 ## Licence
 
 The licences are the same as for the C++ code. The decoders and shared helpers are licensed under Apache-2.0. The encoder files are licensed under GPL-3.0-or-later or under a commercial licence (see [COMMERCIAL.md](../COMMERCIAL.md)). The player front end `Play` is a decoder file (Apache-2.0); the tag and picture code (`LaesTags`, `LaeRetag`) and the command-line tools (`LaesTool`, `LaeEncTool`) are encoder files. Each file names its licence in its SPDX header.

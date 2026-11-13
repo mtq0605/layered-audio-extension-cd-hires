@@ -10,7 +10,7 @@ where it has one, and otherwise by the commit of this repository from which it w
 | Format | Version | Specification | Status |
 |---|---|---|---|
 | LAE Lossy (LAEY) | container version 5 | [spec/lossy/SPEC.md](../spec/lossy/SPEC.md) | Stable |
-| LAE Lossless (LAES) | payload version 1 | [spec/lossless/SPEC.md](../spec/lossless/SPEC.md) | Stable |
+| LAE Lossless (LAES) | payload version 2 (version 1 files remain valid) | [spec/lossless/SPEC.md](../spec/lossless/SPEC.md) | Stable |
 | LAE CD-Extra encapsulation (CDX) | version 0 | [spec/cdx/SPEC.md](../spec/cdx/SPEC.md) | Draft |
 | LAENOISE marking file | version 1 | [plugins/lae_noise_marker/SPEC_LAENOISE.md](../plugins/lae_noise_marker/SPEC_LAENOISE.md) | Stable |
 
@@ -20,15 +20,16 @@ The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IAN
 
 | Component | Version | Reads / writes |
 |---|---|---|
-| `lae_enc`, `lae_dec` (LAEY encoder and decoder) | commit of the release | LAEY container v5 |
-| `laes` (LAES tool) | commit of the release | LAES payload v1 |
+| `lae_enc`, `lae_dec` (LAEY encoder and decoder) | commit of the release | LAEY container v5, WAV and FLAC form, extension packs |
+| `laes` (LAES tool) | commit of the release | LAES payload v1 and v2 |
 | `lae_cdx` (CD-Extra tool) | commit of the release | CDX v0 |
+| `lae_udec` (unified decoder) and `liblae` | commit of the release; `liblae` API 9 | LAEY v5 (both forms, extension packs), LAES v1 and v2 |
 | `lae_noise` and the noise panel `noise_panel.html` (LAE Noise Marker) | commit of the release | LAENOISE v1 |
-| foobar2000 component `foo_input_lae` | 0.20 | LAEY v5, LAES v1 |
-| Kodi add-on `audiodecoder.lae` | 0.2.5 | LAEY v5, LAES v1 |
-| DirectShow filter `dshow_lae` | 0.2.4 | LAEY v5, LAES v1 |
-| VLC module `vlc_lae` | 0.1.4 | LAEY v5, LAES v1 |
-| Java library (`java/`) | commit of the release | LAEY v5, LAES v1 |
+| foobar2000 component `foo_input_lae` | 0.30 | LAEY v5, LAES v1 and v2 |
+| Kodi add-on `audiodecoder.lae` | 0.2.12 | LAEY v5, LAES v1 and v2 |
+| DirectShow filter `dshow_lae` | 0.2.11 | LAEY v5, LAES v1 and v2 |
+| VLC module `vlc_lae` | 0.1.11 | LAEY v5, LAES v1 and v2 |
+| Java library (`java/`) | commit of the release | LAEY v5, LAES v1 and v2 |
 
 ## Compatibility
 
@@ -50,3 +51,4 @@ Each release adds one row to this table.
 | Release | Repository commit | LAEY | LAES | CDX | LAENOISE | foobar2000 | Kodi | DirectShow | VLC |
 |---|---|---|---|---|---|---|---|---|---|
 | v5-2026-11-07 | tag `v5-2026-11-07` | v5 | v1 | v0 | v1 | 0.20 | 0.2.5 | 0.2.4 | 0.1.4 |
+| {NEXT_VERSION} | tag `{NEXT_VERSION}` | v5 | v2 | v0 | v1 | 0.30 | 0.2.12 | 0.2.11 | 0.1.11 |

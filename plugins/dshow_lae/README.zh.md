@@ -14,6 +14,14 @@
 
 不采用打包为 3 字节的 24 位样本，因为 MPC-BE 的音频链路会将其变为噪声。该滤镜依据 DirectShow 接口文档为本项目编写，未使用 base classes，也未使用第三方代码。
 
+## 本次更新的变化
+
+- 也能打开 FLAC 形式的 LAEY 文件（[spec/lossy/SPEC.md](../../spec/lossy/SPEC.zh.md) 第 3.4 节）；文件按内容识别。
+- LAEY 扩展包（同一规范第 5.6 节）：`HKCU\Software\LAE\DirectShow` 中的注册表值 `pack`（DWORD，0 = 第一个扩展包）选择扩展包；文件中没有该扩展包时播放第一个。不会自动选择任何扩展包。
+- LAES 有效载荷版本 2（[spec/lossless/SPEC.md](../../spec/lossless/SPEC.zh.md) 第 10.3 节）：没有其他设置时，播放文件中存储的默认母带；文件没有默认母带时播放核心母带。
+- 母带及其参照链的 SHA-256 全部相符后才播放该母带；核对结果按文件内容保存（保存在 `%APPDATA%\LAE`，与其他 LAE 插件共用）。派生 16 位版本从跳转位置开始播放，逐位相同。
+- 滤镜及其安装程序分英文（`-en`）和中文（`-zh`）两个独立版本。
+
 ## 安装（当前用户，无需管理员权限）
 
 运行 `lae_dshow_setup-<version>.exe`。安装程序将滤镜放入 `%LOCALAPPDATA%\Programs\LAE\DirectShow`，完成注册，并在 Windows 的已安装应用列表中添加一项。可在该列表中卸载滤镜。也可以手动注册滤镜：

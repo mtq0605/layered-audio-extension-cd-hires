@@ -22,13 +22,27 @@ All code is standard C++17 and uses no third-party libraries.
 
 | Platform | Compiler | Options |
 |---|---|---|
-| Windows x64 | MSVC 2022 | `cl /O2 /EHsc /std:c++17 /D_USE_MATH_DEFINES src\lae_dec.cpp` (encoder: add `/bigobj /fp:strict`) |
+| Windows x64 | MSVC 2022 | `cl /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES src\lae_dec.cpp` (encoder: add `/bigobj /fp:strict`) |
 | Windows x86 (32-bit) | MSVC 2022 | as above; SSE2 is the MSVC 32-bit default |
 | Linux / macOS x86-64 | GCC / Clang | `-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread` |
 | Linux x86 (32-bit) | GCC / Clang | additionally `-msse2 -mfpmath=sse` (**required**) |
 | ARM (32/64-bit) | GCC / Clang | `-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread` |
 
 **Never use** `-ffast-math`, `/fp:fast` or any other option that allows fused multiply-add contraction.
+
+**MSVC must always be given `/utf-8`.** The source files are UTF-8 without a byte-order mark, and some of them contain Chinese text in string literals (for example, the `README.TXT` and `BURN.TXT` that `lae_cdx` writes to a disc, and the Chinese texts of the plug-ins). Without `/utf-8`, MSVC reads a source file in the code page of the system; on a Chinese Windows this is GBK (code page 936), and the text is then damaged without any effect on the audio:
+
+- in a plain literal (`"..."`), a byte that does not pair under GBK is replaced by `?`, so that a character is cut off;
+- in a `u8"..."` or `L"..."` literal, the text is converted to other characters, with no `?`;
+- warning C4819 appears only for characters that GBK cannot represent, so a build can be damaged without any warning.
+
+Give `/utf-8` to every MSVC call, including those for files that are plain ASCII today (or set the environment variable `CL=/utf-8`). GCC and Clang read UTF-8 by default; `javac` is called with `-encoding UTF-8`.
+
+**Checks after a release build.** Before the programs are packed:
+
+1. Treat warning C4819 in any compiler log as an error (or compile with `/we4819`).
+2. Search every program, including the DLLs inside the plug-in packages, for damaged Chinese text: a Chinese character whose last byte has become `?`, and the known Chinese phrases of the sources in their damaged `u8` / `L` form. A Chinese build of a plug-in must contain its Chinese texts in the correct form.
+3. Check that every text file the programs write (for example, the disc `README.TXT` and `BURN.TXT`, also inside the disc image and `DATA.ISO`) is valid UTF-8 and free of the damage above.
 
 The output is bit-identical on every platform only if both of the following conditions hold:
 

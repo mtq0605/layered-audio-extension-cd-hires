@@ -22,13 +22,27 @@ SPDX-License-Identifier: CC-BY-4.0
 
 | 平台 | 编译器 | 选项 |
 |---|---|---|
-| Windows x64 | MSVC 2022 | `cl /O2 /EHsc /std:c++17 /D_USE_MATH_DEFINES src\lae_dec.cpp`（编码器：另加 `/bigobj /fp:strict`） |
+| Windows x64 | MSVC 2022 | `cl /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES src\lae_dec.cpp`（编码器：另加 `/bigobj /fp:strict`） |
 | Windows x86（32 位） | MSVC 2022 | 同上；SSE2 为 MSVC 32 位的默认设置 |
 | Linux / macOS x86-64 | GCC / Clang | `-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread` |
 | Linux x86（32 位） | GCC / Clang | 另加 `-msse2 -mfpmath=sse`（**必需**） |
 | ARM（32/64 位） | GCC / Clang | `-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread` |
 
 **切勿使用** `-ffast-math`、`/fp:fast` 或任何其他允许融合乘加收缩的选项。
+
+**MSVC 必须始终带 `/utf-8`。**源文件是不带字节顺序标记的 UTF-8，其中一些在字符串字面量里含有中文（例如 `lae_cdx` 写到光盘上的 `README.TXT` 和 `BURN.TXT`，以及插件的中文文字）。不带 `/utf-8` 时，MSVC 按系统代码页读源文件；在中文 Windows 上是 GBK（代码页 936），文字会因此损坏，但音频不受影响：
+
+- 在普通字面量（`"..."`）里，按 GBK 配不成对的字节被替换成 `?`，一个字就被截断了；
+- 在 `u8"..."` 或 `L"..."` 字面量里，文字被转换成别的字，不出现 `?`；
+- 警告 C4819 只在遇到 GBK 表示不了的字符时出现，所以构建可能已经损坏却没有任何警告。
+
+每个 MSVC 调用都要带 `/utf-8`，包括编译目前纯 ASCII 的文件时（也可以设环境变量 `CL=/utf-8`）。GCC 和 Clang 默认按 UTF-8 读取；`javac` 调用时带 `-encoding UTF-8`。
+
+**发布构建之后的检查。**打包程序之前：
+
+1. 任何编译记录中出现警告 C4819 都按错误处理（或用 `/we4819` 编译）。
+2. 检查每个程序（包括插件安装包里的 DLL）中是否有损坏的中文：最后一个字节变成 `?` 的汉字，以及源码中已知中文短语的 `u8` / `L` 损坏形式。中文版插件必须含有形式正确的中文文字。
+3. 检查程序写出的每个文本文件（例如光盘的 `README.TXT` 和 `BURN.TXT`，也包括光盘映像和 `DATA.ISO` 里的）是合法的 UTF-8，并且没有上述损坏。
 
 仅当以下两个条件同时成立时，输出在所有平台上才逐位一致：
 

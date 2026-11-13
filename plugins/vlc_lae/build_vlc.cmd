@@ -16,8 +16,8 @@ set HERE=%~dp0
 set LAE=%HERE%..\..\src
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 if not exist "%OUT%\obj" mkdir "%OUT%\obj"
-cl /nologo /c /O2 /EHsc /std:c++17 /MD /fp:precise /Fo"%OUT%\obj\lae_api.obj" "%LAE%\lae_api.cpp" >"%OUT%\build_lae.txt" 2>&1 || (type "%OUT%\build_lae.txt" & echo BUILD FAILED lae_api & exit /b 1)
-cl /nologo /c /O2 /EHsc /std:c++17 /MD /fp:strict /Fo"%OUT%\obj\laes_api.obj" "%LAE%\laes_api.cpp" >"%OUT%\build_laes.txt" 2>&1 || (type "%OUT%\build_laes.txt" & echo BUILD FAILED laes_api & exit /b 1)
+cl /nologo /c /O2 /EHsc /std:c++17 /utf-8 /MD /fp:precise /Fo"%OUT%\obj\lae_api.obj" "%LAE%\lae_api.cpp" >"%OUT%\build_lae.txt" 2>&1 || (type "%OUT%\build_lae.txt" & echo BUILD FAILED lae_api & exit /b 1)
+cl /nologo /c /O2 /EHsc /std:c++17 /utf-8 /MD /fp:strict /Fo"%OUT%\obj\laes_api.obj" "%LAE%\laes_api.cpp" >"%OUT%\build_laes.txt" 2>&1 || (type "%OUT%\build_laes.txt" & echo BUILD FAILED laes_api & exit /b 1)
 cl /nologo /c /O2 /EHsc /std:c++17 /utf-8 %LANGDEF% /MD /Zc:preprocessor /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I"%SDK%\include\vlc\plugins" /Fo"%OUT%\obj\lae_vlc.obj" "%HERE%src\lae_vlc.cpp" >"%OUT%\build_vlc.txt" 2>&1 || (type "%OUT%\build_vlc.txt" & echo BUILD FAILED module & exit /b 1)
 link /nologo /DLL /OUT:"%OUT%\liblae_plugin.dll" "%OUT%\obj\lae_vlc.obj" "%OUT%\obj\lae_api.obj" "%OUT%\obj\laes_api.obj" "%SDK%\lib\libvlccore.lib" ws2_32.lib >"%OUT%\build_link.txt" 2>&1 || (type "%OUT%\build_link.txt" & echo LINK FAILED & exit /b 1)
 del /q "%OUT%\liblae_plugin.exp" "%OUT%\liblae_plugin.lib" 2>nul

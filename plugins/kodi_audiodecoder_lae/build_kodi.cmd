@@ -17,9 +17,9 @@ set HERE=%~dp0
 set LAE=%HERE%..\..\src
 call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 if not exist "%OUT%\obj" mkdir "%OUT%\obj"
-cl /nologo /c /O2 /EHsc /std:c++17 /MD /fp:precise /Fo"%OUT%\obj\lae_api.obj" "%LAE%\lae_api.cpp" >"%OUT%\build_lae.txt" 2>&1 || (type "%OUT%\build_lae.txt" & echo BUILD FAILED lae_api & exit /b 1)
-cl /nologo /c /O2 /EHsc /std:c++17 /MD /fp:strict /Fo"%OUT%\obj\laes_api.obj" "%LAE%\laes_api.cpp" >"%OUT%\build_laes.txt" 2>&1 || (type "%OUT%\build_laes.txt" & echo BUILD FAILED laes_api & exit /b 1)
-cl /nologo /c /O2 /EHsc /std:c++17 /MD /DBUILD_KODI_ADDON /DADDON_INSTANCE_VERSION_AUDIODECODER_USED /DADDON_GLOBAL_VERSION_GENERAL_USED /DADDON_GLOBAL_VERSION_GUI_USED /DADDON_GLOBAL_VERSION_AUDIOENGINE_USED /DADDON_GLOBAL_VERSION_FILESYSTEM_USED /DTARGET_WINDOWS /DNOMINMAX /D_USE_MATH_DEFINES /I"%KDK%" /Fo"%OUT%\obj\addon.obj" "%HERE%src\addon.cpp" >"%OUT%\build_addon.txt" 2>&1 || (type "%OUT%\build_addon.txt" & echo BUILD FAILED addon & exit /b 1)
+cl /nologo /c /O2 /EHsc /std:c++17 /utf-8 /MD /fp:precise /Fo"%OUT%\obj\lae_api.obj" "%LAE%\lae_api.cpp" >"%OUT%\build_lae.txt" 2>&1 || (type "%OUT%\build_lae.txt" & echo BUILD FAILED lae_api & exit /b 1)
+cl /nologo /c /O2 /EHsc /std:c++17 /utf-8 /MD /fp:strict /Fo"%OUT%\obj\laes_api.obj" "%LAE%\laes_api.cpp" >"%OUT%\build_laes.txt" 2>&1 || (type "%OUT%\build_laes.txt" & echo BUILD FAILED laes_api & exit /b 1)
+cl /nologo /c /O2 /EHsc /std:c++17 /utf-8 /MD /DBUILD_KODI_ADDON /DADDON_INSTANCE_VERSION_AUDIODECODER_USED /DADDON_GLOBAL_VERSION_GENERAL_USED /DADDON_GLOBAL_VERSION_GUI_USED /DADDON_GLOBAL_VERSION_AUDIOENGINE_USED /DADDON_GLOBAL_VERSION_FILESYSTEM_USED /DTARGET_WINDOWS /DNOMINMAX /D_USE_MATH_DEFINES /I"%KDK%" /Fo"%OUT%\obj\addon.obj" "%HERE%src\addon.cpp" >"%OUT%\build_addon.txt" 2>&1 || (type "%OUT%\build_addon.txt" & echo BUILD FAILED addon & exit /b 1)
 if exist "%OUT%\pkg" rmdir /s /q "%OUT%\pkg"
 xcopy /e /i /q "%HERE%audiodecoder.lae" "%OUT%\pkg\audiodecoder.lae" >nul
 powershell -NoProfile -ExecutionPolicy Bypass -File "%HERE%lang_pkg.ps1" -PkgDir "%OUT%\pkg\audiodecoder.lae" -Lang %PKGLANG% >nul || (echo LANGUAGE PACKAGE FAILED & exit /b 1)

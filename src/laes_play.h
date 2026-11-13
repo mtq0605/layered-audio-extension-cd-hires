@@ -27,6 +27,7 @@
 #include <algorithm>
 #include "laes_stream.h"
 #include "laes_flac.h"
+#include "laes_choices.h"
 namespace laesp {
 #ifdef LAESP_PROFILE   // exclusive time per node kind (tests only)
 #include <chrono>
@@ -89,7 +90,12 @@ struct Node : laess::Sig { V cache; int64_t c0 = 0, keep = 1 << 17, chunk = 1 <<
         if (a < c0) { V t; compute(a, b, t); std::copy(t.begin(), t.end(), out); return; }   // behind the window: computed again, not kept
         if (a > c1) { cache.clear(); c0 = a; }   // a jump forward: the window starts again
         const int64_t e1 = c0 + (int64_t)cache.size();
-        if (b > e1) { const int64_t e = std::min(n, std::max(b, e1 + chunk)); V t; compute(e1, e, t); cache.insert(cache.end(), t.begin(), t.end());
+        // no read-ahead (2026-11-12): exactly what is asked. A master that refers to another asks its tier for its own range plus the filter's
+        // reach (128 samples and T); any rounding up ("+ a chunk", or "to the next multiple of chunk") grows level by level along a reference
+        // chain (255 masters each referring to the one before: the first masters ran far ahead of their own SHA-256 pass, which then found its
+        // samples dropped and recomputed them, each recomputation asking its tier behind its window too; a self-check of 255 x 5 min ran for
+        // hours). Requests come in pieces of 2^16 (output, SHA-256) or a tier's range, so the pieces stay large. Values unchanged.
+        if (b > e1) { const int64_t e = b; V t; compute(e1, e, t); if (cache.empty()) cache.swap(t); else cache.insert(cache.end(), t.begin(), t.end());
 #ifdef LAESP_PROFILE
             Prof::g().computed += e - e1;
 #endif
@@ -144,8 +150,21 @@ private:
             q.push_back(std::move(blk)); qEnd += k; s += k; cv.notify_all(); } } };
 // level j of a master stored as a difference: layer + the reference of its tier (laess::refPiece)
 struct AddRefNode : Node { Node* e = nullptr; laess::Sig* src = nullptr; std::vector<int64_t> h; int64_t wj = 0; int up = 0;
-    void compute(int64_t a, int64_t b, V& out) override { out.resize((size_t)(b - a)); e->get(a, b, out.data()); V r; LAESP_PROF(1); laess::refPiece(*src, h, wj, up, a, b, r, threads);
-        for (size_t i = 0; i < out.size(); i++) out[i] += r[i]; } };
+    int dc = -1000;   // -1000: not looked at yet; -999: h is a filter; else h is 2^31 at one tap: the reference is src[i + wj + dc] scaled by 2^up
+    V tmp;            // the tier's samples for a whole-sample reference (kept between calls: no new array each time)
+    // the layer is read straight from its node's decoded blocks (e->compute: the same values as e->get; this node is the layer's only reader,
+    // so the layer node keeps no copy of its own)
+    void compute(int64_t a, int64_t b, V& out) override { e->compute(a, b, out); LAESP_PROF(1);
+        if (dc == -1000) { int c = -1, nz = 0; for (int t = 0; t < (int)h.size(); t++) if (h[(size_t)t]) { nz++; c = t; } dc = (nz == 1 && h[(size_t)c] == (1LL << 31)) ? c - 127 : -999; }
+        // a whole-sample offset (2026-11-12): the same values as laess::refPiece's own shortcut (src[i + wj + c - 127] << up, or rounded down
+        // by 2^-up), added straight into out, without the +-127 window and the separate result array; at the ends (mirrored indices) and for
+        // a fractional offset, refPiece as before
+        const int64_t s0 = a + wj + dc, s1 = b + wj + dc;
+        if (dc != -999 && s0 >= 0 && s1 <= src->n) { tmp.resize((size_t)(b - a)); src->get(s0, s1, tmp.data()); const size_t k = out.size();
+            if (up >= 0) { for (size_t i = 0; i < k; i++) out[i] += (int64_t)((uint64_t)tmp[i] << up); }
+            else { const int sh = -up; const int64_t rnd = 1LL << (sh - 1); for (size_t i = 0; i < k; i++) out[i] += (tmp[i] + rnd) >> sh; }
+            return; }
+        V r; laess::refPiece(*src, h, wj, up, a, b, r, threads); for (size_t i = 0; i < out.size(); i++) out[i] += r[i]; } };
 // one inverse stage: x (n values) from s (lower level) and d (octave layer)
 struct UpNode : Node { laess::Sig* s = nullptr; laess::Sig* d = nullptr;
     void compute(int64_t a, int64_t b, V& out) override { LAESP_PROF(2); const int64_t pa = a / 2, pb = std::min(s->n, (b + 1) / 2); V x; laess::invPiece(*s, *d, n, pa, pb, x, threads);
@@ -161,6 +180,8 @@ struct File {
     bool flac = false; int baseRate = 0, coreBits = 0; int64_t coreFrames = 0; std::vector<int32_t> core[2];
     uint8_t fileSha[32] = {0}; std::string why;            // why: "" when the payload passed every check; else the reason (the core still plays)
     std::vector<Master> ms; std::vector<Choice> choices; std::vector<std::pair<std::string, std::string>> tags;
+    laes::Head head;        // the header's default master and core master flags (payload version 2; 2026-11-12)
+    int defaultChoice = 0;  // the choice a player plays when the user has chosen nothing (spec/lossless/SPEC.md, Section 10.3): the default master, else the core master (0)
     std::mutex idxM; std::map<uint64_t, std::shared_ptr<LayerIdx>> idx;
     SegSrc payload; bool quick = false;
     // block positions of the layers (by the layer's byte offset in the payload), noted while layers are decoded (memory only)
@@ -202,9 +223,18 @@ struct Player {
     struct MD { int idx = -1; std::vector<std::unique_ptr<Node>> own; Node* top[2] = {nullptr, nullptr}; std::vector<Node*> lev[2]; Hasher sha; int64_t hashed = 0; bool shaOk = false; };
     std::vector<std::unique_ptr<MD>> chain; CoreNode coreSig[2];
     uint64_t rng[2] = {20261029ull + 0x9E3779B97F4A7C15ull * 1, 20261029ull + 0x9E3779B97F4A7C15ull * 2};
+    // the derived 16-bit dither's xorshift64 state after `steps` steps (2 per sample, SPEC 10.1), in O(log steps): the step is linear over
+    // GF(2), so it is applied as a 64 x 64 bit matrix raised to the power `steps` (2026-11-12; the same method as LAEY's xsJump). The state
+    // depends only on the channel and the sample's index, never on the audio, so a derived version starts at any frame bit for bit as from 0.
+    static uint64_t xs64Apply(const uint64_t M[64], uint64_t s) { uint64_t r = 0; for (int j = 0; j < 64; j++) if ((s >> j) & 1) r ^= M[j]; return r; }
+    static uint64_t xs64Jump(uint64_t s, uint64_t steps) {
+        uint64_t M[64], M2[64]; for (int j = 0; j < 64; j++) { uint64_t v = 1ull << j; v ^= v << 13; v ^= v >> 7; v ^= v << 17; M[j] = v; }
+        while (steps) { if (steps & 1) s = xs64Apply(M, s); for (int j = 0; j < 64; j++) M2[j] = xs64Apply(M, M[j]); memcpy(M, M2, sizeof M); steps >>= 1; }
+        return s; }
     // allMasters: every master of the file is decoded and checked in this run (one pass), not only the ones the choice needs
     // startFrame > 0: output begins at that frame (the layers begin at their noted block positions, see LayerIdx); no SHA-256 is computed,
-    // so this is only for a master already verified for this file content. Not for derived 16-bit versions (their dither runs from frame 0).
+    // so this is only for a master already verified for this file content. A derived 16-bit version starts there too: its dither state is
+    // moved to that frame (xs64Jump), the output is the same bit for bit as when decoded from frame 0 (2026-11-12).
     std::string start(File& file, int choice, int nThreads, bool allMasters = false, int64_t startFrame = 0);
     // the next frames (interleaved L R, int32 in the choice's word length); returns the number written (0 at the end)
     int64_t read(int32_t* out, int64_t frames);
@@ -355,20 +385,24 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
     makeChoices(); return ""; }
 
 inline std::string File::parsePayload() {
-    ms.clear(); const uint64_t end = payload.total - 4; uint64_t pos = 0; bool trunc = false;
+    ms.clear(); head = laes::Head(); const uint64_t end = payload.total - 4; uint64_t pos = 0; bool trunc = false;
     auto u = [&](int k) -> uint64_t { if (pos + k > end) { trunc = true; return 0; } uint8_t t[8]; payload.read(pos, t, (size_t)k); pos += k; uint64_t v = 0; for (int i = 0; i < k; i++) v |= (uint64_t)t[i] << (8 * i); return v; };
-    uint64_t magic = u(4), ver = u(2), hs = u(2), base = u(4), cbits = u(1), ch = u(1), nm = u(1), cmode = u(1), nc = u(8); uint8_t csha[32] = {0}; if (pos + 32 <= end) { payload.read(pos, csha, 32); pos += 32; } else trunc = true; u(8);
-    if (trunc || magic != 0x3245414Cull) return "not an LAES block"; if (ver != 1 || hs != 64) return "unsupported LAES version";
-    if ((base != 44100 && base != 48000) || (int)base != baseRate || (int)cbits != coreBits || ch != 2 || cmode > 1 || nm < 1 || nm > 16) return "invalid LAES header";
+    uint64_t magic = u(4), ver = u(2), hs = u(2), base = u(4), cbits = u(1), ch = u(1), nm = u(1), cmode = u(1), nc = u(8); uint8_t csha[32] = {0}; if (pos + 32 <= end) { payload.read(pos, csha, 32); pos += 32; } else trunc = true;
+    uint8_t hb[8] = {0}; if (pos + 8 <= end) { payload.read(pos, hb, 8); pos += 8; } else trunc = true;
+    if (trunc || magic != 0x3245414Cull) return "not an LAES block"; if ((ver != 1 && ver != 2) || hs != 64) return "unsupported LAES version";
+    if ((base != 44100 && base != 48000) || (int)base != baseRate || (int)cbits != coreBits || ch != 2 || cmode > 1 || !laes::headerCountOk(ver, nm) || !laes::headFrom(ver, hb, nm, head)) return "invalid LAES header";
     if (nc != (uint64_t)coreFrames) return "core master length differs from the LAES header";
     if (!quick) { laes::Sha256 s; std::vector<uint8_t> b; b.reserve(1 << 16);   // the core's SHA-256 (16 bit: int16 LE; 24 / 32 bit: int32 LE)
       for (int64_t i = 0; i < coreFrames; i++) for (int c = 0; c < 2; c++) { const uint32_t v = (uint32_t)core[c][(size_t)i]; const int k = coreBits == 16 ? 2 : 4; for (int q = 0; q < k; q++) b.push_back((uint8_t)(v >> (8 * q)));
           if (b.size() >= (1 << 16)) { s.update(b.data(), b.size()); b.clear(); } }
       s.update(b.data(), b.size()); uint8_t hh[32]; s.final(hh); if (memcmp(hh, csha, 32)) return "core master differs from the one this LAES block was made for (SHA-256)"; }
     for (uint64_t mi = 0; mi < nm; mi++) { Master M; laes::MasterInfo& I = M.I;
-        I.bits = (int)u(1); I.stages = (int)u(1); I.w = (int)u(1); I.storage = (int)u(1); I.refTier = (int)u(1); u(3); I.rate = (int)u(4); u(4); const uint64_t F64 = u(8);
+        I.bits = (int)u(1); I.stages = (int)u(1); I.w = (int)u(1); I.storage = (int)u(1); I.refTier = (int)u(1);
+        const uint64_t nl = u(1), fl = u(1), mp = u(1); I.rate = (int)u(4); u(4); const uint64_t F64 = u(8);
         I.whole = (int64_t)u(8); I.frac = (uint32_t)u(4); u(4); if (pos + 32 <= end) { payload.read(pos, I.sha, 32); pos += 32; } else trunc = true;
         if (trunc) return "LAES block truncated";
+        if (ver == 2) { if (pos + nl > end) return "LAES block truncated"; std::string nm2((size_t)nl, '\0'); if (nl) payload.read(pos, &nm2[0], (size_t)nl); pos += nl;
+            if (fl & ~(uint64_t)laes::kNoDerive) return "invalid master record"; if (!laes::validMasterName((const uint8_t*)nm2.data(), nm2.size())) return "invalid master name"; I.name = nm2; I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)
             || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40)) return "invalid master record";
@@ -376,21 +410,17 @@ inline std::string File::parsePayload() {
         M.j = I.storage == 2 ? std::min(I.stages, ms[(size_t)I.refTier - 1].I.stages) : 0;
         for (int c = 0; c < 2; c++) for (int k = M.j; k <= I.stages; k++) { const uint64_t l = u(4); if (trunc || pos + l > end) return "LAES block truncated"; M.layOff[c][k - M.j] = pos; M.layLen[c][k - M.j] = l; pos += l; }
         ms.push_back(M); }
+    { std::vector<laes::MasterInfo> mi; for (const Master& M : ms) mi.push_back(M.I); if (!laes::menuOk(mi)) return "invalid menu positions"; }
     if (pos != end) return "unexpected bytes after the last master";
     return ""; }
 
 inline void File::makeChoices() {   // the same list and order as `laes dec --list` (all masters offered until a run proves otherwise)
-    choices.clear(); { Choice c; c.kind = 0; c.rate = baseRate; c.bits = coreBits; c.frames = coreFrames; c.name = "core"; c.what = "the core master (lossless)"; choices.push_back(c); }
-    if (!why.empty()) return;
-    for (size_t i = 0; i < ms.size(); i++) { const laes::MasterInfo& I = ms[i].I; const std::string mk = "master_" + std::to_string(i + 1);
-        { Choice c; c.kind = 1; c.m = (int)i; c.level = I.stages; c.rate = I.rate; c.bits = I.bits; c.frames = I.frames; c.name = mk + "_" + std::to_string(I.rate) + "_" + std::to_string(I.bits); c.what = "master " + std::to_string(i + 1) + " (lossless)"; choices.push_back(c); }
-        for (int k = I.stages - 1; k >= 0; k--) { Choice c; c.kind = 2; c.m = (int)i; c.level = k; c.rate = I.rate >> (I.stages - k); c.bits = I.bits; c.frames = laes::levLen(I.frames, I.stages - k);
-            c.name = mk + "_level_" + std::to_string(c.rate) + "_" + std::to_string(c.bits); c.what = "rate level of master " + std::to_string(i + 1) + " (lossless)"; choices.push_back(c); } }
-    std::vector<int> rates; for (auto& c : choices) if (std::find(rates.begin(), rates.end(), c.rate) == rates.end()) rates.push_back(c.rate);
-    for (int r : rates) { int best = -1; bool has16 = false; for (size_t j = 0; j < choices.size(); j++) if (choices[j].rate == r) { has16 |= choices[j].bits == 16; if (best < 0 || choices[j].bits > choices[(size_t)best].bits) best = (int)j; }
-        if (has16 || best < 0 || choices[(size_t)best].bits <= 16) continue;
-        Choice dv = choices[(size_t)best]; dv.kind = 3; dv.from = best; dv.bits = 16; dv.name = "derived16_" + std::to_string(r) + "_from_" + choices[(size_t)best].name;
-        dv.what = "16-bit master derived from " + (choices[(size_t)best].name == "core" ? std::string("the core master") : choices[(size_t)best].name) + " by TPDF requantisation: lossless relative to its definition (bit-identical on every decoder), not lossless relative to its " + std::to_string(choices[(size_t)best].bits) + "-bit source"; choices.push_back(dv); } }
+    choices.clear();
+    std::vector<laes::MasterInfo> mi; if (why.empty()) for (const Master& M : ms) mi.push_back(M.I);   // a rejected payload: the core master only
+    const laes::Head hd = why.empty() ? head : laes::Head();
+    const std::vector<laesc::Spec> sp = laesc::build(baseRate, coreBits, coreFrames, mi, nullptr, &hd); defaultChoice = laesc::defaultIndex(sp, hd);
+    for (const laesc::Spec& s : sp) { Choice c; c.kind = s.kind; c.m = s.m; c.level = s.level; c.from = s.from; c.rate = s.rate; c.bits = s.bits; c.frames = s.frames;
+        c.name = s.name; c.what = s.what; choices.push_back(c); } }
 
 // every layer of every master: byte range, values, block length
 inline std::vector<File::LayerRef> File::layerList() const {
@@ -478,7 +508,8 @@ inline std::string Player::start(File& file, int choice, int nThreads, bool allM
     if (choice < 0 || choice >= (int)f->choices.size()) return "no such choice";
     C = f->choices[(size_t)choice];
     if (startFrame < 0 || startFrame > C.frames) return "start position outside the track";
-    if (startFrame > 0) { if (C.kind == 3) return "a derived 16-bit version starts at the beginning (its dither runs from frame 0)"; pos = startFrame; noHash = true; }
+    for (int c = 0; c < 2; c++) rng[c] = xs64Jump(20261029ull + 0x9E3779B97F4A7C15ull * (uint64_t)(c + 1), 2 * (uint64_t)startFrame);   // the dither state at the start frame (0: the seed)
+    if (startFrame > 0) { pos = startFrame; noHash = true; }
     for (int c = 0; c < 2; c++) { coreSig[c].v = &f->core[c]; coreSig[c].n = (int64_t)f->core[c].size(); }
     try { const Choice& S = C.kind == 3 ? f->choices[(size_t)C.from] : C; if (S.kind != 0) need(S.m);
         if (allMasters) for (int m = 0; m < (int)f->ms.size(); m++) need(m);   // every master decoded (and hashed) once, in this one run
@@ -487,7 +518,9 @@ inline std::string Player::start(File& file, int choice, int nThreads, bool allM
         for (auto& d : chain) for (auto& nd : d->own) nd->threads = std::max(1, threads / 2);   // two channels at once, each with half the threads
         // nodes that other masters read at an offset (tiers) keep a window that covers the largest time offset in the chain
         int64_t span = 0; for (auto& d : chain) { const laes::MasterInfo& I = f->ms[(size_t)d->idx].I; span = std::max<int64_t>(span, (I.whole < 0 ? -I.whole : I.whole) + 2); }
-        for (auto& d : chain) for (auto& nd : d->own) { nd->keep = std::max<int64_t>(nd->keep, (span << 3) + 4 * nd->chunk + 4096); } }
+        // and the reach of a reference chain (2026-11-12): each level runs at most the filter's reach (128 + T) ahead of the one that refers to it
+        const int64_t chainReach = (int64_t)chain.size() * ((span << 3) + 256);
+        for (auto& d : chain) for (auto& nd : d->own) { nd->keep = std::max<int64_t>(nd->keep, (span << 3) + 4 * nd->chunk + 4096 + chainReach); } }
     catch (const std::exception& x) { return x.what(); }
     return ""; }
 inline void Player::advanceHashes(double frac) {   // every master of the chain hashed up to the same share of its length as the output

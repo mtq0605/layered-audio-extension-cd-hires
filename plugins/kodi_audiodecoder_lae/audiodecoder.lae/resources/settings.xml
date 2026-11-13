@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <settings>
   <category label="30000">
-    <setting id="layers" type="enum" label="30001" lvalues="30010|30011|30012" default="0"/>
+    <setting id="layers" type="enum" label="30001" lvalues="30010|30011|30012|30013" default="0"/>
     <setting id="maxrate" type="enum" label="30002" lvalues="30020|30021|30022" default="0"/>
     <setting id="maxbits" type="enum" label="30003" lvalues="30030|30031|30032|30033" default="0"/>
+    <setting id="pack" type="enum" label="30004" lvalues="30040|30041|30042|30043|30044|30045|30046|30047|30048" default="0"/>
   </category>
 </settings>

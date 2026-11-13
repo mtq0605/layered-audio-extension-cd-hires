@@ -8,7 +8,7 @@
 // LAES rules, as in the foobar2000 component: a master plays as that master only after a full run matched its SHA-256; the result is kept
 // by the SHA-256 of the whole file (%APPDATA%\LAE\DirectShow\laes_verified.txt); the first time, every master is checked in one pass with a
 // small progress window. Block positions for seeking: laes_index\<file SHA-256>.idx in the same folder (never written into the media file).
-// What plays: HKCU\Software\LAE\DirectShow, DWORD values layers (0 all, 1 CD + depth layer, 2 CD only), maxrate (0 = no limit),
+// What plays: HKCU\Software\LAE\DirectShow, DWORD values layers (0 all, 1 CD or core layer + depth layer, 2 CD or core layer only, 3 CD or core layer + frequency layer without the depth layer), maxrate (0 = no limit),
 // maxbits (0 = no limit, 16, 24, 32).
 #include <windows.h>
 #include <commctrl.h>
@@ -26,12 +26,19 @@
 #include <thread>
 #include <vector>
 #include "../../../src/lae_api.h"
+#include "../../../src/lae_flacmeta.h"   // the FLAC form of LAEY: structure and Vorbis comments (2026-11-10)
 #include "../../../src/lae_wavtags.h"   // tags of the WAV form (LIST/INFO + id3), shared by the LAE player plugins
 
 // {5B3C6E8A-2F41-4C7D-9E15-8A0C3D6B7F21}
 DEFINE_GUID(CLSID_LaeSource, 0x5b3c6e8a, 0x2f41, 0x4c7d, 0x9e, 0x15, 0x8a, 0x0c, 0x3d, 0x6b, 0x7f, 0x21);
 
 namespace {
+// texts: two standalone builds, English (the standard) and Chinese (/DLAE_LANG_ZH)
+#ifdef LAE_LANG_ZH
+const wchar_t* const kTitle = L"LAE 解码器：LAES"; const wchar_t* const kVerifyA = L"校验 "; const wchar_t* const kVerifyB = L" 个母带（SHA-256，仅首次播放）";
+#else
+const wchar_t* const kTitle = L"LAE decoder: LAES"; const wchar_t* const kVerifyA = L"Verifying "; const wchar_t* const kVerifyB = L" masters (SHA-256, first playback only)";
+#endif
 HMODULE g_module = nullptr; std::atomic<long> g_objects{0}, g_locks{0};
 struct FpPin { unsigned mx; FpPin() : mx(_mm_getcsr()) { _mm_setcsr(0x1F80u); } ~FpPin() { _mm_setcsr(mx); } };
 
@@ -60,15 +67,24 @@ private:
 };
 Verified g_verified;
 
-int pick(const laes_file* f, int layers, int maxrate, int maxbits) {   // as foo_input_lae / audiodecoder.lae
+int pick(const laes_file* f, int layers, int maxrate, int maxbits) {
     laes_file_info fi; laes_get_info(f, &fi); if (!fi.payload_ok || layers == 2) return 0;
-    const int capR = layers == 1 ? fi.base_rate : maxrate; int best = 0; laes_choice_info b{}; laes_get_choice(f, 0, &b);
-    for (int i = 1; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_DERIVED16) continue;
-        if ((capR > 0 && c.rate > capR) || (maxbits > 0 && c.bits > maxbits)) continue;
-        const bool better = c.rate != b.rate ? c.rate > b.rate : c.bits != b.bits ? c.bits > b.bits : (c.kind == LAES_KIND_MASTER && b.kind != LAES_KIND_MASTER);
-        if (better) { best = i; b = c; } }
-    if (best == 0 && maxbits > 0 && maxbits < fi.core_bits) for (int i = 1; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_DERIVED16 && c.rate == fi.base_rate) return i; }
-    return best; }
+    const int capR = layers == 1 ? fi.base_rate : maxrate;
+    auto capped = [&](int i) { laes_choice_info c; laes_get_choice(f, i, &c);   // word length above the maximum: this entry's own derived 16-bit version, if the file offers one
+        if (maxbits > 0 && c.bits > maxbits) for (int d = 0; d < fi.choices; d++) if (laes_choice_from(f, d) == i) return d;
+        return i; };
+    // SPEC 10.3 (2026-11-12): what plays without a choice of the user is the file's default entry (set when the file was encoded: a
+    // master itself, else the core master), never an entry picked by rate, size or device. The limits work inside that master only.
+    int d = laes_default_choice(f); if (d < 0 || d >= fi.choices) d = 0;
+    laes_choice_info dc; laes_get_choice(f, d, &dc); if (dc.kind != LAES_KIND_MASTER) return capped(0);
+    for (int i = d; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c);
+        if (i > d && (c.kind == LAES_KIND_MASTER || c.kind == LAES_KIND_CORE)) break;
+        if (c.master != dc.master || c.kind == LAES_KIND_DERIVED16) continue;
+        if (capR > 0 && c.rate > capR) continue;
+        return capped(i); }
+    return capped(0); }
+
+
 
 // a small window with one progress bar, on a thread of its own (the first check of a file's masters)
 class ProgressWindow {
@@ -82,7 +98,7 @@ private:
         INITCOMMONCONTROLSEX ic{sizeof ic, ICC_PROGRESS_CLASS}; InitCommonControlsEx(&ic);
         m_hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"STATIC", text.c_str(), WS_POPUP | WS_CAPTION | WS_VISIBLE | SS_CENTER, CW_USEDEFAULT, CW_USEDEFAULT, 460, 90, nullptr, nullptr, g_module, nullptr);
         if (m_hwnd) { RECT r; GetClientRect(m_hwnd, &r); m_bar = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 10, r.bottom - 26, r.right - 20, 18, m_hwnd, nullptr, g_module, nullptr);
-            SendMessageW(m_bar, PBM_SETRANGE, 0, MAKELPARAM(0, 100)); SetWindowTextW(m_hwnd, L"LAE decoder: LAES"); SetWindowPos(m_hwnd, HWND_TOPMOST, 200, 200, 0, 0, SWP_NOSIZE); }
+            SendMessageW(m_bar, PBM_SETRANGE, 0, MAKELPARAM(0, 100)); SetWindowTextW(m_hwnd, kTitle); SetWindowPos(m_hwnd, HWND_TOPMOST, 200, 200, 0, 0, SWP_NOSIZE); }
         m_ready = true; MSG msg; while (m_hwnd && GetMessageW(&msg, nullptr, 0, 0) > 0) { if (msg.message == WM_CLOSE && msg.hwnd == m_hwnd) { DestroyWindow(m_hwnd); break; } TranslateMessage(&msg); DispatchMessageW(&msg); } }
 };
 
@@ -105,13 +121,15 @@ struct Decoder {
         laes = laes_open_reader(&Decoder::read, this, size, 0, mg, err, sizeof err);
         if (laes && tags.empty()) for (int k = 0; ; k++) { const char* key; const char* val; if (laes_get_tag(laes, k, &key, &val) != 0) break; tags.push_back({key, val}); }
         if (laes) return startLaes() ? S_OK : E_FAIL;
-        if (!strcmp(mg, "LAE1")) return startLaey() ? S_OK : E_FAIL;
+        if (!strcmp(mg, "LAE1")) {   // LAEY, WAV form or FLAC form (liblae tells them apart); the FLAC form's tags are its Vorbis comments
+            if (tags.empty()) { const laeyflac::ReadFn rd = [this](uint64_t off, void* buf, size_t n) { return read(this, off, buf, n) == 0; }; laeyflac::Layout L; if (laeyflac::layout(rd, size, L).empty()) tags = laeyflac::comments(rd, L); }
+            return startLaey() ? S_OK : E_FAIL; }
         return VFW_E_UNSUPPORTED_STREAM; }
     void checkAll() {
         laes_file_info fi; laes_get_info(laes, &fi); int first = -1, nm = 0;
         for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(laes, i, &c); if (c.kind == LAES_KIND_MASTER) { nm++; if (first < 0) first = i; } }
         char err[256]; laes_play* p = laes_start_all(laes, first, 0, err, sizeof err); if (!p) return; laes_choice_info c; laes_get_choice(laes, first, &c);
-        ProgressWindow w(L"First play of this file: checking all " + std::to_wstring(nm) + L" masters (SHA-256), once per file");
+        ProgressWindow w(kVerifyA + std::to_wstring(nm) + kVerifyB);
         std::vector<int32_t> b(65536 * 2); uint64_t got = 0; int64_t k;
         while ((k = laes_read(p, b.data(), 65536)) > 0) { got += (uint64_t)k; w.set((int)(100.0 * (double)got / (double)(c.frames ? c.frames : 1))); }
         if (laes_verified(p) >= 0) for (int m = 0; m < nm; m++) { const int r = laes_master_ok(p, m); if (r >= 0) g_verified.put(fi.file_sha256, m, r == 1); }
@@ -133,12 +151,14 @@ struct Decoder {
     static std::wstring pfcw(const std::string& s) { return std::wstring(s.begin(), s.end()); }
     bool startLaey() {
         char err[512] = ""; if (!lae_selftest()) return false; track = lae_open_reader(&Decoder::read, this, size, err, sizeof err); if (!track) return false;
-        const DWORD layers = setting(L"layers", 0); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : LAE_ROUTE_FULL;
-        lae_info li; lae_get_info(track, &li); int out = 0; const int cap = (int)setting(L"maxrate", 0); if (route == LAE_ROUTE_FULL && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
+        // LAEY extension packs: the pack number the user set (registry value "pack", 0 = the main body); a file without that pack plays pack 0
+        { const int pk = (int)setting(L"pack", 0); if (pk > 0 && pk < lae_pack_count(track)) lae_select_pack(track, pk); }
+        const DWORD layers = setting(L"layers", 0); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : layers == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL;
+        lae_info li; lae_get_info(track, &li); int out = 0; const int cap = (int)setting(L"maxrate", 0); if ((route == LAE_ROUTE_FULL || route == LAE_ROUTE_16) && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
         if (lae_start(track, route, out, err, sizeof err) != 0 && lae_start(track, LAE_ROUTE_CD, 0, err, sizeof err) != 0) return false;
         int r, b; uint64_t fr; lae_output_format(track, &r, &b, &fr); rate = r; bits = b == 16 ? 16 : 24; frames = fr; pos = 0; return true; }
     bool seek(uint64_t frame) { FpPin pin; char err[256]; if (frame > frames) frame = frames;
-        if (laes) { laes_choice_info c; laes_get_choice(laes, choice, &c); if (c.kind == LAES_KIND_DERIVED16) frame = 0;
+        if (laes) {   // every choice starts at the frame, a derived 16-bit version too (its dither state is moved there, bit-exact; 2026-11-12)
             if (play) laes_stop(play); play = frame ? laes_start_at(laes, choice, frame, 0, err, sizeof err) : laes_start_at(laes, choice, 0, 0, err, sizeof err);
             if (!play) play = laes_start(laes, choice, 0, err, sizeof err), frame = 0; pos = frame; return play != nullptr; }
         if (track) { if (lae_seek(track, frame) != 0) return false; pos = frame; return true; }

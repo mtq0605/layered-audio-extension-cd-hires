@@ -19,7 +19,7 @@ public final class LaeEncTool {
     public static void main(String[] args) {
         String[] argv = new String[args.length + 1]; argv[0] = "lae_enc"; System.arraycopy(args, 0, argv, 1, args.length);
         Map<String, String> vars = new HashMap<String, String>();
-        for (String k : new String[] {"LAE_TESTFAIL", "LAE_BLOCKUNITS", "LAE_TESTSEQUENTIAL", "LAE_TESTMAXFRAMES", "PARTTHREADS", "KEEPTMP", "TIMING"}) { String v = System.getenv(k); if (v != null) vars.put(k, v); }
+        for (String k : new String[] {"LAE_TESTFAIL", "LAE_BLOCKUNITS", "LAE_TESTSEQUENTIAL", "LAE_TESTMAXFRAMES", "LAEY_TEST_PIECE", "PARTTHREADS", "KEEPTMP", "TIMING"}) { String v = System.getenv(k); if (v != null) vars.put(k, v); }
         final AtomicBoolean cancel = new AtomicBoolean(false); final Thread mainT = Thread.currentThread(); final boolean[] done = {false};
         Thread hook = new Thread(new Runnable() { @Override public void run() { if (done[0]) return; cancel.set(true); try { mainT.join(10000); } catch (InterruptedException e) { /* exiting */ } } });   // Ctrl+C: stop cleanly
         Runtime.getRuntime().addShutdownHook(hook);

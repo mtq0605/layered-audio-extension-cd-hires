@@ -31,10 +31,17 @@ static inline int poll(struct pollfd* fds, unsigned n, int timeout) { return WSA
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_demux.h>
+// texts: two standalone builds, English (the standard) and Chinese (/DLAE_LANG_ZH)
+#ifdef LAE_LANG_ZH
+#define LT(en, zh) zh
+#else
+#define LT(en, zh) en
+#endif
 #include <vlc_dialog.h>
 #include <vlc_meta.h>
 #include <vlc_aout.h>
 #include "../../../src/lae_api.h"
+#include "../../../src/lae_flacmeta.h"   // the FLAC form of LAEY: structure and Vorbis comments (2026-11-10)
 #include "../../../src/lae_wavtags.h"   // tags of the WAV form (LIST/INFO + id3), shared by the LAE player plugins
 
 namespace {
@@ -65,17 +72,26 @@ private:
 };
 Verified g_verified;
 
-// what plays (as the other LAE players): layers 0 = all, 1 = CD + depth (base rate), 2 = CD only; the highest rate up to maxrate, then the
-// longest word up to maxbits; masters before rate levels; derived 16-bit versions only when nothing else fits
+// what plays (as the other LAE players): layers 0 = all, 1 = CD or core layer + depth (base rate), 2 = CD or core layer only, 3 = CD or core layer + frequency layer (no depth layer). LAES (SPEC 10.3): the first master of the
+// list (the menu order); of it the highest rate up to maxrate; a word above maxbits: that entry's own derived 16-bit version. Never another master.
 int pick(const laes_file* f, int layers, int maxrate, int maxbits) {
     laes_file_info fi; laes_get_info(f, &fi); if (!fi.payload_ok || layers == 2) return 0;
-    const int capR = layers == 1 ? fi.base_rate : maxrate; int best = 0; laes_choice_info b{}; laes_get_choice(f, 0, &b);
-    for (int i = 1; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_DERIVED16) continue;
-        if ((capR > 0 && c.rate > capR) || (maxbits > 0 && c.bits > maxbits)) continue;
-        const bool better = c.rate != b.rate ? c.rate > b.rate : c.bits != b.bits ? c.bits > b.bits : (c.kind == LAES_KIND_MASTER && b.kind != LAES_KIND_MASTER);
-        if (better) { best = i; b = c; } }
-    if (best == 0 && maxbits > 0 && maxbits < fi.core_bits) for (int i = 1; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_DERIVED16 && c.rate == fi.base_rate) return i; }
-    return best; }
+    const int capR = layers == 1 ? fi.base_rate : maxrate;
+    auto capped = [&](int i) { laes_choice_info c; laes_get_choice(f, i, &c);   // word length above the maximum: this entry's own derived 16-bit version, if the file offers one
+        if (maxbits > 0 && c.bits > maxbits) for (int d = 0; d < fi.choices; d++) if (laes_choice_from(f, d) == i) return d;
+        return i; };
+    // SPEC 10.3 (2026-11-12): what plays without a choice of the user is the file's default entry (set when the file was encoded: a
+    // master itself, else the core master), never an entry picked by rate, size or device. The limits work inside that master only.
+    int d = laes_default_choice(f); if (d < 0 || d >= fi.choices) d = 0;
+    laes_choice_info dc; laes_get_choice(f, d, &dc); if (dc.kind != LAES_KIND_MASTER) return capped(0);
+    for (int i = d; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c);
+        if (i > d && (c.kind == LAES_KIND_MASTER || c.kind == LAES_KIND_CORE)) break;
+        if (c.master != dc.master || c.kind == LAES_KIND_DERIVED16) continue;
+        if (capR > 0 && c.rate > capR) continue;
+        return capped(i); }
+    return capped(0); }
+
+
 
 // the file: a local file read directly (the decoders read from several threads), else VLC's stream (one read at a time)
 struct Src {
@@ -110,7 +126,7 @@ void checkAll(demux_t* d, Sys* sy) {
 
 bool seekTo(Sys* sy, uint64_t frame) {
     FpPin pin; char err[256]; if (frame > sy->frames) frame = sy->frames;
-    if (sy->laes) { laes_choice_info c; laes_get_choice(sy->laes, sy->choice, &c); if (c.kind == LAES_KIND_DERIVED16) frame = 0;   // its dither runs from frame 0
+    if (sy->laes) {   // every choice starts at the frame, a derived 16-bit version too (its dither state is moved there, bit-exact; 2026-11-12)
         if (sy->play) laes_stop(sy->play); sy->play = laes_start_at(sy->laes, sy->choice, frame, 0, err, sizeof err);
         if (!sy->play) { sy->play = laes_start(sy->laes, sy->choice, 0, err, sizeof err); frame = 0; } sy->pos = frame; return sy->play != nullptr; }
     if (sy->track) { if (lae_seek(sy->track, frame) != 0) return false; sy->pos = frame; return true; }
@@ -121,9 +137,9 @@ bool startLaes(demux_t* d, Sys* sy) {
     sy->choice = pick(sy->laes, (int)var_InheritInteger(d, "lae-layers"), (int)var_InheritInteger(d, "lae-maxrate"), (int)var_InheritInteger(d, "lae-maxbits"));
     laes_choice_info c; laes_get_choice(sy->laes, sy->choice, &c);
     if (c.master >= 0) { if (g_verified.get(fi.file_sha256, c.master) == 0) checkAll(d, sy);
-        if (g_verified.get(fi.file_sha256, c.master) != 1) { msg_Warn(d, "LAES: master %d did not pass its SHA-256 check: the core master plays", c.master + 1); sy->choice = 0; laes_get_choice(sy->laes, 0, &c); } }
+        if (g_verified.get(fi.file_sha256, c.master) != 1) { msg_Warn(d, LT("LAES: master %d: SHA-256 mismatch; playing the core master", "LAES：母带 %d：SHA-256 不符；播放核心母带"), c.master + 1); sy->choice = 0; laes_get_choice(sy->laes, 0, &c); } }
     sy->rate = c.rate; sy->bits = c.bits; sy->frames = c.frames; if (!seekTo(sy, 0)) return false;
-    msg_Info(d, "LAES: plays %s", c.name);
+    msg_Info(d, LT("LAES: playing %s", "LAES：播放 %s"), c.name);
     // block positions for seeking: the saved record, else one entropy-decoding pass on a thread of its own, then saved
     const std::wstring rec = dataDir() + L"\\laes_index\\" + widen(hex(fi.file_sha256, 32).c_str()) + L".idx"; laes_file* f = sy->laes;
     sy->indexer = std::thread([sy, rec, f] { FpPin pin; std::vector<uint8_t> b; FILE* r = _wfopen(rec.c_str(), L"rb");
@@ -136,11 +152,13 @@ bool startLaes(demux_t* d, Sys* sy) {
     return true; }
 
 bool startLaey(demux_t* d, Sys* sy) {
-    char err[512] = ""; if (!lae_selftest()) { msg_Err(d, "LAE: decoder self-test failed"); return false; }
+    char err[512] = ""; if (!lae_selftest()) { msg_Err(d, LT("LAE: decoder self-test failed", "LAE：解码器自检失败")); return false; }
     sy->track = lae_open_reader(&Src::read, &sy->src, sy->src.size, err, sizeof err); if (!sy->track) { msg_Err(d, "LAE: %s", err); return false; }
-    const int layers = (int)var_InheritInteger(d, "lae-layers"); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : LAE_ROUTE_FULL;
+    // LAEY extension packs: the pack number the user set (0 = the main body); a file without that pack plays pack 0. Never chosen automatically.
+    { const int pk = (int)var_InheritInteger(d, "lae-pack"); if (pk > 0 && pk < lae_pack_count(sy->track) && lae_select_pack(sy->track, pk) != 0) msg_Warn(d, LT("LAEY: extension pack %d unavailable; playing pack 1", "LAEY：扩展包 %d 不可用；播放扩展包 1"), pk + 1); }
+    const int layers = (int)var_InheritInteger(d, "lae-layers"); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : layers == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL;
     lae_info li; lae_get_info(sy->track, &li); int out = 0; const int cap = (int)var_InheritInteger(d, "lae-maxrate");
-    if (route == LAE_ROUTE_FULL && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
+    if ((route == LAE_ROUTE_FULL || route == LAE_ROUTE_16) && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
     if (lae_start(sy->track, route, out, err, sizeof err) != 0 && lae_start(sy->track, LAE_ROUTE_CD, 0, err, sizeof err) != 0) { msg_Err(d, "LAE: %s", err); return false; }
     int r, b; uint64_t fr; lae_output_format(sy->track, &r, &b, &fr); sy->rate = r; sy->bits = b == 16 ? 16 : 24; sy->frames = fr; sy->pos = 0; return true; }
 
@@ -202,6 +220,8 @@ int Open(vlc_object_t* obj) {
     if (d->psz_file) { sy->src.h = CreateFileW(widen(d->psz_file).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr); }
     if (sy->src.h == INVALID_HANDLE_VALUE) sy->src.s = d->s;
     sy->wtags = lae_wavtags::read([sy](uint64_t off, void* buf, size_t n) { return Src::read(&sy->src, off, buf, n) == 0; }, size);   // WAV form only
+    if (!strcmp(mg, "LAE1") && sy->wtags.empty()) {   // LAEY in the FLAC form: its Vorbis comments
+        const laeyflac::ReadFn rd = [sy](uint64_t off, void* buf, size_t n) { return Src::read(&sy->src, off, buf, n) == 0; }; laeyflac::Layout L; if (laeyflac::layout(rd, size, L).empty()) sy->wtags = laeyflac::comments(rd, L); }
     bool ok;
     { FpPin pin; char err[512] = "", m2[5] = "";
       if (!strcmp(mg, "LAE2") && d->b_preparsing) {   // VLC reads the length and tags for its playlist: the structure only (no check, no decoding)
@@ -220,23 +240,25 @@ int Open(vlc_object_t* obj) {
 
 void Close(vlc_object_t* obj) { delete (Sys*)((demux_t*)obj)->p_sys; }
 
-const int kLayers[] = {0, 1, 2}; const char* const kLayersText[] = {"All layers / the master", "CD layer + depth layer (base rate)", "CD layer only"};
-const int kRates[] = {0, 192000, 96000, 48000}; const char* const kRatesText[] = {"No limit", "192 kHz", "96 kHz", "48 kHz"};
-const int kBits[] = {0, 16, 24, 32}; const char* const kBitsText[] = {"No limit", "16 bit", "24 bit", "32 bit"};
+const int kLayers[] = {0, 3, 1, 2};   // CD layer = the 16-bit layer of a 44.1 kHz file; in a 48 kHz file it is the core layer (a CD holds 44.1 kHz only)
+const char* const kLayersText[] = {LT("All layers", "全部层"), LT("Frequency layer only", "仅频率层"), LT("Bit-depth layer only", "仅位深层"), LT("CD/core layer only", "仅 CD 层/核心层")};
+const int kRates[] = {0, 192000, 96000, 48000}; const char* const kRatesText[] = {LT("No limit", "不限"), "192 kHz", "96 kHz", "48 kHz"};
+const int kBits[] = {0, 16, 24, 32}; const char* const kBitsText[] = {LT("No limit", "不限"), LT("16-bit", "16 位"), LT("24-bit", "24 位"), LT("32-bit", "32 位")};
 }  // namespace
 
 vlc_module_begin()
     set_shortname("LAE")
-    set_description("LAE (LAES lossless / LAEY) decoder")
+    set_description(LT("LAE decoder (LAES / LAEY)", "LAE 解码器（LAES / LAEY）"))
     set_category(CAT_INPUT)
     set_subcategory(SUBCAT_INPUT_DEMUX)
     set_capability("demux", 200)
     set_callbacks(Open, Close)
     add_shortcut("lae", "flac")   // "flac": VLC tries the module named for a file's extension first; this one turns plain FLAC down at once
-    add_integer("lae-layers", 0, "What plays", "All layers (the master), CD layer + depth layer, or the CD layer only", false)
+    add_integer("lae-layers", 0, LT("LAEY layers", "LAEY 层"), LT("Layers decoded from LAEY files", "LAEY 文件解码的层"), false)
+    add_integer("lae-pack", 0, LT("LAEY extension pack", "LAEY 扩展包"), LT("Extension pack played from LAEY files with several packs (0 = the first)", "有多个扩展包的 LAEY 文件播放哪个扩展包（0 = 第一个）"), false)
         change_integer_list(kLayers, kLayersText)
-    add_integer("lae-maxrate", 0, "Highest sample rate", "Plays the highest version up to this rate", false)
+    add_integer("lae-maxrate", 0, LT("Maximum sample rate", "最高采样率"), LT("Highest sample rate decoded", "解码的最高采样率"), false)
         change_integer_list(kRates, kRatesText)
-    add_integer("lae-maxbits", 0, "Highest word length", "LAES: plays the longest word up to this length", false)
+    add_integer("lae-maxbits", 0, LT("LAES maximum bit depth", "LAES 最高位深"), LT("Highest bit depth of the LAES version played", "播放的 LAES 版本的最高位深"), false)
         change_integer_list(kBits, kBitsText)
 vlc_module_end()

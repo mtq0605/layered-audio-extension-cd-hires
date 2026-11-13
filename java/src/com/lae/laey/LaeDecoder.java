@@ -55,7 +55,8 @@ public final class LaeDecoder {
     public static final class PlaneStream {
         final PartStream.Err err;
         PartStream.Hdr h = new PartStream.Hdr(); PartStream.Dec dc = new PartStream.Dec(); PartStream.Walker w; public int[] rowBuf; long row0 = -1; int rows = 0;
-        // checkpoints for seeking: the decoder state before the row at frame M0, kept every `every` rows (about 4 s of the stream)
+        // checkpoints for seeking: the decoder state before the row at frame M0, kept every `every` rows (about 4 s of the stream).
+        // Java: a Mark is never changed after it is made (seekTo copies its state), so decoders of the same stream share Mark objects.
         static final class Mark { final long M0; final PartStream.Dec dc; final PartStream.Walker w; Mark(long m, PartStream.Dec d, PartStream.Walker ww) { M0 = m; dc = d; w = ww; } }
         final List<Mark> marks = new ArrayList<Mark>(); long every = 1;
         public PlaneStream(PartStream.Err e) { err = e; }
@@ -78,7 +79,7 @@ public final class LaeDecoder {
         void seekTo(long m) {
             final long cur = row0 >= 0 ? row0 : w.M0; final boolean forward = cur <= m; Mark best = null;
             for (Mark k : marks) { if (k.M0 > m) break; best = k; }
-            if (best != null && (!forward || best.M0 > cur)) { dc = best.dc.copy(); w = new PartStream.Walker(best.w); row0 = -1; rows = 0; } } }
+            if (best != null && (!forward || best.M0 > cur)) { dc = best.dc.copy(); w = new PartStream.Walker(h, err, best.w); row0 = -1; rows = 0; } } }   // Java: bound to this stream's header and error flag (the mark may come from another decoder)
 
     /** port of lae_decoder.h:ImdctStream: IMDCT of a sum of planes (octave segments are disjoint), sample by sample: out(i) = llround(y[N + i]) as mdct::inverse */
     public static final class ImdctStream {
@@ -195,6 +196,9 @@ public final class LaeDecoder {
         /** the stream-error flag of this decoder (C++ thread_local g_streamErr) */
         public final PartStream.Err err = new PartStream.Err();
         CdPcm cdOwn; byte[] laeOwn;   // used by open(): the CD layer (interleaved L/R) and the "LAE " chunk body (with its CRC)
+        /** Java only (2026-11-12): set before open() when this same chunk array already passed the CRC check in this process (the caller
+         *  holds it unchanged): open() then skips the CRC pass over the whole chunk (every pack), which was the whole cost of lae_start */
+        public boolean crcChecked = false;
         public String mode; public int rate = 0, base = 0, stages = 0, P = 0, fc = 0, mi = 0, eq = 0, wm = 0, nseg = 0, nused = 0, d = 0, wrate = 0;
         public long Lm = 0, nb = 0, pb = 0, ncd = 0, Lp = 0, Po = 0, Lo = 0, pos = 0, clip = 0;
         final PlaneStream[] dS = {new PlaneStream(err), new PlaneStream(err)}; PlaneStream[] fS = new PlaneStream[0];
@@ -203,6 +207,32 @@ public final class LaeDecoder {
         final BaseSrc[] baseSrc = {null, null}; final MixSrc[] mix = {null, null};
         final UpSrc[][] ups = {new UpSrc[0], new UpSrc[0]}; final DecSrc[][] decs = {new DecSrc[0], new DecSrc[0]};   // the output chain (seek)
 
+        // port of lae_decoder.h:Decoder::PackInfo, pack, packs (extension packs, 2026-11-10: one core and several mutually independent
+        // extensions; the main body is pack 0, each further pack one "LPAK" record between the main body's last stream record and the CRC)
+        public static final class PackInfo { public String name = ""; public int off = 0, len = 0, rate = 0, stages = 0; }
+        public int pack = 0; public final java.util.ArrayList<PackInfo> packs = new java.util.ArrayList<PackInfo>();   // pack: set before open() (0 = main body, k = packs.get(k - 1))
+        // port of lae_decoder.h:Decoder::bodyEnd (returns the end offset, or -1 where the C++ returns false)
+        static long bodyEnd(byte[] p, long n) {
+            if (n < 56) return -1; final int pb = Le.i32(p, 48); if (pb < 0 || pb > 65536) return -1;
+            long i = 52 + 8L * pb; if (i > n || n - i < 4) return -1;
+            final int ndf = Le.i32(p, (int) i); i += 4; if (ndf < 0 || ndf > n - i) return -1; i += ndf;
+            for (int k = 0; k < 2; k++) { if (n - i < 4) return -1; final int nb = Le.i32(p, (int) i); i += 4; if (nb < 40 || nb > n - i) return -1; i += nb; }
+            if (n - i < 4) return -1; final int ns = Le.i32(p, (int) i); i += 4; if (ns < 1 || ns > 8) return -1;
+            for (int k = 0; k < 2 * ns; k++) { if (n - i < 4) return -1; final int nb = Le.i32(p, (int) i); i += 4; if (nb < 40 || nb > n - i) return -1; i += nb; }
+            return i; }
+        // port of lae_decoder.h:Decoder::scanPacks
+        void scanPacks(byte[] p, long n) { packs.clear(); long e = bodyEnd(p, n); if (e < 0) return;
+            while (packs.size() < 8 && n - e >= 9 && p[(int) e] == 'L' && p[(int) e + 1] == 'P' && p[(int) e + 2] == 'A' && p[(int) e + 3] == 'K') {
+                final long len = Le.i32(p, (int) e + 4) & 0xFFFFFFFFL; if (len < 1 || len > n - e - 8) break;
+                final int nl = p[(int) e + 8] & 0xFF; if (1 + nl + 52 > len) break; PackInfo q = new PackInfo();
+                try { q.name = new String(p, (int) e + 9, nl, "UTF-8"); } catch (java.io.UnsupportedEncodingException x) { q.name = ""; }
+                q.off = (int) e + 9 + nl; q.len = (int) (len - 1 - nl);
+                if (Le.i32(p, q.off) != 0x3145414C || Le.i32(p, q.off + 4) != 5) break;
+                q.rate = Le.i32(p, q.off + 8); q.stages = Le.i32(p, q.off + 16); packs.add(q); e += 8 + len; }
+            // the name of the main body: one optional record after the last pack record, "LNAM" | 1 byte length | the name (UTF-8); display only
+            mainName = ""; if (n - e >= 5 && p[(int) e] == 'L' && p[(int) e + 1] == 'N' && p[(int) e + 2] == 'A' && p[(int) e + 3] == 'M' && (p[(int) e + 4] & 0xFF) <= n - e - 5) {
+                try { mainName = new String(p, (int) e + 5, p[(int) e + 4] & 0xFF, "UTF-8"); } catch (java.io.UnsupportedEncodingException x) { mainName = ""; } } }
+        public String mainName = "";   // the main body's name ("" = none stored)
         private String fail(int[] code, int c, String m) { if (code != null) code[0] = c; return m; }
         // port of lae_decoder.h:Decoder::open
         // returns "" when ready; otherwise the message and code[0] (1 = not this format / bad arguments, 3 = corrupt: the CD audio still plays)
@@ -219,8 +249,12 @@ public final class LaeDecoder {
             if (lae.length < 8) return fail(code, 3, "corrupt LAE chunk");
             // the chunk's first 4 bytes name the format: "LAE1" = LAEY (lossy, this decoder), "LAE2" = LAES (lossless, decoded by laes)
             if (lae[0] == 'L' && lae[1] == 'A' && lae[2] == 'E' && lae[3] == '2') return fail(code, 1, "this is an LAES file (lossless, extension LAE2): decode it with laes; this decoder reads LAEY (extension LAE1)");
-            { int stored = Le.i32(lae, lae.length - 4); if (PartStream.crc32(lae, 0, lae.length - 4) != stored) return fail(code, 3, "LAE chunk damaged (CRC mismatch): refusing to decode; the CD audio itself still plays"); }
-            Rd r = new Rd(lae, 0, lae.length - 4);
+            if (!crcChecked) { int stored = Le.i32(lae, lae.length - 4); if (PartStream.crc32(lae, 0, lae.length - 4) != stored) return fail(code, 3, "LAE chunk damaged (CRC mismatch): refusing to decode; the CD audio itself still plays"); }
+            int bp = 0; long bn = lae.length - 4;   // the payload to decode: the main body (pack 0), exactly as before
+            scanPacks(lae, lae.length - 4);
+            if (pack != 0) { if (pack < 0 || pack > packs.size()) return fail(code, 1, "this file has no extension pack of that number");
+                bp = packs.get(pack - 1).off; bn = packs.get(pack - 1).len; }   // a further pack: its own complete v5 payload, decoded by the same steps
+            Rd r = new Rd(lae, bp, bn);
             if (r.i32v() != 0x3145414C || r.i32v() != 5) return fail(code, 1, "unknown LAE chunk version (this decoder reads v5)");
             rate = r.i32v(); base = r.i32v(); stages = r.i32v(); Lm = r.i32v(); P = r.i32v(); fc = r.i32v(); mi = r.i32v(); eq = r.i32v(); wm = r.i32v(); nb = r.i32v(); pb = r.i32v();
             // header consistency: every field is checked before it is used to address anything
@@ -264,12 +298,18 @@ public final class LaeDecoder {
         // the entropy checkpoints of another decoder of the same chunk (another route): a stream's checkpoints depend only on its bytes, so
         // they are valid here and a route change seeks as fast as the old decoder would have (output unchanged: a seek from a checkpoint
         // gives the samples of a decode from the start)
-        public void adoptMarks(Decoder o) {
-            for (int c = 0; c < 2; c++) copyMarks(dS[c], o.dS[c]);
-            for (int k = 0; k < fS.length && k < o.fS.length; k++) copyMarks(fS[k], o.fS[k]); }
-        // port of lae_decoder.h:Decoder::adoptMarks lambda copy
-        private static void copyMarks(PlaneStream to, PlaneStream from) { if (to.w == null || from.w == null || !to.marks.isEmpty()) return;
-            for (PlaneStream.Mark m : from.marks) to.marks.add(new PlaneStream.Mark(m.M0, m.dc.copy(), new PartStream.Walker(to.h, m.w))); }
+        public void adoptMarks(Decoder o) { adoptMarks(o.snapMarks()); }
+        /** Java only (2026-11-12): the checkpoints of every stream as they are now (the lists are copied, the Mark objects shared: they are
+         *  never changed). Taken in the thread that uses this decoder; the result may then be adopted by a decoder in another thread. */
+        public static final class MarkSnap { final List<List<PlaneStream.Mark>> dS = new ArrayList<List<PlaneStream.Mark>>(), fS = new ArrayList<List<PlaneStream.Mark>>(); }
+        public MarkSnap snapMarks() { MarkSnap m = new MarkSnap();
+            for (int c = 0; c < 2; c++) m.dS.add(dS[c].w != null ? new ArrayList<PlaneStream.Mark>(dS[c].marks) : null);
+            for (PlaneStream p : fS) m.fS.add(p.w != null ? new ArrayList<PlaneStream.Mark>(p.marks) : null); return m; }
+        public void adoptMarks(MarkSnap o) {
+            for (int c = 0; c < 2; c++) copyMarks(dS[c], o.dS.get(c));
+            for (int k = 0; k < fS.length && k < o.fS.size(); k++) copyMarks(fS[k], o.fS.get(k)); }
+        // port of lae_decoder.h:Decoder::adoptMarks lambda copy (Java: the Mark objects are shared, not copied; seekTo copies the state it restores)
+        private static void copyMarks(PlaneStream to, List<PlaneStream.Mark> from) { if (to.w == null || from == null || !to.marks.isEmpty()) return; to.marks.addAll(from); }
         // port of lae_decoder.h:Decoder::streamBytes
         // the read position summed over the streams this route decodes (bytes; it moves back when a seek restores a checkpoint, and two
         // calls with only reads in between differ by the bytes those reads consumed: the extension layers' share of the bitrate)

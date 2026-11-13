@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.List;
 
 import com.lae.core.LaeException;
@@ -315,10 +316,11 @@ public final class Stream {
         return lev; }
     static void removeFile(String p) { new java.io.File(p).delete(); }   // C++ remove(): the result is not checked there either
     // port of laes_stream.h:decodeLaesS
-    public static String decodeLaesS(String bodyPath, LaesFile.Pcm core, int baseRate, String wd, List<DecMaster> out, long piece, int threads) {
-        out.clear(); final In body = new In(bodyPath);
-        try { return decodeLaesSImpl(body, core, baseRate, wd, out, piece, threads); } finally { body.close(); } }
-    private static String decodeLaesSImpl(final In body, LaesFile.Pcm core, int baseRate, String wd, List<DecMaster> out, long piece, int threads) {
+    public static String decodeLaesS(String bodyPath, LaesFile.Pcm core, int baseRate, String wd, List<DecMaster> out, long piece, int threads) { return decodeLaesS(bodyPath, core, baseRate, wd, out, piece, threads, null); }
+    public static String decodeLaesS(String bodyPath, LaesFile.Pcm core, int baseRate, String wd, List<DecMaster> out, long piece, int threads, LaesFile.Head head) {
+        out.clear(); if (head != null) { head.def = 0; head.coreFlags = 0; } final In body = new In(bodyPath);
+        try { return decodeLaesSImpl(body, core, baseRate, wd, out, piece, threads, head); } finally { body.close(); } }
+    private static String decodeLaesSImpl(final In body, LaesFile.Pcm core, int baseRate, String wd, List<DecMaster> out, long piece, int threads, LaesFile.Head head) {
         if (body.n < 64 + 4) return "LAES block too short";
         { java.util.zip.CRC32 crc = new java.util.zip.CRC32(); final long last = body.n - 4; byte[] b = new byte[1 << 22];   // CRC-32 IEEE 802.3, reflected: the bitwise loop of the C++
           for (long a = 0; a < last; a += 1 << 22) { final int k = (int) Math.min(1 << 22, last - a); body.read(a, b, 0, k); crc.update(b, 0, k); }
@@ -326,15 +328,21 @@ public final class Stream {
         final long end = body.n - 4; final long[] pos = {0}; final boolean[] trunc = {false}; final byte[] t8 = new byte[8];
         class Rd { long u(int k) { if (pos[0] + k > end) { trunc[0] = true; return 0; } body.read(pos[0], t8, 0, k); pos[0] += k; long v = 0; for (int i = 0; i < k; i++) v |= (long) (t8[i] & 0xFF) << (8 * i); return v; } }
         Rd R = new Rd();
-        long magic = R.u(4), ver = R.u(2), hs = R.u(2), base = R.u(4), cbits = R.u(1), ch = R.u(1), nm = R.u(1), cmode = R.u(1), nc = R.u(8); byte[] csha = new byte[32]; if (pos[0] + 32 <= end) { body.read(pos[0], csha, 0, 32); pos[0] += 32; } else trunc[0] = true; R.u(8);
-        if (trunc[0] || magic != 0x3245414CL) return "not an LAES block"; if (ver != 1 || hs != 64) return "unsupported LAES version";
-        if ((base != 44100 && base != 48000) || (int) base != baseRate || (int) cbits != core.bits || ch != 2 || cmode > 1 || nm < 1 || nm > 16) return "invalid LAES header";
+        long magic = R.u(4), ver = R.u(2), hs = R.u(2), base = R.u(4), cbits = R.u(1), ch = R.u(1), nm = R.u(1), cmode = R.u(1), nc = R.u(8); byte[] csha = new byte[32]; if (pos[0] + 32 <= end) { body.read(pos[0], csha, 0, 32); pos[0] += 32; } else trunc[0] = true;
+        final byte[] hb = new byte[8]; if (pos[0] + 8 <= end) { body.read(pos[0], hb, 0, 8); pos[0] += 8; } else trunc[0] = true;
+        if (trunc[0] || magic != 0x3245414CL) return "not an LAES block"; if ((ver != 1 && ver != 2) || hs != 64) return "unsupported LAES version";
+        final LaesFile.Head hd = new LaesFile.Head(); if ((base != 44100 && base != 48000) || (int) base != baseRate || (int) cbits != core.bits || ch != 2 || cmode > 1 || !LaesFile.headerCountOk(ver, nm) || !LaesFile.headFrom(ver, hb, 0, nm, hd)) return "invalid LAES header";
+        if (head != null) { head.def = hd.def; head.coreFlags = hd.coreFlags; }
         if (nc != core.frames()) return "core master length differs from the LAES header";
         { byte[] h = new byte[32]; LaesFile.hashAnyCore(core, h); if (!LaesFile.eq32(h, 0, csha, 0)) return "core master differs from the one this LAES block was made for (SHA-256)"; }
         for (long mi = 0; mi < nm; mi++) { DecMaster D = new DecMaster(); LaesFile.MasterInfo I = D.I;
-            I.bits = (int) R.u(1); I.stages = (int) R.u(1); I.w = (int) R.u(1); I.storage = (int) R.u(1); I.refTier = (int) R.u(1); R.u(3); I.rate = (int) R.u(4); R.u(4); final long F64 = R.u(8);
+            I.bits = (int) R.u(1); I.stages = (int) R.u(1); I.w = (int) R.u(1); I.storage = (int) R.u(1); I.refTier = (int) R.u(1);
+            final long nl = R.u(1), fl = R.u(1), mp = R.u(1); I.rate = (int) R.u(4); R.u(4); final long F64 = R.u(8);
             I.whole = R.u(8); I.frac = (int) R.u(4); R.u(4); byte[] sha = new byte[32]; if (pos[0] + 32 <= end) { body.read(pos[0], sha, 0, 32); pos[0] += 32; } else trunc[0] = true;
             if (trunc[0]) return "LAES block truncated";
+            if (ver == 2) { if (pos[0] + nl > end) return "LAES block truncated"; final byte[] nb = new byte[(int) nl]; if (nl != 0) body.read(pos[0], nb, 0, (int) nl); pos[0] += nl;
+                if ((fl & ~(long) LaesFile.NO_DERIVE) != 0) return "invalid master record"; if (!LaesFile.validMasterName(nb, 0, nb.length)) return "invalid master name";
+                I.name = LaesFile.nameOf(nb, 0, nb.length); I.flags = (int) fl; I.menu = (int) mp; }
             if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                 || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))
                 || I.whole <= -(1L << 40) || I.whole >= (1L << 40)) return "invalid master record";
@@ -367,6 +375,7 @@ public final class Stream {
             byte[] h = new byte[32]; hashFiles(D.top[0], D.top[1], I.w, h); D.shaOk = LaesFile.eq32(h, 0, I.sha, 0);
             for (int c = 0; c < 2; c++) D.lev[c] = levelsDown(D.top[c], I.stages, stem + "_c" + c + "_lv", piece, threads);
             out.add(D); }
+        { List<LaesFile.MasterInfo> mi = new ArrayList<LaesFile.MasterInfo>(); for (DecMaster D : out) mi.add(D.I); if (!LaesFile.menuOk(mi)) return "invalid menu positions"; }
         if (pos[0] != end) return "unexpected bytes after the last master";
         return ""; }
 }

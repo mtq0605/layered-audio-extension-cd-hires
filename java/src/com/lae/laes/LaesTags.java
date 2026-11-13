@@ -105,9 +105,11 @@ public final class LaesTags {
 
     // port of laes_tags.h:flacBlocks: VORBIS_COMMENT (type 4) then one PICTURE (type 6) per picture; lastBlock: the final one carries the
     // "last" flag. Empty for no tags.
-    public static byte[] flacBlocks(Tags t, boolean lastBlock) {
+    public static byte[] flacBlocks(Tags t, boolean lastBlock) { return flacBlocks(t, lastBlock, kEncoder); }
+    // enc: the vendor string (lae_enc names itself)
+    public static byte[] flacBlocks(Tags t, boolean lastBlock, String enc) {
         final List<byte[]> bl = new ArrayList<byte[]>(); final List<Integer> types = new ArrayList<Integer>();
-        if (!t.kv.isEmpty()) { ByteArrayOutputStream b = new ByteArrayOutputStream(); final byte[] ven = utf8(kEncoder); le32(b, ven.length); add(b, ven); le32(b, t.kv.size());
+        if (!t.kv.isEmpty()) { ByteArrayOutputStream b = new ByteArrayOutputStream(); final byte[] ven = utf8(enc); le32(b, ven.length); add(b, ven); le32(b, t.kv.size());
             for (KV kv : t.kv) { final byte[] s = utf8(kv.key + "=" + kv.value); le32(b, s.length); add(b, s); }
             bl.add(b.toByteArray()); types.add(4); }
         for (Picture p : t.pics) { ByteArrayOutputStream b = new ByteArrayOutputStream(); final byte[] mime = utf8(p.mime); be32(b, p.type); be32(b, mime.length); add(b, mime); be32(b, 0);   // no description

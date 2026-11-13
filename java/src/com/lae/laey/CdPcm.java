@@ -23,6 +23,9 @@ public abstract class CdPcm {
     public abstract String md5();
     /** releases what the source holds (a file reader: nothing to close here; the owner closes its file) */
     public void close() { }
+    /** Java only (lae_dup): a source with the same values for another track, usable in another thread at the same time. The values held in
+     *  an array are shared (never written); a file reader gets its own cache over the same read function. */
+    public CdPcm share() { return this; }
 
     /** the values held in an array (the C++ layout) */
     public static CdPcm of(final short[] s) { return new CdPcm() {
@@ -43,7 +46,7 @@ public abstract class CdPcm {
      * the values read on demand through rd from the bytes at off (n values), held in a cache of at most cacheBytes (at least 4 blocks of
      * 64 KiB). A failed read throws "cannot read the file" (the decoder's read then returns -1, as on a stream error).
      */
-    public static CdPcm reader(final LaeyDecoder.ReadFn rd, final long off, final long n, long cacheBytes) {
+    public static CdPcm reader(final LaeyDecoder.ReadFn rd, final long off, final long n, final long cacheBytes) {
         final int maxBlocks = (int) Math.max(4, Math.min(1 << 20, cacheBytes / (2L * BLOCK_VALUES)));
         return new CdPcm() {
             final Map<Long, short[]> cache = new LinkedHashMap<Long, short[]>(16, 0.75f, true) { private static final long serialVersionUID = 1L;
@@ -58,5 +61,6 @@ public abstract class CdPcm {
             @Override public String md5() { AlignHash.Md5 m = new AlignHash.Md5(); final long len = 2 * n; byte[] b = new byte[1 << 20];
                 for (long i = 0; i < len; i += b.length) { int c = (int) Math.min(b.length, len - i); if (rd.read(off + i, b, 0, c) != 0) throw new LaeException("cannot read the file"); m.update(b, 0, c); }
                 return m.hex(); }
-            @Override public void close() { cache.clear(); last = null; lastK = -1; } }; }
+            @Override public void close() { cache.clear(); last = null; lastK = -1; }
+            @Override public CdPcm share() { return reader(rd, off, n, cacheBytes); } }; }
 }

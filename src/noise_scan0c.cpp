@@ -34,7 +34,16 @@
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 #include "lae_math.h"   // the same results on every platform (2026-11-06): no C-library log / exp / sin / cos / pow below
 #include <map>
+#include <thread>
+#include <atomic>
+#include <functional>
 using mdct::i32;
+// body(a, b) for [a, b) of [0, n), split over all cores (2026-11-13); used only where every index is computed independently
+static void parFor(long n, const std::function<void(long, long)>& body) {
+    unsigned nt = std::thread::hardware_concurrency(); if (nt == 0) nt = 1; if (nt > 64) nt = 64; if ((long)nt > n) nt = (unsigned)max(1L, n);
+    vector<std::thread> th; long chunk = (n + nt - 1) / nt;
+    for (unsigned k = 0; k < nt; k++) { long a = (long)k * chunk, b = min(n, a + chunk); if (a >= b) break; th.emplace_back(body, a, b); }
+    for (auto& x : th) x.join(); }
 // natural log and exp from lae_math.h; |z|^2 written out (libstdc++'s norm goes through hypot)
 static double lnx(double x) { return lmath::log2(x) * 0.69314718055994530942; }   // ln 2
 static double expx(double x) { return lmath::exp2(x * 1.4426950408889634074); }   // log2 e
@@ -72,15 +81,27 @@ static bool blockStats(const double* x, int T, int B, BStat& st, double& energy,
 // thresholds for one block shape from simulated iid Gaussian blocks
 struct Thr { double vLo, vHi, kLo, kHi, rHi; };
 struct Calib { Thr pass, heavy; double pPass, pHeavy, rejPass, rejHeavy; };
+// Speed (2026-11-13): the 1,000,000 blocks took about 60 s of every scan, whatever the file length. They are simulated on all
+// cores now. All blocks share one xorshift stream, block i using its draws [i D, (i + 1) D); the stream is first stepped in order
+// to note its state at the start of every chunk of blocks, then each chunk runs from that state with the code of one thread. So
+// every block sees the same draws, and every statistic, threshold and output byte is the same as with one thread.
 static Calib calibrate(int T, int B) {
-    const long NS = 1000000; vector<double> V(NS), K(NS), R(NS); vector<double> x((size_t)T * B);
-    uint64_t s = 0x9E3779B97F4A7C15ull; auto u01 = [&]() { s ^= s << 13; s ^= s >> 7; s ^= s << 17; return ((s >> 11) + 0.5) * (1.0 / 9007199254740992.0); };
-    for (long i = 0; i < NS; i++) { for (size_t j = 0; j < x.size(); j += 2) { double r = sqrt(-2 * lnx(u01())), th = 2 * u01(); x[j] = r * lmath::cospi(th); if (j + 1 < x.size()) x[j + 1] = r * lmath::sinpi(th); }   // th in half-turns
-        BStat st; double en, sv, sv2; blockStats(x.data(), T, B, st, en, sv, sv2); V[i] = st.V; K[i] = st.K; R[i] = st.R; }
+    const long NS = 1000000; vector<double> V(NS), K(NS), R(NS); const size_t nx = (size_t)T * B;
+    auto step = [](uint64_t& s) { s ^= s << 13; s ^= s >> 7; s ^= s << 17; };
+    const long D = (long)((nx + 1) / 2) * 2;   // draws per block: two (r, th) for every pair of coefficients
+    const long CH = 2048, nch = (NS + CH - 1) / CH; vector<uint64_t> st0((size_t)nch);
+    { uint64_t s = 0x9E3779B97F4A7C15ull; for (long c = 0; c < nch; c++) { st0[(size_t)c] = s; const long nd = min(CH, NS - c * CH) * D; for (long d = 0; d < nd; d++) step(s); } }
+    parFor(nch, [&](long c0, long c1) { vector<double> x(nx);
+        for (long c = c0; c < c1; c++) { uint64_t s = st0[(size_t)c]; auto u01 = [&]() { step(s); return ((s >> 11) + 0.5) * (1.0 / 9007199254740992.0); };
+            for (long i = c * CH; i < min(NS, (c + 1) * CH); i++) {
+                for (size_t j = 0; j < x.size(); j += 2) { double r = sqrt(-2 * lnx(u01())), th = 2 * u01(); x[j] = r * lmath::cospi(th); if (j + 1 < x.size()) x[j + 1] = r * lmath::sinpi(th); }   // th in half-turns
+                BStat st; double en, sv, sv2; blockStats(x.data(), T, B, st, en, sv, sv2); V[i] = st.V; K[i] = st.K; R[i] = st.R; } } });
     vector<double> sV = V, sK = K, sR = R; sort(sV.begin(), sV.end()); sort(sK.begin(), sK.end()); sort(sR.begin(), sR.end());
     auto q = [&](const vector<double>& a, double p) { long i = (long)llround(p * (NS - 1)); i = max(0L, min(NS - 1, i)); return a[i]; };
     auto thrOf = [&](double p) { return Thr{q(sV, p), q(sV, 1 - p), q(sK, p), q(sK, 1 - p), q(sR, 1 - p)}; };
-    auto rej = [&](const Thr& t) { long n = 0; for (long i = 0; i < NS; i++) n += (V[i] < t.vLo || V[i] > t.vHi || K[i] < t.kLo || K[i] > t.kHi || R[i] > t.rHi); return (double)n / NS; };
+    auto rej = [&](const Thr& t) { std::atomic<long> n{0};   // an integer count: the same whatever the split
+        parFor(NS, [&](long a, long b) { long m = 0; for (long i = a; i < b; i++) m += (V[i] < t.vLo || V[i] > t.vHi || K[i] < t.kLo || K[i] > t.kHi || R[i] > t.rHi); n += m; });
+        return (double)n.load() / NS; };
     auto solve = [&](double target, double& pOut, double& rOut) { double lo = target / 20, hi = target; Thr t{};
         for (int it = 0; it < 30; it++) { double mid = sqrt(lo * hi); t = thrOf(mid); double r = rej(t); if (r > target) hi = mid; else lo = mid; }
         pOut = lo; t = thrOf(lo); rOut = rej(t); return t; };
@@ -109,11 +130,14 @@ static void stationaryPass(FILE* out, WavStream& ws, int plane, double rate, con
     double blkSec = T * (double)N / rate; int WL = (int)llround(10.0 / blkSec);
     const double fsPow = 0.5 * 70368744177664.0;
     vector<char> ok((size_t)ncol * nbk), heavy((size_t)ncol * nbk), zero((size_t)ncol * nbk); vector<double> en((size_t)ncol * nbk), sv((size_t)ncol * nbk), sv2((size_t)ncol * nbk);
-    vector<long> p1(ncol), p2(ncol), p3(ncol), pAll(ncol), nz(ncol); vector<double> x((size_t)T * B);
+    vector<long> p1(ncol), p2(ncol), p3(ncol), pAll(ncol), nz(ncol);
     long nfc = nbk * (long)T; vector<vector<char>> offFail(4, vector<char>((size_t)ncol * nbk, 1));   // offset blocks (q = 1..3): failed (or zero)
     const long G = 64; vector<i32> Xc;   // blocks per chunk: the plane is transformed chunk by chunk
+    // (2026-11-13) the columns of a chunk on all cores: a column writes only its own entries (its counters, its block ids), from
+    // the chunk's coefficients, read only; each thread has its own block buffer x
     for (long b0 = 0; b0 < nbk; b0 += G) { long b1 = min(nbk, b0 + G); long fr0 = 1 + b0 * T, fr1 = min(K, 1 + b1 * T + T); planeFrames(ws, plane, fr0, fr1, Xc);
-        for (int col = 0; col < ncol; col++) {
+        parFor(ncol, [&](long colA, long colB) { vector<double> x((size_t)T * B);
+        for (int col = (int)colA; col < (int)colB; col++) {
             for (long b = b0; b < b1; b++) {
                 for (int t = 0; t < T; t++) for (int k = 0; k < B; k++) x[(size_t)t * B + k] = Xc[(size_t)(1 + b * T + t - fr0) * N + col * B + k];
                 BStat st; size_t id = (size_t)col * nbk + b; double e, s1, s2;
@@ -124,7 +148,7 @@ static void stationaryPass(FILE* out, WavStream& ws, int plane, double rate, con
             for (int q = 1; q <= 3; q++) { long off = (long)q * T / 4;
                 for (long b = b0; b < b1; b++) { long s0 = off + b * T; if (s0 + T > nfc) continue;
                     for (int t = 0; t < T; t++) for (int k = 0; k < B; k++) x[(size_t)t * B + k] = Xc[(size_t)(1 + s0 + t - fr0) * N + col * B + k];
-                    BStat st; double e, s1, s2; offFail[q][(size_t)col * nbk + b] = !(blockStats(x.data(), T, B, st, e, s1, s2) && inside(st, cal.pass)); } } } }
+                    BStat st; double e, s1, s2; offFail[q][(size_t)col * nbk + b] = !(blockStats(x.data(), T, B, st, e, s1, s2) && inside(st, cal.pass)); } } } }); }
     // long windows
     vector<long> cLong(ncol), cTol(ncol), cDriftWin(ncol), cWin(ncol), cFrBefore(ncol), cFrAfter(ncol); vector<vector<double>> lvL(ncol), slopes(ncol);
     double zW = 3.29;
@@ -192,18 +216,22 @@ static vector<LDet> lineScan(WavStream& ws, double rate, int W, bool sPlane, dou
     const double sc = 2.0 / (W * sw2) / 0.5;
     int P2 = 1; while (P2 < 4 * n) P2 <<= 1;
     double thr = lnx((double)n / alphaTest);
-    vector<complex<float>> spec((size_t)n * nb); vector<complex<double>> a(W), seq(P2);
+    vector<complex<float>> spec((size_t)n * nb);
+    // (2026-11-13) the frames' FFTs, then the bins' coherent integrations, on all cores: each frame / bin is computed alone, by the
+    // same code, into its own entries; every thread has its own FFT buffer (fftlib's plan cache is thread_local)
     for (long w = 0; w < nwin; w++) { ws.read((long long)w * n * W, (long long)n * W, L, R);
-        for (long t = 0; t < n; t++) { size_t o = (size_t)t * W;
-            for (int i = 0; i < W; i++) { double v = sPlane ? 0.5 * (L[o + i] - R[o + i]) : 0.5 * (L[o + i] + R[o + i]); a[i] = complex<double>(v * win[i], 0); }
-            fftlib::fft(a); for (int k = 0; k < nb; k++) spec[(size_t)t * nb + k] = complex<float>(a[k]); }
+        parFor(n, [&](long tA, long tB) { vector<complex<double>> a(W);
+            for (long t = tA; t < tB; t++) { size_t o = (size_t)t * W;
+                for (int i = 0; i < W; i++) { double v = sPlane ? 0.5 * (L[o + i] - R[o + i]) : 0.5 * (L[o + i] + R[o + i]); a[i] = complex<double>(v * win[i], 0); }
+                fftlib::fft(a); for (int k = 0; k < nb; k++) spec[(size_t)t * nb + k] = complex<float>(a[k]); } });
         vector<double> Qk(nb, 0.0), dk(nb, 0.0), pk(nb, 0.0), cvk(nb, 0.0);
-        for (int k = 1; k < nb - 1; k++) { double S = 0; for (long t = 0; t < n; t++) { seq[t] = complex<double>(spec[(size_t)t * nb + k]); S += nrm(seq[t]); }
+        parFor(nb - 2, [&](long kA, long kB) { vector<complex<double>> seq(P2);
+        for (int k = 1 + (int)kA; k < 1 + (int)kB; k++) { double S = 0; for (long t = 0; t < n; t++) { seq[t] = complex<double>(spec[(size_t)t * nb + k]); S += nrm(seq[t]); }
             if (S <= 0) continue; for (long t = n; t < P2; t++) seq[t] = 0; fftlib::fft(seq);
             int jb = 0; double mx = 0; for (int j = 0; j < P2; j++) { double v = nrm(seq[j]); if (v > mx) { mx = v; jb = j; } }
             Qk[k] = mx / S; double dl = (double)jb / P2; if (dl >= 0.5) dl -= 1; dk[k] = dl;   // X_t ~ e^{+i 2pi dl t}: the phase step per frame is the fractional bin offset
             pk[k] = mx / ((double)n * n) * sc;
-            double m = S / n, v = 0; for (long t = 0; t < n; t++) { double q = nrm(complex<double>(spec[(size_t)t * nb + k])); v += (q - m) * (q - m); } cvk[k] = sqrt(v / (n - 1)) / m; }
+            double m = S / n, v = 0; for (long t = 0; t < n; t++) { double q = nrm(complex<double>(spec[(size_t)t * nb + k])); v += (q - m) * (q - m); } cvk[k] = sqrt(v / (n - 1)) / m; } });
         for (int k = 1; k < nb - 1; ) { if (Qk[k] < thr) { k++; continue; } int e = k; while (e + 1 < nb - 1 && Qk[e + 1] >= thr) e++;
             int best = k; for (int q = k; q <= e; q++) if (pk[q] > pk[best]) best = q;
             k = e + 1; double fl = (best + dk[best]) * binHz; if (fl < 20.0) continue;   // below 20 Hz: DC offset leaking into bin 1

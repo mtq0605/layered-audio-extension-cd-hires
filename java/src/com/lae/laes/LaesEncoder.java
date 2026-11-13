@@ -38,6 +38,8 @@ public final class LaesEncoder {
     public interface Listener { void message(String line); void progress(String stage, double fraction); }
     /** one master argument: path, T (base samples), or @auto */
     public static final class MasterArg { public String path; public double T = 0; public boolean auto = false;
+        /** the publisher's name of this master ("" = none; UTF-8 of at most 255 bytes, no control characters) and its flags (LaesFile.NO_DERIVE) - payload version 2, 2026-11-11 */
+        public String name = ""; public int flags = 0;
         public MasterArg(String p, double t, boolean a) { path = p; T = t; auto = a; } }
     /** port of laes_tool.cpp:AutoT (the result of LAEY's alignment search; not ported, see Aligner) */
     public static final class AutoT { public boolean found = false; public double T = 0, err = 0, resid = 0; public String search = "", notes = "", why = ""; }
@@ -80,6 +82,14 @@ public final class LaesEncoder {
         public Aligner aligner = null;
         /** --tag / --cover / --picture (2026-11-05): written into the release file; empty = none (the file is the same as without) */
         public LaesTags.Tags tags = new LaesTags.Tags();
+        /** --name=&lt;k&gt;:&lt;text&gt;, --no-derive, --no-derive=&lt;k&gt; as given (k = the k-th master as given); applied after MasterArg.name / flags (2026-11-11) */
+        public List<String> nameArgs = new ArrayList<String>();
+        /** the default master (2026-11-12): 0 = the core master (also when not set), k = the k-th master as given; --default=&lt;k&gt; | core in nameArgs overrides it */
+        public int defaultGiven = 0;
+        /** the core master offers no derived 16-bit version (2026-11-12); also --no-derive=core or a bare --no-derive in nameArgs */
+        public boolean coreNoDerive = false;
+        /** --menu-order=&lt;k1&gt;,&lt;k2&gt;,... (the k of the masters as given); "" = the order the masters are given in (the default, 2026-11-11) */
+        public String menuOrder = "";
         /** fromArgs: the reason when --tag / --cover / --picture could not be read ("" = fine); reported after the form check, as the C++ */
         public String tagError = "";
         /** --form=flac|wav ("" = from the name; for .lae: flac) */
@@ -108,6 +118,8 @@ public final class LaesEncoder {
             o.smallDisk = flag(args, "--small-disk"); o.diskStopRemove = flag(args, "--disk-stop-remove"); o.diskStop = o.diskStopRemove || flag(args, "--disk-stop"); o.forceDisk = flag(args, "--force-disk");
             { final String r = System.getenv("LAES_DISK_RESERVE"); if (r != null) o.diskReserve = CStd.atoll(r); }
             o.tagError = LaesTags.parseArgs(args, o.tags);
+            for (int i = 2; i < args.length; i++) if (args[i].startsWith("--name=") || args[i].equals("--no-derive") || args[i].startsWith("--no-derive=") || args[i].startsWith("--default=")) o.nameArgs.add(args[i]);
+            o.menuOrder = arg(args, "--menu-order");
             final String th = arg(args, "--threads"); if (!th.isEmpty()) o.threads = CStd.atoi(th);   // Java only (the C++ skips arguments starting with '-')
             for (int i = 2; i < args.length; i++) { if (args[i].length() > 0 && args[i].charAt(0) == '-') continue; String a = args[i]; double T = 0; boolean au = false; final int at = a.lastIndexOf('@');
                 if (at >= 0 && at > 2) { au = a.substring(at + 1).equals("auto"); T = au ? 0 : CStd.atof(a.substring(at + 1)); a = a.substring(0, at); }
@@ -222,13 +234,46 @@ public final class LaesEncoder {
         final List<String> paths = new ArrayList<String>(); final List<Double> Ts = new ArrayList<Double>(); final List<Boolean> autoT = new ArrayList<Boolean>(); final List<StreamEnc.WavInfo> wis = new ArrayList<StreamEnc.WavInfo>();
         for (MasterArg a : opt.masters) { StreamEnc.WavInfo wi = new StreamEnc.WavInfo(); final String e = StreamEnc.probeMaster(a.path, wi); if (!e.isEmpty()) { say(L, e); return 2; } paths.add(a.path); Ts.add(a.T); autoT.add(a.auto); wis.add(wi); }
         if (paths.isEmpty()) { say(L, "no master given"); return 1; }
+        if (paths.size() > 255) { say(L, "at most 255 masters"); return 1; }
+        // names and "no derived versions" (2026-11-11, payload version 2): --name=<k>:<text> (k = the k-th master as given, from 1; may repeat),
+        // --no-derive (every master) or --no-derive=<k>. Names come only from here: nothing is filled in from file names, paths or dates.
+        final List<String> names = new ArrayList<String>(); final List<Integer> mflags = new ArrayList<Integer>(); for (MasterArg a : opt.masters) { names.add(a.name); mflags.add(a.flags); }
+        for (int q = 0; q < names.size(); q++) { if (!LaesFile.validMasterName(names.get(q))) { say(L, "--name=" + (q + 1) + ": a name is UTF-8 of at most 255 bytes without control characters (" + LaesFile.nameBytes(names.get(q)).length + " bytes given)"); return 1; }
+            if ((mflags.get(q) & ~LaesFile.NO_DERIVE) != 0) { say(L, "unknown master flag"); return 1; } }
+        // the default master (2026-11-12; not given = the core master) and the core master's "no derived version" flag
+        long defGiven = opt.defaultGiven; int coreFlags = opt.coreNoDerive ? LaesFile.NO_DERIVE : 0;
+        if (defGiven < 0 || defGiven > paths.size()) { say(L, "--default=<k> (k = 1 ... " + paths.size() + ", the masters in the order given) or --default=core"); return 1; }
+        for (String a : opt.nameArgs) {
+            if (a.startsWith("--default=")) { final String v = a.substring(10); final long k = v.equals("core") ? 0 : CStd.strtolFull(v);
+                if (!v.equals("core") && (v.isEmpty() || !v.matches("[+-]?[0-9]+") && !v.matches("\\s*[+-]?[0-9]+") || k < 0 || k > paths.size())) { say(L, "--default=<k> (k = 1 ... " + paths.size() + ", the masters in the order given) or --default=core"); return 1; }
+                defGiven = k; continue; }
+            if (a.equals("--no-derive=core")) { coreFlags |= LaesFile.NO_DERIVE; continue; }
+            if (a.equals("--no-derive")) coreFlags |= LaesFile.NO_DERIVE;
+            if (a.startsWith("--name=")) { final String v = a.substring(7); final int col = v.indexOf(':'); final long k = col < 0 ? 0 : CStd.strtolFull(v.substring(0, col));
+                if (col < 0 || k < 1 || k > paths.size()) { say(L, "--name=<k>:<text>, k = 1 ... " + paths.size() + " (the masters in the order given)"); return 1; }
+                final String t = v.substring(col + 1); if (!LaesFile.validMasterName(t)) { say(L, "--name=" + k + ": a name is UTF-8 of at most 255 bytes without control characters (" + LaesFile.nameBytes(t).length + " bytes given)"); return 1; }
+                names.set((int) k - 1, t); }
+            else if (a.equals("--no-derive")) { for (int q = 0; q < mflags.size(); q++) mflags.set(q, mflags.get(q) | LaesFile.NO_DERIVE); }
+            else { final long k = CStd.strtolFull(a.substring(12)); if (k < 1 || k > paths.size()) { say(L, "--no-derive=<k>, k = 1 ... " + paths.size()); return 1; } mflags.set((int) k - 1, mflags.get((int) k - 1) | LaesFile.NO_DERIVE); } }
+        // the menu order is the order the masters are given in (the order in the file is the encoder's); --menu-order=<k1>,<k2>,...
+        // = another order (the k of the masters as given). When it equals the file order nothing is stored.
+        final List<Integer> menuList = new ArrayList<Integer>(); { final String mo = opt.menuOrder == null ? "" : opt.menuOrder;
+            if (mo.isEmpty()) for (int i = 0; i < paths.size(); i++) menuList.add(i + 1);   // the default (a bare --menu-order: the same)
+            else { int a0 = 0; final boolean[] seen = new boolean[paths.size() + 1];
+                for (;;) { final int b0 = mo.indexOf(',', a0); final String t = b0 < 0 ? mo.substring(a0) : mo.substring(a0, b0); final long k = CStd.strtolFull(t);
+                    if (k < 1 || k > paths.size() || seen[(int) k]) { say(L, "--menu-order=<k1>,<k2>,...: every master as given (1 ... " + paths.size() + ") once"); return 1; } seen[(int) k] = true; menuList.add((int) k);
+                    if (b0 < 0) break; a0 = b0 + 1; }
+                if (menuList.size() != paths.size()) { say(L, "--menu-order=<k1>,<k2>,...: every master as given (1 ... " + paths.size() + ") once"); return 1; } } }
+        final List<Integer> given = new ArrayList<Integer>(); for (int i = 0; i < paths.size(); i++) given.add(i + 1);   // the k of --name for each master, through the reordering
         {   // file order: more bits first, then higher rate (a master can only refer to earlier ones; a shorter word refers to a longer one cheaply)
             final List<Integer> ord = new ArrayList<Integer>(); for (int i = 0; i < paths.size(); i++) ord.add(i);
             Collections.sort(ord, new Comparator<Integer>() { public int compare(Integer a, Integer b) { final StreamEnc.WavInfo x = wis.get(a), y = wis.get(b);   // std::stable_sort: Collections.sort is stable
                 if (x.bits != y.bits) return x.bits > y.bits ? -1 : 1; if (x.rate != y.rate) return x.rate > y.rate ? -1 : 1; return 0; } });
             final List<String> p2 = new ArrayList<String>(); final List<Double> t2 = new ArrayList<Double>(); final List<Boolean> a2 = new ArrayList<Boolean>(); final List<StreamEnc.WavInfo> w2 = new ArrayList<StreamEnc.WavInfo>();
-            for (int k : ord) { p2.add(paths.get(k)); t2.add(Ts.get(k)); a2.add(autoT.get(k)); w2.add(wis.get(k)); }
-            paths.clear(); paths.addAll(p2); Ts.clear(); Ts.addAll(t2); autoT.clear(); autoT.addAll(a2); wis.clear(); wis.addAll(w2); }
+            final List<String> n2 = new ArrayList<String>(); final List<Integer> f2 = new ArrayList<Integer>(), g2 = new ArrayList<Integer>();
+            for (int k : ord) { p2.add(paths.get(k)); t2.add(Ts.get(k)); a2.add(autoT.get(k)); w2.add(wis.get(k)); n2.add(names.get(k)); f2.add(mflags.get(k)); g2.add(given.get(k)); }
+            paths.clear(); paths.addAll(p2); Ts.clear(); Ts.addAll(t2); autoT.clear(); autoT.addAll(a2); wis.clear(); wis.addAll(w2);
+            names.clear(); names.addAll(n2); mflags.clear(); mflags.addAll(f2); given.clear(); given.addAll(g2); }
         // the form: .flac = FLAC, .wav = WAV, .lae (the format's own name, 2026-11-05) = --form=flac (default) or --form=wav
         final String formArg = opt.form; final boolean laeName = out.length() > 4 && out.substring(out.length() - 4).equalsIgnoreCase(".lae");
         if (!formArg.isEmpty() && !formArg.equals("flac") && !formArg.equals("wav")) { say(L, "--form must be flac or wav"); return 1; }
@@ -261,7 +306,7 @@ public final class LaesEncoder {
             if (timing) say(L, "work folder: about " + gb(need) + " GB needed, " + gb(ec ? 0 : avail) + " GB free"); }
         final boolean[] resumed = {false}; final String wd = workDir(wdPath, job, resumed);
         boolean ok = false;
-        try { final int rc = encodeInWork(opt, L, ctx, wd, resumed[0], paths, Ts, autoT, wis, stOf, base, asFlac, coreBits, maxSt, tlog, t0); ok = true; return rc; }
+        try { final int rc = encodeInWork(opt, L, ctx, wd, resumed[0], paths, Ts, autoT, wis, stOf, base, asFlac, coreBits, maxSt, tlog, t0, names, mflags, given, menuList, defGiven, coreFlags); ok = true; return rc; }
         finally {   // the work folder goes at the end; kept when the run is stopped by an exception (disk full, closed: the same command continues),
                     // not with --disk-stop-remove and not when the user cancelled (Java: the app's cancel button means "stop and leave nothing")
             final boolean cancelled = ctx.cancel != null && ctx.cancel.get();
@@ -274,7 +319,8 @@ public final class LaesEncoder {
         tlog.append(stageLine(s, (t - t0[0]) / 1e9)).append("   peak memory so far ").append(CStd.f(heapPeak / 1048576.0, 7, 0)).append(" MB").append('\n'); t0[0] = t; }
 
     private static int encodeInWork(final Options opt, final Listener L, final StreamEnc.Ctx ctx, final String wd, final boolean resumed, List<String> paths, List<Double> Ts, List<Boolean> autoT, List<StreamEnc.WavInfo> wis,
-                                    final int[] stOf, final int base, final boolean asFlac, final int coreBits, final int maxSt, StringBuilder tlog, long[] t0) {
+                                    final int[] stOf, final int base, final boolean asFlac, final int coreBits, final int maxSt, StringBuilder tlog, long[] t0,
+                                    final List<String> names, final List<Integer> mflags, final List<Integer> given, final List<Integer> menuList, final long defGiven, final int coreFlags) {   // names, flags, the k as given, the menu order (2026-11-11)
         final String out = opt.out, corePath = opt.core; final long piece = pieceFor(opt, maxSt);
         if (resumed) { say(L, "continuing from the work folder " + wd); say(L, "  从工作文件夹 " + wd + " 接着做"); }
         final StreamEnc.DiskGuard dg = new StreamEnc.DiskGuard(); dg.dir = wd; dg.track = opt.timing; dg.reserve = opt.diskReserve; dg.stop = opt.diskStop; dg.removeNote = opt.diskStopRemove; dg.listener = L; dg.cancel = ctx.cancel; StreamEnc.diskGuard(dg);
@@ -301,10 +347,12 @@ public final class LaesEncoder {
             final AutoT A = opt.aligner.align(corePath, core, paths.get(i), pm.get(i), opt.laeEnc); if (!A.found) { say(L, paths.get(i) + ": " + A.why + "; nothing written"); return 2; }
             if (!acceptAlign(A, paths.get(i), opt.accept, opt.aligner, L)) { say(L, "alignment not accepted; nothing written"); return 2; } Ts.set(i, A.T); }
         stage(tlog, t0, "core master, alignment");
-        final List<StreamEnc.MasterSel> sel = new ArrayList<StreamEnc.MasterSel>(); for (int i = 0; i < paths.size(); i++) { final long[] t = setT(Ts.get(i)); StreamEnc.MasterSel s = new StreamEnc.MasterSel(); s.storage = -1; s.whole = t[0]; s.frac = (int) t[1]; sel.add(s); }
-        // file order, tried two ways, the smaller kept: (a) more bits first; (b) the master the core was derived from first, then the others more bits first
+        final List<StreamEnc.MasterSel> sel = new ArrayList<StreamEnc.MasterSel>(); for (int i = 0; i < paths.size(); i++) { final long[] t = setT(Ts.get(i)); StreamEnc.MasterSel s = new StreamEnc.MasterSel(); s.storage = -1; s.whole = t[0]; s.frac = (int) t[1]; s.name = names.get(i); s.flags = mflags.get(i); sel.add(s); }
+        if (!menuList.isEmpty()) for (int i = 0; i < paths.size(); i++) for (int p = 0; p < menuList.size(); p++) if (menuList.get(p).intValue() == given.get(i).intValue()) sel.get(i).menu = p + 1;
+        // file order, tried two ways, the smaller kept: (a) more bits first; (b) the master the core was derived from first, then the others more bits first.
+        // More than 16 masters (2026-11-11): order (a) only.
         final List<List<Integer>> orders = new ArrayList<List<Integer>>(); { List<Integer> a = new ArrayList<Integer>(); for (int i = 0; i < paths.size(); i++) a.add(i); orders.add(a); }
-        if (coreSrc >= 0 && coreSrc != 0) { List<Integer> b = new ArrayList<Integer>(); b.add(coreSrc); for (int i = 0; i < paths.size(); i++) if (i != coreSrc) b.add(i); orders.add(b); }
+        if (coreSrc >= 0 && coreSrc != 0 && paths.size() <= 16) { List<Integer> b = new ArrayList<Integer>(); b.add(coreSrc); for (int i = 0; i < paths.size(); i++) if (i != coreSrc) b.add(i); orders.add(b); }
         List<LaesFile.MasterInfo> info = new ArrayList<LaesFile.MasterInfo>(); String bodyPath = ""; long bodySize = -1; List<Integer> pick = null;
         final Map<String, StreamEnc.CachedCand> cache = new TreeMap<String, StreamEnc.CachedCand>();   // with two orders, the second takes the sizes of the candidates the first coded (only its chosen ones are coded again)
         final String cacheLog = wd + "/cache.txt";   // the cache's entries as they are made (resume)
@@ -322,16 +370,18 @@ public final class LaesEncoder {
         { final String t = resumed ? StreamEnc.getState(pickP) : null; if (t != null) { final StreamEnc.StateR r = new StreamEnc.StateR(t); final long pi = r.i(); final String ts = r.str(); if (!r.bad && ts.equals(tsig) && pi >= 0 && pi < orders.size()) picked = (int) pi; } }
         ctx.stage = "candidates, payload"; ctx.done = 0; { double tot = 0; for (StreamEnc.Prep m : pm) tot += (double) m.frames / (double) (1 << m.stages) * (1 + 2 * paths.size()) * 2; ctx.total = Math.max(1, tot * orders.size()); }
         for (int oi = 0; oi < orders.size(); oi++) { if (picked >= 0 && oi != picked) continue;
-            final List<Integer> ord = orders.get(oi); final List<StreamEnc.Prep> m2 = new ArrayList<StreamEnc.Prep>(); final List<StreamEnc.MasterSel> s2 = new ArrayList<StreamEnc.MasterSel>(); for (int k : ord) { m2.add(pm.get(k)); s2.add(sel.get(k)); }
+            final List<Integer> ord = orders.get(oi); final List<StreamEnc.Prep> m2 = new ArrayList<StreamEnc.Prep>(); final List<StreamEnc.MasterSel> s2 = new ArrayList<StreamEnc.MasterSel>(); for (int k : ord) { m2.add(pm.get(k)); final StreamEnc.MasterSel c = sel.get(k), d = new StreamEnc.MasterSel(); d.storage = c.storage; d.refTier = c.refTier; d.whole = c.whole; d.frac = c.frac; d.name = c.name; d.flags = c.flags; d.menu = c.menu; s2.add(d); }
+            { boolean same = true; for (int k = 0; k < s2.size(); k++) same &= s2.get(k).menu == 0 || s2.get(k).menu == k + 1; if (same) for (StreamEnc.MasterSel s : s2) s.menu = 0; }   // the menu order is the file order: nothing to store
             final List<LaesFile.MasterInfo> i2 = oinfo.get(oi); final String bp = wd + "/body" + oi, stO = wd + "/o" + oi + ".done";
             if (resumed) { final String t = StreamEnc.getState(stO);
-                if (t != null) { final StreamEnc.StateR r = new StreamEnc.StateR(t); final long sz = r.i(); final String ts = r.str(); final long n = r.i(); i2.clear(); for (long q = 0; q < Math.max(0, Math.min(n, 16)); q++) { final LaesFile.MasterInfo I = new LaesFile.MasterInfo(); StreamEnc.getInfo(r, I); i2.add(I); }
+                if (t != null) { final StreamEnc.StateR r = new StreamEnc.StateR(t); final long sz = r.i(); final String ts = r.str(); final long n = r.i(); i2.clear(); for (long q = 0; q < Math.max(0, Math.min(n, 255)); q++) { final LaesFile.MasterInfo I = new LaesFile.MasterInfo(); StreamEnc.getInfo(r, I); i2.add(I); }
                     if (!r.bad && ts.equals(tsig) && n == ord.size() && new File(bp).isFile() && sz == new File(bp).length()) { osz[oi] = sz; continue; }   // made by an earlier run
                     // a stale o<oi>.done (other T, damaged, body gone): the whole order is made again. Without one the order was not
                     // finished: its masters' choice states stay, each checked (files' sizes, T) when encodeLaesS restores it (C++ e6eab9f).
                     new File(stO).delete(); for (int mi = 0; mi < ord.size(); mi++) new File(wd + "/o" + oi + "_m" + mi + ".done").delete(); } }
             final List<String> kept = new ArrayList<String>();
-            final String err = StreamEnc.encodeLaesS(core, base, m2, s2, i2, bp, wd + "/o" + oi, asFlac ? 1 : 0, piece, ctx, orders.size() > 1 ? cache : null, cacheLog, kept);
+            final LaesFile.Head hd = new LaesFile.Head(); hd.coreFlags = coreFlags; if (defGiven != 0) for (int k = 0; k < ord.size(); k++) if (given.get(ord.get(k)) == defGiven) hd.def = k + 1;   // the default in this file order
+            final String err = StreamEnc.encodeLaesS(core, base, m2, s2, i2, bp, wd + "/o" + oi, asFlac ? 1 : 0, piece, ctx, orders.size() > 1 ? cache : null, cacheLog, kept, hd);
             if (!err.isEmpty()) { say(L, err); return 2; } osz[oi] = new File(bp).length();
             { final StreamEnc.StateW w = new StreamEnc.StateW(); w.i(osz[oi]); w.str(tsig); w.i(i2.size()); for (LaesFile.MasterInfo I : i2) StreamEnc.putInfo(w, I); StreamEnc.putState(stO, w.s.toString()); }
             for (String f : kept) new File(f).delete(); }   // the chosen layers, now in the payload
@@ -340,8 +390,19 @@ public final class LaesEncoder {
         for (int oi = 0; oi < orders.size(); oi++) { final String bp = wd + "/body" + oi; if (!bp.equals(bodyPath)) new File(bp).delete(); }
         StreamEnc.diskCheck(true);   // the largest size: before the work folder goes
         stage(tlog, t0, "candidates, payload");
-        { final List<String> p2 = new ArrayList<String>(); final List<StreamEnc.Prep> q2 = new ArrayList<StreamEnc.Prep>(); for (int k : pick) { p2.add(paths.get(k)); q2.add(pm.get(k)); } paths = p2; pm = q2; }
+        { final List<String> p2 = new ArrayList<String>(), n2 = new ArrayList<String>(); final List<StreamEnc.Prep> q2 = new ArrayList<StreamEnc.Prep>(); final List<Integer> g2 = new ArrayList<Integer>(), f2 = new ArrayList<Integer>();
+          for (int k : pick) { p2.add(paths.get(k)); q2.add(pm.get(k)); n2.add(names.get(k)); g2.add(given.get(k)); f2.add(mflags.get(k)); }
+          paths = p2; pm = q2; names.clear(); names.addAll(n2); given.clear(); given.addAll(g2); mflags.clear(); mflags.addAll(f2); }
+        final int[] menus = new int[paths.size()];   // the menu position of each master in the file order (all 0 when it is the file order)
+        if (!menuList.isEmpty()) { boolean same = true; for (int k = 0; k < paths.size(); k++) { for (int p = 0; p < menuList.size(); p++) if (menuList.get(p).intValue() == given.get(k).intValue()) menus[k] = p + 1; same &= menus[k] == k + 1; } if (same) Arrays.fill(menus, 0); }
         { StringBuilder s = new StringBuilder("file order:"); for (int k = 0; k < paths.size(); k++) s.append(' ').append(k + 1).append(" = ").append(paths.get(k)).append(';'); s.append(orders.size() > 1 ? " (the smaller of two orders)" : ""); say(L, s.toString()); }
+        { boolean any = false; for (int k = 0; k < paths.size(); k++) any |= names.get(k).length() != 0 || mflags.get(k) != 0 || given.get(k) != k + 1 || menus[k] != 0;
+          if (any) for (int k = 0; k < paths.size(); k++) say(L, "  given " + given.get(k) + " -> master " + (menus[k] != 0 ? menus[k] : k + 1) + " in menus, " + (k + 1) + " in the file" + (names.get(k).length() == 0 ? "" : " \"" + names.get(k) + "\"")
+                                                                + ((mflags.get(k) & LaesFile.NO_DERIVE) != 0 ? " (no derived versions)" : "")); }
+        final LaesFile.Head headF = new LaesFile.Head(); headF.coreFlags = coreFlags; for (int k = 0; k < paths.size(); k++) if (defGiven != 0 && given.get(k) == defGiven) headF.def = k + 1;   // in the file order kept
+        if (headF.def != 0) say(L, "default: given " + defGiven + " -> master " + (menus[headF.def - 1] != 0 ? menus[headF.def - 1] : headF.def) + " in menus" + (names.get(headF.def - 1).length() == 0 ? "" : " \"" + names.get(headF.def - 1) + "\""));
+        else say(L, "default: the core master");
+        if ((coreFlags & LaesFile.NO_DERIVE) != 0) say(L, "  the core master: no derived 16-bit version");
         final long coreFrames = core.frames(); final int coreBitsW = core.bits;
         ctx.stage = "core master frames, file"; ctx.done = 0; ctx.total = 1; ctx.step(0);
         if (asFlac) { final String why = writeFlacForm(out, wd, core, base, bodyPath, bodySize, ctx, opt.tags); if (why != null) { new File(out + ".part").delete(); say(L, "FLAC self-check failed" + (why.isEmpty() ? "" : ": ") + why + "; nothing written"); return 2; } }
@@ -363,7 +424,11 @@ public final class LaesEncoder {
         for (int i = 0; i < info.size(); i++) { final LaesFile.MasterInfo I = info.get(i); final String tier = I.refTier == 0 ? "the core master" : "master " + I.refTier;
             final String how = I.storage == 1 ? "full" : I.storage == 0 ? "difference to " + tier + " at the base level"
                              : "difference to " + tier + " at " + (base << Math.min(I.stages, info.get(I.refTier - 1).stages)) + " Hz";
-            say(L, "  master " + (i + 1) + ": " + I.rate + " Hz " + I.bits + "-bit, " + how + ", layers " + CStd.f(I.layerBits / secs / 1000, 1) + " kb/s"); }
+            final String nmq = i < names.size() && names.get(i).length() != 0 ? " \"" + names.get(i) + "\"" : "";
+            say(L, "  master " + (i + 1) + nmq + ": " + I.rate + " Hz " + I.bits + "-bit, " + how + ", layers " + CStd.f(I.layerBits / secs / 1000, 1) + " kb/s"); }
+        { final List<LaesFile.MasterInfo> vi = new ArrayList<LaesFile.MasterInfo>(); for (int i = 0; i < info.size(); i++) { final LaesFile.MasterInfo I = info.get(i), q = new LaesFile.MasterInfo(); q.menu = I.menu;
+              q.name = i < names.size() ? names.get(i) : I.name; q.flags = i < mflags.size() ? mflags.get(i) : I.flags; vi.add(q); }
+          say(L, "  payload version " + LaesFile.payloadVersionFor(vi, headF)); }
         if (opt.timing) { say(L, "timing:"); for (String s : tlog.toString().split("\n")) if (!s.isEmpty()) say(L, s); say(L, "  work folder, largest   " + CStd.f(dg.peak / 1048576.0, 8, 1) + " MB"); }
         if (L != null) L.progress("done", 1.0);
         return 0; }

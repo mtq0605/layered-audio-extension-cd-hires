@@ -38,6 +38,16 @@ LAE_API int LAE_CALL laes_get_choice(const laes_file* h, int i, laes_choice_info
     out->kind = c.kind; out->master = c.m; out->level = c.level; out->rate = c.rate; out->bits = c.bits; out->frames = (uint64_t)c.frames; out->name = c.name.c_str(); out->what = c.what.c_str(); return 0; }
 LAE_API int LAE_CALL laes_get_tag(const laes_file* h, int i, const char** key, const char** value) {
     if (!h || i < 0 || i >= (int)h->f.tags.size()) return -1; if (key) *key = h->f.tags[(size_t)i].first.c_str(); if (value) *value = h->f.tags[(size_t)i].second.c_str(); return 0; }
+LAE_API const char* LAE_CALL laes_master_name(const laes_file* h, int m) {
+    if (!h || !h->f.why.empty() || m < 0 || m >= (int)h->f.ms.size()) return nullptr; return h->f.ms[(size_t)m].I.name.c_str(); }
+LAE_API int LAE_CALL laes_master_flags(const laes_file* h, int m) {
+    if (!h || !h->f.why.empty() || m < 0 || m >= (int)h->f.ms.size()) return -1; return h->f.ms[(size_t)m].I.flags; }
+LAE_API int LAE_CALL laes_master_number(const laes_file* h, int m) {
+    if (!h || !h->f.why.empty() || m < 0 || m >= (int)h->f.ms.size()) return 0; std::vector<laes::MasterInfo> mi; for (const auto& M : h->f.ms) mi.push_back(M.I); return laesc::displayNo(mi, (size_t)m); }
+LAE_API int LAE_CALL laes_default_choice(const laes_file* h) { return h ? h->f.defaultChoice : 0; }
+LAE_API int LAE_CALL laes_core_flags(const laes_file* h) { return h && h->f.why.empty() ? h->f.head.coreFlags : 0; }
+LAE_API int LAE_CALL laes_choice_from(const laes_file* h, int i) {
+    if (!h || i < 0 || i >= (int)h->f.choices.size()) return -1; const laesp::Choice& c = h->f.choices[(size_t)i]; return c.kind == 3 ? c.from : -1; }
 static laes_play* startImpl(laes_file* h, int choice, int threads, bool all, char* err, int errlen, uint64_t frame = 0) {
     if (!h) { setErrS(err, errlen, "no file"); return nullptr; }
     laes_play* p = nullptr;

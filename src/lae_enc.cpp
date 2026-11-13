@@ -5,10 +5,11 @@
 //   input : PCM WAV master, stereo, 16/24/32-bit integer, rate = 44.1k or 48k family x 2, 4 or 8
 //   output: WAV whose audio is the CD layer (16 bit at 44.1/48 kHz, plays everywhere) + a "LAE " chunk with
 //           the depth layer (L, R) and the frequency layer (M, S), each range-coded with partition levels
-// usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2 (scheme), default s1] [zs] [cd=<CD.wav>] [energy] [equal]
+// usage: lae_enc <master.wav> <out.wav | out.flac | out.lae> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2 (scheme), default s1] [zs] [cd=<CD.wav>] [energy] [equal]
 //                [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d]
-//                [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]
-//        lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   new tags, no re-encoding
+//                [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [--form=flac | --form=wav]
+//        the output form (2026-11-10): WAV form by default; .flac = FLAC form; .lae = WAV form unless --form=flac (see outputForm below)
+//        lae_enc tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   new tags, no re-encoding
 //        lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdaccept]   the CD's split markers onto the master (cd_plan.cpp)
 //   mode = share of the scanned D (and C) content kept at its tier (see the MODES table in partition_format.h); energy = measure the
 //   share by energy instead of cell count; equal = halving cuts only. The frequency layer is stored per octave (independent streams).
@@ -85,6 +86,8 @@ extern "C" __declspec(dllimport) int __stdcall GlobalMemoryStatusEx(LaeMemStatus
 #include "frac_delay.h"   // global: the v6 phase delay, shared by the route split, the alignment and the decoder (::lae_fd)
 #include "noise_marks.h"   // global: the marking file of noise= (::nmk), read by the encoder and by the layer coder
 #include "laes_tags.h"     // tags and pictures (2026-11-06): the same code and layout as laes
+#include "laey_flac.h"     // the FLAC form (2026-11-10): reader (also used by the decoder module below)
+#include "laes_flac_enc.h" // FLAC frame writer (RFC 9639, the project's own code), the one of the LAES FLAC form
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 // ---- per-thread module settings and output: two layers (L and R, M and S) are coded at once, each in its own thread. A layer thread
 // keeps its own copy of the variables a layer sets (env() below) and its own printed text, which is shown after the pair in the usual
@@ -207,6 +210,20 @@ static std::string tagArgs(int argc, char** argv, int from, laestag::Tags& t) {
     for (int i = from; i < argc; i++) if (isTagOpt(argv[i])) v.push_back(argv[i][0] == '-' ? std::string(argv[i]) : "--" + std::string(argv[i]));
     std::vector<char*> pv; for (auto& x : v) pv.push_back(&x[0]); return laestag::parseArgs((int)pv.size(), pv.data(), t); }
 
+// The form of the output file (2026-11-10). WAV is the default form of LAEY; FLAC is a supported one: a name ending in .flac = FLAC form (the CD layer in FLAC audio frames,
+// the extension in "LAE1" APPLICATION blocks: laey_flac.h); a name ending in .lae (the format's own name) = WAV form, or FLAC form with
+// --form=flac (laes: the other way round); any other name = WAV form (CD layer in 'data', extension in the "LAE " chunk), as before. --form=flac / --form=wav (also
+// without the "--") must agree with a .flac / .wav name. Readers go by content, never by the name.
+static bool isFormOpt(const char* a) { return !strncmp(a, "--form=", 7) || !strncmp(a, "form=", 5); }
+static bool nameEnds(const std::string& s, const char* e) { const size_t n = strlen(e); if (s.size() <= n) return false;
+    for (size_t i = 0; i < n; i++) { char c = s[s.size() - n + i]; if (c >= 'A' && c <= 'Z') c = (char)(c + 32); if (c != e[i]) return false; } return true; }
+static int outputForm(const std::string& out, int argc, char** argv, int from) {   // 0 = WAV form, 1 = FLAC form, -1 = refused (reason printed)
+    std::string formArg; for (int i = from; i < argc; i++) if (isFormOpt(argv[i])) formArg = strchr(argv[i], '=') + 1;
+    if (!formArg.empty() && formArg != "flac" && formArg != "wav") { printf("--form must be flac or wav\n"); return -1; }
+    const bool laeName = nameEnds(out, ".lae"); const bool asFlac = laeName ? formArg == "flac" : nameEnds(out, ".flac");
+    if (!formArg.empty() && !laeName && (formArg == "flac") != asFlac) { printf("--form=%s does not match the name %s (use .lae to choose the form freely)\n", formArg.c_str(), out.c_str()); return -1; }
+    return asFlac ? 1 : 0; }
+
 // lae_enc tag <in.wav> <out.wav> [tags] (2026-11-06): new tags without re-encoding. A new file is written ("fmt ", the new tags, then
 // every other chunk in its order; former LIST/INFO and "id3 " chunks are left out; no tags given = none); the input is not changed. The
 // new file's CD audio ("data") and "LAE " chunk are then compared byte for byte with the input's.
@@ -234,8 +251,54 @@ static bool sameBody(FILE* a, const Ck& ka, FILE* b, const Ck& kb) {
     std::vector<uint8_t> x(1 << 20), y(1 << 20); unsigned long long left = ka.len;
     while (left) { const size_t n = (size_t)std::min<unsigned long long>(left, x.size()); if (fread(x.data(), 1, n, a) != n || fread(y.data(), 1, n, b) != n || memcmp(x.data(), y.data(), n)) return false; left -= n; }
     return true; }
+// FLAC form (2026-11-10): "fLaC" | STREAMINFO | the new tags | every other block in its order (former VORBIS_COMMENT, PICTURE and
+// PADDING blocks are left out) | the audio frames, copied. Then the new file's "LAE1" blocks and audio frames are compared byte for
+// byte with the input's.
+struct Bk { int type; long long body; uint32_t len; bool lae1; };
+static bool walkFlac(FILE* f, std::vector<Bk>& bks, long long& audioOff, long long& end, std::string& why) {
+    uint8_t h[4]; if (_fseeki64(f, 0, SEEK_END)) { why = "cannot seek"; return false; } end = _ftelli64(f);
+    if (_fseeki64(f, 0, SEEK_SET) || fread(h, 1, 4, f) != 4 || memcmp(h, "fLaC", 4)) { why = "not a FLAC file"; return false; }
+    long long p = 4; bool last = false;
+    while (!last) { uint8_t b[4]; if (p + 4 > end || _fseeki64(f, p, SEEK_SET) || fread(b, 1, 4, f) != 4) { why = "FLAC metadata truncated"; return false; }
+        Bk k; last = (b[0] & 0x80) != 0; k.type = b[0] & 0x7F; k.len = (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3]; k.body = p + 4; k.lae1 = false;
+        if (k.body + k.len > end) { why = "FLAC metadata truncated"; return false; }
+        if (k.type == 2 && k.len >= 4) { char id[4]; if (fread(id, 1, 4, f) != 4) { why = "FLAC metadata truncated"; return false; } k.lae1 = !memcmp(id, "LAE1", 4); }
+        bks.push_back(k); p = k.body + k.len; }
+    audioOff = p; return true; }
+static bool copyRange(FILE* in, long long off, unsigned long long len, FILE* out) {
+    if (_fseeki64(in, off, SEEK_SET)) return false; std::vector<uint8_t> b(1 << 20);
+    while (len) { const size_t n = (size_t)std::min<unsigned long long>(len, b.size()); if (fread(b.data(), 1, n, in) != n || fwrite(b.data(), 1, n, out) != n) return false; len -= n; }
+    return true; }
+static bool sameRange(FILE* a, long long offA, FILE* b, long long offB, unsigned long long len) {
+    if (_fseeki64(a, offA, SEEK_SET) || _fseeki64(b, offB, SEEK_SET)) return false; std::vector<uint8_t> x(1 << 20), y(1 << 20);
+    while (len) { const size_t n = (size_t)std::min<unsigned long long>(len, x.size()); if (fread(x.data(), 1, n, a) != n || fread(y.data(), 1, n, b) != n || memcmp(x.data(), y.data(), n)) return false; len -= n; }
+    return true; }
+static int retagFlac(FILE* fi, const std::string& in, const std::string& out, const std::string& part, const laestag::Tags& tags) {
+    std::error_code ec; std::vector<Bk> bks; long long audioOff = 0, end = 0; std::string why;
+    if (!walkFlac(fi, bks, audioOff, end, why)) { fclose(fi); printf("%s: %s; nothing written\n", in.c_str(), why.c_str()); return 1; }
+    bool haveLae = false; for (auto& k : bks) haveLae = haveLae || k.lae1;
+    if (bks.empty() || bks[0].type != 0 || bks[0].len != 34 || !haveLae) { fclose(fi); printf("%s is not an LAE file in the FLAC form (it needs STREAMINFO and \"LAE1\" APPLICATION blocks); nothing written\n", in.c_str()); return 1; }
+    std::vector<Bk> keep; for (size_t i = 1; i < bks.size(); i++) { const int t = bks[i].type; if (t != 0 && t != 1 && t != 4 && t != 6) keep.push_back(bks[i]); }
+    const std::vector<uint8_t> tb = laestag::flacBlocks(tags, false, kLaeyEncoder);
+    FILE* fo = fopen(part.c_str(), "wb"); bool ok = fo != nullptr;
+    if (ok) { const uint8_t h[8] = {'f', 'L', 'a', 'C', 0, 0, 0, 34}; ok = fwrite(h, 1, 8, fo) == 8 && copyRange(fi, bks[0].body, 34, fo) && (tb.empty() || fwrite(tb.data(), 1, tb.size(), fo) == tb.size()); }
+    for (size_t i = 0; ok && i < keep.size(); i++) { const Bk& k = keep[i]; const uint8_t bh[4] = {(uint8_t)((i + 1 == keep.size() ? 0x80 : 0) | k.type), (uint8_t)(k.len >> 16), (uint8_t)(k.len >> 8), (uint8_t)k.len};
+        ok = fwrite(bh, 1, 4, fo) == 4 && copyRange(fi, k.body, k.len, fo); }
+    ok = ok && copyRange(fi, audioOff, (unsigned long long)(end - audioOff), fo);
+    if (fo) ok = fclose(fo) == 0 && ok;
+    if (ok) { FILE* fc = fopen(part.c_str(), "rb"); std::vector<Bk> b2; long long a2 = 0, e2 = 0; std::string w2;
+        ok = fc && walkFlac(fc, b2, a2, e2, w2) && e2 - a2 == end - audioOff && sameRange(fi, audioOff, fc, a2, (unsigned long long)(end - audioOff));
+        std::vector<Bk> l1, l2; for (auto& k : bks) if (k.lae1) l1.push_back(k); for (auto& k : b2) if (k.lae1) l2.push_back(k);
+        ok = ok && l1.size() == l2.size(); for (size_t i = 0; ok && i < l1.size(); i++) ok = l1[i].len == l2[i].len && sameRange(fi, l1[i].body, fc, l2[i].body, l1[i].len);
+        if (fc) fclose(fc);
+        if (!ok) printf("check FAILED: the new file's CD audio frames or LAE1 blocks differ from the input's\n"); }
+    else printf("cannot write %s\n", part.c_str());
+    fclose(fi);
+    if (ok) { std::filesystem::rename(std::filesystem::u8path(part), std::filesystem::u8path(out), ec); ok = !ec; if (!ok) printf("cannot rename %s to %s\n", part.c_str(), out.c_str()); }
+    if (!ok) { std::filesystem::remove(std::filesystem::u8path(part), ec); printf("nothing written\n"); return 2; }
+    printf("written: %s (FLAC form, %zu tag(s), %zu picture(s)); CD audio frames and LAE1 blocks byte-identical to %s\n", out.c_str(), tags.kv.size(), tags.pics.size(), in.c_str()); return 0; }
 static int retag(int argc, char** argv) {
-    if (argc < 4) { printf("usage: lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   (no tags given: the tags are removed)\n"); return 1; }
+    if (argc < 4) { printf("usage: lae_enc tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   (WAV or FLAC form, the output keeps the input's form; no tags given: the tags are removed)\n"); return 1; }
     const std::string in = argv[2], out = argv[3], part = out + ".part";
     for (int i = 4; i < argc; i++) if (!isTagOpt(argv[i])) { printf("unknown option '%s': nothing written (options: --tag=KEY=VALUE --cover=<image> --picture=<type>:<image>)\n", argv[i]); return 1; }
     std::error_code ec; if (std::filesystem::exists(std::filesystem::u8path(out), ec)) { printf("%s already exists: choose another output name (the input is never changed); nothing written\n", out.c_str()); return 1; }
@@ -243,6 +306,10 @@ static int retag(int argc, char** argv) {
     laestag::Tags tags; { const std::string e = tagArgs(argc, argv, 4, tags); if (!e.empty()) { printf("%s: nothing written\n", e.c_str()); return 1; } }
     const std::vector<uint8_t> tc = laestag::wavChunks(tags, kLaeyEncoder);
     FILE* fi = fopen(in.c_str(), "rb"); if (!fi) { printf("cannot read %s\n", in.c_str()); return 1; }
+    { uint8_t h4[4] = {0}; const bool inFlac = fread(h4, 1, 4, fi) == 4 && !memcmp(h4, "fLaC", 4);   // the output keeps the input's form; its name must not say the other one
+      if (inFlac ? nameEnds(out, ".wav") : nameEnds(out, ".flac")) { fclose(fi); printf("%s is in the %s form: give the output a %s name (lae_enc tag does not change the form); nothing written\n", in.c_str(), inFlac ? "FLAC" : "WAV", inFlac ? ".flac or .lae" : ".wav or .lae"); return 1; }
+      if (inFlac) return retagFlac(fi, in, out, part, tags); }
+    rewind(fi);   // the form check above read 4 bytes; walk() reads the RIFF header from the start
     std::vector<Ck> cks; std::string why; if (!walk(fi, cks, why)) { fclose(fi); printf("%s: %s; nothing written\n", in.c_str(), why.c_str()); return 1; }
     const Ck* fmt = find(cks, "fmt "); const Ck* dat = find(cks, "data"); const Ck* lae = find(cks, "LAE ");
     if (!fmt || !dat || !lae) { fclose(fi); printf("%s is not an LAE file (it needs \"fmt \", \"data\" and \"LAE \" chunks); nothing written\n", in.c_str()); return 1; }
@@ -263,8 +330,27 @@ static int retag(int argc, char** argv) {
     printf("written: %s (%zu tag(s), %zu picture(s)); CD audio and LAE chunk byte-identical to %s\n", out.c_str(), tags.kv.size(), tags.pics.size(), in.c_str()); return 0; }
 }  // namespace m_tag
 
+// Extension packs (2026-11-10, spec/lossy/SPEC.md, Section 5.6; one core and several mutually independent masters):
+// master2=<master.wav> .. master9= each add one further extension to the file, computed as a whole from that
+// master against the same core (the CD layer / core layer) by this encoder's own cd= path - its alignment (master<n>align=<offset>, as
+// cdalign=; without it both searches run and the encoder stops), its own cut-off, depth layer with its own leak compensation, and
+// frequency layer. master<n>accept = cdaccept and master<n>edge=cut = cdedge=cut for that master; master<n>name= is the name shown where
+// a pack is chosen (master1name= names the main body, the first master: one optional "LNAM" record after the last pack record). A pack is exactly the "LAE " payload that "lae_enc <master n> cd=<the core>" writes; it goes into one record
+// after the main body's last stream (lae_decoder.h), where v5 decoders do not read, so they play the core and the main body as before.
+// Nothing is shared between packs and nothing in one depends on another; the core must come out of every pack's
+// alignment unchanged, sample for sample. Without these options nothing here runs and the output is the earlier one, byte for byte.
+struct PackOpt { std::string path, align, name, edge; bool accept = false, any = false; };
+static bool packOptArg(const char* a) { return !strncmp(a, "master", 6) && a[6] >= '2' && a[6] <= '9' && (a[7] == '=' || !strncmp(a + 7, "align=", 6) || !strncmp(a + 7, "name=", 5) || !strncmp(a + 7, "edge=", 5) || !strcmp(a + 7, "accept")); }
+static std::string packOptParse(const char* a, PackOpt* pk) {   // pk[0] = master2 .. pk[7] = master9; "" or the reason
+    PackOpt& q = pk[a[6] - '2']; const char* r = a + 7; const std::string key = std::string(a, 7); q.any = true;
+    if (*r == '=') { if (!r[1]) return key + "=: give the master's file"; q.path = r + 1; return ""; }
+    if (!strncmp(r, "align=", 6)) { if (!r[6]) return key + "align=: give the offset, as for cdalign="; q.align = r + 6; return ""; }
+    if (!strncmp(r, "name=", 5)) { if (strlen(r + 5) > 255) return key + "name=: a name has at most 255 bytes"; q.name = r + 5; return ""; }
+    if (!strncmp(r, "edge=", 5)) { if (strcmp(r + 5, "cut") && strcmp(r + 5, "pad")) return key + "edge=: pad or cut, as for cdedge="; q.edge = r + 5; return ""; }
+    q.accept = true; return ""; }
+
 static int encode(int argc, char** argv) {
-    if (argc < 3) { printf("usage: lae_enc <master.wav> <out.wav> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2, default s1] [zs] [cd=<independent CD.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]\n"); return 1; }
+    if (argc < 3) { printf("usage: lae_enc <master.wav> <out.wav | out.flac | out.lae> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2, default s1] [zs] [cd=<independent CD.wav>] [energy] [equal] [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]\n"); return 1; }
     auto T0 = std::chrono::steady_clock::now();
     const std::string outPath = argv[2], partPath = outPath + ".part", tmp = outPath + ".tmp";
     encrun::out = outPath; encrun::part = partPath; encrun::tmp = tmp; encrun::hadOld = exists(outPath);
@@ -275,13 +361,23 @@ static int encode(int argc, char** argv) {
     bool equal = false, zsOpt = false, cdCheck = false, cdAccept = false, bits24 = false, manual = false, resume = false; int wm = 0, scheme = 1, cdEdge = -1; const char* cdPath = nullptr; long long manualT = 0; unsigned long long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once (default: half the physical memory); cdEdge: cdedge=pad / cut (m_align::EDGE_*), -1 not given
     std::string manualText; int manualSg = 1; long long manualI = 0, manualF = 0, manualFs = 1, manualPlace = 0, manualPhi = 0;   // cdalign=<o>: o = sg * (I + F / Fs) master samples
     double manualMove = 0;   // the fraction (master samples, |f| <= 1/2) the master is moved by when it is placed at manualT
+    PackOpt pk[8]; int nPacks = 0;   // extension packs: master2= .. master9=
+    std::string mainName;   // master1name=<text>: the name of the main body (the first master), "" = none stored
+    // internal steps of the extension packs (each a run of this encoder inside the calling run): alignout=<file> = align this master to
+    // cd=, hand the aligned master to the calling run and encode nothing; rawin=<rate> = argument 1 is such an aligned master
+    const char* alignOut = nullptr; int rawRate = 0; long cdAddLead = 0, cdAddTail = 0;   // cdAdd*: the digital-silence frames the alignment added before / after the given CD
     laestag::Tags tags; std::vector<uint8_t> tagChunks;   // --tag / --cover / --picture: read and checked before any work
-    { const std::string e = tagArgs(argc, argv, 4, tags); if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; } tagChunks = laestag::wavChunks(tags, kLaeyEncoder); }
-    for (int i = 4; i < argc; i++) { const char* a = argv[i]; if (isTagOpt(a)) continue;
+    const int formSel = outputForm(outPath, argc, argv, 4); if (formSel < 0) { printf("nothing encoded\n"); return 1; } const bool asFlac = formSel == 1;
+    { const std::string e = tagArgs(argc, argv, 4, tags); if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; }
+      tagChunks = asFlac ? laestag::flacBlocks(tags, false, kLaeyEncoder) : laestag::wavChunks(tags, kLaeyEncoder); }   // FLAC form: VORBIS_COMMENT + PICTURE blocks, before the "LAE1" blocks
+    for (int i = 4; i < argc; i++) { const char* a = argv[i]; if (isTagOpt(a) || isFormOpt(a)) continue;
+        if (!strncmp(a, "master1name=", 12)) { if (strlen(a + 12) > 255) { printf("master1name=: a name has at most 255 bytes\n"); return 1; } mainName = a + 12; continue; }   // the main body's name, shown where a master is chosen
         if (!strcmp(a, "equal")) equal = true; else if (!strcmp(a, "energy")) wm = 1; else if (!strcmp(a, "s2")) scheme = 2; else if (!strcmp(a, "s1")) scheme = 1;
         else if (!strcmp(a, "zs")) zsOpt = true; else if (!strncmp(a, "cd=", 3) && a[3]) cdPath = a + 3; else if (!strcmp(a, "cdcheck")) cdCheck = true;
         else if (!strcmp(a, "cdaccept")) cdAccept = true; else if (!strcmp(a, "cdedge=pad")) cdEdge = m_align::EDGE_PAD; else if (!strcmp(a, "cdedge=cut")) cdEdge = m_align::EDGE_CUT; else if (!strcmp(a, "bits=24")) bits24 = true; else if (!strcmp(a, "resume")) resume = true;
         else if (!strncmp(a, "noise=", 6) && a[6]) noisePath = a + 6; else if (!strcmp(a, "g") || !strcmp(a, "g=d")) { gOpt = true; gLevel = 'd'; } else if (!strcmp(a, "g=c")) { gOpt = true; gLevel = 'c'; } else if (!strcmp(a, "g=b")) { gOpt = true; gLevel = 'b'; }
+        else if (!strncmp(a, "alignout=", 9) && a[9]) alignOut = a + 9; else if (!strncmp(a, "rawin=", 6) && atoi(a + 6) > 0) rawRate = atoi(a + 6);
+        else if (packOptArg(a)) { const std::string e = packOptParse(a, pk); if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; } }   // extension packs (2026-11-10)
         else if (!strncmp(a, "mem=", 4)) { const double g = atof(a + 4); if (!(g > 0) || g > 1e6) { printf("mem=%s: give the memory budget in GB (for example mem=8)\n", a + 4); return 1; } memBudget = (unsigned long long)(g * 1073741824.0); }
         else if (!strcmp(a, "cdalign=none")) { printf("cdalign=none was removed (2026-10-22): every CD is checked. A small remaining difference can be accepted with cdaccept, a known offset given with cdalign=<offset>; nothing encoded\n"); return 1; }
         else if (!strncmp(a, "cdalign=", 8)) {   // master samples, whole or with a fraction (v6): digits, optionally '.' and up to 9 digits
@@ -292,9 +388,15 @@ static int encode(int argc, char** argv) {
             if (!ni || !ok || *p || I > 2000000000LL) { printf(strchr(v, ',') ? "cdalign=%s: write the fraction with a point (for example cdalign=3.5)\n"
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
-        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume)\n", a); return 1; } }
+        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d master2=<master.wav> .. master9= master<n>align= master<n>name= (n from 1) master<n>accept master<n>edge= --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume)\n", a); return 1; } }
     encrun::keepTmp = resume;
     if ((cdCheck || cdAccept || manual || cdEdge >= 0) && !cdPath) { printf("cdcheck, cdalign, cdaccept and cdedge= need cd=<CD.wav>\n"); return 1; }
+    for (int k = 0; k < 8; k++) { if (!pk[k].any) continue;
+        if (pk[k].path.empty()) { printf("master%d...: master%d=<master.wav> is missing: nothing encoded\n", k + 2, k + 2); return 1; }
+        if (k != nPacks) { printf("master%d=: the further masters are numbered without a gap (master%d= is missing): nothing encoded\n", k + 2, nPacks + 2); return 1; }
+        nPacks++; }
+    if (alignOut && (!cdPath || nPacks || resume || cdCheck)) { printf("alignout= is an internal step of the extension packs: nothing encoded\n"); return 1; }
+    if (nPacks && (noisePath || resume || cdCheck)) { printf("further masters (master2= ...) cannot be combined with noise=, resume or cdcheck in this version: nothing encoded\n"); return 1; }
     if (mi >= part::MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
     const bool partLeft = exists(partPath);   // with resume, decided once the work folder's notes are read (below)
     if (partLeft && !resume) { printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath.c_str()); return 1; }
@@ -308,7 +410,10 @@ static int encode(int argc, char** argv) {
                                         "  84 MB per hour of music (44.1 kHz family; about 94 MB for 48 kHz), i.e. about 9 minutes less music per CD-Extra disc.\n");   // as the layer module forces it (keep: cells AND energy; max: energy), so the header and the report say what was used
     // only the header is read here; the samples go straight to m0.raw once the work folder exists (the master is never held whole in memory)
     wavin::Info wi;
-    wavio::Wav w; if (!(wavin::probe(argv[1], wi) && wi.ch == 2)) { printf("need a stereo integer PCM WAV\n"); oldNote(); return 1; }
+    wavio::Wav w;
+    if (rawRate > 0) { const long long rb = fileSize(argv[1]); if (rb < 8) { printf("rawin=: the aligned master is missing\n"); return 2; }   // internal: an aligned master of this run (stereo int32, 24 bit left-aligned)
+        wi.rate = rawRate; wi.ch = 2; wi.bits = 24; wi.dataBytes = rb / 8 * 6; }
+    else if (!(wavin::probe(argv[1], wi) && wi.ch == 2)) { printf("need a stereo integer PCM WAV\n"); oldNote(); return 1; }
     w.rate = wi.rate; w.ch = wi.ch; w.bits = wi.bits;
     std::string note32;
     if (w.bits == 32) {   // LAE v5 carries at most 24 bit: say what reducing the master would drop, then end or continue as the user chooses
@@ -378,14 +483,15 @@ static int encode(int argc, char** argv) {
         return true; };
     if (!spaceOk()) return 2;
     std::string masterMd5;   // MD5 of the master's data bytes, computed once while reading
-    { long long fr = 0, l8 = 0; wavin::toRaw(argv[1], wi, T("m0.raw").c_str(), fr, l8, masterMd5);
+    if (rawRate > 0) { std::error_code ec; std::filesystem::copy_file(argv[1], T("m0.raw"), std::filesystem::copy_options::overwrite_existing, ec); if (ec) encio::fail(std::string("cannot copy ") + argv[1] + ": " + ec.message()); }
+    else { long long fr = 0, l8 = 0; wavin::toRaw(argv[1], wi, T("m0.raw").c_str(), fr, l8, masterMd5);
         if (fr != Lm) encio::fail("internal error: master length"); }
     // resume (block-wise, without cd=): every finished step is noted in resume.txt in the work folder, together with a key made of this
     // encoder build, the options, the block length and the master's MD5. A run with the same key continues after the last finished step;
     // any other key starts from the beginning. The notes are read only by this encoder and never go into the LAE file.
     std::set<std::string> doneSteps; std::mutex stepMu; const std::string manifest = T("resume.txt");
     if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | options");   // not the block length: it does not change any result
-        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume") && !isTagOpt(argv[i])) key += std::string(" ") + argv[i];   // tags: written with the file only
+        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume") && !isTagOpt(argv[i]) && !isFormOpt(argv[i])) key += std::string(" ") + argv[i];   // tags and the form: written with the file only
         key += " | master " + masterMd5;
         if (noisePath) { const std::string t = encio::readText(noisePath); uint64_t h = 1469598103934665603ull; for (unsigned char ch : t) { h ^= ch; h *= 1099511628211ull; }   // FNV-1a of the marking file
             char hs[32]; snprintf(hs, sizeof hs, "%016llx", (unsigned long long)h); key += std::string(" | noise ") + hs; }
@@ -448,6 +554,10 @@ static int encode(int argc, char** argv) {
             struct Att { int kind = 2; std::string why; };
             m_align::Report rep; std::string placed; long padP = 0, cutL = 0, cutT = 0; long long rpT = 0; double rpMv = 0;   // the last attempt, for the report
             m_align::Place edgeQ; bool edgeAsk = false;   // the last placement, and whether the master has sound beyond the CD (needs cdedge=pad / cut; 2026-11-03)
+            // a master whose speed drifts against the CD (tape wow and flutter): never continued on its own; with the position given by
+            // hand AND cdaccept it goes on like a difference beyond -33 dB (the extension codes the whole difference, the precision stays the same)
+            auto driftConfirmed = [&](m_align::Report& r) { if (manual && !r.found && (r.tag == "drift" || r.tag == "edit")) { r.found = true;   /* "edit": some check blocks do not match at all; no block matching ("nomatch") is never continued */ r.band = m_align::BAND_CONFIRM_LARGE;   // then asked like every difference beyond -33 dB
+                printf("align: WARNING: the master's speed drifts against the CD (for example tape wow and flutter): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"); } };
             auto attempt = [&](const m_align::Report& rep1, const std::string& sch, long long tPlace, double mv, int edge) -> Att {
                 Att A; const std::string pre = sch.empty() ? "align: " : "align (" + sch + "): ", key = sch.empty() ? "" : " search=" + sch;
                 rep = rep1; placed.clear(); padP = cutL = cutT = 0; rpT = tPlace; rpMv = mv; edgeQ = m_align::Place(); edgeAsk = false;
@@ -465,8 +575,8 @@ static int encode(int argc, char** argv) {
                     const bool tentative = edgeAsk && cdEdge < 0;   // the search goes on as with pad, but nothing is chosen yet
                     for (auto& l : q.lines) printf("%s%s\n", pre.c_str(), (tentative && l.rfind("cdedge=pad: ", 0) == 0 ? "with cdedge=pad (not chosen yet): " + l.substr(12) : l).c_str());
                     std::string bad = q.ok ? std::string() : q.why; const bool moved = q.ok && (q.shift != 0 || q.Lm2 != Lm);
-                    if (bad.empty() && q.cdLead) { c.pcm16.insert(c.pcm16.begin(), 2 * (size_t)q.cdLead, (int16_t)0); have = (long)c.pcm16.size() / 2; }
-                    if (bad.empty() && q.cdTail) { c.pcm16.insert(c.pcm16.end(), 2 * (size_t)q.cdTail, (int16_t)0); have = (long)c.pcm16.size() / 2; }   // cdedge=pad at the end
+                    if (bad.empty() && q.cdLead) { c.pcm16.insert(c.pcm16.begin(), 2 * (size_t)q.cdLead, (int16_t)0); have = (long)c.pcm16.size() / 2; cdAddLead += q.cdLead; }
+                    if (bad.empty() && q.cdTail) { c.pcm16.insert(c.pcm16.end(), 2 * (size_t)q.cdTail, (int16_t)0); have = (long)c.pcm16.size() / 2; cdAddTail += q.cdTail; }   // cdedge=pad at the end
                     if (bad.empty() && moved) {   // cheap stops first, before anything is resized, written or derived
                         const std::string far = m_align::cdOnlyFar(c.pcm16, have, q, stages, (int)base, pb0);
                         if (!far.empty()) bad = far; else if (!fitsLength(q.Lm2)) bad = fmt("the placed master (%lld frames) is outside this encoder's length limits", q.Lm2); }
@@ -487,7 +597,7 @@ static int encode(int argc, char** argv) {
                               while (kL < P && silent((long long)kL * up1)) kL++; while (kT < P && silent(Lm - (long long)(kT + 1) * up1)) kT++; }
                             c.pcm16.erase(c.pcm16.end() - 2 * (size_t)kT, c.pcm16.end()); c.pcm16.erase(c.pcm16.begin(), c.pcm16.begin() + 2 * (size_t)kL); have = (long)c.pcm16.size() / 2;
                             if (kL || kT) masterRange((long long)kL * up1, Lm - (long long)kT * up1, 0, 0); Lm -= (long long)(kL + kT) * up1;
-                            padP = P; cutL = kL; cutT = kT;
+                            padP = P; cutL = kL; cutT = kT; cdAddLead += P - kL; cdAddTail += P - kT;
                             printf("%sdigital silence: %ld CD frames added at each end before the move; removed again where still digital silence: start %ld, end %ld (kept: start %ld, end %ld)\n",
                                    pre.c_str(), P, kL, kT, P - kL, P - kT); }
                         if (!spaceOk(reuse) || !derive()) { A.kind = 3; return A; }
@@ -500,7 +610,7 @@ static int encode(int argc, char** argv) {
                     if (!co.empty()) { A.why = co; return A; }
                     if (have != need) { A.why = fmt("the CD has %ld samples, the placed master needs %ld at %d Hz: the lengths do not match", have, need, (int)base); return A; }
                     const long long zero = 0;   // the placed (and moved) master, checked again at offset 0 (the same three blocks, through its own derivation)
-                    m_align::Report rep2; { const blkio::View m(mFile); rep2 = m_align::run(c.pcm16, have, b24, nb0, pb0, m, (long)Lm, (int)base, stages, t, "", 0, -1, &zero); }
+                    m_align::Report rep2; { const blkio::View m(mFile); rep2 = m_align::run(c.pcm16, have, b24, nb0, pb0, m, (long)Lm, (int)base, stages, t, "", 0, -1, &zero); } driftConfirmed(rep2);
                     for (auto& l : rep2.lines) printf("%sre-check: %s\n", pre.c_str(), l.c_str());
                     printf("ALIGN_RECHECK%s%s\n", rep2.alignLine.substr(5).c_str(), key.c_str());
                     if (mv != 0 && rep2.hint.rfind("still shifted", 0) == 0)   // the suggestion keeps the fraction
@@ -551,7 +661,7 @@ static int encode(int argc, char** argv) {
                        cdCheck ? "cdcheck: both searches checked, nothing encoded" : "nothing encoded", res[0].c_str(), res[1].c_str());
                 if (cdCheck) return 0; oldNote(); return 1; }
             // by hand
-            {   m_align::Report r; { const blkio::View m(mFile); r = m_align::run(c.pcm16, have, b24, nb0, pb0, m, (long)Lm, (int)base, stages, 0, "; the placement given by hand follows", 0, -1, &manualT); }
+            {   m_align::Report r; { const blkio::View m(mFile); r = m_align::run(c.pcm16, have, b24, nb0, pb0, m, (long)Lm, (int)base, stages, 0, "; the placement given by hand follows", 0, -1, &manualT); } driftConfirmed(r);
                 for (auto& l : r.lines) printf("align: %s\n", l.c_str()); printf("%s\n", r.alignLine.c_str());
                 printf("align: offset given by hand: cdalign=%s (checked first at the nearest whole offset %+lld)\n", manualText.c_str(), manualT);
                 printf("align: fraction given by hand: cdalign=%s is the whole offset %+lld with the master moved by %+.7f master samples; not measured\n",
@@ -606,6 +716,92 @@ static int encode(int argc, char** argv) {
         encio::writeVec(T("b16.s16").c_str(), b);
         std::vector<uint8_t> df = slurp(T("dither.flags")); std::fill(df.begin(), df.end(), 0); encio::writeVec(T("dither.flags").c_str(), df);
         printf("independent CD: %s (%ld samples) used as the CD layer\n", cdPath, have); }
+    if (alignOut) {   // internal step of the extension packs: this master now lies on the given core's time line; hand it to the calling run
+        std::error_code ec; std::filesystem::rename(T("m0.raw"), alignOut, ec); if (ec) encio::fail(std::string("cannot write ") + alignOut + ": " + ec.message());
+        encio::writeText((std::string(alignOut) + ".report.txt").c_str(), alignReport.empty() ? std::string("\n") : alignReport);
+        encio::writeText((std::string(alignOut) + ".txt").c_str(), std::to_string(Lm) + " " + std::to_string(cdAddLead) + " " + std::to_string(cdAddTail) + " " + std::to_string(w.rate) + "\n");
+        printf("further master aligned: %lld frames on the core's time line (digital silence added to the core: %ld frame(s) before, %ld after)\n", Lm, cdAddLead, cdAddTail); return 0; }
+    // extension packs. First every further master is aligned to the core by the master's own alignment (cd= path: the user's position,
+    // placement, the move by the fraction, the checks), one after the other. Where an alignment adds digital silence to the core (sound
+    // only that master has with master<n>edge=pad, or what the fractional move carries past a hard-cut edge), the master and the
+    // masters aligned before get the same silence, so all lie on one time line and the core is the same for every pack. Then each
+    // aligned master is encoded against the final core as a run of its own with nothing shared (position 0, nothing moved again), and
+    // its "LAE " payload is kept for the file. All of it before the main body's layers, so that a master not placed yet stops early.
+    std::vector<std::vector<uint8_t>> packRecs; std::string packReport; std::vector<uint8_t> mainRec;   // mainRec: the optional "LNAM" record (master1name=)
+    if (nPacks) {
+        const long pbA = P >> stages; std::vector<int16_t> core; { std::vector<int16_t> b = encio::readAll<int16_t>(T("b16.s16").c_str()); core.assign(b.begin() + 2 * (size_t)pbA, b.end() - 2 * (size_t)pbA); }
+        const std::string coreW = T("core.wav");
+        auto writeCore = [&]() { std::vector<uint8_t> o; wavio::hdr(o, (int)base, 2, 16, core.size() * 2, 0); o.insert(o.end(), (const uint8_t*)core.data(), (const uint8_t*)core.data() + core.size() * 2); encio::writeVec(coreW.c_str(), o); };
+        writeCore();
+        auto padRawFile = [&](const std::string& f, long long a, long long b) {   // a zero frames + the file + b zero frames
+            const std::string nf = f + ".new"; { const long long n = fileSize(f) / 8; const blkio::View m(f); blkio::Writer wr(nf.c_str()); std::vector<int32_t> z((size_t)1 << 19, 0), x; const long long BS = 1LL << 18;
+              for (long long k = 0; k < a; k += BS) wr.put(z.data(), (size_t)(std::min(BS, a - k) * 2));
+              for (long long i = 0; i < n; i += BS) { const long long e = std::min(n, i + BS); x.resize((size_t)(e - i) * 2); for (long long j = i; j < e; j++) { x[(size_t)(j - i) * 2] = m[(size_t)j * 2]; x[(size_t)(j - i) * 2 + 1] = m[(size_t)j * 2 + 1]; } wr.put(x); }
+              for (long long k = 0; k < b; k += BS) wr.put(z.data(), (size_t)(std::min(BS, b - k) * 2));
+              wr.finish(); }
+            std::error_code ec; std::filesystem::rename(nf, f, ec); if (ec) encio::fail("cannot replace " + f + ": " + ec.message()); };
+        struct Aligned { std::string raw; int rate = 0; long long up = 1; long lead = 0, tail = 0; }; std::vector<Aligned> al((size_t)nPacks);
+        std::vector<std::string> common = {modeName, scheme == 2 ? "s2" : "s1"};   // the coding options are the same for every pack
+        for (int i = 4; i < argc; i++) { const char* a = argv[i]; if (!strcmp(a, "zs") || !strcmp(a, "energy") || !strcmp(a, "equal") || !strcmp(a, "bits=24") || !strncmp(a, "mem=", 4) || !strcmp(a, "g") || !strncmp(a, "g=", 2)) common.push_back(a); }   // g: every pack on its own master (2026-11-11)
+        const bool hadUnits = getenv("LAE_BLOCKUNITS") != nullptr; bool stopA = false;
+        auto nested = [&](std::vector<std::string> a) {   // one further master: this encoder, run as a step of this run with its own work folder
+            const std::string so = encrun::out, sp = encrun::part, st = encrun::tmp; const bool b1 = encrun::hadOld, b2 = encrun::partMine, b3 = encrun::tmpMine, b4 = encrun::cleaned, b5 = encrun::keepTmp;
+            std::vector<char*> v; for (auto& s : a) v.push_back(&s[0]); v.push_back(nullptr); int rc;
+            try { rc = encode((int)a.size(), v.data()); }
+            catch (const encio::Fail& e) { printf("further master: stopped: %s\n", e.what()); rc = 2; }
+            catch (const std::bad_alloc&) { printf("further master: stopped: out of memory\n"); rc = 2; }
+            encrun::out = so; encrun::part = sp; encrun::tmp = st; encrun::hadOld = b1; encrun::partMine = b2; encrun::tmpMine = b3; encrun::cleaned = b4; encrun::keepTmp = b5;
+            clearModuleEnv(); env("ZSIGN", zsOpt ? "1" : ""); env("RULE_F", scheme == 2 ? "2" : "1"); env("RULE_D", mi == part::MODE_KEEP20 ? "3" : "1"); env("DITHERFLAGS", T("dither.flags"));   // this run's own module settings again
+            if (!hadUnits) env("LAE_BLOCKUNITS", "");
+            return rc; };
+        const long long upM = 1LL << stages; const bool bits24c = std::find(common.begin(), common.end(), std::string("bits=24")) != common.end();
+        for (int k = 0; k < nPacks; k++) { const PackOpt& q = pk[k]; const std::string num = std::to_string(k + 2), pre = "master" + num + " (pack " + std::to_string(k + 1) + "): ", raw = T("al" + num + ".raw");
+            printf("%saligning %s to the core (%zu frames) with the master's alignment. In its lines below, \"the master\" is this master, \"the CD\" / \"independent CD\" is the core, cdalign= stands for master%salign=, cdaccept for master%saccept, cdedge= for master%sedge=\n",
+                   pre.c_str(), q.path.c_str(), core.size() / 2, num.c_str(), num.c_str(), num.c_str());
+            std::vector<std::string> a = {"lae_enc", q.path, T("al" + num + ".wav"), "3", "cd=" + coreW, "alignout=" + raw};
+            if (!q.align.empty()) a.push_back("cdalign=" + q.align); if (q.accept) a.push_back("cdaccept"); if (!q.edge.empty()) a.push_back("cdedge=" + q.edge); if (bits24c) a.push_back("bits=24");
+            const int rc = nested(a);
+            if (rc != 0 || !exists(raw + ".txt")) { stopA = true;
+                printf(q.align.empty() ? "%snot placed yet: choose its position from the two searches above and give it as master%salign=<offset>\n" : "%snot aligned at master%salign=%s (see the lines above)\n", pre.c_str(), num.c_str(), q.align.c_str()); continue; }
+            long long Lx = 0; long aL = 0, aT = 0; int rx = 0;
+            if (sscanf(encio::readText((raw + ".txt").c_str()).c_str(), "%lld %ld %ld %d", &Lx, &aL, &aT, &rx) != 4 || aL < 0 || aT < 0 || rx <= 0) encio::fail("internal error: alignment result of master" + num);
+            packReport += "pack " + std::to_string(k + 1) + " (master" + num + "): " + q.path + "\n" + encio::readText((raw + ".report.txt").c_str());
+            { std::error_code ec; std::filesystem::remove(raw + ".txt", ec); std::filesystem::remove(raw + ".report.txt", ec); }
+            const long long upX = (long long)(rx / (int)base);
+            if (upX < 2 || Lx / upX != (long long)(core.size() / 2) + aL + aT) { printf("%sinternal error: the aligned master has %lld frames at %d Hz, the core %zu + %ld + %ld; nothing encoded\n", pre.c_str(), Lx, rx, core.size() / 2, aL, aT); oldNote(); return 2; }
+            if (aL || aT) printf("%sits alignment needs %ld frame(s) of digital silence before the core and %ld after\n", pre.c_str(), aL, aT);
+            al[(size_t)k].raw = raw; al[(size_t)k].rate = rx; al[(size_t)k].up = upX; al[(size_t)k].lead = aL; al[(size_t)k].tail = aT; }
+        if (stopA) { printf("further masters: nothing encoded\n"); oldNote(); return 1; }
+        long maxL = 0, maxT = 0; for (auto& x : al) { maxL = std::max(maxL, x.lead); maxT = std::max(maxT, x.tail); }
+        if (maxL || maxT) {   // the largest need on each side: the core gets that digital silence once, and the master and every further master the same
+            printf("further masters: the core gets %ld frame(s) of digital silence before and %ld after (the largest need of any master); the master and every further master get the same\n", maxL, maxT);
+            core.insert(core.begin(), 2 * (size_t)maxL, (int16_t)0); core.insert(core.end(), 2 * (size_t)maxT, (int16_t)0);
+            padRawFile(T("m0.raw"), maxL * upM, maxT * upM); Lm += (long long)(maxL + maxT) * upM;
+            if (!fitsLength(Lm)) { printf("further masters: the time line (%lld frames) is outside this encoder's length limits: nothing encoded\n", Lm); oldNote(); return 1; }
+            if (!derive()) return 2;
+            if (cdPath) {   // the given CD with its digital silence is the CD layer again, as after the master's own alignment
+                std::vector<uint8_t> b = slurp(T("b16.s16")); if (b.size() / 4 != core.size() / 2 + 2 * (size_t)pbA) encio::fail("internal error: core length after padding");
+                memcpy(b.data() + 4 * (size_t)pbA, core.data(), core.size() * 2); encio::writeVec(T("b16.s16").c_str(), b);
+                std::vector<uint8_t> df = slurp(T("dither.flags")); std::fill(df.begin(), df.end(), 0); encio::writeVec(T("dither.flags").c_str(), df); }
+            else { std::vector<int16_t> b = encio::readAll<int16_t>(T("b16.s16").c_str()); const size_t want = core.size(); core.assign(b.begin() + 2 * (size_t)pbA, b.end() - 2 * (size_t)pbA);   // derived core: derived again from the padded master
+                if (core.size() != want) encio::fail("internal error: derived core length after padding"); }
+            for (auto& x : al) if (maxL - x.lead || maxT - x.tail) padRawFile(x.raw, (maxL - x.lead) * x.up, (maxT - x.tail) * x.up);
+            writeCore(); }
+        for (int k = 0; k < nPacks; k++) { const PackOpt& q = pk[k]; const std::string num = std::to_string(k + 2), pre = "master" + num + " (pack " + std::to_string(k + 1) + "): ", outK = T("pk" + num + ".wav");
+            printf("%sencoding the aligned master against the core (%zu frames) as an extension of its own (position 0: nothing is moved again)\n", pre.c_str(), core.size() / 2);
+            std::vector<std::string> a = {"lae_enc", al[(size_t)k].raw, outK}; a.insert(a.end(), common.begin(), common.end()); a.push_back("cd=" + coreW); a.push_back("cdalign=0"); a.push_back("rawin=" + std::to_string(al[(size_t)k].rate));
+            if (q.accept) a.push_back("cdaccept");
+            const int rc = nested(a);
+            if (rc != 0 || !exists(outK)) { stopA = true; printf("%snot encoded (see the lines above)\n", pre.c_str()); continue; }
+            wavio::Wav pw; if (!wavio::readCD(outK.c_str(), pw) || pw.lae.size() < 60) encio::fail("internal error: the pack of master" + num + " could not be read back");
+            if (pw.pcm16 != core) { printf("%sinternal error: the pack's core differs from the file's core (%zu frames instead of %zu, or other samples); nothing encoded\n", pre.c_str(), pw.pcm16.size() / 2, core.size() / 2); oldNote(); return 2; }
+            { std::error_code ec; std::filesystem::remove(al[(size_t)k].raw, ec); }
+            std::vector<uint8_t> r = {'L', 'P', 'A', 'K'}; const uint32_t n = (uint32_t)(1 + q.name.size() + pw.lae.size() - 4); for (int i = 0; i < 4; i++) r.push_back((uint8_t)(n >> (8 * i)));
+            r.push_back((uint8_t)q.name.size()); r.insert(r.end(), q.name.begin(), q.name.end()); r.insert(r.end(), pw.lae.begin(), pw.lae.end() - 4);   // the pack's payload without its CRC: one CRC covers the whole chunk
+            printf("%sencoded: %zu B\n", pre.c_str(), r.size()); packRecs.push_back(std::move(r));
+            { std::error_code ec; std::filesystem::remove(outK, ec); std::filesystem::remove(outK + ".align.txt", ec); } }
+        { std::error_code ec; std::filesystem::remove(coreW, ec); }
+        if (stopA) { printf("further masters: nothing encoded\n"); oldNote(); return 1; } }
     { std::error_code ec; std::filesystem::remove(T("m0.raw"), ec); std::filesystem::remove(T("m0.orig"), ec); }   // disk (2026-11-05): every later step reads the padded master m.raw
     if (noisePath && (placeT != 0 || Lm != LmIn)) {   // the user (2026-11-04): alignment and its confirmation come first, the marking is made on the aligned master
         printf("noise=: the master was placed on the CD's time line here (whole offset %+lld master samples, length %lld -> %lld frames), so the marked cells no longer lie on the grid they were marked on.\n"
@@ -726,12 +922,58 @@ static int encode(int argc, char** argv) {
         put32((int32_t)fc); put32(mi); put32(equal ? 1 : 0); put32(wm); put32((int32_t)nb); put32((int32_t)pb);
         putb(edge.data(), edge.size() * 2); put32((int32_t)dfl.size()); putb(dfl.data(), dfl.size());
         putS(dL[0]); putS(dR[0]); put32((int32_t)fM.size()); for (auto& s : fM) putS(s); for (auto& s : fS) putS(s);
+        for (auto& r : packRecs) putb(r.data(), r.size());   // extension packs: one record each, after the main body's last stream and inside the one CRC
+        // the main body's name (2026-11-12, spec/lossy/SPEC.md, Section 5.6): one optional record after the last pack record,
+        // "LNAM" | 1 byte length | the name (UTF-8). Display only; a decoder that does not know it ends the pack list there.
+        if (!mainName.empty()) { mainRec.assign({ 'L', 'N', 'A', 'M', (uint8_t)mainName.size() }); mainRec.insert(mainRec.end(), mainName.begin(), mainName.end()); putb(mainRec.data(), mainRec.size()); }
         uint32_t c = 0xFFFFFFFFu; static const struct Tab { uint32_t t[256]; Tab() { for (uint32_t i = 0; i < 256; i++) { uint32_t v = i; for (int k = 0; k < 8; k++) v = v & 1 ? 0xEDB88320u ^ (v >> 1) : v >> 1; t[i] = v; } } } tab;
         for (auto& q : pc) for (size_t i = 0; i < q.second; i++) c = tab.t[(c ^ q.first[i]) & 0xFF] ^ (c >> 8);   // = crc32() of part_stream.h over the whole chunk
         put32((int32_t)(c ^ 0xFFFFFFFFu));   // v3: CRC-32 of everything before it (integrity check, whole chunk)
         size_t n = 0; for (auto& q : pc) n += q.second; return n; };
+    // FLAC form (2026-11-10): the CD layer coded once into FLAC frames (block size 4096, two independent channels, 16 bits: the frame
+    // writer of the LAES FLAC form), kept in the work folder as cd.flacframes; STREAMINFO needs the smallest and the largest frame and
+    // the MD5 of the samples. The frames are coded in batches (memory of one batch); each frame depends only on its own samples, so
+    // the bytes do not depend on the number of threads. A resumed run codes them again (seconds).
+    struct CdFlac { bool made = false; uint32_t fmin = 0, fmax = 0; uint8_t md5[16] = {0}; unsigned long long bytes = 0; } cdf;
+    const std::string cdFlacPath = T("cd.flacframes");
+    auto makeCdFlac = [&]() -> bool { if (cdf.made) return true;
+        const long n = nb - 2 * pb, B = 4096, nf = (n + B - 1) / B; if (n < 16) { printf("the CD layer is too short for the FLAC form (fewer than 16 samples): nothing written\n"); return false; }
+        blkio::Reader<int16_t, 2> r(T("b16.s16").c_str()); alignhash::Md5 md; FILE* f = fopen(cdFlacPath.c_str(), "wb"); if (!f) { printf("cannot write %s\n", cdFlacPath.c_str()); return false; }
+        const long batch = 512; uint32_t fmin = 0xFFFFFF, fmax = 0; unsigned long long bytes = 0; bool okw = true; std::vector<int16_t> x; std::vector<int32_t> ch[2];
+        const int th = (int)std::min(16u, std::max(1u, std::thread::hardware_concurrency()));
+        for (long k0 = 0; k0 < nf && okw; k0 += batch) { const long k1 = std::min(nf, k0 + batch), a = k0 * B, b = std::min(n, k1 * B), cnt = k1 - k0;
+            r.read(pb + a, pb + b, x); md.update((const uint8_t*)x.data(), x.size() * 2);   // 16-bit little-endian, interleaved: the bytes STREAMINFO's MD5 is defined on
+            for (int c = 0; c < 2; c++) { ch[c].resize((size_t)(b - a)); for (long i = 0; i < b - a; i++) ch[c][(size_t)i] = x[(size_t)i * 2 + c]; }
+            std::vector<std::vector<uint8_t>> fr((size_t)cnt); std::atomic<long> next{0}; std::atomic<bool> bad{false};
+            auto work = [&]() { try { for (long k; (k = next.fetch_add(1)) < cnt;) fr[(size_t)k] = laesflac::encodeFrame(ch, (int64_t)k * B, (int64_t)std::min<long>(B, (b - a) - k * B), (uint64_t)(k0 + k), (int)base, 16); } catch (...) { bad = true; } };
+            { std::vector<std::thread> pool; for (int t = 1; t < th && t < cnt; t++) { try { pool.emplace_back(work); } catch (...) { break; } } work(); for (auto& p : pool) p.join(); }
+            if (bad) { fclose(f); encio::fail("the CD layer could not be coded as FLAC (out of memory?)"); }
+            for (auto& q : fr) { fmin = std::min<uint32_t>(fmin, (uint32_t)q.size()); fmax = std::max<uint32_t>(fmax, (uint32_t)q.size()); bytes += q.size(); okw = okw && fwrite(q.data(), 1, q.size(), f) == q.size(); } }
+        okw = fclose(f) == 0 && okw; if (!okw) { printf("cannot write %s\n", cdFlacPath.c_str()); return false; }
+        const std::string h = md.hex(); for (int i = 0; i < 16; i++) cdf.md5[i] = (uint8_t)std::stoul(h.substr((size_t)i * 2, 2), nullptr, 16);
+        cdf.fmin = fmin; cdf.fmax = fmax; cdf.bytes = bytes; cdf.made = true; return true; };
+    // the bytes of the FLAC form: "fLaC" | STREAMINFO | VORBIS_COMMENT, PICTURE (the tags, if any) | the chunk body in "LAE1" APPLICATION
+    // blocks of at most 2^24 - 5 bytes each (the last one carries the "last metadata block" flag) | the audio frames. No SEEKTABLE,
+    // no CUESHEET, no padding, nothing between the pieces.
+    size_t flacPieces = 0;
+    auto fileBytesFlac = [&](const std::vector<Piece>& pc, size_t laeN, const std::function<bool(const uint8_t*, size_t)>& f) {
+        const long n = nb - 2 * pb; const uint32_t bs = n >= 4096 ? 4096u : (uint32_t)std::max<long>(16, n);
+        std::vector<uint8_t> o = {'f', 'L', 'a', 'C'}; laesflac::putBlockHeader(o, false, 0, 34);
+        laes::BitW si; si.put(bs, 16); si.put(bs, 16); si.put(cdf.fmin, 24); si.put(cdf.fmax, 24); si.put((uint64_t)(int)base, 20); si.put(1, 3); si.put(15, 5); si.put((uint64_t)n, 36);
+        o.insert(o.end(), si.b.begin(), si.b.end()); o.insert(o.end(), cdf.md5, cdf.md5 + 16); o.insert(o.end(), tagChunks.begin(), tagChunks.end());
+        if (!f(o.data(), o.size())) return false;
+        size_t left = laeN, room = 0, blocks = 0; size_t pieceMax = laeyflac::kPiece;
+        if (const char* tp = std::getenv("LAEY_TEST_PIECE")) { const long long v = atoll(tp); if (v >= 1 && (unsigned long long)v < laeyflac::kPiece) pieceMax = (size_t)v; }   // test only: smaller pieces, to exercise the split
+        for (auto& q : pc) { const uint8_t* p = q.first; size_t k = q.second;
+            while (k) { if (!room) { room = std::min(pieceMax, left); std::vector<uint8_t> bh; laesflac::putBlockHeader(bh, left == room, 2, (uint32_t)(room + 4));
+                    bh.insert(bh.end(), {'L', 'A', 'E', '1'}); blocks++; if (!f(bh.data(), bh.size())) return false; }
+                const size_t t = std::min(k, room); if (!f(p, t)) return false; p += t; k -= t; room -= t; left -= t; } }
+        if (left || room) return false; flacPieces = blocks;
+        FILE* ff = fopen(cdFlacPath.c_str(), "rb"); if (!ff) return false; std::vector<uint8_t> buf((size_t)1 << 20); unsigned long long total = 0; bool okc = true;
+        for (size_t k; okc && (k = fread(buf.data(), 1, buf.size(), ff)) > 0;) { total += k; okc = f(buf.data(), k); }
+        fclose(ff); return okc && total == cdf.bytes; };
     // the bytes of the output file (as wavio::writeCD writes them), handed to f piece by piece
-    auto fileBytes = [&](const std::vector<Piece>& pc, size_t laeN, const std::function<bool(const uint8_t*, size_t)>& f) {
+    auto fileBytesWav = [&](const std::vector<Piece>& pc, size_t laeN, const std::function<bool(const uint8_t*, size_t)>& f) {
         std::vector<uint8_t> o; const size_t extra = laeN == 0 ? 0 : 8 + laeN + (laeN & 1); wavio::hdr(o, (int)base, 2, 16, (size_t)cdBytes, extra + tagChunks.size());
         if (!tagChunks.empty()) o.insert(o.begin() + 36, tagChunks.begin(), tagChunks.end());   // tags after "fmt " (RIFF 12 + fmt 24 bytes), before "data"
         if (!f(o.data(), o.size())) return false;
@@ -743,8 +985,10 @@ static int encode(int argc, char** argv) {
         for (auto& q : pc) if (q.second && !f(q.first, q.second)) return false;
         const uint8_t z = 0; return !(laeN & 1) || f(&z, 1); };
     // written to <out>.part and read back: the file on disk must hold exactly this CD layer and this chunk
+    auto fileBytes = [&](const std::vector<Piece>& pc, size_t laeN, const std::function<bool(const uint8_t*, size_t)>& f) { return asFlac ? fileBytesFlac(pc, laeN, f) : fileBytesWav(pc, laeN, f); };
     auto writeFile = [&]() { std::vector<std::vector<uint8_t>> small; std::vector<Piece> pc; const size_t laeN = chunkPieces(small, pc);
-        if (!wavio::fits32(cdBytes, 8ULL + laeN + 1 + tagChunks.size())) { printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return (size_t)0; }
+        if (asFlac) { if (laeN == 0 || laeN > 0x7FFFFFFFull || !makeCdFlac()) { if (laeN > 0x7FFFFFFFull) printf("the extension would exceed 2 GB: nothing written\n"); return (size_t)0; } }
+        else if (!wavio::fits32(cdBytes, 8ULL + laeN + 1 + tagChunks.size())) { printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return (size_t)0; }
         encrun::partMine = true; markDone("part");   // resume: this run owns the .part from here on
         bool okw = false; { FILE* f = fopen(partPath.c_str(), "wb"); if (f) { okw = fileBytes(pc, laeN, [&](const uint8_t* p, size_t n) { return fwrite(p, 1, n, f) == n; }); okw = fclose(f) == 0 && okw; } }
         if (!okw || encio::testFail("partwrite")) { printf("cannot write %s\n", partPath.c_str()); return (size_t)0; }
@@ -791,12 +1035,18 @@ static int encode(int argc, char** argv) {
         std::error_code ec; for (int k = 0; k < 20; k++) { ec.clear(); std::filesystem::rename(partPath, outPath, ec); if (!ec) break; std::this_thread::sleep_for(std::chrono::milliseconds(250)); }
         if (ec) { printf("cannot rename %s to %s: %s (the output may be open in another program)\n", partPath.c_str(), outPath.c_str(), ec.message().c_str()); oldNote(); return 2; }
         encrun::partMine = false; encrun::keepTmp = false; }   // finished: the work folder goes, also after a resumed run
+    if (nPacks) {   // the file's packs: printed, and their alignment reports go into the report beside the file
+        size_t all = 0; for (auto& r : packRecs) all += r.size();
+        printf("extension packs: %d further pack(s), %zu B in all (pack 0 = the main body, from %s)\n", nPacks, all, argv[1]);
+        for (int k = 0; k < nPacks; k++) printf("  pack %d: %s%s%s%s, %zu B\n", k + 1, pk[k].path.c_str(), pk[k].name.empty() ? "" : " (\"", pk[k].name.c_str(), pk[k].name.empty() ? "" : "\")", packRecs[(size_t)k].size());
+        if (!packReport.empty()) { if (alignReport.empty()) alignReport = std::string("LAE alignment report (further masters)\noutput: ") + outPath + "\n"; alignReport += packReport; } }
     if (!alignReport.empty()) { const std::string rp = outPath + ".align.txt"; FILE* f = fopen(rp.c_str(), "wb");
         bool ok = f && fwrite(alignReport.data(), 1, alignReport.size(), f) == alignReport.size(); if (f && fclose(f)) ok = false;
         printf(ok ? "alignment report: %s\n" : "WARNING: the alignment report %s could not be written (the LAE file itself is complete)\n", rp.c_str()); }
     if (diskPoll.peak > 0) printf("work folder: largest %.2f GB (%.0f bytes per master frame; sampled every 0.25 s)\n", diskPoll.peak / 1e9, diskPoll.peak / (double)(Lm + 2 * P));
     size_t sd = dL[0].size() + dR[0].size(), sf = 0; for (auto& s : fM) sf += s.size(); for (auto& s : fS) sf += s.size();
     std::string extra; if (!note32.empty()) extra += " | " + note32; if (!alignNote.empty()) extra += " | " + alignNote;
+    if (asFlac) printf("FLAC form: CD layer %llu B as FLAC frames (%.1f %% of its %llu B of PCM), extension in %zu LAE1 block(s)\n", cdf.bytes, cdBytes ? 100.0 * cdf.bytes / cdBytes : 0.0, cdBytes, flacPieces);
     printf("LAE encode OK: %s | CD %d Hz cut-off %.0f Hz | scheme %d, mode %s (share by %s) %s | CD PCM %zu B, depth %zu B, frequency %zu B in %zu octave segment(s), chunk %zu B | beyond full scale before limiter %s | %.1f s%s\n",
            argv[2], (int)base, fc, scheme, part::MODES[mi].name, wm == 2 ? "cells+energy" : (wm ? "energy" : "cells"), equal ? "equal" : "unequal", (size_t)cdBytes, sd, sf, fM.size(), chunk,
            nclip >= 0 ? std::to_string(nclip).c_str() : "not measured", std::chrono::duration<double>(std::chrono::steady_clock::now() - T0).count(), extra.c_str());

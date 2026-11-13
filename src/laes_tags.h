@@ -71,9 +71,9 @@ inline void be32(std::vector<uint8_t>& o, uint32_t v) { for (int i = 3; i >= 0; 
 inline void add(std::vector<uint8_t>& o, const std::string& s) { o.insert(o.end(), s.begin(), s.end()); }
 
 // FLAC: VORBIS_COMMENT (type 4) then one PICTURE (type 6) per picture; lastBlock: the final one carries the "last" flag. Empty for no tags.
-inline std::vector<uint8_t> flacBlocks(const Tags& t, bool lastBlock) {
+inline std::vector<uint8_t> flacBlocks(const Tags& t, bool lastBlock, const char* enc = kEncoder) {   // enc: the vendor string (lae_enc names itself)
     std::vector<std::vector<uint8_t>> bl; std::vector<int> types;
-    if (!t.kv.empty()) { std::vector<uint8_t> b; le32(b, (uint32_t)strlen(kEncoder)); add(b, kEncoder); le32(b, (uint32_t)t.kv.size());
+    if (!t.kv.empty()) { std::vector<uint8_t> b; le32(b, (uint32_t)strlen(enc)); add(b, enc); le32(b, (uint32_t)t.kv.size());
         for (auto& kv : t.kv) { const std::string s = kv.first + "=" + kv.second; le32(b, (uint32_t)s.size()); add(b, s); }
         bl.push_back(b); types.push_back(4); }
     for (auto& p : t.pics) { std::vector<uint8_t> b; be32(b, (uint32_t)p.type); be32(b, (uint32_t)p.mime.size()); add(b, p.mime); be32(b, 0);   // no description

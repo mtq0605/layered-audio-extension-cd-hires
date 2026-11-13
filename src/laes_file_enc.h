@@ -9,14 +9,19 @@
 namespace laes {
 // storage -1 = the encoder chooses storage and reference tier (refTier is then ignored and whole / frac are T relative to the core);
 // storage 0 / 1 / 2 with refTier given: whole / frac are T relative to that tier
-struct MasterIn { Pcm m; int storage = -1; int refTier = 0; int64_t whole = 0; uint32_t frac = 0; };
+struct MasterIn { Pcm m; int storage = -1; int refTier = 0; int64_t whole = 0; uint32_t frac = 0; std::string name; int flags = 0; int menu = 0; };   // name, flags, menu position: payload version 2 (laes_file.h)
 struct BWr { std::vector<uint8_t> b; void u(uint64_t v, int n) { for (int i = 0; i < n; i++) b.push_back((uint8_t)(v >> (8 * i))); } void raw(const uint8_t* p, size_t n) { b.insert(b.end(), p, p + n); } };
 // ---- encoder: core (16 / 24 / 32 bit) + masters -> "LAE " chunk body (payload + CRC-32); coreMode 0 = WAV / CD, 1 = FLAC audio frames
-inline std::vector<uint8_t> encodeLaes(const Pcm& core, int baseRate, const std::vector<MasterIn>& ms, std::vector<MasterInfo>& info, std::string& err, int coreMode = 0) {
+inline std::vector<uint8_t> encodeLaes(const Pcm& core, int baseRate, const std::vector<MasterIn>& ms, std::vector<MasterInfo>& info, std::string& err, int coreMode = 0, const Head& head = Head()) {
     err.clear(); info.assign(ms.size(), MasterInfo()); BWr o; uint8_t sh[32]; hashAnyCore(core, sh);
     if (core.bits != 16 && core.bits != 24 && core.bits != 32) { err = "core master word length must be 16, 24 or 32"; return {}; } if (coreMode != 0 && coreMode != 1) { err = "core master mode must be 0 or 1"; return {}; }
-    o.u(0x3245414Cull, 4); o.u(1, 2); o.u(64, 2); o.u((uint64_t)baseRate, 4); o.u((uint64_t)core.bits, 1); o.u(2, 1); o.u(ms.size(), 1); o.u((uint64_t)coreMode, 1); o.u((uint64_t)core.frames(), 8); o.raw(sh, 32); o.u(0, 8);
-    if (ms.empty() || ms.size() > 16) { err = "1 to 16 masters"; return {}; }
+    if (ms.empty() || ms.size() > 255) { err = "1 to 255 masters"; return {}; }
+    int ver = ms.size() > 16 ? 2 : 1; for (const MasterIn& x : ms) { if (!validMasterName(x.name)) { err = "a master name must be UTF-8 of at most 255 bytes without control characters"; return {}; } if (x.flags & ~kNoDerive) { err = "unknown master flag"; return {}; } if (!x.name.empty() || x.flags || x.menu) ver = 2; }
+    { std::vector<MasterInfo> t(ms.size()); for (size_t i = 0; i < ms.size(); i++) t[i].menu = ms[i].menu; if (!menuOk(t)) { err = "menu positions must be 1 ... M, each once"; return {}; } }
+    if (head.def < 0 || head.def > (int)ms.size()) { err = "the default master must be 0 (the core master) or 1 ... M"; return {}; } if (head.coreFlags & ~kNoDerive) { err = "unknown core master flag"; return {}; }
+    if (head.def || head.coreFlags) ver = 2;
+    o.u(0x3245414Cull, 4); o.u((uint64_t)ver, 2); o.u(64, 2); o.u((uint64_t)baseRate, 4); o.u((uint64_t)core.bits, 1); o.u(2, 1); o.u(ms.size(), 1); o.u((uint64_t)coreMode, 1); o.u((uint64_t)core.frames(), 8); o.raw(sh, 32);
+    { uint8_t hb[8]; headTo(ver, head, hb); o.raw(hb, 8); }
     std::vector<std::vector<std::vector<V>>> lev(ms.size());   // lev[m][c][k]: level k of master m (samples >> w), k = 0..stages
     for (size_t mi = 0; mi < ms.size(); mi++) { const Pcm& m = ms[mi].m; MasterInfo& I = info[mi];
         if (m.bits != 16 && m.bits != 24 && m.bits != 32) { err = "master word length must be 16, 24 or 32"; return {}; }
@@ -52,8 +57,9 @@ inline std::vector<uint8_t> encodeLaes(const Pcm& core, int baseRate, const std:
             if (best < 0 || C.bits < cs[best].bits) best = (int)q; }
         if (best < 0) { err = "no usable storage for master " + std::to_string(mi + 1); return {}; }
         Cand& B = cs[best]; I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? 0 : B.whole; I.frac = B.storage == 1 ? 0 : B.frac; I.layerBits = B.bits;
-        o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(0, 3); o.u((uint64_t)I.rate, 4); o.u(0, 4); o.u((uint64_t)I.frames, 8);
-        o.u((uint64_t)I.whole, 8); o.u(I.frac, 4); o.u(0, 4); o.raw(I.sha, 32);
+        I.name = ms[mi].name; I.flags = ms[mi].flags; I.menu = ms[mi].menu;
+        o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? I.name.size() : 0, 1); o.u(ver == 2 ? (uint64_t)I.flags : 0, 1); o.u(ver == 2 ? (uint64_t)I.menu : 0, 1); o.u((uint64_t)I.rate, 4); o.u(0, 4); o.u((uint64_t)I.frames, 8);
+        o.u((uint64_t)I.whole, 8); o.u(I.frac, 4); o.u(0, 4); o.raw(I.sha, 32); if (ver == 2) o.raw((const uint8_t*)I.name.data(), I.name.size());
         for (int c = 0; c < 2; c++) { o.u(B.e[c].size(), 4); o.raw(B.e[c].data(), B.e[c].size()); for (int k = B.j + 1; k <= st; k++) { o.u(d[c][k].size(), 4); o.raw(d[c][k].data(), d[c][k].size()); } } }
     uint32_t crc = 0xFFFFFFFFu; for (uint8_t by : o.b) { crc ^= by; for (int k = 0; k < 8; k++) crc = crc & 1 ? 0xEDB88320u ^ (crc >> 1) : crc >> 1; } crc ^= 0xFFFFFFFFu; o.u(crc, 4);
     return o.b; }

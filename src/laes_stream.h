@@ -236,22 +236,27 @@ inline void levelsDown(const std::string& top, int stages, std::vector<std::stri
     for (int k = stages; k > 0; k--) { std::unique_ptr<Sig> x(new FileSig(k == stages ? top : lev[(size_t)k])); const int64_t ne = (x->n + 1) / 2; lev[(size_t)(k - 1)] = stem + "_L" + std::to_string(k - 1);
         SigOut o(lev[(size_t)(k - 1)]); V s, d; const int64_t P = piece << (k - 1);
         for (int64_t a = 0; a < ne; a += P) { fwdPiece(*x, a, std::min(ne, a + P), s, d, threads); o.put(s.data(), s.size()); } o.close(); } }
-inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& core, int baseRate, const std::string& wd, std::vector<DecMaster>& out, int64_t piece, int threads) {
-    using namespace laes; out.clear(); In body(bodyPath); if (body.n < 64 + 4) return "LAES block too short";
+inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& core, int baseRate, const std::string& wd, std::vector<DecMaster>& out, int64_t piece, int threads, laes::Head* head = nullptr) {
+    using namespace laes; out.clear(); if (head) *head = Head(); In body(bodyPath); if (body.n < 64 + 4) return "LAES block too short";
     { uint32_t crc = 0xFFFFFFFFu; std::vector<uint8_t> b; const long long last = body.n - 4;
       for (long long a = 0; a < last; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, last - a)); body.read(a, b.data(), b.size()); for (uint8_t by : b) { crc ^= by; for (int k = 0; k < 8; k++) crc = crc & 1 ? 0xEDB88320u ^ (crc >> 1) : crc >> 1; } }
       crc ^= 0xFFFFFFFFu; uint8_t t[4]; body.read(last, t, 4); const uint32_t stored = t[0] | t[1] << 8 | t[2] << 16 | (uint32_t)t[3] << 24; if (crc != stored) return "LAES block damaged (CRC-32)"; }
     const long long end = body.n - 4; long long pos = 0; bool trunc = false;
     auto u = [&](int k) -> uint64_t { if (pos + k > end) { trunc = true; return 0; } uint8_t t[8]; body.read(pos, t, (size_t)k); pos += k; uint64_t v = 0; for (int i = 0; i < k; i++) v |= (uint64_t)t[i] << (8 * i); return v; };
-    uint64_t magic = u(4), ver = u(2), hs = u(2), base = u(4), cbits = u(1), ch = u(1), nm = u(1), cmode = u(1), nc = u(8); uint8_t csha[32] = {0}; if (pos + 32 <= end) { body.read(pos, csha, 32); pos += 32; } else trunc = true; u(8);
-    if (trunc || magic != 0x3245414Cull) return "not an LAES block"; if (ver != 1 || hs != 64) return "unsupported LAES version";
-    if ((base != 44100 && base != 48000) || (int)base != baseRate || (int)cbits != core.bits || ch != 2 || cmode > 1 || nm < 1 || nm > 16) return "invalid LAES header";
+    uint64_t magic = u(4), ver = u(2), hs = u(2), base = u(4), cbits = u(1), ch = u(1), nm = u(1), cmode = u(1), nc = u(8); uint8_t csha[32] = {0}; if (pos + 32 <= end) { body.read(pos, csha, 32); pos += 32; } else trunc = true;
+    uint8_t hb[8] = {0}; if (pos + 8 <= end) { body.read(pos, hb, 8); pos += 8; } else trunc = true;
+    if (trunc || magic != 0x3245414Cull) return "not an LAES block"; if ((ver != 1 && ver != 2) || hs != 64) return "unsupported LAES version";
+    Head hd; if ((base != 44100 && base != 48000) || (int)base != baseRate || (int)cbits != core.bits || ch != 2 || cmode > 1 || !headerCountOk(ver, nm) || !headFrom(ver, hb, nm, hd)) return "invalid LAES header";
+    if (head) *head = hd;
     if (nc != (uint64_t)core.frames()) return "core master length differs from the LAES header";
     { uint8_t h[32]; hashAnyCore(core, h); if (memcmp(h, csha, 32)) return "core master differs from the one this LAES block was made for (SHA-256)"; }
     for (uint64_t mi = 0; mi < nm; mi++) { DecMaster D; MasterInfo& I = D.I;
-        I.bits = (int)u(1); I.stages = (int)u(1); I.w = (int)u(1); I.storage = (int)u(1); I.refTier = (int)u(1); u(3); I.rate = (int)u(4); u(4); const uint64_t F64 = u(8);
+        I.bits = (int)u(1); I.stages = (int)u(1); I.w = (int)u(1); I.storage = (int)u(1); I.refTier = (int)u(1);
+        const uint64_t nl = u(1), fl = u(1), mp = u(1); I.rate = (int)u(4); u(4); const uint64_t F64 = u(8);
         I.whole = (int64_t)u(8); I.frac = (uint32_t)u(4); u(4); uint8_t sha[32] = {0}; if (pos + 32 <= end) { body.read(pos, sha, 32); pos += 32; } else trunc = true;
         if (trunc) return "LAES block truncated";
+        if (ver == 2) { if (pos + (long long)nl > end) return "LAES block truncated"; std::string nm2((size_t)nl, '\0'); if (nl) body.read(pos, &nm2[0], (size_t)nl); pos += (long long)nl;
+            if (fl & ~(uint64_t)kNoDerive) return "invalid master record"; if (!validMasterName((const uint8_t*)nm2.data(), nm2.size())) return "invalid master name"; I.name = nm2; I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)
             || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40)) return "invalid master record";
@@ -281,6 +286,7 @@ inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& cor
         uint8_t h[32]; hashFiles(D.top[0], D.top[1], I.w, h); D.shaOk = memcmp(h, I.sha, 32) == 0;
         for (int c = 0; c < 2; c++) levelsDown(D.top[c], I.stages, D.lev[c], stem + "_c" + std::to_string(c) + "_lv", piece, threads);
         out.push_back(D); }
+    { std::vector<laes::MasterInfo> mi; for (const auto& D : out) mi.push_back(D.I); if (!laes::menuOk(mi)) return "invalid menu positions"; }
     if (pos != end) return "unexpected bytes after the last master";
     return ""; }
 }  // namespace laess

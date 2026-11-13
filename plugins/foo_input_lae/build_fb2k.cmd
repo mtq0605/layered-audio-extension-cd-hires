@@ -1,7 +1,8 @@
 @echo off
 rem SPDX-FileCopyrightText: 2026 mtq0605
 rem SPDX-License-Identifier: Apache-2.0
-rem usage: build_fb2k.cmd <SDK-2019-12-27 folder> <SDK-2026-10-01 folder> <output folder>
+rem usage: build_fb2k.cmd <SDK-2019-12-27 folder> <SDK-2026-10-01 folder> <output folder> [en | zh]
+rem   en (default): the English build; zh: the Chinese build (/DLAE_LANG_ZH). The two are standalone versions.
 rem Builds foo_input_lae.dll twice and packs both into foo_input_lae.fb2k-component (foobar2000 picks the one that fits):
 rem   x86 (root of the package): foobar2000 1.4 / 1.5 and 2.x 32-bit, built against SDK-2019-12-27 (the SDK code needs /d2notypeopt);
 rem   x64 (folder x64 in the package): foobar2000 2.x 64-bit, built against SDK-2026-10-01.
@@ -11,6 +12,9 @@ setlocal
 set SDK86=%~1
 set SDK64=%~2
 set OUT=%~3
+set LANGDEF=
+if /i "%~4"=="zh" set LANGDEF=/DLAE_LANG_ZH
+if not "%~4"=="" if /i not "%~4"=="zh" if /i not "%~4"=="en" (echo language must be en or zh & exit /b 1)
 if "%OUT%"=="" (echo usage: build_fb2k.cmd ^<SDK-2019-12-27^> ^<SDK-2026-10-01^> ^<output folder^> & exit /b 1)
 set LAE=%~dp0..\..\src
 set VC=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build
@@ -46,7 +50,7 @@ cl %COMMON% /d2notypeopt /I"%SDK%" /I"%SDK%\foobar2000" /Fo"%O%\obj\\" "%SDK%\fo
 if errorlevel 1 (echo BUILD FAILED sdk %ARCH% & type "%O%\build_sdk.txt" & exit /b 1)
 set PERM=
 if "%ARCH%"=="x64" set PERM=/permissive
-cl %COMMON% %PERM% /d2notypeopt /DLAE_STATIC /I"%SDK%" /I"%SDK%\foobar2000" /I"%LAE%" /Fo"%O%\obj\\" "%~dp0foo_input_lae.cpp" > "%O%\build_component.txt" 2>&1
+cl %COMMON% %PERM% %LANGDEF% /d2notypeopt /DLAE_STATIC /I"%SDK%" /I"%SDK%\foobar2000" /I"%LAE%" /Fo"%O%\obj\\" "%~dp0foo_input_lae.cpp" > "%O%\build_component.txt" 2>&1
 if errorlevel 1 (echo BUILD FAILED component %ARCH% & type "%O%\build_component.txt" & exit /b 1)
 cl %COMMON% /std:c++17 /fp:precise /D_USE_MATH_DEFINES /DLAE_STATIC /Fo"%O%\obj\\" "%LAE%\lae_api.cpp" > "%O%\build_lae.txt" 2>&1
 if errorlevel 1 (echo BUILD FAILED liblae %ARCH% & type "%O%\build_lae.txt" & exit /b 1)

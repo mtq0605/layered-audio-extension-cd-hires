@@ -28,6 +28,7 @@
 #include <thread>
 #include <vector>
 #include "../../../src/lae_api.h"
+#include "../../../src/lae_flacmeta.h"   // the FLAC form of LAEY: structure and Vorbis comments (2026-11-10)
 #include "../../../src/lae_wavtags.h"   // tags of the WAV form (LIST/INFO + id3), shared by the LAE player plugins
 
 namespace {
@@ -100,17 +101,25 @@ Verified g_verified;
 
 int mastersOf(const laes_file* f) { laes_file_info fi; laes_get_info(f, &fi); int n = 0; for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_MASTER) n++; } return n; }
 
-// what plays, from the settings (as the foobar2000 component): layers 0 = all, 1 = CD + depth (base rate), 2 = CD only; the highest rate up
-// to maxrate, then the longest word up to maxbits; masters before rate levels; derived 16-bit versions only when nothing else fits
+// what plays, from the settings (as the foobar2000 component): layers 0 = all, 1 = CD or core layer + depth (base rate), 2 = CD or core layer only, 3 = CD or core layer + frequency layer (no depth layer). LAES (SPEC 10.3): the file's default entry (a master, else the core master); of that master the highest rate up to maxrate; a word above maxbits: that entry's own derived 16-bit version. Never another master.
 int pick(const laes_file* f, int layers, int maxrate, int maxbits) {
     laes_file_info fi; laes_get_info(f, &fi); if (!fi.payload_ok || layers == 2) return 0;
-    const int capR = layers == 1 ? fi.base_rate : maxrate; int best = 0; laes_choice_info b{}; laes_get_choice(f, 0, &b);
-    for (int i = 1; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_DERIVED16) continue;
-        if ((capR > 0 && c.rate > capR) || (maxbits > 0 && c.bits > maxbits)) continue;
-        const bool better = c.rate != b.rate ? c.rate > b.rate : c.bits != b.bits ? c.bits > b.bits : (c.kind == LAES_KIND_MASTER && b.kind != LAES_KIND_MASTER);
-        if (better) { best = i; b = c; } }
-    if (best == 0 && maxbits > 0 && maxbits < fi.core_bits) for (int i = 1; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c); if (c.kind == LAES_KIND_DERIVED16 && c.rate == fi.base_rate) return i; }
-    return best; }
+    const int capR = layers == 1 ? fi.base_rate : maxrate;
+    auto capped = [&](int i) { laes_choice_info c; laes_get_choice(f, i, &c);   // word length above the maximum: this entry's own derived 16-bit version, if the file offers one
+        if (maxbits > 0 && c.bits > maxbits) for (int d = 0; d < fi.choices; d++) if (laes_choice_from(f, d) == i) return d;
+        return i; };
+    // SPEC 10.3 (2026-11-12): what plays without a choice of the user is the file's default entry (set when the file was encoded: a
+    // master itself, else the core master), never an entry picked by rate, size or device. The limits work inside that master only.
+    int d = laes_default_choice(f); if (d < 0 || d >= fi.choices) d = 0;
+    laes_choice_info dc; laes_get_choice(f, d, &dc); if (dc.kind != LAES_KIND_MASTER) return capped(0);
+    for (int i = d; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(f, i, &c);
+        if (i > d && (c.kind == LAES_KIND_MASTER || c.kind == LAES_KIND_CORE)) break;
+        if (c.master != dc.master || c.kind == LAES_KIND_DERIVED16) continue;
+        if (capR > 0 && c.rate > capR) continue;
+        return capped(i); }
+    return capped(0); }
+
+
 
 class CLaeDecoder : public kodi::addon::CInstanceAudioDecoder {
 public:
@@ -141,7 +150,7 @@ public:
 
     int64_t Seek(int64_t time) override {
         FpPin pin; const uint64_t frame = std::min<uint64_t>(m_frames, (uint64_t)(time * (int64_t)m_rate / 1000)); char err[256];
-        if (m_laes) { laes_choice_info c; laes_get_choice(m_laes, m_choice, &c); if (c.kind == LAES_KIND_DERIVED16) return -1;   // its dither runs from frame 0
+        if (m_laes) {   // every choice starts at the frame, a derived 16-bit version too (its dither state is moved there, bit-exact; 2026-11-12)
             if (m_play) laes_stop(m_play); m_play = laes_start_at(m_laes, m_choice, frame, 0, err, sizeof err); return m_play ? time : -1; }
         if (m_track) return lae_seek(m_track, frame) == 0 ? time : -1;
         return -1; }
@@ -162,12 +171,24 @@ public:
             else for (int k = 0; ; k++) { const char* key; const char* val; if (laes_get_tag(q, k, &key, &val) != 0) break; putTag(tag, key, val); }
             laes_close(q); return true; }
         // LAEY (container v5): the master rate and length from the "LAE " chunk header (magic LAE1, version 5, master rate, base rate, stages, frames)
-        uint8_t h[12]; if (s.size < 12 || Src::read(&s, 0, h, 12) != 0 || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) return false;
+        // the same 24 header bytes from the FLAC form (2026-11-10): the start of the "LAE1" APPLICATION data; tags from the Vorbis comments
+        auto fromHeader = [&](const uint8_t* hd, const lae_wavtags::List& tg) { auto u32 = [&](int o) { return (uint32_t)hd[o] | (uint32_t)hd[o + 1] << 8 | (uint32_t)hd[o + 2] << 16 | (uint32_t)hd[o + 3] << 24; };
+            if (u32(0) != 0x3145414Cu || u32(4) != 5) return false; const uint32_t master = u32(8), base = u32(12), frames = u32(20); if (!master || !base) return false;
+            const int ly = kodi::addon::GetSettingInt("layers"), cap = rateSetting(); int out = ly == 1 || ly == 2 ? (int)base : (int)master;   // as Init picks the route
+            if ((ly == 0 || ly == 3) && cap > 0) while (out > cap && out > (int)base) out /= 2;
+            tag.SetDuration((int)(frames / master)); tag.SetSamplerate(out); tag.SetChannels(2);
+            for (auto& kv : tg) putTag(tag, kv.first.c_str(), kv.second.c_str());
+            return true; };
+        uint8_t h[12]; if (s.size < 12 || Src::read(&s, 0, h, 12) != 0) return false;
+        if (!memcmp(h, "fLaC", 4)) { const laeyflac::ReadFn rd = [&s](uint64_t off, void* buf, size_t n) { return Src::read(&s, off, buf, n) == 0; }; laeyflac::Layout L; bool notLaey = true; uint8_t hd[24];
+            if (!laeyflac::layout(rd, s.size, L).empty() || !laeyflac::check(L, notLaey).empty() || !laeyflac::head(rd, L, hd, 24)) return false;
+            return fromHeader(hd, laeyflac::comments(rd, L)); }
+        if (memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) return false;
         for (uint64_t pos = 12; pos + 8 <= s.size;) { uint8_t c[8]; if (Src::read(&s, pos, c, 8) != 0) return false; const uint64_t n = (uint64_t)c[4] | (uint64_t)c[5] << 8 | (uint64_t)c[6] << 16 | (uint64_t)c[7] << 24;
             if (!memcmp(c, "LAE ", 4)) { uint8_t hd[24]; if (n < 24 || Src::read(&s, pos + 8, hd, 24) != 0) return false; auto u32 = [&](int o) { return (uint32_t)hd[o] | (uint32_t)hd[o + 1] << 8 | (uint32_t)hd[o + 2] << 16 | (uint32_t)hd[o + 3] << 24; };
                 if (u32(0) != 0x3145414Cu || u32(4) != 5) return false; const uint32_t master = u32(8), base = u32(12), frames = u32(20); if (!master || !base) return false;
                 const int ly = kodi::addon::GetSettingInt("layers"), cap = rateSetting(); int out = ly == 1 || ly == 2 ? (int)base : (int)master;   // as Init picks the route
-                if (ly == 0 && cap > 0) while (out > cap && out > (int)base) out /= 2;
+                if ((ly == 0 || ly == 3) && cap > 0) while (out > cap && out > (int)base) out /= 2;
                 tag.SetDuration((int)(frames / master)); tag.SetSamplerate(out); tag.SetChannels(2);
                 for (auto& kv : wt) putTag(tag, kv.first.c_str(), kv.second.c_str());
                 return true; }
@@ -215,8 +236,10 @@ private:
     bool startLaey() {
         char err[512] = ""; if (!lae_selftest()) { kodi::Log(ADDON_LOG_ERROR, "LAE: decoder self-test failed"); return false; }
         m_track = lae_open_reader(&Src::read, m_src.get(), m_src->size, err, sizeof err); if (!m_track) { kodi::Log(ADDON_LOG_ERROR, "LAE: %s", err); return false; }
-        const int layers = kodi::addon::GetSettingInt("layers"); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : LAE_ROUTE_FULL;
-        lae_info li; lae_get_info(m_track, &li); int out = 0; const int cap = rateSetting(); if (route == LAE_ROUTE_FULL && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
+        // LAEY extension packs: the pack number the user set (0 = the main body); a file without that pack plays pack 0. Never chosen automatically.
+        { const int pk = kodi::addon::GetSettingInt("pack"); if (pk > 0 && pk < lae_pack_count(m_track) && lae_select_pack(m_track, pk) != 0) kodi::Log(ADDON_LOG_WARNING, "LAE: extension pack %d cannot be used: pack 0 plays", pk); }
+        const int layers = kodi::addon::GetSettingInt("layers"); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : layers == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL;
+        lae_info li; lae_get_info(m_track, &li); int out = 0; const int cap = rateSetting(); if ((route == LAE_ROUTE_FULL || route == LAE_ROUTE_16) && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
         if (lae_start(m_track, route, out, err, sizeof err) != 0 && lae_start(m_track, LAE_ROUTE_CD, 0, err, sizeof err) != 0) { kodi::Log(ADDON_LOG_ERROR, "LAE: %s", err); return false; }
         int rate, bits; uint64_t frames; lae_output_format(m_track, &rate, &bits, &frames); m_rate = rate; m_bits = bits == 16 ? 16 : 24; m_frames = frames; return true; }
 };

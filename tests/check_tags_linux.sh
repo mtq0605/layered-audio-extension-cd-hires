@@ -10,7 +10,7 @@ w=$(mktemp -d); bad=0; F="-O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -
 REF_PLAIN=c9cb93ff30a1f1887e5e826d671ca1716635affee64e278bc186e73e2bfeee25
 REF_TAGGED=47249d07b4e950237a5779ce3c325d6e432b3d5e53641ad2e523522b57c4a78d
 for p in lae_enc gen_suite cut_wav; do g++ $F -o "$w/$p" src/$p.cpp 2> "$w/b_$p.txt" || { echo "build $p: FAILED"; head -20 "$w/b_$p.txt"; exit 1; }; done
-"$w/gen_suite" "$w" 88200 > /dev/null && "$w/cut_wav" "$w/sweep_88200.wav" "$w/s.wav" 5 2 > /dev/null || { echo "source: FAILED"; exit 1; }
+"$w/gen_suite" "$w" 88200 20 sweep > /dev/null && "$w/cut_wav" "$w/sweep_88200.wav" "$w/s.wav" 5 2 > /dev/null || { echo "source: FAILED"; exit 1; }
 # two tiny "pictures": a PNG header with IHDR (1 x 1, 8-bit RGB) and a JPEG start with an SOF0 marker; stored byte for byte
 printf '\211PNG\r\n\032\n\000\000\000\015IHDR\000\000\000\001\000\000\000\001\010\002\000\000\000\220wS\336' > "$w/c.png"
 printf '\377\330\377\300\000\021\010\000\002\000\003\003\001\021\000\002\021\001\003\021\001\377\331' > "$w/b.jpg"

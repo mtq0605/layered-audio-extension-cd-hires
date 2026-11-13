@@ -29,7 +29,7 @@ import com.lae.core.U;
  *     per channel (L, then R), with j = 0 for storage 0 / 1 and j = min(stages, stages of the tier) for storage 2:
  *       u32 length + the level-j difference (storage 0 / 2) or the base level (storage 1), coded with laes_codec (block 4096 * 2^j);
  *       then for each stage k = j+1..stages: u32 length + octave layer k (block 4096 * 2^(k-1))
- *   No index, no seek table, no cue table; nothing interleaved with the core (rules T-1, T-2).
+ *   No index, no seek table, no cue table; nothing interleaved with the core.
  * Reconstruction of master m: level j = (storage 1 ? 0 : reference(tier's level j, T * 2^j, grid difference)) + layer; then inv() per stage
  * k = j+1..stages; samples &lt;&lt; w. A tier's level j comes from its decoded samples (&gt;&gt; w) by fwd(). Each channel only from the same channel.
  * grid difference (up) = the master's significant bits (bits - w) minus the tier's (core: its bits; master k: bits_k - w_k); it may be negative.
@@ -63,7 +63,38 @@ public final class LaesFile {
         for (int i = 0; i < p.frames(); i++) for (int c = 0; c < 2; c++) { final int v = (int) p.c[c][i]; b[fill++] = (byte) v; b[fill++] = (byte) (v >>> 8); if (fill >= (1 << 16)) { s.update(b, 0, fill); fill = 0; } }
         s.update(b, 0, fill); s.finish(out); }
     /** port of laes_file.h:MasterInfo (frac: uint32 in an int) */
-    public static final class MasterInfo { public int bits = 0, stages = 0, w = 0, storage = 0, refTier = 0, rate = 0; public long frames = 0; public long whole = 0; public int frac = 0; public byte[] sha = new byte[32]; public double layerBits = 0; }
+    public static final class MasterInfo { public int bits = 0, stages = 0, w = 0, storage = 0, refTier = 0, rate = 0; public long frames = 0; public long whole = 0; public int frac = 0; public byte[] sha = new byte[32]; public double layerBits = 0;
+        public String name = ""; public int flags = 0; public int menu = 0; }   // name, flags, menu position: payload version 2 (2026-11-11); menu 0 = the file order
+    // port of laes_file.h:kNoDerive  (master record flag bit 0: no derived 16-bit versions)
+    public static final int NO_DERIVE = 1;
+    // port of laes_file.h:headerCountOk  (version 1: 1..16 masters; version 2: 1..255)
+    public static boolean headerCountOk(long ver, long nm) { return nm >= 1 && ((ver == 1 && nm <= 16) || (ver == 2 && nm <= 255)); }
+    // port of laes_file.h:validMasterName  (well-formed UTF-8, shortest forms, no surrogates, at most U+10FFFF, no U+0000..U+001F or U+007F)
+    public static boolean validMasterName(byte[] p, int off, int n) {
+        for (int i = 0; i < n;) { final int c = p[off + i] & 0xFF; int cp, k;
+            if (c < 0x80) { cp = c; k = 1; } else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; k = 2; } else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; k = 3; } else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; k = 4; } else return false;
+            if (i + k > n) return false; for (int q = 1; q < k; q++) { final int b = p[off + i + q] & 0xFF; if ((b & 0xC0) != 0x80) return false; cp = cp << 6 | (b & 0x3F); }
+            if ((k == 2 && cp < 0x80) || (k == 3 && cp < 0x800) || (k == 4 && cp < 0x10000) || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) || cp < 0x20 || cp == 0x7F) return false;
+            i += k; }
+        return true; }
+    // the name's bytes as stored (UTF-8)
+    public static byte[] nameBytes(String s) { try { return s.getBytes("UTF-8"); } catch (java.io.UnsupportedEncodingException e) { throw new RuntimeException(e); } }
+    public static String nameOf(byte[] p, int off, int n) { try { return new String(p, off, n, "UTF-8"); } catch (java.io.UnsupportedEncodingException e) { throw new RuntimeException(e); } }
+    // port of laes_file.h:validMasterName(std::string)  (a lone surrogate in the String gives '?' in UTF-8 and the round trip check refuses it)
+    public static boolean validMasterName(String s) { final byte[] b = nameBytes(s); return b.length <= 255 && validMasterName(b, 0, b.length) && nameOf(b, 0, b.length).equals(s); }
+    /** port of laes_file.h:Head (2026-11-12, header bytes 56 / 57 of payload version 2): def 0 = the core master, k = master k in the file; coreFlags bit 0 = no derived 16-bit version of the core master */
+    public static final class Head { public int def = 0; public int coreFlags = 0; }
+    // port of laes_file.h:headFrom  (b: the 8 header bytes at offset off; version 1: nothing read)
+    public static boolean headFrom(long ver, byte[] b, int off, long nm, Head h) { h.def = 0; h.coreFlags = 0; if (ver != 2) return true;
+        if ((b[off] & 0xFF) > nm || (b[off + 1] & ~NO_DERIVE) != 0) return false; for (int i = 2; i < 8; i++) if (b[off + i] != 0) return false; h.def = b[off] & 0xFF; h.coreFlags = b[off + 1] & 0xFF; return true; }
+    // port of laes_file.h:headTo
+    public static void headTo(int ver, Head h, byte[] b, int off) { for (int i = 0; i < 8; i++) b[off + i] = 0; if (ver == 2) { b[off] = (byte) h.def; b[off + 1] = (byte) h.coreFlags; } }
+    // port of laes_file.h:payloadVersionFor
+    public static int payloadVersionFor(List<MasterInfo> info) { return payloadVersionFor(info, new Head()); }
+    public static int payloadVersionFor(List<MasterInfo> info, Head h) { if (info.size() > 16 || h.def != 0 || h.coreFlags != 0) return 2; for (MasterInfo I : info) if (I.name.length() != 0 || I.flags != 0 || I.menu != 0) return 2; return 1; }
+    // port of laes_file.h:menuOk  (all 0, or each of 1 ... M exactly once)
+    public static boolean menuOk(List<MasterInfo> info) { boolean any = false; for (MasterInfo I : info) any |= I.menu != 0; if (!any) return true;
+        boolean[] seen = new boolean[info.size() + 1]; for (MasterInfo I : info) { if (I.menu < 1 || I.menu > info.size() || seen[I.menu]) return false; seen[I.menu] = true; } return true; }
     // port of laes_file.h:levLen
     public static long levLen(long n, int k) { while (k-- > 0) n = (n + 1) / 2; return n; }
     // port of laes_file.h:unusedBits
@@ -102,21 +133,26 @@ public final class LaesFile {
     public static boolean isLaes(byte[] body) { return body.length >= 8 && body[0] == 'L' && body[1] == 'A' && body[2] == 'E' && body[3] == '2'; }
     static boolean eq32(byte[] a, int ao, byte[] b, int bo) { for (int i = 0; i < 32; i++) if (a[ao + i] != b[bo + i]) return false; return true; }
     /** port of laes_file.h:decodeLaes (whole signals in memory) */
-    public static String decodeLaes(byte[] body, Pcm core, int baseRate, List<Pcm> out, List<MasterInfo> info, List<Boolean> shaOk) {
-        out.clear(); info.clear(); shaOk.clear(); if (body.length < 64 + 4) return "LAES block too short";
+    public static String decodeLaes(byte[] body, Pcm core, int baseRate, List<Pcm> out, List<MasterInfo> info, List<Boolean> shaOk) { return decodeLaes(body, core, baseRate, out, info, shaOk, null); }
+    public static String decodeLaes(byte[] body, Pcm core, int baseRate, List<Pcm> out, List<MasterInfo> info, List<Boolean> shaOk, Head head) {
+        out.clear(); info.clear(); shaOk.clear(); if (head != null) { head.def = 0; head.coreFlags = 0; } if (body.length < 64 + 4) return "LAES block too short";
         int crc = 0xFFFFFFFF; for (int i = 0; i + 4 < body.length; i++) { crc ^= body[i] & 0xFF; for (int k = 0; k < 8; k++) crc = (crc & 1) != 0 ? 0xEDB88320 ^ (crc >>> 1) : crc >>> 1; } crc ^= 0xFFFFFFFF;
         final int L = body.length; int stored = (body[L - 4] & 0xFF) | (body[L - 3] & 0xFF) << 8 | (body[L - 2] & 0xFF) << 16 | (body[L - 1] & 0xFF) << 24; if (crc != stored) return "LAES block damaged (CRC-32)";
         BRd2 r = new BRd2(body, body.length - 4);
-        long magic = r.u(4), ver = r.u(2), hs = r.u(2), base = r.u(4), cbits = r.u(1), ch = r.u(1), nm = r.u(1), cmode = r.u(1), nc = r.u(8); final int csha = r.take(32); r.u(8);
-        if (r.fail || magic != 0x3245414CL) return "not an LAES block"; if (ver != 1 || hs != 64) return "unsupported LAES version";
-        if ((base != 44100 && base != 48000) || (int) base != baseRate || (int) cbits != core.bits || ch != 2 || cmode > 1 || nm < 1 || nm > 16) return "invalid LAES header";
+        long magic = r.u(4), ver = r.u(2), hs = r.u(2), base = r.u(4), cbits = r.u(1), ch = r.u(1), nm = r.u(1), cmode = r.u(1), nc = r.u(8); final int csha = r.take(32); final int hb = r.take(8);
+        if (r.fail || magic != 0x3245414CL) return "not an LAES block"; if ((ver != 1 && ver != 2) || hs != 64) return "unsupported LAES version";
+        final Head hd = new Head(); if ((base != 44100 && base != 48000) || (int) base != baseRate || (int) cbits != core.bits || ch != 2 || cmode > 1 || !headerCountOk(ver, nm) || !headFrom(ver, body, hb, nm, hd)) return "invalid LAES header";
+        if (head != null) { head.def = hd.def; head.coreFlags = hd.coreFlags; }
         if (nc != core.frames()) return "core master length differs from the LAES header";   // compared as uint64: nothing truncated
         { byte[] h = new byte[32]; hashAnyCore(core, h); if (!eq32(h, 0, body, csha)) return "core master differs from the one this LAES block was made for (SHA-256)"; }
         List<long[][][]> levs = new ArrayList<long[][][]>();   // levs[m][c][k]: level k of decoded master m (samples >> w)
         for (long mi = 0; mi < nm; mi++) { MasterInfo I = new MasterInfo();
-            I.bits = (int) r.u(1); I.stages = (int) r.u(1); I.w = (int) r.u(1); I.storage = (int) r.u(1); I.refTier = (int) r.u(1); r.u(3); I.rate = (int) r.u(4); r.u(4); final long F64 = r.u(8);
+            I.bits = (int) r.u(1); I.stages = (int) r.u(1); I.w = (int) r.u(1); I.storage = (int) r.u(1); I.refTier = (int) r.u(1);
+            final long nl = r.u(1), fl = r.u(1), mp = r.u(1); I.rate = (int) r.u(4); r.u(4); final long F64 = r.u(8);
             I.whole = r.u(8); I.frac = (int) r.u(4); r.u(4); final int sha = r.take(32);
             if (r.fail) return "LAES block truncated";
+            if (ver == 2) { final int np = r.take(nl); if (r.fail) return "LAES block truncated"; if ((fl & ~(long) NO_DERIVE) != 0) return "invalid master record";
+                if (!validMasterName(body, np, (int) nl)) return "invalid master name"; I.name = nameOf(body, np, (int) nl); I.flags = (int) fl; I.menu = (int) mp; }
             if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                 || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))   // all in uint64
                 || I.whole <= -(1L << 40) || I.whole >= (1L << 40)) return "invalid master record";
@@ -135,6 +171,7 @@ public final class LaesFile {
             long[][][] lv = new long[2][I.stages + 1][];   // every level of this master, for later masters that refer to it
             for (int c = 0; c < 2; c++) { lv[c][I.stages] = top[c]; for (int k = I.stages; k > 0; k--) { lv[c][k - 1] = Lift.fwd(lv[c][k])[0]; } }
             byte[] h = new byte[32]; hashPcm(m, h); shaOk.add(eq32(h, 0, I.sha, 0)); levs.add(lv); info.add(I); out.add(m); }
+        if (!menuOk(info)) return "invalid menu positions";
         if (r.pos != r.n) return "unexpected bytes after the last master";
         return "";
     }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="audiodecoder.lae" version="0.2.5" name="LAE decoder" provider-name="mtq0605">
+<addon id="audiodecoder.lae" version="0.2.12" name="LAE decoder" provider-name="mtq0605">
   <requires>
     <import addon="kodi.binary.global.main" version="2.0.2"/>
     <import addon="kodi.binary.global.general" version="1.0.5"/>
@@ -16,10 +16,10 @@
     </support>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en_GB">LAE (Layered Audio Extension) decoder: LAES lossless masters and LAEY</summary>
-    <summary lang="zh_CN">LAE（分层音频扩展）解码器：LAES 无损母带和 LAEY</summary>
-    <description lang="en_GB">Plays .lae files: LAES (LAE Lossless) in the WAV, RF64 or FLAC form, and LAEY WAV. A master plays after its SHA-256 has been checked once (remembered per file content). Rename an LAE .flac or .wav file to .lae to play its masters; as .flac or .wav, Kodi plays its CD-compatible core.</description>
-    <description lang="zh_CN">播放 .lae 文件：LAES（LAE 无损，WAV、RF64 或 FLAC 形式）和 LAEY WAV。母带先核对一次 SHA-256 再播放（按文件内容记住结果）。把 LAE 的 .flac 或 .wav 改名为 .lae 就能放其中的母带；保持 .flac / .wav 时 Kodi 放它的 CD 兼容核心母带。</description>
+    <summary lang="en_GB">LAE decoder (LAES / LAEY)</summary>
+    <summary lang="zh_CN">LAE 解码器（LAES / LAEY）</summary>
+    <description lang="en_GB">Decodes LAE (Layered Audio Extension) files: LAES (lossless) in WAV, RF64 and FLAC containers, LAEY (lossy) in WAV and FLAC containers. Masters are verified by SHA-256 on first playback.[CR][CR]Note: Kodi passes only files with the extension .lae to this add-on. LAE files named .wav or .flac are played by Kodi's built-in decoder, which outputs only the core master (LAES) or the CD/core layer (LAEY). Rename such files to .lae to play their masters and extension layers.</description>
+    <description lang="zh_CN">解码 LAE（分层音频扩展）文件：LAES（无损，WAV、RF64、FLAC 封装）和 LAEY（有损，WAV、FLAC 封装）。母带在首次播放时经 SHA-256 校验。[CR][CR]注意：Kodi 只把扩展名为 .lae 的文件交给本插件。扩展名为 .wav 或 .flac 的 LAE 文件由 Kodi 自带的解码器播放，只输出核心母带（LAES）或 CD 层/核心层（LAEY）。将此类文件改名为 .lae，才能播放其中的母带和扩展层。</description>
     <license>GPL-3.0-or-later (the add-on binary; LAE decoder sources Apache-2.0)</license>
     <platform>windows-x86_64</platform>
   </extension>

@@ -419,7 +419,8 @@ public final class StreamEnc {
         return core; }
     // ---- the payload (laes::encodeLaes, block-wise). ms: the masters in file order with their storage choice (MasterIn without samples).
     /** port of laes_stream_enc.h:MasterSel (frac: uint32 in an int) */
-    public static final class MasterSel { public int storage = -1, refTier = 0; public long whole = 0; public int frac = 0; }
+    public static final class MasterSel { public int storage = -1, refTier = 0; public long whole = 0; public int frac = 0;
+        public String name = ""; public int flags = 0; public int menu = 0; }   // name, flags, menu position: payload version 2 (laes_file.h, 2026-11-11)
     // coded candidates shared between the file orders the tool tries (L5, 2026-11-03): a candidate's layers depend only on the master, its
     // storage, the tier signal (the core or a given master), the level j and T, never on the file order. Key -> layer bits and the two layer
     // sizes only (disk, 2026-11-05): a candidate's files are removed as soon as a smaller one is found, with or without a cache; the one chosen
@@ -434,12 +435,21 @@ public final class StreamEnc {
     // and each master's choice is kept in a state file; cacheLog: the cache's entries appended as they are made)
     public static String encodeLaesS(Core core, int baseRate, final List<Prep> ms, final List<MasterSel> sel, List<LaesFile.MasterInfo> info,
                                      String bodyPath, String stem, int coreMode, long piece, Ctx ctx, Map<String, CachedCand> cache, String cacheLog, List<String> kept) {
+        return encodeLaesS(core, baseRate, ms, sel, info, bodyPath, stem, coreMode, piece, ctx, cache, cacheLog, kept, new LaesFile.Head()); }
+    // head: the default master and the core master's flags (2026-11-12, header bytes 56 / 57)
+    public static String encodeLaesS(Core core, int baseRate, final List<Prep> ms, final List<MasterSel> sel, List<LaesFile.MasterInfo> info,
+                                     String bodyPath, String stem, int coreMode, long piece, Ctx ctx, Map<String, CachedCand> cache, String cacheLog, List<String> kept, LaesFile.Head head) {
         info.clear(); for (int i = 0; i < ms.size(); i++) info.add(new LaesFile.MasterInfo()); final byte[] sh = new byte[32]; hashAnyCore(core, sh);
         if (core.bits != 16 && core.bits != 24 && core.bits != 32) return "core master word length must be 16, 24 or 32"; if (coreMode != 0 && coreMode != 1) return "core master mode must be 0 or 1";
         Stream.Out bo = new Stream.Out(bodyPath); boolean okClose = false;
         try { CrcOut o = new CrcOut(bo);
-            o.u(0x3245414CL, 4); o.u(1, 2); o.u(64, 2); o.u(baseRate, 4); o.u(core.bits, 1); o.u(2, 1); o.u(ms.size(), 1); o.u(coreMode, 1); o.u(core.frames(), 8); o.put(sh, 0, 32); o.u(0, 8);
-            if (ms.isEmpty() || ms.size() > 16) return "1 to 16 masters";
+            if (ms.isEmpty() || ms.size() > 255) return "1 to 255 masters";
+            int ver = ms.size() > 16 ? 2 : 1; for (MasterSel x : sel) { if (!LaesFile.validMasterName(x.name)) return "a master name must be UTF-8 of at most 255 bytes without control characters"; if ((x.flags & ~LaesFile.NO_DERIVE) != 0) return "unknown master flag"; if (x.name.length() != 0 || x.flags != 0 || x.menu != 0) ver = 2; }
+            { final List<LaesFile.MasterInfo> t = new ArrayList<LaesFile.MasterInfo>(); for (MasterSel x : sel) { LaesFile.MasterInfo q = new LaesFile.MasterInfo(); q.menu = x.menu; t.add(q); } if (!LaesFile.menuOk(t)) return "menu positions must be 1 ... M, each once"; }
+            if (head.def < 0 || head.def > ms.size()) return "the default master must be 0 (the core master) or 1 ... M"; if ((head.coreFlags & ~LaesFile.NO_DERIVE) != 0) return "unknown core master flag";
+            if (head.def != 0 || head.coreFlags != 0) ver = 2;
+            o.u(0x3245414CL, 4); o.u(ver, 2); o.u(64, 2); o.u(baseRate, 4); o.u(core.bits, 1); o.u(2, 1); o.u(ms.size(), 1); o.u(coreMode, 1); o.u(core.frames(), 8); o.put(sh, 0, 32);
+            { final byte[] hb = new byte[8]; LaesFile.headTo(ver, head, hb, 0); o.put(hb, 0, 8); }
             for (int mi = 0; mi < ms.size(); mi++) { final Prep m = ms.get(mi); final LaesFile.MasterInfo I = info.get(mi);
                 if (m.bits != 16 && m.bits != 24 && m.bits != 32) return "master word length must be 16, 24 or 32";
                 int st = 0; while ((baseRate << st) < m.rate && st < 4) st++; if ((baseRate << st) != m.rate || st > 3) return "master rate must be the base rate times 1, 2, 4 or 8";
@@ -458,7 +468,8 @@ public final class StreamEnc {
                     boolean tOk = false; if (!r.bad && q >= 0 && q < cs.size()) { final Cand C = cs.get((int) q); if (C.storage == 1) tOk = rWhole == 0 && rFrac == 0; else { final long[] wf = relT(sel, mi, autoSel, C.tier); tOk = wf != null && wf[0] == rWhole && (int) wf[1] == rFrac; } }   // the T of this run
                     if (tOk && n0 >= 0 && sizeOrMinus(e0) == n0 && n1 >= 0 && sizeOrMinus(e1) == n1) {   // the files whole, as they were written
                         final Cand C = cs.get((int) q); C.whole = rWhole; C.frac = rFrac; C.bits = rBits; C.e[0] = e0; C.e[1] = e1; C.coded = true; best = (int) q; restored = true; } }
-                if (best < 0) for (int q = 0; q < cs.size(); q++) { final Cand C = cs.get(q); C.bits = above(m, st, C.j);
+                final boolean[] inShort = best < 0 ? makeShort(autoSel, cs, mi, m, st, I, core, info, ms, sel, stem, ctx) : null;
+                if (best < 0) for (int q = 0; q < cs.size(); q++) { if (inShort != null && !inShort[q]) continue; final Cand C = cs.get(q); C.bits = above(m, st, C.j);
                     for (int c = 0; c < 2; c++) C.e[c] = stem + "_m" + mi + "_k" + q + "_c" + c + ".lay";
                     if (C.storage != 1) { final long[] wf = relT(sel, mi, autoSel, C.tier); if (wf == null) { C.e[0] = ""; continue; } C.whole = wf[0]; C.frac = (int) wf[1]; }
                     String key = ""; if (cache != null) { key = m.raw + "|" + C.storage + "|" + (C.storage == 1 ? "-" : C.tier == 0 ? "core" : ms.get(C.tier - 1).raw) + "|" + C.j;
@@ -477,8 +488,9 @@ public final class StreamEnc {
                 if (kept != null && !restored) { final Cand B = cs.get(best); final StateW w = new StateW(); w.i(best); w.i(B.storage == 1 ? 0 : B.whole); w.i(B.storage == 1 ? 0 : (B.frac & 0xFFFFFFFFL)); w.d(B.bits);
                     w.str(B.e[0]); w.i(sizeOrMinus(B.e[0])); w.str(B.e[1]); w.i(sizeOrMinus(B.e[1])); putState(stP, w.s.toString()); }
                 final Cand B = cs.get(best); I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? 0 : B.whole; I.frac = B.storage == 1 ? 0 : B.frac; I.layerBits = B.bits;
-                o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(0, 3); o.u(I.rate, 4); o.u(0, 4); o.u(I.frames, 8);
-                o.u(I.whole, 8); o.u(I.frac & 0xFFFFFFFFL, 4); o.u(0, 4); o.put(I.sha, 0, 32);
+                I.name = sel.get(mi).name; I.flags = sel.get(mi).flags; I.menu = sel.get(mi).menu; final byte[] nb = LaesFile.nameBytes(I.name);
+                o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? nb.length : 0, 1); o.u(ver == 2 ? I.flags : 0, 1); o.u(ver == 2 ? I.menu : 0, 1); o.u(I.rate, 4); o.u(0, 4); o.u(I.frames, 8);
+                o.u(I.whole, 8); o.u(I.frac & 0xFFFFFFFFL, 4); o.u(0, 4); o.put(I.sha, 0, 32); if (ver == 2) o.put(nb, 0, nb.length);
                 for (int c = 0; c < 2; c++) { { Stream.In e = new Stream.In(B.e[c]); final long en = e.n; e.close(); o.u(en, 4); } o.file(B.e[c]); if (kept != null) kept.add(B.e[c]); else removeFile(B.e[c]);
                     for (int k = B.j + 1; k <= st; k++) { { Stream.In d = new Stream.In(m.dfile[c][k]); final long dn = d.n; d.close(); o.u(dn, 4); } o.file(m.dfile[c][k]); } } }
             final long crc = o.crc.getValue(); final byte[] t = {(byte) crc, (byte) (crc >> 8), (byte) (crc >> 16), (byte) (crc >> 24)}; bo.put(t, 0, 4); bo.close(); okClose = true;
@@ -486,6 +498,33 @@ public final class StreamEnc {
         finally { if (!okClose) closeQuiet(bo); } }
     // codes a candidate into its two layer files; lb: the bits of each channel. null when coded, else the reason
     // port of laes_stream_enc.h:encodeLaesS::code (the lambda)
+    // port of laes_stream_enc.h:encodeLaesS::makeShort  (more than 16 masters, 2026-11-11: every candidate is first coded on 4 excerpts of
+    // 2^15 base-rate samples (x 2^j at level j) at positions given only by the length (the centres of the four quarters, aligned down to
+    // the block length); the 3 with the smallest estimate are coded in full. null: every candidate in full (up to 16 masters, as before).
+    // LAES_NO_SHORTLIST set: the full search, for tests.)
+    static boolean[] makeShort(boolean autoSel, List<Cand> cs, int mi, Prep m, int st, LaesFile.MasterInfo I, Core core, List<LaesFile.MasterInfo> info, List<Prep> ms,
+                               List<MasterSel> sel, String stem, Ctx ctx) {
+        final int kShort = 3;
+        if (!(autoSel && ms.size() > 16 && cs.size() > kShort) || System.getenv("LAES_NO_SHORTLIST") != null) return null;
+        final List<double[]> est = new ArrayList<double[]>();   // {estimate, q}
+        for (int q = 0; q < cs.size(); q++) { final Cand C = cs.get(q); long wh = 0; int fr = 0; if (C.storage != 1) { final long[] wf = relT(sel, mi, autoSel, C.tier); if (wf == null) continue; wh = wf[0]; fr = (int) wf[1]; }
+            final int j = C.j; final long nj = LaesFile.levLen(I.frames, st - j), B = 4096L << j, L = (1L << 15) << j;
+            final List<long[]> segs = new ArrayList<long[]>(); if (nj <= 4 * L) segs.add(new long[] {0, nj});
+            else for (int s = 0; s < 4; s++) { long a = (2 * s + 1) * (nj / 8) + ((2 * s + 1) * (nj % 8)) / 8 - L / 2; a = a / B * B; a = Math.max(0L, Math.min(a, nj - L) / B * B); segs.add(new long[] {a, a + L}); }
+            long got = 0; double pb = 0; final String pf = stem + "_m" + mi + "_probe.lay";
+            int up = 0; if (C.storage != 1) up = C.tier == 0 ? (m.bits - I.w) - core.bits : (m.bits - I.w) - (info.get(C.tier - 1).bits - info.get(C.tier - 1).w);
+            final long wj = wh * (1L << j) + (j != 0 ? ((fr & 0xFFFFFFFFL) >>> (32 - j)) : 0); final int fj = (int) ((fr & 0xFFFFFFFFL) << j); final long[] h = LaesMath.refTaps(fj);
+            for (int c = 0; c < 2; c++) { Stream.Sig x = null, src = null; LayerOut lo = null;
+                try { x = levelOf(m, c, j); if (C.storage != 1) { if (C.tier == 0) src = new IntSig(core.c[c]); else src = levelOf(ms.get(C.tier - 1), c, j); }
+                    lo = new LayerOut(pf, B, ctx);
+                    for (long[] sg : segs) { final long[] v = new long[(int) (sg[1] - sg[0])]; x.get(sg[0], sg[1], v, 0);
+                        if (C.storage != 1) { final long[] r = Stream.refPiece(src, h, wj, up, sg[0], sg[1], ctx.threads); for (int i = 0; i < v.length; i++) v[i] -= r[i]; }
+                        lo.feed(v, v.length); if (c == 0) got += v.length; }
+                    pb += (double) lo.finish(); lo = null; removeFile(pf); }
+                finally { if (lo != null) lo.abandon(); closeQuiet(x); closeQuiet(src); } }
+            est.add(new double[] {above(m, st, j) + pb * (double) nj / (double) Math.max(1L, got), q}); }
+        java.util.Collections.sort(est, new java.util.Comparator<double[]>() { public int compare(double[] a, double[] b) { return a[0] < b[0] ? -1 : b[0] < a[0] ? 1 : 0; } });   // stable, as std::stable_sort
+        final boolean[] in = new boolean[cs.size()]; for (int k = 0; k < est.size() && k < kShort; k++) in[(int) est.get(k)[1]] = true; return in; }
     static String code(Cand C, double[] lb, Prep m, int st, LaesFile.MasterInfo I, Core core, List<LaesFile.MasterInfo> info, List<Prep> ms, long piece, Ctx ctx) {
         if (C.storage == 1) { for (int c = 0; c < 2; c++) { Stream.Sig x = levelOf(m, c, 0); LayerOut lo = null;
                 try { lo = new LayerOut(C.e[c], 4096, ctx); final long P = piece; long[] v = new long[0];

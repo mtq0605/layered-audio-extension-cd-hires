@@ -299,7 +299,7 @@ inline Core32 deriveCore32(const std::vector<Prep*>& ms, int base, int coreBits,
                 core.c[c][(size_t)i] = (int32_t)std::max(mn, std::min(mx, v)); } } }
     return core; }
 // ---- the payload (laes::encodeLaes, block-wise). ms: the masters in file order with their storage choice (MasterIn without samples).
-struct MasterSel { int storage = -1, refTier = 0; int64_t whole = 0; uint32_t frac = 0; };
+struct MasterSel { int storage = -1, refTier = 0; int64_t whole = 0; uint32_t frac = 0; std::string name; int flags = 0; int menu = 0; };   // name, flags, menu position: payload version 2 (laes_file.h)
 // coded candidates shared between the file orders the tool tries (L5, 2026-11-03): a candidate's layers depend only on the master, its
 // storage, the tier signal (the core or a given master), the level j and T, never on the file order. Key -> layer bits and the two layer
 // sizes only (disk, 2026-11-05): a candidate's files are removed as soon as a smaller one is found, with or without a cache; the one chosen
@@ -308,13 +308,23 @@ struct CachedCand { double b[2] = {0, 0}; };   // the layer bits of each channel
 using CandCache = std::map<std::string, CachedCand>;
 inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vector<const Prep*>& ms, const std::vector<MasterSel>& sel, std::vector<laes::MasterInfo>& info,
                                const std::string& bodyPath, const std::string& stem, int coreMode, int64_t piece, int threads, CandCache* cache = nullptr,
-                               const std::string& cacheLog = std::string(), std::vector<std::string>* kept = nullptr) {   // resume (2026-11-05): kept != null
-    using namespace laes; info.assign(ms.size(), MasterInfo()); uint8_t sh[32]; hashCore32(core, sh);
+                               const std::string& cacheLog = std::string(), std::vector<std::string>* kept = nullptr,   // resume (2026-11-05): kept != null
+                               const std::vector<laes::MasterInfo>* fixed = nullptr,   // laes add (2026-11-11): the first fixed->size() masters are already
+                               const laes::Head& head = laes::Head()) {   // the default master and the core master's flags (2026-11-12)
+    // in the file: their records (info) are taken as they are, nothing is coded or written for them, and later masters may refer to them
+    // (ms and sel for them: their decoded samples and absolute T). The body then holds the header and the new masters only.
+    using namespace laes; info.assign(ms.size(), MasterInfo()); const size_t nFixed = fixed ? fixed->size() : 0; for (size_t i = 0; i < nFixed && i < info.size(); i++) info[i] = (*fixed)[i]; uint8_t sh[32]; hashCore32(core, sh);
     if (core.bits != 16 && core.bits != 24 && core.bits != 32) return "core master word length must be 16, 24 or 32"; if (coreMode != 0 && coreMode != 1) return "core master mode must be 0 or 1";
     Out bo(bodyPath); CrcOut o(bo);
-    o.u(0x3245414Cull, 4); o.u(1, 2); o.u(64, 2); o.u((uint64_t)baseRate, 4); o.u((uint64_t)core.bits, 1); o.u(2, 1); o.u(ms.size(), 1); o.u((uint64_t)coreMode, 1); o.u((uint64_t)core.frames(), 8); o.put(sh, 32); o.u(0, 8);
-    if (ms.empty() || ms.size() > 16) return "1 to 16 masters";
-    for (size_t mi = 0; mi < ms.size(); mi++) { const Prep& m = *ms[mi]; MasterInfo& I = info[mi];
+    if (ms.empty() || ms.size() > 255) return "1 to 255 masters";
+    int ver = ms.size() > 16 ? 2 : 1; for (const MasterSel& x : sel) { if (!validMasterName(x.name)) return "a master name must be UTF-8 of at most 255 bytes without control characters"; if (x.flags & ~kNoDerive) return "unknown master flag"; if (!x.name.empty() || x.flags || x.menu) ver = 2; }
+    { std::vector<MasterInfo> t(sel.size()); for (size_t i = 0; i < sel.size(); i++) t[i].menu = sel[i].menu; if (!menuOk(t)) return "menu positions must be 1 ... M, each once"; }
+    if (head.def < 0 || head.def > (int)ms.size()) return "the default master must be 0 (the core master) or 1 ... M"; if (head.coreFlags & ~kNoDerive) return "unknown core master flag";
+    if (head.def || head.coreFlags) ver = 2;
+    o.u(0x3245414Cull, 4); o.u((uint64_t)ver, 2); o.u(64, 2); o.u((uint64_t)baseRate, 4); o.u((uint64_t)core.bits, 1); o.u(2, 1); o.u(ms.size(), 1); o.u((uint64_t)coreMode, 1); o.u((uint64_t)core.frames(), 8); o.put(sh, 32);
+    { uint8_t hb[8]; headTo(ver, head, hb); o.put(hb, 8); }
+    for (size_t mi = 0; mi < ms.size(); mi++) { if (mi < nFixed) { const Prep& m = *ms[mi]; if (m.bits != info[mi].bits || m.w != info[mi].w || m.rate != info[mi].rate || m.frames != info[mi].frames) return "master " + std::to_string(mi + 1) + " decoded differs from its record"; continue; }
+        const Prep& m = *ms[mi]; MasterInfo& I = info[mi];
         if (m.bits != 16 && m.bits != 24 && m.bits != 32) return "master word length must be 16, 24 or 32";
         int st = 0; while ((baseRate << st) < m.rate && st < 4) st++; if ((baseRate << st) != m.rate || st > 3) return "master rate must be the base rate times 1, 2, 4 or 8";
         I.bits = m.bits; I.stages = st; I.w = m.w; I.rate = m.rate; I.frames = m.frames; memcpy(I.sha, m.sha, 32);
@@ -351,13 +361,37 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
                     lb[c] = (double)lo.finish(); });
                 for (int c = 0; c < 2; c++) if (!ce[c].empty()) { cerr = ce[c]; return false; } }
             C.coded = true; return true; };
+        // more than 16 masters (2026-11-11, spec/lossless/SPEC.md, Section 11.2): every candidate is first coded on 4 excerpts of 2^15 base-rate samples
+        // (x 2^j at level j) at positions given only by the length (the centres of the four quarters, aligned down to the block length),
+        // never by the content; the 3 with the smallest estimate are coded in full and the smallest of those wins, as before. Up to 16
+        // masters every candidate is coded in full (the file is the same byte for byte as before). Nothing about this is stored in the file.
+        std::vector<bool> inShort; const size_t kShort = 3;
+        auto makeShort = [&]() { if (!(autoSel && ms.size() > 16 && cs.size() > kShort) || getenv("LAES_NO_SHORTLIST")) return;   // the variable: tests (full search, to compare)
+            std::vector<std::pair<double, size_t>> est;
+            for (size_t q = 0; q < cs.size(); q++) { const Cand& C = cs[q]; int64_t wh = 0; uint32_t fr = 0; if (C.storage != 1 && !relT(C.tier, wh, fr)) continue;
+                const int j = C.j; const int64_t nj = levLen(I.frames, st - j), B = 4096LL << j, L = (1LL << 15) << j;
+                std::vector<std::pair<int64_t, int64_t>> segs; if (nj <= 4 * L) segs.push_back({0, nj});
+                else for (int s = 0; s < 4; s++) { int64_t a = (2 * s + 1) * (nj / 8) + ((2 * s + 1) * (nj % 8)) / 8 - L / 2; a = a / B * B; a = std::max<int64_t>(0, std::min<int64_t>(a, nj - L) / B * B); segs.push_back({a, a + L}); }
+                int64_t got = 0; double pb = 0; const std::string pf = stem + "_m" + std::to_string(mi) + "_probe.lay";
+                int up = 0; if (C.storage != 1) up = C.tier == 0 ? (m.bits - I.w) - core.bits : (m.bits - I.w) - (info[(size_t)C.tier - 1].bits - info[(size_t)C.tier - 1].w);
+                const int64_t wj = wh * (1LL << j) + (j ? (int64_t)(fr >> (32 - j)) : 0); const uint32_t fj = (uint32_t)((uint64_t)fr << j); const std::vector<int64_t> h = refTaps(fj);
+                for (int c = 0; c < 2; c++) { std::unique_ptr<Sig> x = levelOf(m, c, j), src; if (C.storage != 1) { if (C.tier == 0) src.reset(new Core32Sig(core.c[c])); else src = levelOf(*ms[(size_t)C.tier - 1], c, j); }
+                    LayerOut lo(pf, B); V v, r;
+                    for (const auto& sg : segs) { v.resize((size_t)(sg.second - sg.first)); x->get(sg.first, sg.second, v.data());
+                        if (C.storage != 1) { refPiece(*src, h, wj, up, sg.first, sg.second, r, threads); for (size_t i = 0; i < v.size(); i++) v[i] -= r[i]; }
+                        lo.feed(v.data(), (int64_t)v.size()); if (c == 0) got += (int64_t)v.size(); }
+                    pb += (double)lo.finish(); remove(pf.c_str()); }
+                est.push_back({above(j) + pb * (double)nj / (double)std::max<int64_t>(1, got), q}); }
+            std::stable_sort(est.begin(), est.end(), [](const std::pair<double, size_t>& a, const std::pair<double, size_t>& b) { return a.first < b.first; });
+            inShort.assign(cs.size(), false); for (size_t k = 0; k < est.size() && k < kShort; k++) inShort[est[k].second] = true; };
         int best = -1; const std::string stP = stem + "_m" + std::to_string(mi) + ".done"; std::string stT; bool restored = false;
         if (kept && getState(stP, stT)) {   // resume: this master's choice was made before (its two layer files kept)
             StateR r(stT); const int64_t q = r.i(); Cand R; R.whole = r.i(); R.frac = (uint32_t)r.i(); R.bits = r.d(); R.e[0] = r.str(); const long long n0 = r.i(); R.e[1] = r.str(); const long long n1 = r.i();
             bool tOk = false; if (!r.bad && q >= 0 && q < (int64_t)cs.size()) { int64_t wh = 0; uint32_t fr = 0; tOk = cs[(size_t)q].storage == 1 ? (R.whole == 0 && R.frac == 0) : (relT(cs[(size_t)q].tier, wh, fr) && wh == R.whole && fr == R.frac); }   // the T of this run
             if (tOk && n0 >= 0 && sizeOrMinus(R.e[0]) == n0 && n1 >= 0 && sizeOrMinus(R.e[1]) == n1) {   // the files whole, as they were written
                 Cand& C = cs[(size_t)q]; C.whole = R.whole; C.frac = R.frac; C.bits = R.bits; C.e[0] = R.e[0]; C.e[1] = R.e[1]; C.coded = true; best = (int)q; restored = true; } }
-        if (best < 0) for (size_t q = 0; q < cs.size(); q++) { Cand& C = cs[q]; C.bits = above(C.j);
+        if (best < 0) makeShort();
+        if (best < 0) for (size_t q = 0; q < cs.size(); q++) { if (!inShort.empty() && !inShort[q]) continue; Cand& C = cs[q]; C.bits = above(C.j);
             for (int c = 0; c < 2; c++) C.e[c] = stem + "_m" + std::to_string(mi) + "_k" + std::to_string(q) + "_c" + std::to_string(c) + ".lay";
             if (C.storage != 1 && !relT(C.tier, C.whole, C.frac)) { C.e[0].clear(); continue; }
             std::string key; if (cache) { key = m.raw + "|" + std::to_string(C.storage) + "|" + (C.storage == 1 ? std::string("-") : C.tier == 0 ? std::string("core") : ms[(size_t)C.tier - 1]->raw) + "|" + std::to_string(C.j);
@@ -373,8 +407,9 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
             if (b != B.bits) return "internal error: a candidate coded again differs in size"; }   // its files were removed in the other order
         if (kept && !restored) { const Cand& B = cs[(size_t)best]; StateW w; w.i(best); w.i(B.storage == 1 ? 0 : B.whole); w.i(B.storage == 1 ? 0 : B.frac); w.d(B.bits); w.str(B.e[0]); w.i(sizeOrMinus(B.e[0])); w.str(B.e[1]); w.i(sizeOrMinus(B.e[1])); putState(stP, w.s); }
         Cand& B = cs[(size_t)best]; I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? 0 : B.whole; I.frac = B.storage == 1 ? 0 : B.frac; I.layerBits = B.bits;
-        o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(0, 3); o.u((uint64_t)I.rate, 4); o.u(0, 4); o.u((uint64_t)I.frames, 8);
-        o.u((uint64_t)I.whole, 8); o.u(I.frac, 4); o.u(0, 4); o.put(I.sha, 32);
+        I.name = sel[mi].name; I.flags = sel[mi].flags; I.menu = sel[mi].menu;
+        o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? I.name.size() : 0, 1); o.u(ver == 2 ? (uint64_t)I.flags : 0, 1); o.u(ver == 2 ? (uint64_t)I.menu : 0, 1); o.u((uint64_t)I.rate, 4); o.u(0, 4); o.u((uint64_t)I.frames, 8);
+        o.u((uint64_t)I.whole, 8); o.u(I.frac, 4); o.u(0, 4); o.put(I.sha, 32); if (ver == 2) o.put((const uint8_t*)I.name.data(), I.name.size());
         for (int c = 0; c < 2; c++) { { In e(B.e[c]); o.u((uint64_t)e.n, 4); } o.file(B.e[c]); if (kept) kept->push_back(B.e[c]); else remove(B.e[c].c_str());
             for (int k = B.j + 1; k <= st; k++) { { In d(m.dfile[c][(size_t)k]); o.u((uint64_t)d.n, 4); } o.file(m.dfile[c][(size_t)k]); } } }
     const uint32_t crc = o.crc ^ 0xFFFFFFFFu; uint8_t t[4] = {(uint8_t)crc, (uint8_t)(crc >> 8), (uint8_t)(crc >> 16), (uint8_t)(crc >> 24)}; bo.put(t, 4); bo.close();

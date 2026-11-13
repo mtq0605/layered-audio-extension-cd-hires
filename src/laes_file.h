@@ -7,19 +7,20 @@
 //
 // Payload (little-endian):
 //   header, 64 bytes: magic "LAE2" | u16 version = 1 | u16 header size = 64 | u32 base rate | u8 core bits (16 / 24 / 32) | u8 channels = 2 |
-//                     u8 number of masters (1..16) | u8 core mode (0 = core in the WAV "data" / CD tracks, 1 = core in the FLAC audio frames) |
+//                     u8 number of masters (version 1: 1..16; version 2: 1..255) | u8 core mode (0 = core in the WAV "data" / CD tracks, 1 = core in the FLAC audio frames) |
 //                     u64 core frames | 32-byte SHA-256 of the core (16 bit: int16 LE as in "data"; 24 / 32 bit: int32 LE) |
 //                     u64 reserved = 0
 //   per master, 72-byte record, then its layers:
 //     u8 bits (16/24/32) | u8 stages (0..3: rate = base * 2^stages) | u8 unused low bits w | u8 storage (0 = difference to a tier at the base
 //     level, 1 = full, 2 = difference to an earlier master at the highest level both have) | u8 reference tier (0 = core, k = master k;
-//     storage 0: core or any earlier master; storage 2: an earlier master) | 3 reserved | u32 rate | u32 reserved | u64 frames |
+//     storage 0: core or any earlier master; storage 2: an earlier master) | version 1: 3 reserved; version 2: u8 name length N, u8 flags
+//     (bit 0: no derived 16-bit versions), u8 menu position (0 = file order; else a permutation of 1..M) | u32 rate | u32 reserved | u64 frames |
 //     i64 T whole | u32 T fraction (2^-32 base sample; T relative to the reference tier) | u32 reserved | 32-byte SHA-256 of the master
-//     (samples as int32 LE, L R L R ...)
+//     (samples as int32 LE, L R L R ...) | version 2: the N bytes of the name (UTF-8, no control characters)
 //     per channel (L, then R), with j = 0 for storage 0 / 1 and j = min(stages, stages of the tier) for storage 2:
 //       u32 length + the level-j difference (storage 0 / 2) or the base level (storage 1), coded with laes_codec (block 4096 * 2^j);
 //       then for each stage k = j+1..stages: u32 length + octave layer k (block 4096 * 2^(k-1))
-//   No index, no seek table, no cue table; nothing interleaved with the core (rules T-1, T-2).
+//   No index, no seek table, no cue table; nothing interleaved with the core.
 // Reconstruction of master m: level j = (storage 1 ? 0 : reference(tier's level j, T * 2^j, grid difference)) + layer; then inv() per stage
 // k = j+1..stages; samples << w. A tier's level j comes from its decoded samples (>> w) by fwd(). Each channel only from the same channel.
 // grid difference (up) = the master's significant bits (bits - w) minus the tier's (core: its bits; master k: bits_k - w_k); it may be negative.
@@ -106,7 +107,37 @@ inline void hashPcm(const Pcm& p, uint8_t out[32]) { Sha256 s; std::vector<uint8
 inline void hashCore(const Pcm& p, uint8_t out[32]) { Sha256 s; std::vector<uint8_t> b; b.reserve(1 << 16);   // int16 LE, as in the "data" chunk
     for (int64_t i = 0; i < p.frames(); i++) for (int c = 0; c < 2; c++) { uint16_t v = (uint16_t)(int16_t)p.c[c][i]; b.push_back((uint8_t)v); b.push_back((uint8_t)(v >> 8)); if (b.size() >= (1 << 16)) { s.update(b.data(), b.size()); b.clear(); } }
     s.update(b.data(), b.size()); s.final(out); }
-struct MasterInfo { int bits = 0, stages = 0, w = 0, storage = 0, refTier = 0, rate = 0; int64_t frames = 0; int64_t whole = 0; uint32_t frac = 0; uint8_t sha[32]; double layerBits = 0; };
+// name and flags (payload version 2, 2026-11-11): the name is free UTF-8 text from the publisher, shown as it is and never used for any
+// processing; flag bit 0 = this master offers no derived 16-bit versions. Version 1 payloads: "" and 0.
+struct MasterInfo { int bits = 0, stages = 0, w = 0, storage = 0, refTier = 0, rate = 0; int64_t frames = 0; int64_t whole = 0; uint32_t frac = 0; uint8_t sha[32]; double layerBits = 0;
+                    std::string name; int flags = 0; int menu = 0; };   // menu: the position in menus and selection, 1 ... M (version 2), 0 = the file order
+const int kNoDerive = 1;   // master record flag bit 0
+// payload versions (2026-11-11): 1 = up to 16 masters, record bytes 5..7 reserved; 2 = up to 255 masters, record byte 5 = name length N,
+// byte 6 = flags (bit 0: no derived versions; bits 1..7 are 0), byte 7 = menu position (1..M, or 0 for every master = the file order), the N name bytes right after the 72-byte record
+inline bool headerCountOk(uint64_t ver, uint64_t nm) { return nm >= 1 && ((ver == 1 && nm <= 16) || (ver == 2 && nm <= 255)); }
+// a master name: well-formed UTF-8 (shortest forms, no surrogates, at most U+10FFFF), no control characters U+0000 ... U+001F, U+007F
+inline bool validMasterName(const uint8_t* p, size_t n) {
+    for (size_t i = 0; i < n;) { const uint8_t c = p[i]; uint32_t cp; size_t k;
+        if (c < 0x80) { cp = c; k = 1; } else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; k = 2; } else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; k = 3; } else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; k = 4; } else return false;
+        if (i + k > n) return false; for (size_t q = 1; q < k; q++) { if ((p[i + q] & 0xC0) != 0x80) return false; cp = cp << 6 | (p[i + q] & 0x3F); }
+        if ((k == 2 && cp < 0x80) || (k == 3 && cp < 0x800) || (k == 4 && cp < 0x10000) || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) || cp < 0x20 || cp == 0x7F) return false;
+        i += k; }
+    return true; }
+inline bool validMasterName(const std::string& s) { return s.size() <= 255 && validMasterName((const uint8_t*)s.data(), s.size()); }
+// the header's last 8 bytes (2026-11-12, payload version 2; version 1: reserved, written as 0 and ignored): byte 56 = the default master
+// (0 = the core master, k = master k in the file order: what a player plays when the user has chosen nothing; it cannot play
+// it - not decodable, SHA-256 mismatch - : the core master), byte 57 = the core master's flags (bit 0: no derived 16-bit version;
+// bits 1..7 are 0), bytes 58..63 = 0. Not set by the publisher: 0 and 0.
+struct Head { int def = 0; int coreFlags = 0; };
+// reads and checks bytes 56..63 (version 2); version 1: nothing is read from them (old writers put zeros there)
+inline bool headFrom(uint64_t ver, const uint8_t b[8], uint64_t nm, Head& h) { h = Head(); if (ver != 2) return true;
+    if (b[0] > nm || (b[1] & ~kNoDerive)) return false; for (int i = 2; i < 8; i++) if (b[i]) return false; h.def = b[0]; h.coreFlags = b[1]; return true; }
+inline void headTo(int ver, const Head& h, uint8_t b[8]) { memset(b, 0, 8); if (ver == 2) { b[0] = (uint8_t)h.def; b[1] = (uint8_t)h.coreFlags; } }
+// the version a writer uses: 1 whenever the file fits it (then the bytes are exactly those of a version 1 writer), else 2
+inline int payloadVersionFor(const std::vector<MasterInfo>& info, const Head& h = Head()) { if (info.size() > 16 || h.def || h.coreFlags) return 2; for (const MasterInfo& I : info) if (!I.name.empty() || I.flags || I.menu) return 2; return 1; }
+// the menu positions: all 0 (the file order) or each of 1 ... M exactly once
+inline bool menuOk(const std::vector<MasterInfo>& info) { bool any = false; for (const MasterInfo& I : info) any |= I.menu != 0; if (!any) return true;
+    std::vector<bool> seen(info.size() + 1, false); for (const MasterInfo& I : info) { if (I.menu < 1 || I.menu > (int)info.size() || seen[(size_t)I.menu]) return false; seen[(size_t)I.menu] = true; } return true; }
 inline int64_t levLen(int64_t n, int k) { while (k-- > 0) n = (n + 1) / 2; return n; }
 inline int unusedBits(const Pcm& p) { int64_t o = 0; for (int c = 0; c < 2; c++) for (int64_t v : p.c[c]) o |= v; if (!o) return 0; int w = 0; while (w < 31 && !((o >> w) & 1)) w++; return w; }
 // the reference of a tier on the master's base grid, nOut values: r[i] = round(sum_q h[q] src[m(i + whole + q)] / 2^(31 - up)), h = refTaps(frac).
@@ -132,21 +163,25 @@ struct BRd2 { const uint8_t* p; size_t n, pos = 0; bool fail = false; uint64_t u
 inline void hashAnyCore(const Pcm& p, uint8_t out[32]) { if (p.bits == 16) hashCore(p, out); else hashPcm(p, out); }
 // ---- decoder: "LAE " chunk body + core -> masters. Every field and layer is checked; returns "" or the reason.
 inline bool isLaes(const std::vector<uint8_t>& body) { return body.size() >= 8 && !memcmp(body.data(), "LAE2", 4); }
-inline std::string decodeLaes(const std::vector<uint8_t>& body, const Pcm& core, int baseRate, std::vector<Pcm>& out, std::vector<MasterInfo>& info, std::vector<bool>& shaOk) {
-    out.clear(); info.clear(); shaOk.clear(); if (body.size() < 64 + 4) return "LAES block too short";
+inline std::string decodeLaes(const std::vector<uint8_t>& body, const Pcm& core, int baseRate, std::vector<Pcm>& out, std::vector<MasterInfo>& info, std::vector<bool>& shaOk, Head* head = nullptr) {
+    out.clear(); info.clear(); shaOk.clear(); if (head) *head = Head(); if (body.size() < 64 + 4) return "LAES block too short";
     uint32_t crc = 0xFFFFFFFFu; for (size_t i = 0; i + 4 < body.size(); i++) { crc ^= body[i]; for (int k = 0; k < 8; k++) crc = crc & 1 ? 0xEDB88320u ^ (crc >> 1) : crc >> 1; } crc ^= 0xFFFFFFFFu;
     uint32_t stored = body[body.size() - 4] | body[body.size() - 3] << 8 | body[body.size() - 2] << 16 | (uint32_t)body[body.size() - 1] << 24; if (crc != stored) return "LAES block damaged (CRC-32)";
     BRd2 r{body.data(), body.size() - 4};
-    uint64_t magic = r.u(4), ver = r.u(2), hs = r.u(2), base = r.u(4), cbits = r.u(1), ch = r.u(1), nm = r.u(1), cmode = r.u(1), nc = r.u(8); const uint8_t* csha = r.take(32); r.u(8);
-    if (r.fail || magic != 0x3245414Cull) return "not an LAES block"; if (ver != 1 || hs != 64) return "unsupported LAES version";
-    if ((base != 44100 && base != 48000) || (int)base != baseRate || (int)cbits != core.bits || ch != 2 || cmode > 1 || nm < 1 || nm > 16) return "invalid LAES header";
+    uint64_t magic = r.u(4), ver = r.u(2), hs = r.u(2), base = r.u(4), cbits = r.u(1), ch = r.u(1), nm = r.u(1), cmode = r.u(1), nc = r.u(8); const uint8_t* csha = r.take(32); const uint8_t* hb = r.take(8);
+    if (r.fail || magic != 0x3245414Cull) return "not an LAES block"; if ((ver != 1 && ver != 2) || hs != 64) return "unsupported LAES version";
+    Head hd; if ((base != 44100 && base != 48000) || (int)base != baseRate || (int)cbits != core.bits || ch != 2 || cmode > 1 || !headerCountOk(ver, nm) || !headFrom(ver, hb, nm, hd)) return "invalid LAES header";
+    if (head) *head = hd;
     if (nc != (uint64_t)core.frames()) return "core master length differs from the LAES header";   // compared as uint64: nothing truncated
     { uint8_t h[32]; hashAnyCore(core, h); if (memcmp(h, csha, 32)) return "core master differs from the one this LAES block was made for (SHA-256)"; }
     std::vector<std::vector<std::vector<V>>> levs;   // levs[m][c][k]: level k of decoded master m (samples >> w)
     for (uint64_t mi = 0; mi < nm; mi++) { MasterInfo I;
-        I.bits = (int)r.u(1); I.stages = (int)r.u(1); I.w = (int)r.u(1); I.storage = (int)r.u(1); I.refTier = (int)r.u(1); r.u(3); I.rate = (int)r.u(4); r.u(4); const uint64_t F64 = r.u(8);
+        I.bits = (int)r.u(1); I.stages = (int)r.u(1); I.w = (int)r.u(1); I.storage = (int)r.u(1); I.refTier = (int)r.u(1);
+        const uint64_t nl = r.u(1), fl = r.u(1), mp = r.u(1); I.rate = (int)r.u(4); r.u(4); const uint64_t F64 = r.u(8);
         I.whole = (int64_t)r.u(8); I.frac = (uint32_t)r.u(4); r.u(4); const uint8_t* sha = r.take(32);
         if (r.fail) return "LAES block truncated";
+        if (ver == 2) { const uint8_t* np = r.take((size_t)nl); if (r.fail) return "LAES block truncated"; if (fl & ~(uint64_t)kNoDerive) return "invalid master record";
+            if (!validMasterName(np, (size_t)nl)) return "invalid master name"; I.name.assign((const char*)np, (size_t)nl); I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)   // all in uint64
             || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40)) return "invalid master record";
@@ -165,6 +200,7 @@ inline std::string decodeLaes(const std::vector<uint8_t>& body, const Pcm& core,
         std::vector<std::vector<V>> lv(2, std::vector<V>(I.stages + 1));   // every level of this master, for later masters that refer to it
         for (int c = 0; c < 2; c++) { lv[c][I.stages] = top[c]; for (int k = I.stages; k > 0; k--) { V d; laesfast::fwd(lv[c][k], lv[c][k - 1], d); } }
         uint8_t h[32]; hashPcm(m, h); shaOk.push_back(memcmp(h, I.sha, 32) == 0); levs.push_back(lv); info.push_back(I); out.push_back(m); }
+    if (!menuOk(info)) return "invalid menu positions";
     if (r.pos != r.n) return "unexpected bytes after the last master";
     return ""; }
 }  // namespace laes

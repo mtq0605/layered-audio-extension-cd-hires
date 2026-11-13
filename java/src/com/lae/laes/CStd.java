@@ -40,6 +40,11 @@ public final class CStd {
         BigDecimal v = BigDecimal.ZERO; boolean any = false; while (i < n && Character.isDigit(s.charAt(i))) { v = v.multiply(BigDecimal.TEN).add(BigDecimal.valueOf(s.charAt(i) - '0')); i++; any = true; if (v.compareTo(BigDecimal.valueOf(Long.MAX_VALUE).add(BigDecimal.ONE)) > 0) break; }
         if (!any) return 0; if (neg) v = v.negate();
         if (v.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0) return Long.MAX_VALUE; if (v.compareTo(BigDecimal.valueOf(Long.MIN_VALUE)) < 0) return Long.MIN_VALUE; return v.longValue(); }
+    // C strtol(s, &e, 10) with the whole string required (*e == 0): the value, or 0 when anything is left over (callers refuse k < 1); overflow: Long.MAX_VALUE / MIN_VALUE
+    public static long strtolFull(String s) { int i = 0; final int n = s.length(); while (i < n && (s.charAt(i) == ' ' || (s.charAt(i) >= 9 && s.charAt(i) <= 13))) i++;
+        boolean neg = false; if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) { neg = s.charAt(i) == '-'; i++; }
+        final int d0 = i; long v = 0; boolean ovf = false; while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') { if (v > (Long.MAX_VALUE - (s.charAt(i) - '0')) / 10) ovf = true; else v = v * 10 + (s.charAt(i) - '0'); i++; }
+        if (i == d0) return 0; if (i != n) return 0; if (ovf) return neg ? Long.MIN_VALUE : Long.MAX_VALUE; return neg ? -v : v; }
     public static int atoi(String s) { final long v = atoll(s); return v > Integer.MAX_VALUE ? Integer.MAX_VALUE : v < Integer.MIN_VALUE ? Integer.MIN_VALUE : (int) v; }
     // printf "%.<dec>f" of d (exact binary value, ties to even; inf / nan as the MSVC CRT)
     public static String f(double d, int dec) {

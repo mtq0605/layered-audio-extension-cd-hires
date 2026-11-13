@@ -61,6 +61,8 @@ final class LaeCd implements LaeEncoder.CdHook {
                 if (x.cdCheck) return 0; x.oldNote(); return 1; }
             // by hand
             {   CdAlign.Report r; { BlkIo.View m = new BlkIo.View(mFile); try { r = CdAlign.run(cd, have, b24, nb0, pb0, m, x.Lm, base, stages, 0, "; the placement given by hand follows", 0, -1, x.manualT, true); } finally { m.close(); } }
+                if (x.manual && !r.found && (r.tag.equals("drift") || r.tag.equals("edit"))) { r.found = true; r.band = CdAlign.BAND_CONFIRM_LARGE;   // port of lae_enc.cpp driftConfirmed (2026-11-11): a master whose speed drifts is never continued on its own; "nomatch" never
+                env.printf("align: WARNING: the master's speed drifts against the CD (for example tape wow and flutter): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"); }
                 for (String l : r.lines) env.printf("align: %s\n", l); env.printf("%s\n", r.alignLine);
                 env.printf("align: offset given by hand: cdalign=%s (checked first at the nearest whole offset %+lld)\n", x.manualText, x.manualT);
                 env.printf("align: fraction given by hand: cdalign=%s is the whole offset %+lld with the master moved by %+.7f master samples; not measured\n",
@@ -155,8 +157,8 @@ final class LaeCd implements LaeEncoder.CdHook {
             final boolean tentative = edgeAsk && x.cdEdge < 0;   // the search goes on as with pad, but nothing is chosen yet
             for (String l : q.lines) env.printf("%s%s\n", pre, (tentative && l.startsWith("cdedge=pad: ") ? "with cdedge=pad (not chosen yet): " + l.substring(12) : l));
             String bad = q.ok ? "" : q.why; final boolean moved = q.ok && (q.shift != 0 || q.Lm2 != x.Lm);
-            if (bad.isEmpty() && q.cdLead != 0) cdInsert(true, q.cdLead);
-            if (bad.isEmpty() && q.cdTail != 0) cdInsert(false, q.cdTail);   // cdedge=pad at the end
+            if (bad.isEmpty() && q.cdLead != 0) { cdInsert(true, q.cdLead); x.cdAddLead += q.cdLead; }
+            if (bad.isEmpty() && q.cdTail != 0) { cdInsert(false, q.cdTail); x.cdAddTail += q.cdTail; }   // cdedge=pad at the end
             if (bad.isEmpty() && moved) {   // cheap stops first, before anything is resized, written or derived
                 final String far = CdAlign.cdOnlyFar(cd, have, q, stages, base, pb0);
                 if (!far.isEmpty()) bad = far; else if (!x.fitsLength(q.Lm2)) bad = CdAlign.fmt("the placed master (%lld frames) is outside this encoder's length limits", q.Lm2); }
@@ -175,7 +177,7 @@ final class LaeCd implements LaeEncoder.CdHook {
                     { BlkIo.View m = new BlkIo.View(mFile); try { while (kL < P && silent(m, kL * up1, up1)) kL++; while (kT < P && silent(m, x.Lm - (kT + 1) * up1, up1)) kT++; } finally { m.close(); } }
                     { short[] o = new short[(int) (cd.length - 2 * kT - 2 * kL)]; System.arraycopy(cd, (int) (2 * kL), o, 0, o.length); cd = o; have = cd.length / 2; }
                     if (kL != 0 || kT != 0) masterRange(kL * up1, x.Lm - kT * up1, 0, 0); x.Lm -= (kL + kT) * up1;
-                    padP = P; cutL = kL; cutT = kT;
+                    padP = P; cutL = kL; cutT = kT; x.cdAddLead += P - kL; x.cdAddTail += P - kT;
                     env.printf("%sdigital silence: %ld CD frames added at each end before the move; removed again where still digital silence: start %ld, end %ld (kept: start %ld, end %ld)\n",
                                pre, P, kL, kT, P - kL, P - kT); }
                 if (!x.spaceOk(reuse) || !x.derive()) { A.kind = 3; return A; }
@@ -189,6 +191,8 @@ final class LaeCd implements LaeEncoder.CdHook {
             if (have != need) { A.why = CdAlign.fmt("the CD has %ld samples, the placed master needs %ld at %d Hz: the lengths do not match", have, need, base); return A; }
             final long zero = 0;   // the placed (and moved) master, checked again at offset 0 (the same three blocks, through its own derivation)
             CdAlign.Report rep2; { BlkIo.View m = new BlkIo.View(mFile); try { rep2 = CdAlign.run(cd, have, b24, nb0, pb0, m, x.Lm, base, stages, t, "", 0, -1, zero, true); } finally { m.close(); } }
+            if (x.manual && !rep2.found && (rep2.tag.equals("drift") || rep2.tag.equals("edit"))) { rep2.found = true; rep2.band = CdAlign.BAND_CONFIRM_LARGE;   // port of lae_enc.cpp driftConfirmed (2026-11-11): a master whose speed drifts is never continued on its own; "nomatch" never
+                env.printf("align: WARNING: the master's speed drifts against the CD (for example tape wow and flutter): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"); }
             for (String l : rep2.lines) env.printf("%sre-check: %s\n", pre, l);
             env.printf("ALIGN_RECHECK%s%s\n", rep2.alignLine.substring(5), key);
             if (mv != 0 && rep2.hint.startsWith("still shifted"))   // the suggestion keeps the fraction

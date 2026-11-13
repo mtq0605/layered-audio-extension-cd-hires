@@ -154,6 +154,34 @@ struct DecSrc : Cached { Src* in; const int32_t* h; int half;
 // ---- one track: open (all checks, in the order of the command-line decoder), then read the output frames in order
 struct Decoder {
     std::vector<int16_t> cdOwn; std::vector<uint8_t> laeOwn;   // used by open(): the CD layer (interleaved L/R) and the "LAE " chunk body (with its CRC)
+    // Extension packs (2026-11-10, spec/lossy/SPEC.md, Section 5.6): one core (the CD layer / core layer) and several mutually
+    // independent extensions, each computed as a whole from its own master against that core. The main body is pack 0. Each further
+    // pack is one record between the main body's last stream record and the CRC, where earlier v5 decoders never read:
+    //   "LPAK" | uint32 n = bytes that follow | 1 byte name length | the name (UTF-8) | that pack's complete v5 payload (from "LAE1")
+    // Decoding pack k = the unchanged v5 steps on that payload with the same CD layer. Nothing is shared between packs, and nothing
+    // selects one but the caller (pack, default 0): no automatic choice, no priority field.
+    // A record that is not well-formed ends the list; the main body decodes as always.
+    struct PackInfo { std::string name; size_t off = 0, len = 0; int rate = 0, stages = 0; };
+    int pack = 0; std::vector<PackInfo> packs;   // pack: set before open() (0 = main body, k = packs[k - 1]); packs: the further packs found by open()
+    static bool bodyEnd(const uint8_t* p, size_t n, size_t& end) {   // where a v5 payload's last stream record ends; false if its structure does not fit in n
+        auto i32 = [&](size_t o) { int32_t v; memcpy(&v, p + o, 4); return v; };
+        if (n < 56) return false; const int32_t pb = i32(48); if (pb < 0 || pb > 65536) return false;
+        size_t i = 52 + 8 * (size_t)pb; if (i > n || n - i < 4) return false;
+        const int32_t ndf = i32(i); i += 4; if (ndf < 0 || (size_t)ndf > n - i) return false; i += (size_t)ndf;
+        auto rec = [&]() { if (n - i < 4) return false; const int32_t nb = i32(i); i += 4; if (nb < 40 || (size_t)nb > n - i) return false; i += (size_t)nb; return true; };
+        if (!rec() || !rec()) return false; if (n - i < 4) return false; const int32_t ns = i32(i); i += 4; if (ns < 1 || ns > 8) return false;
+        for (int k = 0; k < 2 * ns; k++) if (!rec()) return false;
+        end = i; return true; }
+    void scanPacks(const uint8_t* p, size_t n) { packs.clear(); size_t e = 0; if (!bodyEnd(p, n, e)) return;
+        while (packs.size() < 8 && n - e >= 9 && !memcmp(p + e, "LPAK", 4)) {
+            const uint32_t len = (uint32_t)p[e + 4] | (uint32_t)p[e + 5] << 8 | (uint32_t)p[e + 6] << 16 | (uint32_t)p[e + 7] << 24; if (len < 1 || len > n - e - 8) break;
+            const size_t nl = p[e + 8]; if (1 + nl + 52 > len) break; PackInfo q; q.name.assign((const char*)p + e + 9, nl); q.off = e + 9 + nl; q.len = len - 1 - nl;
+            int32_t magic, ver; memcpy(&magic, p + q.off, 4); memcpy(&ver, p + q.off + 4, 4); if (magic != 0x3145414C || ver != 5) break;
+            memcpy(&q.rate, p + q.off + 8, 4); memcpy(&q.stages, p + q.off + 16, 4); packs.push_back(q); e += 8 + (size_t)len; }
+        // the name of the main body (2026-11-12: every master can show under its name): one optional record after the last pack
+        // record, "LNAM" | 1 byte name length | the name (UTF-8). Display only, like the pack names: nothing is chosen by it.
+        mainName.clear(); if (n - e >= 5 && !memcmp(p + e, "LNAM", 4) && (size_t)p[e + 4] <= n - e - 5) mainName.assign((const char*)p + e + 5, p[e + 4]); }
+    std::string mainName;   // the main body's name ("" = none stored)
     std::string mode; int rate = 0, base = 0, stages = 0, P = 0, fc = 0, mi = 0, eq = 0, wm = 0, nseg = 0, nused = 0, d = 0, wrate = 0;
     long Lm = 0, nb = 0, pb = 0, ncd = 0, Lp = 0, Po = 0, Lo = 0, pos = 0, clip = 0;
     PlaneStream dS[2]; std::vector<PlaneStream> fS; ImdctStream dI[2], mI, sI; bool haveF = false;
@@ -172,7 +200,11 @@ struct Decoder {
         // the chunk's first 4 bytes name the format: "LAE1" = LAEY (lossy, this decoder), "LAE2" = LAES (lossless, decoded by laes)
         if (!memcmp(lae.data(), "LAE2", 4)) return fail(1, "this is an LAES file (lossless, extension LAE2): decode it with laes; this decoder reads LAEY (extension LAE1)");
         { uint32_t stored; memcpy(&stored, lae.data() + lae.size() - 4, 4); if (crc32(lae.data(), lae.size() - 4) != stored) return fail(3, "LAE chunk damaged (CRC mismatch): refusing to decode; the CD audio itself still plays"); }
-        Rd r{lae.data(), lae.size() - 4};
+        const uint8_t* bp = lae.data(); size_t bn = lae.size() - 4;   // the payload to decode: the main body (pack 0), exactly as before
+        scanPacks(lae.data(), lae.size() - 4);
+        if (pack != 0) { if (pack < 0 || (size_t)pack > packs.size()) return fail(1, "this file has no extension pack of that number");
+            bp = lae.data() + packs[(size_t)pack - 1].off; bn = packs[(size_t)pack - 1].len; }   // a further pack: its own complete v5 payload, decoded by the same steps
+        Rd r{bp, bn};
         if (r.i32v() != 0x3145414C || r.i32v() != 5) return fail(1, "unknown LAE chunk version (this decoder reads v5)");
         rate = r.i32v(); base = r.i32v(); stages = r.i32v(); Lm = r.i32v(); P = r.i32v(); fc = r.i32v(); mi = r.i32v(); eq = r.i32v(); wm = r.i32v(); nb = r.i32v(); pb = r.i32v();
         // header consistency: every field is checked before it is used to address anything

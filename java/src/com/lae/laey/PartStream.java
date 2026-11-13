@@ -101,6 +101,12 @@ public final class PartStream {
             tierP = o.tierP.clone(); zlP = o.zlP.clone(); expZero = o.expZero.clone(); expSign = o.expSign.clone(); prevTier = o.prevTier; prevE = o.prevE; }
         // the C++ default copy constructor (keeps the other's header)
         Walker(Walker o) { this(o.h, o); }
+        // Java only (2026-11-12): as Walker(hh, o), but reporting stream errors to e (the decoder that continues from o's state; the C++
+        // flag is per thread, so a checkpoint taken from another decoder needs no rebinding there)
+        Walker(Hdr hh, Err e, Walker o) { h = hh; err = e; nc = o.nc; M0 = o.M0;
+            coefM = new UModel[o.coefM.length]; for (int i = 0; i < coefM.length; i++) coefM[i] = o.coefM[i].copy();
+            expM = new UModel[o.expM.length]; for (int i = 0; i < expM.length; i++) expM[i] = o.expM[i].copy();
+            tierP = o.tierP.clone(); zlP = o.zlP.clone(); expZero = o.expZero.clone(); expSign = o.expSign.clone(); prevTier = o.prevTier; prevE = o.prevE; }
         // port of part_stream.h:Walker::done
         boolean done() { return M0 >= h.K; }
         // port of part_stream.h:Walker::rowFrames

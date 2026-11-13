@@ -44,7 +44,16 @@ public final class LaesTool {
     /** port of laes_tool.cpp:main::Src */
     static final class Src { int kind = 0; int m = 0; int k = 0; int rate = 0, bits = 0; long n = 0; }
     /** port of laes_tool.cpp:main::Choice */
-    static final class Choice { String name, what; Src s; boolean derived = false; int from = -1; Choice(String n, String w, Src x) { name = n; what = w; s = x; } }
+    static final class Choice { String name, what; Src s; boolean derived = false; int from = -1; int kind = 0; int no = 0; Choice(String n, String w, Src x) { name = n; what = w; s = x; } }   // no: the master's number in the menu order
+    // port of laes_pick.h:parseRanges  ("6,12" / "6-12" / "2-4, 9": every number; null: not such a list)
+    static List<Long> parseRanges(String s) { final List<Long> out = new ArrayList<Long>(); int i = 0; boolean any = false; final int n = s.length();
+        for (;;) { while (i < n && s.charAt(i) == ' ') i++; if (i >= n) return any ? out : null;
+            if (s.charAt(i) < '0' || s.charAt(i) > '9') return null; long a = 0; while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') { a = a * 10 + (s.charAt(i) - '0'); if (a > 100000) return null; i++; }
+            long b = a; while (i < n && s.charAt(i) == ' ') i++;
+            if (i < n && s.charAt(i) == '-') { i++; while (i < n && s.charAt(i) == ' ') i++; if (i >= n || s.charAt(i) < '0' || s.charAt(i) > '9') return null; b = 0;
+                while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') { b = b * 10 + (s.charAt(i) - '0'); if (b > 100000) return null; i++; } while (i < n && s.charAt(i) == ' ') i++; }
+            if (a < 1 || b < a) return null; for (long v = a; v <= b; v++) out.add(v); any = true;
+            if (i >= n) return out; if (s.charAt(i) != ',') return null; i++; } }
     // port of laes_tool.cpp:main::readSrc (the lambda)
     static long[] readSrc(LaesFile.Pcm core, List<Stream.DecMaster> dec, Src s, int c, long a, long b) { final long[] out = new long[(int) (b - a)];
         if (s.kind == 0) { System.arraycopy(core.c[c], (int) a, out, 0, (int) (b - a)); return out; }
@@ -90,32 +99,52 @@ public final class LaesTool {
         System.out.println("format: LAES (lossless, extension LAE2)");
         final int maxSt = 3;   // pieces sized for the highest rate a master can have
         final LaesEncoder.Options po = LaesEncoder.Options.fromArgs(args); final long piece = LaesEncoder.pieceFor(po, maxSt); final int threads = Par.threadsOr(po.threads);
-        final List<Stream.DecMaster> dec = new ArrayList<Stream.DecMaster>(); final String de = Stream.decodeLaesS(bodyPath, core, core.rate, wd, dec, piece, threads);
+        final List<Stream.DecMaster> dec = new ArrayList<Stream.DecMaster>(); final LaesFile.Head head = new LaesFile.Head(); final String de = Stream.decodeLaesS(bodyPath, core, core.rate, wd, dec, piece, threads, head);
         if (!de.isEmpty()) { System.out.println(inPath + ": " + de + " (the core master is still playable)"); return 2; }
-        boolean all = true; for (int i = 0; i < dec.size(); i++) { System.out.println("master " + (i + 1) + ": " + dec.get(i).I.rate + " Hz " + dec.get(i).I.bits + "-bit, " + dec.get(i).I.frames + " frames, SHA-256 " + (dec.get(i).shaOk ? "ok" : "MISMATCH")); all &= dec.get(i).shaOk; }
+        boolean all = true; { final List<LaesFile.MasterInfo> mi0 = new ArrayList<LaesFile.MasterInfo>(); for (Stream.DecMaster D : dec) mi0.add(D.I); final int[] mo = Choices.menuOrder(mi0);   // in the menu order, numbered as in menus
+          for (int p = 0; p < mo.length; p++) { final int i = mo[p]; final LaesFile.MasterInfo I = dec.get(i).I;
+              System.out.println("master " + (p + 1) + (I.name.length() == 0 ? "" : " \"" + I.name + "\"") + ": " + I.rate + " Hz " + I.bits + "-bit, " + I.frames + " frames, SHA-256 " + (dec.get(i).shaOk ? "ok" : "MISMATCH")
+                                 + (mo[p] != p ? " (master " + (i + 1) + " in the file)" : "")); all &= dec.get(i).shaOk; }
+          if (head.def != 0) { final LaesFile.MasterInfo D = dec.get(head.def - 1).I; System.out.println("default: master " + Choices.displayNo(mi0, head.def - 1) + (D.name.length() == 0 ? "" : " \"" + D.name + "\"") + " (set when encoded)"); }
+          else System.out.println("default: the core master");
+          if ((head.coreFlags & LaesFile.NO_DERIVE) != 0) System.out.println("the core master: no derived 16-bit version"); }
         if (isDec) {
-            // every choice the file offers: the core, each master, each master's rate levels (lossless), and a 16-bit version derived
-            // from the longest-word choice at each rate that has no 16-bit choice of its own (a new master: lossy against its source)
-            final List<Choice> ch = new ArrayList<Choice>(); { Src s = new Src(); s.rate = core.rate; s.bits = core.bits; s.n = core.frames(); ch.add(new Choice("core", "the core master (lossless)", s)); }
-            for (int i = 0; i < dec.size(); i++) { final String mk = "master_" + (i + 1); final LaesFile.MasterInfo I = dec.get(i).I;
-                if (!dec.get(i).shaOk) { System.out.println("master " + (i + 1) + ": SHA-256 mismatch: not offered (nor its rate levels)"); continue; }
-                { Src s = new Src(); s.kind = 1; s.m = i; s.rate = I.rate; s.bits = I.bits; s.n = I.frames; ch.add(new Choice(mk + "_" + I.rate + "_" + I.bits, "master " + (i + 1) + " (lossless)", s)); }
-                for (int k = I.stages - 1; k >= 0; k--) { Src s = new Src(); s.kind = 2; s.m = i; s.k = k; s.rate = I.rate >> (I.stages - k); s.bits = I.bits; s.n = LaesFile.levLen(I.frames, I.stages - k);
-                    ch.add(new Choice(mk + "_level_" + s.rate + "_" + s.bits, "rate level of master " + (i + 1) + " (lossless)", s)); } }
-            { final List<Integer> rates = new ArrayList<Integer>(); for (Choice c : ch) if (!rates.contains(c.s.rate)) rates.add(c.s.rate);
-              for (int r : rates) { int best = -1; boolean has16 = false; for (int j = 0; j < ch.size(); j++) if (ch.get(j).s.rate == r) { has16 |= ch.get(j).s.bits == 16; if (best < 0 || ch.get(j).s.bits > ch.get(best).s.bits) best = j; }
-                  if (has16 || best < 0 || ch.get(best).s.bits <= 16) continue;
-                  final Choice sc = ch.get(best); Src s = new Src(); s.kind = sc.s.kind; s.m = sc.s.m; s.k = sc.s.k; s.rate = sc.s.rate; s.bits = 16; s.n = sc.s.n;
-                  Choice dv = new Choice("derived16_" + r + "_from_" + sc.name, "16-bit master derived from " + (sc.name.equals("core") ? "the core master" : sc.name) + " by TPDF requantisation: lossless relative to its definition (bit-identical on every decoder), not lossless relative to its " + sc.s.bits + "-bit source", s); dv.derived = true; dv.from = best;
-                  ch.add(dv); } }
-            if (LaesEncoder.Options.flag(args, "--list")) { System.out.println("choices (use --pick=<n>[,<n>...] or --pick=<rate>:<bits>):");
-                for (int j = 0; j < ch.size(); j++) System.out.println(String.format("  %2d  %6d Hz %2d-bit  %s", j + 1, ch.get(j).s.rate, ch.get(j).s.bits, ch.get(j).what)); return all ? 0 : 2; }
+            // every choice the file offers (Choices = laes_choices.h, SPEC 10; the same list as the players): the core master, then per master its
+            // own group - the master, its rate levels (lossless), its derived 16-bit versions (unless the file turns them off for it)
+            final List<LaesFile.MasterInfo> infos = new ArrayList<LaesFile.MasterInfo>(); final boolean[] offered = new boolean[dec.size()];
+            for (int i = 0; i < dec.size(); i++) { infos.add(dec.get(i).I); offered[i] = dec.get(i).shaOk;
+                if (!dec.get(i).shaOk) System.out.println("master " + (i + 1) + ": SHA-256 mismatch: not offered (nor its rate levels or derived versions)"); }
+            final List<Choice> ch = new ArrayList<Choice>();
+            final List<Choices.Spec> specs = Choices.build(core.rate, core.bits, core.frames(), infos, offered, head); final int defJ = Choices.defaultIndex(specs, head);
+            for (Choices.Spec sp : specs) { Src s = new Src(); s.kind = sp.kind == 3 ? 0 : sp.kind; s.rate = sp.rate; s.bits = sp.bits; s.n = sp.frames; if (sp.m >= 0) s.m = sp.m; s.k = sp.level;
+                final Choice c = new Choice(sp.name, sp.what, s); c.kind = sp.kind; c.no = sp.no;
+                if (sp.kind == 3) { c.derived = true; c.from = sp.from; final Src f = ch.get(sp.from).s; final Src d = new Src(); d.kind = f.kind; d.m = f.m; d.k = f.k; d.rate = f.rate; d.bits = 16; d.n = f.n; c.s = d; } ch.add(c); }
+            final boolean listAll = LaesEncoder.Options.arg(args, "--list").equals("all");
+            if (LaesEncoder.Options.flag(args, "--list") || listAll) { System.out.println("choices (use --pick=<n>[,<n>...], --pick=<rate>:<bits> (masters only), --pick=master:<k> or --pick=name:<text>):");
+                // --list: the first level only (spec/lossless/SPEC.md, Section 10.3): the core master and each master with its whole description, the default marked;
+                // --list=all: also the rate levels and derived versions under each master, marked "-"; the numbers are those of --pick either way
+                int hidden = 0;
+                for (int j = 0; j < ch.size(); j++) { if (!listAll && ch.get(j).kind >= 2) { hidden++; continue; } String extra = ""; if (ch.get(j).kind <= 1) { final long sec = ch.get(j).s.rate != 0 ? ch.get(j).s.n / ch.get(j).s.rate : 0; extra = String.format("  %d:%02d", sec / 60, sec % 60); if (j == defJ) extra += "  [default]"; }
+                    System.out.println(String.format("  %3d  %6d Hz %2d-bit  %s%s%s", j + 1, ch.get(j).s.rate, ch.get(j).s.bits, ch.get(j).kind >= 2 ? "  - " : "", ch.get(j).what, extra)); }
+                if (hidden != 0) System.out.println("(" + hidden + " rate levels and derived versions not shown: --list=all)");
+                return all ? 0 : 2; }
             final List<Integer> pick = new ArrayList<Integer>(); final String pk = LaesEncoder.Options.arg(args, "--pick");
-            if (pk.isEmpty()) { pick.add(0); for (int j = 1; j < ch.size(); j++) if (!ch.get(j).derived && (ch.get(j).what.startsWith("master") || LaesEncoder.Options.flag(args, "--levels"))) pick.add(j); }
-            else { int a = 0; for (;;) { final int b = pk.indexOf(',', a); final String t = pk.substring(a, b < 0 ? pk.length() : b); final int col = t.indexOf(':'); boolean found = false;
-                    if (col < 0) { final long j = CStd.atoi(t); if (j >= 1 && j <= ch.size()) { pick.add((int) j - 1); found = true; } }
-                    else { final int r = CStd.atoi(t), bb = CStd.atoi(t.substring(col + 1)); for (int j = 0; j < ch.size() && !found; j++) if (ch.get(j).s.rate == r && ch.get(j).s.bits == bb) { pick.add(j); found = true; } }
-                    if (!found) { System.out.println("--pick: '" + t + "' is not one of the choices (see --list)"); return 2; } if (b < 0) break; a = b + 1; } }
+            if (pk.isEmpty()) { pick.add(0); for (int j = 1; j < ch.size(); j++) if (ch.get(j).kind == 1 || (ch.get(j).kind == 2 && LaesEncoder.Options.flag(args, "--levels"))) pick.add(j); }
+            else { int a = 0; for (;;) { final int b = pk.indexOf(',', a); final String t = pk.substring(a, b < 0 ? pk.length() : b); final int col = t.indexOf(':');
+                    // <n> or <a>-<b>: entries of --list. <rate>:<bits>: the masters (never a rate level or a derived version) with that rate and
+                    // word length. master:<k>: master k. name:<text>: the masters with exactly this name.
+                    final List<Integer> hit = new ArrayList<Integer>();
+                    if (col < 0) { final List<Long> v = parseRanges(t); if (v != null) { boolean okR = true; for (long j : v) okR = okR && j >= 1 && j <= ch.size(); if (okR) for (long j : v) hit.add((int) j - 1); } }
+                    else if (t.startsWith("master:")) { final long k = CStd.strtolFull(t.substring(7)); for (int j = 0; j < ch.size(); j++) if (ch.get(j).kind == 1 && ch.get(j).no == k) hit.add(j); }
+                    else if (t.startsWith("name:")) { final String nm = t.substring(5); for (int j = 0; j < ch.size(); j++) if (ch.get(j).kind == 1 && nm.length() != 0 && infos.get(ch.get(j).s.m).name.equals(nm)) hit.add(j); }
+                    else { final int r = CStd.atoi(t), bb = CStd.atoi(t.substring(col + 1)); for (int j = 0; j < ch.size(); j++) if (ch.get(j).kind == 1 && ch.get(j).s.rate == r && ch.get(j).s.bits == bb) hit.add(j); }
+                    if (hit.isEmpty()) { System.out.println("--pick: '" + t + "' is not one of the choices (see --list)"); return 2; }
+                    // several masters fit: the user chooses. The C++ tool shows a tick list in a console; this port has none and
+                    // lists the candidates as the C++ does outside a console, nothing written
+                    if (hit.size() > 1 && col >= 0) { System.out.println("--pick: '" + t + "' fits " + hit.size() + " masters. Tick the ones to write:");
+                        for (int j : hit) System.out.println(String.format("  %4d  %6d Hz %2d-bit  %s", j + 1, ch.get(j).s.rate, ch.get(j).s.bits, Choices.masterLabel(ch.get(j).no, infos.get(ch.get(j).s.m))));
+                        System.out.println("Not in a console: give the numbers with --pick=<n>, several --pick=<n>,<n>, a range --pick=<a>-<b>. Nothing written."); return 1; }
+                    for (int j : hit) if (!pick.contains(j)) pick.add(j); if (b < 0) break; a = b + 1; } }
             new File(args[2]).mkdirs(); final String d = args[2] + "/";
             for (int j : pick) { final Choice C = ch.get(j); final Src S = C.derived ? ch.get(C.from).s : C.s; final int by = C.s.bits / 8; final long n = C.s.n, db = n * 2 * by;
                 final byte[] h = LaesEncoder.wavHeader(C.s.rate, C.s.bits); final long fmtLen = C.s.bits > 16 ? 40 : 16;

@@ -15,7 +15,9 @@
 #include "lae_api.h"
 #include "lae_decoder.h"
 #include "lae_cdx_read.h"
-#include "laes_file.h"   // laes::Sha256 (the file key of the seek checkpoints)
+#include "laey_flac.h"   // the FLAC form: CD layer in FLAC frames, extension in "LAE1" APPLICATION blocks (2026-11-10)
+#include "laes_file.h"  // laes::Sha256 (the file key of the seek checkpoints)
+#include <map>
 #include <mutex>
 #include <chrono>
 #include <array>
@@ -130,23 +132,50 @@ struct lae_track {
     std::vector<int16_t> cd; std::vector<uint8_t> lae; lae_info info{};
     std::unique_ptr<Decoder> dec; int route = -1, outRate = 0, wrate = 0, bits = 0; uint64_t pos = 0, outFrames = 0; bool err = false;
     std::vector<std::vector<SavedMark>> saved;   // seek checkpoints of every stream (from the check at open or the player's record)
+    // extension packs (API 8, spec/lossy/SPEC.md, Section 5.6): the pack the next lae_start decodes (0 = the main body), the further packs found at
+    // open, pack 0's information, and the checkpoints of each further pack once it was selected (its streams are checked then; the
+    // player's record on disk holds pack 0 only)
+    int pack = 0; std::vector<Decoder::PackInfo> packs; std::string mainName; lae_info info0{}; std::map<int, std::vector<std::vector<SavedMark>>> savedOf;
 };
 // checks the v5 pair (all decoder checks) and fills the information; takes cd and lae. key: SHA-256 of the whole file (the player's
 // checkpoint record is looked up by it); the first time a file is met, every entropy stream is checked to its end and the record is made
 static lae_track* finish(std::vector<int16_t>&& cd, std::vector<uint8_t>&& lae, int pair, const Sha& key, char* err, int errlen) {
     auto t = std::make_unique<lae_track>(); t->cd.swap(cd); t->lae.swap(lae);
     { Decoder D; int code = 0; std::string e = D.openRef(t->cd, t->lae, "full", 0, &code); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
+      t->packs = D.packs; t->mainName = D.mainName;   // the main body's name (optional "LNAM" record), for display only
       lae_info& i = t->info; i.master_rate = D.rate; i.base_rate = D.base; i.stages = D.stages; i.cutoff_hz = D.fc; i.cd_frames = (uint64_t)D.ncd; i.master_frames = (uint64_t)D.Lm;
       const std::filesystem::path dir = indexDir();
       if (dir.empty() || !loadIndex(dir, key, D, t->saved)) {
           e = D.checkAll(t->saved, D.seekThreads); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
           if (!dir.empty()) saveIndex(dir, key, packIndex(key, D, t->saved)); } }
-    std::string h = md5hex(t->cd); memcpy(t->info.cd_md5, h.c_str(), 33); t->info.from_pair = pair; return t.release(); }
+    std::string h = md5hex(t->cd); memcpy(t->info.cd_md5, h.c_str(), 33); t->info.from_pair = pair; t->info0 = t->info; return t.release(); }
 static Sha shaOf(laes::Sha256& s) { Sha k{}; s.final(k.data()); return k; }
+// FLAC form (2026-11-10, laey_flac.h): the CD layer in the FLAC audio frames, the extension in "LAE1" APPLICATION blocks. The whole file is
+// read once, in blocks (SHA-256 for the player's checkpoint record; the pieces and the audio frames are copied on the way), then the
+// frames are decoded and checked against STREAMINFO (sample count, MD5). From there on the track is the same as one opened from a WAV.
+static lae_track* openFlac(lae_read_fn rd, void* ctx, uint64_t size, char* err, int errlen) {
+    auto get = [&](uint64_t off, void* p, size_t n) { return rd(ctx, off, p, n) == 0; };
+    laeyflac::Layout L; std::string e = laeyflac::layout(get, size, L); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
+    bool notLaey = true; e = laeyflac::check(L, notLaey); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
+    if (L.audioLen > (size_t)-1 / 2) { setErr(err, errlen, "the file is too large for this decoder"); return nullptr; }
+    std::vector<uint8_t> lae((size_t)L.laeLen), au((size_t)L.audioLen); laes::Sha256 sh; std::vector<uint8_t> blk((size_t)4 << 20);
+    auto copyPart = [](uint64_t at, const uint8_t* q, uint64_t n, uint64_t off, uint64_t len, uint8_t* to) {   // the part of [at, at + n) inside [off, off + len)
+        const uint64_t a = std::max(at, off), e2 = std::min(at + n, off + len); if (a < e2) memcpy(to + (a - off), q + (a - at), (size_t)(e2 - a)); };
+    for (uint64_t at = 0; at < size; at += blk.size()) { const uint64_t n = std::min<uint64_t>(blk.size(), size - at);
+        if (!get(at, blk.data(), (size_t)n)) { setErr(err, errlen, "cannot read the file"); return nullptr; }
+        sh.update(blk.data(), (size_t)n); copyPart(at, blk.data(), n, L.audioOff, L.audioLen, au.data());
+        uint64_t done = 0; for (const laeyflac::Piece& q : L.lae) { copyPart(at, blk.data(), n, q.off, q.len, lae.data() + done); done += q.len; } }
+    const laesflac::Info si = laeyflac::infoOf(L); std::vector<int16_t> pcm; e = laeyflac::decodeAudio(au.data(), au.size(), si, pcm); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
+    std::vector<uint8_t>().swap(au);
+    if (!laeyflac::md5ok(pcm, si)) { setErr(err, errlen, "FLAC audio (the CD or core layer): MD5 missing or wrong (the audio is not the one this file was written with): refusing to decode; that audio itself still plays"); return nullptr; }
+    return finish(std::move(pcm), std::move(lae), 0, shaOf(sh), err, errlen); }
+struct MemSrc { const uint8_t* b; size_t n; };
+static int LAE_CALL readMem(void* ctx, uint64_t offset, void* buf, size_t len) { const MemSrc* m = (const MemSrc*)ctx; if (offset > m->n || len > m->n - offset) return -1; memcpy(buf, m->b + offset, len); return 0; }
 // C++ linkage (not inside extern "C": with /EHsc, exceptions leaving an extern "C" function would skip the destructors of its locals)
 static lae_track* openBytes(const uint8_t* b, size_t len, char* err, int errlen) {
+    if (len >= 4 && !memcmp(b, "fLaC", 4)) { MemSrc m{b, len}; return openFlac(readMem, &m, len, err, errlen); }   // FLAC form
     int rate = 0; std::vector<int16_t> pcm; std::vector<uint8_t> lae; std::string e = cdxr::parseWav(b, len, rate, pcm, &lae); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
-    if (lae.empty()) { setErr(err, errlen, "no LAE chunk: plain CD audio"); return nullptr; }
+    if (lae.empty()) { setErr(err, errlen, "no LAE chunk: plain audio"); return nullptr; }
     laes::Sha256 s; s.update(b, len); return finish(std::move(pcm), std::move(lae), 0, shaOf(s), err, errlen); }
 // the same RIFF walk as cdxr::parseWav (the last 'fmt ', 'data' and "LAE " chunk count; a truncated last chunk is tolerated), but through the
 // host's reader: only the 'data' and "LAE " bodies are read, straight into the track's own vectors
@@ -155,6 +184,7 @@ static lae_track* openReader(lae_read_fn rd, void* ctx, uint64_t size, char* err
     auto u16 = [](const uint8_t* q) { return (int)(q[0] | q[1] << 8); }; auto u32 = [](const uint8_t* q) { return (uint32_t)q[0] | (uint32_t)q[1] << 8 | (uint32_t)q[2] << 16 | (uint32_t)q[3] << 24; };
     uint8_t h[12]; if (size < 12) { setErr(err, errlen, "not a WAV file"); return nullptr; }
     if (!get(0, h, 12)) { setErr(err, errlen, "cannot read the file"); return nullptr; }
+    if (!memcmp(h, "fLaC", 4)) return openFlac(rd, ctx, size, err, errlen);   // FLAC form (2026-11-10)
     if (memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) { setErr(err, errlen, "not a WAV file"); return nullptr; }
     uint64_t p = 12, dOff = 0, dLen = 0, lOff = 0, lLen = 0; int fmt = 0, ch = 0, bits = 0; bool haveFmt = false, haveData = false, haveLae = false;
     while (size - p >= 8) { uint8_t c[8]; if (!get(p, c, 8)) { setErr(err, errlen, "cannot read the file"); return nullptr; }
@@ -167,7 +197,7 @@ static lae_track* openReader(lae_read_fn rd, void* ctx, uint64_t size, char* err
         if (n + (n & 1) >= size - body) break; p = body + n + (n & 1); }
     if (!haveFmt || !haveData) { setErr(err, errlen, "not a PCM WAV file"); return nullptr; }
     if (fmt != 1 || ch != 2 || bits != 16) { setErr(err, errlen, "not 16-bit stereo PCM"); return nullptr; }
-    if (!haveLae || lLen == 0) { setErr(err, errlen, "no LAE chunk: plain CD audio"); return nullptr; }
+    if (!haveLae || lLen == 0) { setErr(err, errlen, "no LAE chunk: plain audio"); return nullptr; }
     if (dLen / 4 * 4 > (size_t)-1 / 2 || lLen > (size_t)-1 / 2) { setErr(err, errlen, "the file is too large for this decoder"); return nullptr; }
     // the whole file once, in blocks (so that the host can abort between them): its SHA-256 (the key of the player's checkpoint record),
     // and the 'data' and "LAE " bodies copied into the track's own vectors
@@ -221,18 +251,37 @@ LAE_API lae_track* LAE_CALL lae_open_pair_files(const char* base_wav, const char
         return lae_open_pair(pcm.data(), pcm.size() / 2, rate, x.data(), x.size(), err, errlen); }
     catch (...) { setErr(err, errlen, "out of memory or internal error"); return nullptr; } }
 LAE_API int LAE_CALL lae_get_info(const lae_track* t, lae_info* out) { if (!t || !out) return -1; *out = t->info; return 0; }
+// Extension packs (API 8). The pack is chosen by the caller only, by its number; the name is for display and selects nothing.
+// Selecting a pack leaves the track unstarted; a further pack's entropy streams are checked to their end the first time it
+// is selected (as pack 0's are at open), in memory only.
+LAE_API int LAE_CALL lae_pack_count(const lae_track* t) { return t ? 1 + (int)t->packs.size() : -1; }
+LAE_API int LAE_CALL lae_pack_info(const lae_track* t, int k, int* rate, int* stages, char* name, size_t name_size) {
+    if (!t || k < 0 || (size_t)k > t->packs.size()) return -1;
+    if (rate) *rate = k ? t->packs[(size_t)k - 1].rate : t->info0.master_rate; if (stages) *stages = k ? t->packs[(size_t)k - 1].stages : t->info0.stages;
+    if (name && name_size) { const std::string n = k ? t->packs[(size_t)k - 1].name : t->mainName; const size_t c = (std::min)(n.size(), name_size - 1); memcpy(name, n.data(), c); name[c] = 0; }
+    return 0; }
+LAE_API int LAE_CALL lae_selected_pack(const lae_track* t) { return t ? t->pack : -1; }
+LAE_API int LAE_CALL lae_select_pack(lae_track* t, int k) {
+    try { if (!t || k < 0 || (size_t)k > t->packs.size()) return -1;
+        t->dec.reset(); t->route = -1; t->pos = 0; t->err = false;
+        if (k == 0) { t->info = t->info0; t->pack = 0; return 0; }
+        Decoder D; D.pack = k; int code = 0; std::string e = D.openRef(t->cd, t->lae, "full", 0, &code); if (!e.empty()) return -1;
+        if (!t->savedOf.count(k)) { std::vector<std::vector<SavedMark>> s; e = D.checkAll(s, D.seekThreads); if (!e.empty()) return -1; t->savedOf[k] = std::move(s); }
+        lae_info i = t->info0; i.master_rate = D.rate; i.stages = D.stages; i.cutoff_hz = D.fc; i.master_frames = (uint64_t)D.Lm; t->info = i; t->pack = k; return 0; }
+    catch (...) { return -1; } }
 LAE_API int LAE_CALL lae_start(lae_track* t, int route, int out_rate, char* err, int errlen) {
     try { if (!t) return -1; std::unique_ptr<Decoder> old = std::move(t->dec); t->route = -1; t->err = false; t->pos = 0;   // a failed start leaves the track unstarted (read/seek refuse it)
-        if (route == LAE_ROUTE_CD) { if (out_rate && out_rate != t->info.base_rate) { setErr(err, errlen, "the CD route plays at the base rate only"); return -1; }
+        if (route == LAE_ROUTE_CD) { if (out_rate && out_rate != t->info.base_rate) { setErr(err, errlen, "the CD / core layer route plays at the base rate only"); return -1; }
             t->route = route; t->outRate = 0; t->wrate = t->info.base_rate; t->bits = 16; t->outFrames = t->info.cd_frames; return 0; }
         const char* m = route == LAE_ROUTE_CD24 ? "cd24" : route == LAE_ROUTE_16 ? "16" : route == LAE_ROUTE_FULL ? "full" : nullptr;
         if (!m) { setErr(err, errlen, "unknown route"); return -1; }
-        if (!mdct::selftestOK()) { setErr(err, errlen, "decoder self-test failed in this thread (floating-point state): play the CD layer"); return -1; }
+        if (!mdct::selftestOK()) { setErr(err, errlen, "decoder self-test failed in this thread (floating-point state): play the CD / core layer"); return -1; }
         auto D = std::make_unique<Decoder>(); int code = 0;
+        D->pack = t->pack;   // the pack chosen with lae_select_pack (0 = the main body)
         std::string e = D->openRef(t->cd, t->lae, m, route == LAE_ROUTE_CD24 ? 0 : out_rate, &code); if (!e.empty()) { setErr(err, errlen, e); return -1; }
         if (route == LAE_ROUTE_CD24 && out_rate && out_rate != D->wrate) { setErr(err, errlen, "the CD24 route plays at the base rate only"); return -1; }
         if (old) D->adoptMarks(*old);   // a restart or another route keeps the seek checkpoints decoded so far
-        D->useSaved(t->saved);   // and the checkpoints of the check at open (or of the player's record of this file)
+        D->useSaved(t->pack ? t->savedOf[t->pack] : t->saved);   // and the checkpoints of the check at open (or of the player's record of this file), or of the selected pack
         t->route = route; t->outRate = out_rate; t->wrate = D->wrate; t->bits = 24; t->outFrames = (uint64_t)D->Lo; t->dec = std::move(D); return 0; }
     catch (...) { setErr(err, errlen, "out of memory or internal error"); return -1; } }
 LAE_API int LAE_CALL lae_output_format(const lae_track* t, int* rate, int* bits, uint64_t* frames) {

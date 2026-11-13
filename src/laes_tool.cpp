@@ -21,14 +21,33 @@
 //       --tag=KEY=VALUE (Vorbis names: TITLE, ARTIST, ALBUM, DATE, COPYRIGHT, COMMENT, ...; may repeat), --cover=<image> (front cover),
 //       --picture=<type>:<image> (other pictures, ID3 / FLAC picture types, any number); JPEG or PNG stored byte for byte.
 //       FLAC: VORBIS_COMMENT + PICTURE before the "LAE2" blocks; WAV: LIST/INFO + "id3 " (ID3v2.4) between "fmt " and "data". UTF-8.
+//       masters (2026-11-11): up to 255; --name=<k>:<text> names the k-th master as given (the publisher's free text, UTF-8, at most 255
+//       bytes, no control characters; shown by players as it is, never used to choose anything); --no-derive / --no-derive=<k>: that
+//       master offers no derived 16-bit versions. Any name, a --no-derive or more than 16 masters: payload version 2 (players from before
+//       2026-11-11 then play the core master only); otherwise version 1, byte for byte as before. Above 16 masters the reference of each
+//       master is chosen from the 3 candidates with the smallest size on 4 fixed excerpts (coded in full), and one file order only.
+//       menu order (2026-11-11): the order the masters are given in (--menu-order=<k1>,<k2>,...: another order); the file order stays
+//       the encoder's smallest one; a menu order other than the file order is stored (payload version 2). Every number shown or taken (list, master:<k>, master_<k>_ file names, names / add) is the menu number.
+//       default (2026-11-12): --default=<k> (the k-th master as given) is what players play when nothing is chosen; not given or
+//       --default=core: the core master (header byte 56). --no-derive=core: the core master offers no derived version (byte 57); a
+//       bare --no-derive turns off every derived version, the core master's too. Either set: payload version 2.
+//   laes names <in> <out> | --in-place [--name=<k>:<text>] [--no-derive[=<k>|core]] [--derive[=<k>|core]] [--menu-order=<k1>,...] [--default=<k>|core]   a NEW file (--in-place: the file itself, default and core flag only) with other master
+//       names / derive flags / menu order (k = the master's menu number; an empty text removes the name); every layer and the tags copied
+//       byte for byte, every master checked
+//   laes add <in> <out> <master>[@T] ... [--name=<k>:<text>] [--no-derive[=<k>]] [--menu-order=<k1>,...]   a NEW file: the old one with new
+//       masters at the end (the old parts byte for byte; each new master against the core master and every master before it)
+//   laes extract <in> <out> --pick=master:<k> | name:<text> | <rate>:<bits>[,...]   a NEW file with the chosen masters, decoded and encoded
+//       again in full (same core master, tags kept); the order of --pick is the new menu order
 //   laes tag <in> <out> [--tag=... --cover=... --picture=...]   a NEW file with exactly these tags (none: no tags); audio bytes and
 //       payload copied byte for byte, then every master checked against its SHA-256; the old file is kept. Refuses an existing <out>.
 //   laes parts <file>                                  blocks / chunks, SHA-256 of the audio bytes and of the payload, the tags as read
 //   laes dec <in.wav | in.flac> <out dir> [--levels]   writes core.wav and master_<k>_<rate>_<bits>.wav (and every rate level with --levels)
 //   laes dec <in> --list                              every choice: core, masters, rate levels (lossless) and derived 16-bit versions
-//   laes dec <in> <out dir> --pick=<n>[,<n>...] | --pick=<rate>:<bits>   writes only the chosen ones. A derived 16-bit version exists for each
-//       rate without a 16-bit choice of its own: made from the longest-word choice there with a fixed TPDF rule; it is a derived
-//       master: lossless relative to that rule (bit-identical on every decoder), not lossless relative to its source
+//   laes dec <in> <out dir> --pick=<n>[,<n>...] | <rate>:<bits> | master:<k> | name:<text>   writes only the chosen ones. <rate>:<bits>
+//       and name:<text> match masters only (never a rate level or a derived version); several match: the user ticks them (laes_pick.h; in a script they are listed, nothing written). <a>-<b>: a range of entries.
+//       The list (laes_choices.h, 2026-11-11): the core master; then per master its group - the master, its rate levels, and its derived
+//       16-bit versions (each master above 16 bit, at its own rate and every level, unless the file turns them off for it), made with a
+//       fixed TPDF rule: bit-identical on every decoder, lossless relative to that rule, not lossless relative to the master
 //   laes verify <in.wav | in.flac> <master.wav> ...    decodes and compares every master bit for bit with the given files
 //   laes align <cd.wav> <master.wav> [--lae-enc=<path>] [--accept]   LAEY's automatic search (lae_enc cdcheck) -> T exactly as measured
 //       (fraction included); alignment error within -60 dB passes, otherwise it is shown and passes only when chosen by hand. Writes nothing.
@@ -52,6 +71,7 @@
 #include "laes_stream_enc.h"   // block-wise enc / dec / verify / align (2026-10-30)
 #include "laes_play.h"   // the playback decoder, for the self-check of the written file (2026-11-03)
 #include "laes_tags.h"   // tags and pictures (2026-11-05)
+#include "laes_pick.h"   // the tick list for several masters that fit one --pick (2026-11-11)
 #ifdef _WIN32
 static const char* kLaeEnc = "lae_enc.exe"; static const char* kQ = "\"";   // cmd.exe needs the whole command line quoted once more
 #else   // POSIX names of the same calls
@@ -262,8 +282,40 @@ static std::string checkStored(const std::string& path, int threads) {
     if (!p.err.empty()) return p.err; if (!p.verified()) return "SHA-256 mismatch"; return ""; }
 
 
-int main(int argc, char** argv) {
-    lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
+// the file in its layout (FLAC blocks / RIFF chunks in their order, the tags kept as they are) with a new LAES payload (bodyP, bsz bytes)
+// in place of the old one: FLAC: the LAE2 APPLICATION blocks replaced where the first one was; WAV: the "LAE " chunk; ds64 / JUNK made again.
+// laes names / add / extract (2026-11-11: always a new file in the encoder's layout)
+static std::string writeWithPayload(laess::In& in, const Layout& L, const std::string& bodyP, long long bsz, const std::string& outPart) {
+        { laess::Out o(outPart); laess::In body(bodyP);
+          if (L.flac) {   // the blocks in their order; the LAE2 APPLICATION blocks replaced, where the first one was, by the new payload's
+              const size_t pieceA = (1u << 24) - 1 - 4; const long long napp = (bsz + (long long)pieceA - 1) / (long long)pieceA; o.put("fLaC", 4);
+              struct Em { int type; long long off, len; bool lae; long long a; }; std::vector<Em> em; bool done = false;
+              for (const Part& q : L.parts) { if (q.type == 2 && q.id == "LAE2") { if (!done) for (long long i = 0; i < napp; i++) em.push_back({2, 0, std::min<long long>((long long)pieceA, bsz - i * (long long)pieceA), true, i * (long long)pieceA}); done = true; }
+                  else em.push_back({q.type, q.off, q.len, false, 0}); }
+              for (size_t i = 0; i < em.size(); i++) { const Em& e = em[i]; const long long L4 = e.lae ? e.len + 4 : e.len;
+                  const uint8_t bh[4] = {(uint8_t)((i + 1 == em.size() ? 0x80 : 0) | e.type), (uint8_t)(L4 >> 16), (uint8_t)(L4 >> 8), (uint8_t)L4}; o.put(bh, 4);
+                  if (e.lae) { o.put("LAE2", 4); copyRange(body, o, e.a, e.len); } else copyRange(in, o, e.off, e.len); }
+              copyRange(in, o, L.audioOff, L.audioLen); }
+          else {   // RIFF / RF64: "fmt " and every chunk in its order (tags kept as they are); the "LAE " chunk with the new payload; ds64 / JUNK made again
+              const Part* fmt = nullptr; std::vector<const Part*> keep; for (auto& q : L.parts) { if (q.id == "fmt ") fmt = &q; else if (q.id == "ds64" || q.id == "JUNK") continue; else keep.push_back(&q); }
+              if (!fmt || fmt->len < 16) return "no fmt chunk";
+              long long riff = 4 + 8 + fmt->len + (fmt->len & 1); for (auto* q : keep) { const long long len = q->id == "LAE " ? bsz : q->len; riff += 8 + len + (len & 1); }
+              const bool rf64 = riff > 0xFFFFFFFFLL || getenv("LAES_FORCE_RF64");
+              std::vector<uint8_t> h; auto p32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) h.push_back((uint8_t)(v >> (8 * i))); }; auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; i++) h.push_back((uint8_t)(v >> (8 * i))); };
+              if (rf64) { uint8_t fb[16]; in.read(fmt->off, fb, 16); const int align = fb[12] | fb[13] << 8;
+                  h.insert(h.end(), {'R', 'F', '6', '4', 0xFF, 0xFF, 0xFF, 0xFF, 'W', 'A', 'V', 'E', 'd', 's', '6', '4', 40, 0, 0, 0}); u64((uint64_t)(riff + 48)); u64((uint64_t)L.audioLen); u64((uint64_t)(align ? L.audioLen / align : 0));
+                  h.insert(h.end(), {1, 0, 0, 0, 'L', 'A', 'E', ' '}); u64((uint64_t)bsz); }
+              else { h.insert(h.end(), {'R', 'I', 'F', 'F'}); p32((uint32_t)riff); h.insert(h.end(), {'W', 'A', 'V', 'E'}); }
+              h.insert(h.end(), {'f', 'm', 't', ' '}); p32((uint32_t)fmt->len); o.put(h.data(), h.size()); copyRange(in, o, fmt->off, fmt->len); if (fmt->len & 1) { const uint8_t z = 0; o.put(&z, 1); }
+              for (auto* q : keep) { const bool isLae = q->id == "LAE "; const long long len = isLae ? bsz : q->len; std::vector<uint8_t> ch(q->id.begin(), q->id.end()); const bool big = rf64 && (q->id == "data" || isLae);
+                  for (int i = 0; i < 4; i++) ch.push_back(big ? 0xFF : (uint8_t)((uint64_t)len >> (8 * i))); o.put(ch.data(), ch.size());
+                  if (isLae) copyRange(body, o, 0, bsz); else copyRange(in, o, q->off, q->len); if (len & 1) { const uint8_t z = 0; o.put(&z, 1); } } }
+          o.close(); }
+    return ""; }
+static int laesMain(int argc, char** argv);
+int main(int argc, char** argv) { lae_u8::init(argc, argv); return laesMain(argc, argv); }   // UTF-8 arguments and file names on Windows (win_utf8.h)
+// laes add / extract (2026-11-11) run the dec and enc commands of this same program through laesMain
+static int laesMain(int argc, char** argv) {
     if (argc < 2) { printf("laes enc | tag | parts | dec | verify | align | selftest | excerpt | mkcd  (see the source header)\n"); return 1; }
     const std::string cmd = argv[1];
     if (cmd == "selftest") return selftest::run() ? 2 : 0;
@@ -390,6 +442,275 @@ int main(int argc, char** argv) {
         printf("%s: %s form, %zu tag(s), %zu picture(s) (%.1f MB); audio bytes, payload and every master's SHA-256 checked\n", out.c_str(), L.flac ? "FLAC" : "WAV", tags.kv.size(), tags.pics.size(), pb / 1e6);
         return 0; }
     catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[3]) + ".part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
+    if (cmd == "add" && argc >= 5) try {   // 2026-11-11: a NEW file = the old one + new masters at the end of the payload
+        // laes add <in> <out> <master>[@T] ... [--name=<k>:<text>] [--no-derive[=<k>]] [--menu-order=<k1>,...]   (k of --name / --no-derive: the new
+        // masters as given; --menu-order: the masters by their present numbers, the new ones numbered after them in the order given).
+        // The core master, every old record and every old layer are copied byte for byte; each new master is coded against the core
+        // master and every master before it, as laes enc does (the smallest candidate). The old masters are decoded once (they are the
+        // references); every master of the new file is then checked against its SHA-256.
+        const std::string src = argv[2], out = argv[3]; std::error_code ec;
+        if (out.empty() || out[0] == '-') { printf("laes add <in> <out> <master> ...\n"); return 1; }
+        if (fs::exists(out, ec)) { printf("%s exists: choose another name (the old file is kept, a new one is written)\n", out.c_str()); return 1; }
+        laess::In in(src); Layout L; { const std::string e = readLayout(in, L); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+        if (L.payload.empty()) { printf("%s: no LAE extension found\n", src.c_str()); return 2; }
+        long long ptot = 0; for (auto& r : L.payload) ptot += r.second;
+        auto pread = [&](long long at, void* d, size_t n) { uint8_t* q = (uint8_t*)d; long long base0 = 0;
+            for (auto& r : L.payload) { if (n && at < base0 + r.second) { const long long o = at - base0; const size_t k = (size_t)std::min<long long>((long long)n, r.second - o); in.read(r.first + o, q, k); q += k; n -= k; at += (long long)k; } base0 += r.second; }
+            if (n) laess::fail("payload truncated"); };
+        { char mg[5] = {0}; if (ptot >= 4) pread(0, mg, 4); if (strcmp(mg, "LAE2")) { printf("%s: not LAES (extension %s)\n", src.c_str(), mg); return 2; } }
+        if (ptot < 68) { printf("%s: LAES block too short\n", src.c_str()); return 2; }
+        auto le = [](const uint8_t* p, int n) { uint64_t v = 0; for (int i = n - 1; i >= 0; i--) v = v << 8 | p[i]; return v; };
+        uint8_t hd[64]; pread(0, hd, 64); const int ver0 = hd[4] | hd[5] << 8, nOld = hd[14], base = (int)le(hd + 8, 4), coreMode = hd[15];
+        if ((ver0 != 1 && ver0 != 2) || !laes::headerCountOk((uint64_t)ver0, (uint64_t)nOld)) { printf("%s: unsupported LAES version or header\n", src.c_str()); return 2; }
+        struct ORec { uint8_t r[72]; std::string name; std::vector<std::pair<long long, long long>> lay; MasterInfo I; };
+        std::vector<ORec> rs; long long pos = 64;
+        for (int mi = 0; mi < nOld; mi++) { ORec R; pread(pos, R.r, 72); pos += 72; MasterInfo& I = R.I;
+            I.bits = R.r[0]; I.stages = R.r[1]; I.w = R.r[2]; I.storage = R.r[3]; I.refTier = R.r[4]; I.rate = (int)le(R.r + 8, 4); I.frames = (int64_t)le(R.r + 16, 8); I.whole = (int64_t)le(R.r + 24, 8); I.frac = (uint32_t)le(R.r + 32, 4); memcpy(I.sha, R.r + 40, 32);
+            if (ver0 == 2) { const int nl = R.r[5]; I.flags = R.r[6]; I.menu = R.r[7]; I.name.resize((size_t)nl); if (nl) pread(pos, &I.name[0], (size_t)nl); pos += nl; }
+            if (I.stages > 3 || (I.storage == 2 && (I.refTier < 1 || I.refTier > mi))) { printf("%s: invalid master record %d\n", src.c_str(), mi + 1); return 2; }
+            const int j = I.storage == 2 ? std::min(I.stages, rs[(size_t)I.refTier - 1].I.stages) : 0;
+            for (int c = 0; c < 2; c++) for (int k = j; k <= I.stages; k++) { uint8_t t[4]; pread(pos, t, 4); const long long l = (long long)le(t, 4); if (pos + 4 + l > ptot - 4) { printf("%s: LAES block truncated\n", src.c_str()); return 2; } R.lay.push_back({pos, 4 + l}); pos += 4 + l; }
+            rs.push_back(R); }
+        if (pos != ptot - 4) { printf("%s: unexpected bytes after the last master\n", src.c_str()); return 2; }
+        // the new masters and the options
+        std::vector<std::string> paths; std::vector<double> Ts; std::vector<laess::WavInfo> wis;
+        for (int i = 4; i < argc; i++) { if (argv[i][0] == '-') continue; std::string a = argv[i]; double T = 0; const size_t at = a.rfind('@'); if (at != std::string::npos && at > 2) { T = atof(a.substr(at + 1).c_str()); a = a.substr(0, at); }
+            laess::WavInfo wi; const std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } paths.push_back(a); Ts.push_back(T); wis.push_back(wi); }
+        if (paths.empty()) { printf("no new master given\n"); return 1; }
+        const size_t nAll = (size_t)nOld + paths.size(); if (nAll > 255) { printf("at most 255 masters (%zu now, %zu new)\n", (size_t)nOld, paths.size()); return 1; }
+        for (auto& w : wis) { int st = 0; while ((base << st) < w.rate && st < 4) st++; if ((base << st) != w.rate || st > 3) { printf("a new master must be at %d Hz times 1, 2, 4 or 8\n", base); return 1; } }
+        std::vector<std::string> names(paths.size()); std::vector<int> mflags(paths.size(), 0); std::vector<size_t> menuList;
+        for (int i = 4; i < argc; i++) { const std::string a = argv[i]; if (a[0] != '-') continue;
+            if (a.rfind("--name=", 0) == 0) { const std::string v = a.substr(7); const size_t col = v.find(':'); char* e = nullptr; const long k = col == std::string::npos ? 0 : strtol(v.c_str(), &e, 10);
+                if (col == std::string::npos || e != v.c_str() + col || k < 1 || k > (long)paths.size()) { printf("--name=<k>:<text>, k = 1 ... %zu (the new masters as given)\n", paths.size()); return 1; }
+                const std::string t = v.substr(col + 1); if (!laes::validMasterName(t)) { printf("--name=%ld: a name is UTF-8 of at most 255 bytes without control characters\n", k); return 1; } names[(size_t)k - 1] = t; }
+            else if (a == "--no-derive") { for (int& f : mflags) f |= laes::kNoDerive; }
+            else if (a.rfind("--no-derive=", 0) == 0) { char* e = nullptr; const long k = strtol(a.c_str() + 12, &e, 10); if (*e || k < 1 || k > (long)paths.size()) { printf("--no-derive=<k>, k = 1 ... %zu\n", paths.size()); return 1; } mflags[(size_t)k - 1] |= laes::kNoDerive; }
+            else if (a.rfind("--menu-order=", 0) == 0) { std::vector<bool> seen(nAll + 1, false); size_t a0 = 13;
+                for (;;) { const size_t b0 = a.find(',', a0); const std::string t = a.substr(a0, b0 == std::string::npos ? std::string::npos : b0 - a0); char* e = nullptr; const long k = strtol(t.c_str(), &e, 10);
+                    if (*e || k < 1 || k > (long)nAll || seen[(size_t)k]) { printf("--menu-order=<k1>,<k2>,...: every master (1 ... %zu; the new ones from %d on) once\n", nAll, nOld + 1); return 1; } seen[(size_t)k] = true; menuList.push_back((size_t)k);
+                    if (b0 == std::string::npos) break; a0 = b0 + 1; }
+                if (menuList.size() != nAll) { printf("--menu-order=<k1>,<k2>,...: every master (1 ... %zu) once\n", nAll); return 1; } }
+            else if (a == "--timing" || a.rfind("--threads", 0) == 0) continue;
+            else { printf("unknown option %s\n", a.c_str()); return 1; } }
+        // the new masters in the encoder's order among themselves (more bits first, then higher rate); "num" = their number in menus (after the old ones)
+        std::vector<size_t> ordN(paths.size()); for (size_t i = 0; i < ordN.size(); i++) ordN[i] = i;
+        std::stable_sort(ordN.begin(), ordN.end(), [&](size_t a, size_t b) { return wis[a].bits != wis[b].bits ? wis[a].bits > wis[b].bits : wis[a].rate > wis[b].rate; });
+        // menu positions of all masters (old ones by their present number, new ones after them as given), then by --menu-order
+        std::vector<MasterInfo> oldInfo; for (auto& R : rs) oldInfo.push_back(R.I); const std::vector<size_t> oldOrder = laesc::menuOrder(oldInfo);
+        std::vector<size_t> numOf(nAll, 0);   // the present number of each master in the new file order (old: as now; new: nOld + k as given)
+        for (size_t p = 0; p < oldOrder.size(); p++) numOf[oldOrder[p]] = p + 1; for (size_t q = 0; q < ordN.size(); q++) numOf[(size_t)nOld + q] = (size_t)nOld + ordN[q] + 1;
+        std::vector<int> menus(nAll, 0); { bool same = true; for (size_t i = 0; i < nAll; i++) { size_t p = numOf[i]; if (!menuList.empty()) for (size_t z = 0; z < menuList.size(); z++) if (menuList[z] == numOf[i]) p = z + 1; menus[i] = (int)p; same &= p == i + 1; }
+          if (same) std::fill(menus.begin(), menus.end(), 0); }
+        // the old masters decoded once (this program's dec command): they are the references of the new ones
+        Gone g{workDir(out + ".add")}; const std::string dd = g.p + "/dec";
+        { std::vector<std::string> av = {"laes", "dec", src, dd}; std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr);
+          if (laesMain((int)av.size(), ap.data()) != 0) { printf("%s: the masters could not be decoded and checked; nothing written\n", src.c_str()); return 2; } }
+        Pcm core; { const std::string e = readWav(dd + "/core.wav", core); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+        int maxSt = 0; std::vector<int> stOf(nAll); for (size_t i = 0; i < nAll; i++) { stOf[i] = i < (size_t)nOld ? rs[i].I.stages : [&] { int st = 0; while ((base << st) < wis[ordN[i - nOld]].rate) st++; return st; }(); maxSt = std::max(maxSt, stOf[i]); }
+        auto othersOf = [&](size_t i) { std::vector<int> o; for (size_t k = 0; k < stOf.size(); k++) if (k != i) o.push_back(stOf[k]); return o; };
+        const int64_t piece = pieceFor(maxSt); std::vector<laess::Prep> pm(nAll);
+        for (size_t i = 0; i < nAll; i++) { const std::string stem = g.p + "/m" + std::to_string(i); pm[i].threads = threads;
+            const std::string p = i < (size_t)nOld ? dd + "/master_" + std::to_string(laesc::displayNo(oldInfo, i)) + "_" + std::to_string(rs[i].I.rate) + "_" + std::to_string(rs[i].I.bits) + ".wav" : paths[ordN[i - nOld]];
+            std::string e = laess::prepRead(p, stem, pm[i]); if (e.empty()) e = laess::prepLevels(pm[i], base, stem, piece, threads, othersOf(i)); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+            if (i < (size_t)nOld && memcmp(pm[i].sha, rs[i].I.sha, 32)) { printf("master %zu decoded differs from its record; nothing written\n", i + 1); return 2; } }
+        // T relative to the core master for every master: old ones from their chain (a master stored in full has none: 0), new ones as given
+        std::vector<int64_t> absT(nAll, 0); for (size_t i = 0; i < (size_t)nOld; i++) { const MasterInfo& I = rs[i].I; if (I.storage != 1) absT[i] = I.whole * 4294967296LL + (int64_t)I.frac + (I.refTier ? absT[(size_t)I.refTier - 1] : 0); }
+        std::vector<laess::MasterSel> sel(nAll); std::vector<MasterInfo> fixedInfo(oldInfo);
+        for (size_t i = 0; i < nAll; i++) { laess::MasterSel& s = sel[i];
+            if (i < (size_t)nOld) { s.whole = absT[i] >> 32; s.frac = (uint32_t)(absT[i] & 0xFFFFFFFFLL); s.name = rs[i].I.name; s.flags = rs[i].I.flags; fixedInfo[i].menu = menus[i]; }
+            else { const size_t q = ordN[i - nOld]; MasterIn t; setT(t, Ts[q]); s.storage = -1; s.whole = t.whole; s.frac = t.frac; s.name = names[q]; s.flags = mflags[q]; }
+            s.menu = menus[i]; }
+        laess::Core32 core32 = laess::toCore32(core); std::vector<const laess::Prep*> m2; for (auto& p : pm) m2.push_back(&p); std::vector<MasterInfo> i2; const std::string bp = g.p + "/body";
+        { const std::string e = laess::encodeLaesS(core32, base, m2, sel, i2, bp, g.p + "/o", coreMode, piece, threads, nullptr, std::string(), nullptr, &fixedInfo); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+        // the new payload: header (version, M), the old records and layers byte for byte, the new masters as coded, a new CRC-32
+        std::vector<MasterInfo> vi(nAll); for (size_t i = 0; i < nAll; i++) { vi[i].name = sel[i].name; vi[i].flags = sel[i].flags; vi[i].menu = sel[i].menu; }
+        laes::Head Hold; if (!laes::headFrom((uint64_t)ver0, hd + 56, (uint64_t)nOld, Hold)) { printf("%s: invalid LAES header\n", src.c_str()); return 2; }   // kept: the default master's index does not change (new masters go last)
+        const int ver = laes::payloadVersionFor(vi, Hold);
+        auto crcOf = [](uint32_t c, const uint8_t* p, size_t n) { for (size_t i = 0; i < n; i++) { c ^= p[i]; for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1; } return c; };
+        const std::string bodyP = out + ".body.part"; long long bsz = 0;
+        { laess::Out o(bodyP); uint32_t c = 0xFFFFFFFFu; auto put = [&](const void* d, size_t n) { o.put(d, n); c = crcOf(c, (const uint8_t*)d, n); bsz += (long long)n; };
+          uint8_t h2[64]; memcpy(h2, hd, 64); h2[4] = (uint8_t)ver; h2[5] = 0; h2[14] = (uint8_t)nAll; laes::headTo(ver, Hold, h2 + 56); put(h2, 64); std::vector<uint8_t> b;
+          for (size_t i = 0; i < rs.size(); i++) { const ORec& R = rs[i]; uint8_t r2[72]; memcpy(r2, R.r, 72); r2[5] = ver == 2 ? (uint8_t)R.I.name.size() : 0; r2[6] = ver == 2 ? (uint8_t)R.I.flags : 0; r2[7] = ver == 2 ? (uint8_t)menus[i] : 0;
+              put(r2, 72); if (ver == 2 && !R.I.name.empty()) put(R.I.name.data(), R.I.name.size());
+              for (auto& l : R.lay) for (long long a = 0; a < l.second; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, l.second - a)); pread(l.first + a, b.data(), b.size()); put(b.data(), b.size()); } }
+          { laess::In nb(bp); for (long long a = 64; a < nb.n - 4; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, nb.n - 4 - a)); nb.read(a, b.data(), b.size()); put(b.data(), b.size()); } }
+          c ^= 0xFFFFFFFFu; const uint8_t t[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)}; o.put(t, 4); bsz += 4; o.close(); }
+        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); fs::remove(bodyP, ec); if (!we.empty()) { printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }
+        std::string why; { laess::In nw(out + ".part"); Layout N; why = readLayout(nw, N);
+            if (why.empty() && shaOf(in, {{L.audioOff, L.audioLen}}) != shaOf(nw, {{N.audioOff, N.audioLen}})) why = "the audio bytes differ"; }
+        if (why.empty()) why = checkStored(out + ".part", threads);   // every master, old and new, decoded and checked against its SHA-256
+        if (!why.empty()) { fs::remove(out + ".part", ec); printf("self-check failed: %s; nothing written\n", why.c_str()); return 2; }
+        fs::rename(out + ".part", out, ec); if (ec) { printf("cannot write %s\n", out.c_str()); return 2; }
+        printf("%s: %s form, payload version %d, %zu master(s) (%d before); the old ones copied byte for byte, every master's SHA-256 checked\n", out.c_str(), L.flac ? "FLAC" : "WAV", ver, nAll, nOld);
+        { std::vector<MasterInfo> m1(nAll); for (size_t i = 0; i < nAll; i++) m1[i] = i < (size_t)nOld ? rs[i].I : i2[i]; for (size_t i = 0; i < nAll; i++) { m1[i].name = sel[i].name; m1[i].menu = sel[i].menu; m1[i].flags = sel[i].flags; }
+          const std::vector<size_t> o1 = laesc::menuOrder(m1);
+          for (size_t p = 0; p < o1.size(); p++) { const size_t i = o1[p]; const MasterInfo& I = m1[i]; const std::string tier = I.storage == 1 ? "full" : I.refTier == 0 ? "difference to the core master" : "difference to master " + std::to_string(laesc::displayNo(m1, (size_t)I.refTier - 1));
+              printf("  master %zu%s: %d Hz %d-bit%s%s\n", p + 1, I.name.empty() ? "" : (" \"" + I.name + "\"").c_str(), I.rate, I.bits, i < (size_t)nOld ? " (as before)" : (", new, " + tier).c_str(), (I.flags & laes::kNoDerive) ? " (no derived versions)" : ""); } }
+        return 0; }
+    catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
+    if (cmd == "extract" && argc >= 5) try {   // 2026-11-11: a NEW file with some of the masters, packed again
+        // laes extract <in> <out> --pick=<p>[,<p>...]   p = master:<k> | name:<text> | <rate>:<bits> (masters only; several fit: the user ticks them; master:<a>-<b> a range).
+        // The chosen masters are decoded and encoded again in full (laes enc with the same core master), so each one gets the best
+        // reference among those kept; nothing is cut out of the old payload. The order of --pick is the menu order of the new file;
+        // names and "no derived versions" go with their masters; the tags, pictures and the core master's audio bytes are kept as they are.
+        const std::string src = argv[2], out = argv[3]; std::error_code ec;
+        if (out.empty() || out[0] == '-') { printf("laes extract <in> <out> --pick=master:<k>,...\n"); return 1; }
+        if (fs::exists(out, ec)) { printf("%s exists: choose another name (the old file is kept, a new one is written)\n", out.c_str()); return 1; }
+        const std::string pk = arg(argc, argv, "--pick"); if (pk.empty()) { printf("give --pick=master:<k>,name:<text>,<rate>:<bits>,...\n"); return 1; }
+        laess::In in(src); Layout L; { const std::string e = readLayout(in, L); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+        if (L.payload.empty()) { printf("%s: no LAE extension found\n", src.c_str()); return 2; }
+        Gone g{workDir(out + ".extract")}; const std::string dd = g.p + "/dec";
+        // the records (names, flags, menu numbers, T) as the player reads them
+        laesp::FnSrc fsrc; fsrc.n = (uint64_t)in.n; fsrc.fn = [&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); return 0; }; laesp::File pf; { char mg[5]; const std::string e = pf.open(fsrc, mg, true); if (!e.empty() || !pf.why.empty()) { printf("%s: %s\n", src.c_str(), e.empty() ? pf.why.c_str() : e.c_str()); return 2; } }
+        std::vector<MasterInfo> mi; for (const auto& M : pf.ms) mi.push_back(M.I); const std::vector<size_t> mo = laesc::menuOrder(mi);
+        std::vector<size_t> chosen;   // file indices, in the order of --pick
+        { size_t a = 0; for (;;) { const size_t b = pk.find(',', a); const std::string t = pk.substr(a, b == std::string::npos ? std::string::npos : b - a); std::vector<size_t> hit;
+              if (t.rfind("master:", 0) == 0) { std::vector<long> v; if (laespick::parseRanges(t.substr(7), v)) { bool okR = true; for (long k : v) okR = okR && k >= 1 && k <= (long)mo.size(); if (okR) for (long k : v) hit.push_back(mo[(size_t)k - 1]); } }   // master:<k> or master:<a>-<b>
+              else if (t.rfind("name:", 0) == 0) { for (size_t p = 0; p < mo.size(); p++) if (!t.substr(5).empty() && mi[mo[p]].name == t.substr(5)) hit.push_back(mo[p]); }
+              else if (t.find(':') != std::string::npos) { const int r = atoi(t.c_str()), bb = atoi(t.c_str() + t.find(':') + 1); for (size_t p = 0; p < mo.size(); p++) if (mi[mo[p]].rate == r && mi[mo[p]].bits == bb) hit.push_back(mo[p]); }
+              if (hit.empty()) { printf("--pick: '%s' is no master of %s (master:<k>, name:<text> or <rate>:<bits>; see laes dec --list)\n", t.c_str(), src.c_str()); return 1; }
+              // several masters fit (<rate>:<bits> or name:): the user ticks the ones to keep; in a console a tick list, else listed, nothing written
+              if (hit.size() > 1 && t.rfind("master:", 0) != 0) {
+                  std::vector<laespick::Item> it; for (size_t h : hit) { char lb[48]; snprintf(lb, sizeof lb, "%6d Hz %2d-bit  ", mi[h].rate, mi[h].bits); const long no = laesc::displayNo(mi, h); it.push_back({no, lb + laesc::masterLabel((size_t)no, mi[h])}); }
+                  char tl[256]; snprintf(tl, sizeof tl, "--pick: '%s' fits %zu masters. Tick the ones to keep (the numbers are master:<k>):", t.c_str(), hit.size());
+                  if (!laespick::interactive()) { printf("%s\n", tl); for (const auto& x : it) printf("  master:%ld  %s\n", x.no, x.line.c_str());
+                      printf("Not in a console: give --pick=master:<k>, several master:<k>,master:<k>, a range master:<a>-<b>. Nothing written.\n"); return 1; }
+                  const std::vector<long> got = laespick::tick(tl, it, "e.g. " + std::to_string(it.front().no) + "," + std::to_string(it.back().no) + " or " + std::to_string(it.front().no) + "-" + std::to_string(it.back().no));
+                  if (got.empty()) return 1; hit.clear(); for (long x : got) hit.push_back(mo[(size_t)x - 1]); }
+              for (size_t h : hit) if (std::find(chosen.begin(), chosen.end(), h) == chosen.end()) chosen.push_back(h);
+              if (b == std::string::npos) break; a = b + 1; } }
+        { std::vector<std::string> av = {"laes", "dec", src, dd}; std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr);   // every master, checked
+          if (laesMain((int)av.size(), ap.data()) != 0) { printf("%s: the masters could not be decoded and checked; nothing written\n", src.c_str()); return 2; } }
+        // T relative to the core master (from each chain; a master stored in full has none: 0) in base samples
+        std::vector<int64_t> absT(mi.size(), 0); for (size_t i = 0; i < mi.size(); i++) { const MasterInfo& I = mi[i]; if (I.storage != 1) absT[i] = I.whole * 4294967296LL + (int64_t)I.frac + (I.refTier ? absT[(size_t)I.refTier - 1] : 0); }
+        const std::string tmpOut = g.p + (L.flac ? "/new.flac" : "/new.wav");
+        std::vector<std::string> av = {"laes", "enc", tmpOut, "--core=" + dd + "/core.wav"};
+        for (size_t q = 0; q < chosen.size(); q++) { const size_t i = chosen[q]; char tb[64]; snprintf(tb, sizeof tb, "@%.17g", (double)absT[i] / 4294967296.0);
+            av.push_back(dd + "/master_" + std::to_string(laesc::displayNo(mi, i)) + "_" + std::to_string(mi[i].rate) + "_" + std::to_string(mi[i].bits) + ".wav" + (absT[i] ? std::string(tb) : std::string()));
+            if (!mi[i].name.empty()) av.push_back("--name=" + std::to_string(q + 1) + ":" + mi[i].name);
+            if (mi[i].flags & laes::kNoDerive) av.push_back("--no-derive=" + std::to_string(q + 1));
+            if (pf.head.def == (int)i + 1) av.push_back("--default=" + std::to_string(q + 1)); }   // the default goes with its master; not chosen: the core master (2026-11-12)
+        if (pf.head.coreFlags & laes::kNoDerive) av.push_back("--no-derive=core");
+        av.push_back("--menu-order");
+        { std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr); if (laesMain((int)av.size(), ap.data()) != 0) { printf("encoding the chosen masters failed; nothing written\n"); return 2; } }
+        // the new payload in the old file's layout (tags, pictures and the core master's audio bytes as they were)
+        laess::In nt(tmpOut); Layout NL; { const std::string e = readLayout(nt, NL); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+        const std::string bodyP = out + ".body.part"; long long bsz = 0; { laess::Out o(bodyP); for (auto& r : NL.payload) { copyRange(nt, o, r.first, r.second); bsz += r.second; } o.close(); }
+        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); fs::remove(bodyP, ec); if (!we.empty()) { printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }
+        std::string why; { laess::In nw(out + ".part"); Layout N; why = readLayout(nw, N);
+            if (why.empty() && shaOf(in, {{L.audioOff, L.audioLen}}) != shaOf(nw, {{N.audioOff, N.audioLen}})) why = "the audio bytes differ"; }
+        if (why.empty()) why = checkStored(out + ".part", threads);
+        if (!why.empty()) { fs::remove(out + ".part", ec); printf("self-check failed: %s; nothing written\n", why.c_str()); return 2; }
+        fs::rename(out + ".part", out, ec); if (ec) { printf("cannot write %s\n", out.c_str()); return 2; }
+        printf("%s: %s form, %zu of %zu master(s), encoded again; tags and the core master's audio bytes as before; every master's SHA-256 checked\n", out.c_str(), L.flac ? "FLAC" : "WAV", chosen.size(), mi.size());
+        for (size_t q = 0; q < chosen.size(); q++) { const MasterInfo& I = mi[chosen[q]]; printf("  master %zu%s: %d Hz %d-bit (master %d before)\n", q + 1, I.name.empty() ? "" : (" \"" + I.name + "\"").c_str(), I.rate, I.bits, laesc::displayNo(mi, chosen[q])); }
+        return 0; }
+    catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
+    if (cmd == "names" && argc >= 4) try {   // 2026-11-11: a NEW file with other master names / derive flags; every layer copied byte for byte
+        const std::string src = argv[2], out = argv[3]; std::error_code ec;
+        // --in-place (2026-11-12): only the default and the core master's flag change; the file keeps its size and every
+        // other byte: header bytes 4 (version) and 56 / 57 and the CRC-32 of the payload, 7 bytes at most; the old bytes are printed first,
+        // every master is checked afterwards, and on any failure the old bytes are written back
+        const bool inPlace = out == "--in-place";
+        if (!inPlace && (out.empty() || out[0] == '-')) { printf("give the new file's name: laes names <in> <out> --name=<k>:<text> ... (or laes names <in> --in-place --default=<k>|core)\n"); return 1; }
+        if (!inPlace && fs::exists(out, ec)) { printf("%s exists: choose another name (the old file is kept, a new one is written)\n", out.c_str()); return 1; }
+        if (inPlace) for (int i = 4; i < argc; i++) { const std::string a = argv[i];
+            if (a.rfind("--default=", 0) != 0 && a != "--no-derive=core" && a != "--derive=core") { printf("--in-place takes only --default=<k>|core, --no-derive=core, --derive=core (%s changes the size: write a new file)\n", a.c_str()); return 1; } }
+        laess::In in(src); Layout L; { const std::string e = readLayout(in, L); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+        if (L.payload.empty()) { printf("%s: no LAE extension found (not an LAES / LAE file)\n", src.c_str()); return 2; }
+        long long ptot = 0; for (auto& r : L.payload) ptot += r.second;
+        auto pread = [&](long long at, void* d, size_t n) { uint8_t* q = (uint8_t*)d; long long base = 0;   // the payload as one byte string over its ranges
+            for (auto& r : L.payload) { if (n && at < base + r.second) { const long long o = at - base; const size_t k = (size_t)std::min<long long>((long long)n, r.second - o); in.read(r.first + o, q, k); q += k; n -= k; at += (long long)k; } base += r.second; }
+            if (n) laess::fail("payload truncated"); };
+        { char mg[5] = {0}; if (ptot >= 4) pread(0, mg, 4); if (strcmp(mg, "LAE2")) { printf("%s: not LAES (extension %s)\n", src.c_str(), mg); return 2; } }
+        if (ptot < 68) { printf("%s: LAES block too short\n", src.c_str()); return 2; }
+        auto crcOf = [](uint32_t c, const uint8_t* p, size_t n) { for (size_t i = 0; i < n; i++) { c ^= p[i]; for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1; } return c; };
+        // pass 1: the records as they are (and the old CRC-32)
+        uint8_t hd[64]; pread(0, hd, 64); const int ver0 = hd[4] | hd[5] << 8, nm = hd[14]; if ((ver0 != 1 && ver0 != 2) || !laes::headerCountOk((uint64_t)ver0, (uint64_t)nm)) { printf("%s: unsupported LAES version or header\n", src.c_str()); return 2; }
+        struct Rec { uint8_t r[72]; std::string name; int flags = 0, menu = 0; int stages = 0, j = 0; std::vector<std::pair<long long, long long>> lay; };   // lay: (offset, length) of each layer with its u32 length
+        std::vector<Rec> rs; long long pos = 64;
+        for (int mi = 0; mi < nm; mi++) { Rec R; pread(pos, R.r, 72); pos += 72; if (ver0 == 2) { const int nl = R.r[5]; R.flags = R.r[6]; R.menu = R.r[7]; R.name.resize((size_t)nl); if (nl) pread(pos, &R.name[0], (size_t)nl); pos += nl; }
+            R.stages = R.r[1]; const int storage = R.r[3], tier = R.r[4]; if (R.stages > 3 || (storage == 2 && (tier < 1 || tier > mi))) { printf("%s: invalid master record %d\n", src.c_str(), mi + 1); return 2; }
+            R.j = storage == 2 ? std::min(R.stages, rs[(size_t)tier - 1].stages) : 0;
+            for (int c = 0; c < 2; c++) for (int k = R.j; k <= R.stages; k++) { uint8_t t[4]; pread(pos, t, 4); const long long l = t[0] | t[1] << 8 | t[2] << 16 | (long long)t[3] << 24; if (pos + 4 + l > ptot - 4) { printf("%s: LAES block truncated\n", src.c_str()); return 2; } R.lay.push_back({pos, 4 + l}); pos += 4 + l; }
+            rs.push_back(R); }
+        if (pos != ptot - 4) { printf("%s: unexpected bytes after the last master\n", src.c_str()); return 2; }
+        { uint32_t c = 0xFFFFFFFFu; std::vector<uint8_t> b; for (long long a = 0; a < ptot - 4; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, ptot - 4 - a)); pread(a, b.data(), b.size()); c = crcOf(c, b.data(), b.size()); }
+          uint8_t t[4]; pread(ptot - 4, t, 4); if ((c ^ 0xFFFFFFFFu) != (uint32_t)(t[0] | t[1] << 8 | t[2] << 16 | (uint32_t)t[3] << 24)) { printf("%s: LAES block damaged (CRC-32); nothing written\n", src.c_str()); return 2; } }
+        // the changes: --name=<k>:<text> (k = master k as menus number it; an empty text removes the name), --no-derive[=<k>], --derive[=<k>],
+        // --menu-order=<k1>,<k2>,... (the masters by their present numbers, in the new order)
+        std::vector<size_t> mord; { std::vector<MasterInfo> m0(rs.size()); for (size_t i = 0; i < rs.size(); i++) m0[i].menu = rs[i].menu; mord = laesc::menuOrder(m0); }   // mord[k - 1] = the file index of master k
+        bool changed = false;
+        laes::Head H; if (!laes::headFrom((uint64_t)ver0, hd + 56, (uint64_t)nm, H)) { printf("%s: invalid LAES header\n", src.c_str()); return 2; }   // the default and the core master's flags (2026-11-12)
+        for (int i = 4; i < argc; i++) { const std::string a = argv[i];
+            auto num = [&](const char* s, long& k) { char* e = nullptr; k = strtol(s, &e, 10); return !*e && k >= 1 && k <= nm; };
+            if (a.rfind("--default=", 0) == 0) { long k = 0; if (a.substr(10) == "core") H.def = 0; else if (num(a.c_str() + 10, k)) H.def = (int)mord[(size_t)k - 1] + 1;
+                else { printf("--default=<k> (k = 1 ... %d, as menus number them) or --default=core\n", nm); return 1; } changed = true; continue; }
+            if (a == "--no-derive=core" || a == "--derive=core") { H.coreFlags = a[2] == 'n' ? (H.coreFlags | laes::kNoDerive) : (H.coreFlags & ~laes::kNoDerive); changed = true; continue; }
+            if (a == "--no-derive" || a == "--derive") H.coreFlags = a == "--derive" ? (H.coreFlags & ~laes::kNoDerive) : (H.coreFlags | laes::kNoDerive);
+            if (a.rfind("--name=", 0) == 0) { const std::string v = a.substr(7); const size_t col = v.find(':'); long k = 0;
+                if (col == std::string::npos || !num(v.substr(0, col).c_str(), k)) { printf("--name=<k>:<text>, k = 1 ... %d (the masters of the file)\n", nm); return 1; }
+                const std::string t = v.substr(col + 1); if (!laes::validMasterName(t)) { printf("--name=%ld: a name is UTF-8 of at most 255 bytes without control characters (%zu bytes given)\n", k, t.size()); return 1; }
+                rs[mord[(size_t)k - 1]].name = t; changed = true; }
+            else if (a == "--no-derive" || a == "--derive") { for (Rec& R : rs) R.flags = a == "--derive" ? (R.flags & ~laes::kNoDerive) : (R.flags | laes::kNoDerive); changed = true; }
+            else if (a.rfind("--no-derive=", 0) == 0 || a.rfind("--derive=", 0) == 0) { const bool off = a[2] == 'n'; long k = 0; if (!num(a.c_str() + (off ? 12 : 9), k)) { printf("%s: k = 1 ... %d\n", a.c_str(), nm); return 1; }
+                Rec& R = rs[mord[(size_t)k - 1]]; R.flags = off ? (R.flags | laes::kNoDerive) : (R.flags & ~laes::kNoDerive); changed = true; }
+            else if (a.rfind("--menu-order=", 0) == 0) { std::vector<bool> seen((size_t)nm + 1, false); std::vector<size_t> nl2; size_t a0 = 13;
+                for (;;) { const size_t b0 = a.find(',', a0); const std::string t = a.substr(a0, b0 == std::string::npos ? std::string::npos : b0 - a0); long k = 0;
+                    if (!num(t.c_str(), k) || seen[(size_t)k]) { printf("--menu-order=<k1>,<k2>,...: every master (1 ... %d) once\n", nm); return 1; } seen[(size_t)k] = true; nl2.push_back((size_t)k);
+                    if (b0 == std::string::npos) break; a0 = b0 + 1; }
+                if ((int)nl2.size() != nm) { printf("--menu-order=<k1>,<k2>,...: every master (1 ... %d) once\n", nm); return 1; }
+                std::vector<int> nmenu(rs.size(), 0); bool same = true; for (size_t p = 0; p < nl2.size(); p++) nmenu[mord[nl2[p] - 1]] = (int)p + 1;
+                for (size_t i = 0; i < rs.size(); i++) same &= nmenu[i] == (int)i + 1;
+                for (size_t i = 0; i < rs.size(); i++) rs[i].menu = same ? 0 : nmenu[i]; changed = true; }
+            else { printf("unknown option %s (laes names <in> <out> --name=<k>:<text> --no-derive[=<k>|core] --derive[=<k>|core] --menu-order=<k1>,... --default=<k>|core)\n", a.c_str()); return 1; } }
+        if (!changed) { printf("nothing to change: give --name=<k>:<text>, --no-derive[=<k>|core], --derive[=<k>|core], --menu-order=<k1>,... or --default=<k>|core\n"); return 1; }
+        std::vector<MasterInfo> vi(rs.size()); for (size_t i = 0; i < rs.size(); i++) { vi[i].name = rs[i].name; vi[i].flags = rs[i].flags; vi[i].menu = rs[i].menu; } const int ver = laes::payloadVersionFor(vi, H);
+        if (inPlace) {
+            uint8_t h2[64]; memcpy(h2, hd, 64); h2[4] = (uint8_t)ver; h2[5] = 0; laes::headTo(ver, H, h2 + 56);
+            uint32_t c = crcOf(0xFFFFFFFFu, h2, 64); { std::vector<uint8_t> b; for (long long a = 64; a < ptot - 4; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, ptot - 4 - a)); pread(a, b.data(), b.size()); c = crcOf(c, b.data(), b.size()); } }
+            c ^= 0xFFFFFFFFu; const uint8_t t4[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)};
+            // the file offset of payload byte p (the payload may be split over FLAC APPLICATION blocks)
+            auto fileAt = [&](long long p) { long long base = 0; for (auto& r : L.payload) { if (p < base + r.second) return r.first + (p - base); base += r.second; } return -1LL; };
+            struct Ch { long long at; uint8_t old, now; }; std::vector<Ch> chg;
+            uint8_t o4[4]; pread(ptot - 4, o4, 4);
+            for (int i = 0; i < 64; i++) if (h2[i] != hd[i]) chg.push_back({fileAt(i), hd[i], h2[i]});
+            for (int i = 0; i < 4; i++) if (t4[i] != o4[i]) chg.push_back({fileAt(ptot - 4 + i), o4[i], t4[i]});
+            if (in.f) { fclose(in.f); in.f = nullptr; }   // closed before writing
+            if (chg.empty()) { printf("%s: nothing changes\n", src.c_str()); return 0; }
+            printf("%s: %zu bytes change in place (file offset: old -> new):", src.c_str(), chg.size()); for (auto& x : chg) printf(" %lld: %02X -> %02X;", x.at, x.old, x.now); printf("\n");
+            auto put = [&](bool now) { FILE* f = fopen(src.c_str(), "r+b"); if (!f) return false; bool ok = true;
+                for (auto& x : chg) { ok = ok && laess::seekTo(f, x.at) && fputc(now ? x.now : x.old, f) != EOF; } ok = fflush(f) == 0 && ok; fclose(f); return ok; };
+            if (!put(true)) { put(false); printf("cannot write %s; the old bytes are written back\n", src.c_str()); return 2; }
+            const std::string why = checkStored(src, threads);
+            if (!why.empty()) { const bool back = put(false); printf("self-check failed: %s; %s\n", why.c_str(), back ? "the old bytes are written back" : "WRITING THE OLD BYTES BACK FAILED"); return 2; }
+            printf("%s: payload version %d, changed in place; every master's SHA-256 checked\n", src.c_str(), ver);
+            if (H.def) printf("  default: master %d%s\n", laesc::displayNo(vi, (size_t)H.def - 1), rs[(size_t)H.def - 1].name.empty() ? "" : (" \"" + rs[(size_t)H.def - 1].name + "\"").c_str()); else printf("  default: the core master\n");
+            if (H.coreFlags & laes::kNoDerive) printf("  the core master: no derived 16-bit version\n");
+            return 0; }
+        // pass 2: the new payload (header with the version, records with names and flags, the layers byte for byte, a new CRC-32)
+        const std::string bodyP = out + ".body.part"; long long bsz = 0;
+        { laess::Out o(bodyP); uint32_t c = 0xFFFFFFFFu; auto put = [&](const void* d, size_t n) { o.put(d, n); c = crcOf(c, (const uint8_t*)d, n); bsz += (long long)n; };
+          uint8_t h2[64]; memcpy(h2, hd, 64); h2[4] = (uint8_t)ver; h2[5] = 0; laes::headTo(ver, H, h2 + 56); put(h2, 64);
+          std::vector<uint8_t> b;
+          for (const Rec& R : rs) { uint8_t r2[72]; memcpy(r2, R.r, 72); r2[5] = ver == 2 ? (uint8_t)R.name.size() : 0; r2[6] = ver == 2 ? (uint8_t)R.flags : 0; r2[7] = ver == 2 ? (uint8_t)R.menu : 0; put(r2, 72); if (ver == 2 && !R.name.empty()) put(R.name.data(), R.name.size());
+              for (auto& l : R.lay) for (long long a = 0; a < l.second; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, l.second - a)); pread(l.first + a, b.data(), b.size()); put(b.data(), b.size()); } }
+          c ^= 0xFFFFFFFFu; const uint8_t t[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)}; o.put(t, 4); bsz += 4; o.close(); }
+        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); if (!we.empty()) { printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }
+        fs::remove(bodyP, ec);
+        std::string why; { laess::In nw(out + ".part"); Layout N; why = readLayout(nw, N);
+            if (why.empty() && shaOf(in, {{L.audioOff, L.audioLen}}) != shaOf(nw, {{N.audioOff, N.audioLen}})) why = "the audio bytes differ"; }
+        if (why.empty()) why = checkStored(out + ".part", threads);   // every master decoded and checked against its SHA-256
+        if (!why.empty()) { fs::remove(out + ".part", ec); printf("self-check failed: %s; nothing written\n", why.c_str()); return 2; }
+        fs::rename(out + ".part", out, ec); if (ec) { printf("cannot write %s\n", out.c_str()); return 2; }
+        printf("%s: %s form, payload version %d, %zu master(s); layers copied byte for byte, every master's SHA-256 checked\n", out.c_str(), L.flac ? "FLAC" : "WAV", ver, rs.size());
+        { std::vector<MasterInfo> m1(rs.size()); for (size_t i = 0; i < rs.size(); i++) m1[i].menu = rs[i].menu; const std::vector<size_t> o1 = laesc::menuOrder(m1);
+          for (size_t p = 0; p < o1.size(); p++) { const Rec& R = rs[o1[p]]; const std::string inFile = o1[p] != p ? " (master " + std::to_string(o1[p] + 1) + " in the file)" : std::string();
+              printf("  master %zu%s%s%s%s\n", p + 1, R.name.empty() ? "" : (" \"" + R.name + "\"").c_str(), (R.flags & laes::kNoDerive) ? " (no derived versions)" : "", inFile.c_str(), H.def == (int)o1[p] + 1 ? "  [default]" : ""); }
+          if (!H.def) printf("  default: the core master\n"); if (H.coreFlags & laes::kNoDerive) printf("  the core master: no derived 16-bit version\n"); }
+        return 0; }
+    catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
     if (cmd == "enc" && argc >= 4) try {
         const std::string out = argv[2], corePath = arg(argc, argv, "--core"); const bool derive = flag(argc, argv, "--derive-core");
         // --timing: prints the time of each stage at the end (L5, 2026-11-03); the file written does not change
@@ -400,12 +721,41 @@ int main(int argc, char** argv) {
             if (at != std::string::npos && at > 2) { au = a.substr(at + 1) == "auto"; T = au ? 0 : atof(a.substr(at + 1).c_str()); a = a.substr(0, at); }
             laess::WavInfo wi; std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } paths.push_back(a); Ts.push_back(T); autoT.push_back(au); wis.push_back(wi); }
         if (paths.empty()) { printf("no master given\n"); return 1; }
+        if (paths.size() > 255) { printf("at most 255 masters\n"); return 1; }
+        // names and "no derived versions" (2026-11-11, payload version 2): --name=<k>:<text> (k = the k-th master as given, from 1; may repeat),
+        // --no-derive (every master) or --no-derive=<k>. Names come only from here: nothing is filled in from file names, paths or dates.
+        std::vector<std::string> names(paths.size()); std::vector<int> mflags(paths.size(), 0);
+        // the default master (2026-11-12; not given = the core master): --default=<k> (k = the k-th master as given) or
+        // --default=core; the core master's derived 16-bit version: off with --no-derive=core or a bare --no-derive (every derived version)
+        long defGiven = 0; int coreFlags = 0;
+        for (int i = 3; i < argc; i++) { const std::string a = argv[i];
+            if (a.rfind("--default=", 0) == 0) { const std::string v = a.substr(10); char* e = nullptr; const long k = v == "core" ? 0 : strtol(v.c_str(), &e, 10);
+                if (v != "core" && (v.empty() || *e || k < 0 || k > (long)paths.size())) { printf("--default=<k> (k = 1 ... %zu, the masters in the order given) or --default=core\n", paths.size()); return 1; } defGiven = k; continue; }
+            if (a == "--no-derive=core") { coreFlags |= laes::kNoDerive; continue; }
+            if (a == "--no-derive") coreFlags |= laes::kNoDerive;
+            if (a.rfind("--name=", 0) == 0) { const std::string v = a.substr(7); const size_t col = v.find(':'); char* e = nullptr; const long k = col == std::string::npos ? 0 : strtol(v.c_str(), &e, 10);
+                if (col == std::string::npos || e != v.c_str() + col || k < 1 || k > (long)paths.size()) { printf("--name=<k>:<text>, k = 1 ... %zu (the masters in the order given)\n", paths.size()); return 1; }
+                const std::string t = v.substr(col + 1); if (!laes::validMasterName(t)) { printf("--name=%ld: a name is UTF-8 of at most 255 bytes without control characters (%zu bytes given)\n", k, t.size()); return 1; }
+                names[(size_t)k - 1] = t; }
+            else if (a == "--no-derive") { for (int& f : mflags) f |= laes::kNoDerive; }
+            else if (a.rfind("--no-derive=", 0) == 0) { char* e = nullptr; const long k = strtol(a.c_str() + 12, &e, 10); if (*e || k < 1 || k > (long)paths.size()) { printf("--no-derive=<k>, k = 1 ... %zu\n", paths.size()); return 1; } mflags[(size_t)k - 1] |= laes::kNoDerive; } }
+        // the menu order (2026-11-11: the order in the file stays the smallest one, the order people choose from is the one marked):
+        // the menu order is the order the masters are given in (the order in the file is the
+        // code's); --menu-order=<k1>,<k2>,... = another order (the k of the masters as given). When it equals the file order nothing is stored.
+        std::vector<size_t> menuList; { const std::string mo = arg(argc, argv, "--menu-order");
+            if (mo.empty()) for (size_t i = 0; i < paths.size(); i++) menuList.push_back(i + 1);   // the default (a bare --menu-order: the same)
+            else { size_t a0 = 0; std::vector<bool> seen(paths.size() + 1, false);
+                for (;;) { const size_t b0 = mo.find(',', a0); const std::string t = mo.substr(a0, b0 == std::string::npos ? std::string::npos : b0 - a0); char* e = nullptr; const long k = strtol(t.c_str(), &e, 10);
+                    if (*e || k < 1 || k > (long)paths.size() || seen[(size_t)k]) { printf("--menu-order=<k1>,<k2>,...: every master as given (1 ... %zu) once\n", paths.size()); return 1; } seen[(size_t)k] = true; menuList.push_back((size_t)k);
+                    if (b0 == std::string::npos) break; a0 = b0 + 1; }
+                if (menuList.size() != paths.size()) { printf("--menu-order=<k1>,<k2>,...: every master as given (1 ... %zu) once\n", paths.size()); return 1; } } }
+        std::vector<size_t> given(paths.size()); for (size_t i = 0; i < given.size(); i++) given[i] = i + 1;   // the k of --name for each master, through the reordering
         {   // file order: more bits first, then higher rate (a master can only refer to earlier ones; a shorter word refers to a longer one cheaply)
             std::vector<size_t> ord(paths.size()); for (size_t i = 0; i < ord.size(); i++) ord[i] = i;
             std::stable_sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { return wis[a].bits != wis[b].bits ? wis[a].bits > wis[b].bits : wis[a].rate > wis[b].rate; });
-            std::vector<std::string> p2; std::vector<double> t2; std::vector<bool> a2; std::vector<laess::WavInfo> w2;
-            for (size_t k = 0; k < ord.size(); k++) { p2.push_back(paths[ord[k]]); t2.push_back(Ts[ord[k]]); a2.push_back(autoT[ord[k]]); w2.push_back(wis[ord[k]]); }
-            paths.swap(p2); Ts.swap(t2); autoT.swap(a2); wis.swap(w2); }
+            std::vector<std::string> p2, n2; std::vector<double> t2; std::vector<bool> a2; std::vector<laess::WavInfo> w2; std::vector<int> f2; std::vector<size_t> g2;
+            for (size_t k = 0; k < ord.size(); k++) { p2.push_back(paths[ord[k]]); t2.push_back(Ts[ord[k]]); a2.push_back(autoT[ord[k]]); w2.push_back(wis[ord[k]]); n2.push_back(names[ord[k]]); f2.push_back(mflags[ord[k]]); g2.push_back(given[ord[k]]); }
+            paths.swap(p2); Ts.swap(t2); autoT.swap(a2); wis.swap(w2); names.swap(n2); mflags.swap(f2); given.swap(g2); }
         // the form: .flac = FLAC, .wav = WAV, .lae (the format's own name, 2026-11-05) = --form=flac (default) or --form=wav
         const std::string formArg = arg(argc, argv, "--form"); const bool laeName = out.size() > 4 && !_stricmp(out.c_str() + out.size() - 4, ".lae");
         if (!formArg.empty() && formArg != "flac" && formArg != "wav") { printf("--form must be flac or wav\n"); return 1; }
@@ -473,10 +823,12 @@ int main(int argc, char** argv) {
             if (!acceptAlign(A, paths[i], flag(argc, argv, "--accept"))) { printf("alignment not accepted; nothing written\n"); return 2; } Ts[i] = A.T; }
         stage("core master, alignment");
         if (!corePath.empty()) core32 = laess::toCore32(core);   // from here on the core as int32 (memory, 2026-11-05: half of the int64 copy)
-        std::vector<laess::MasterSel> sel(paths.size()); for (size_t i = 0; i < paths.size(); i++) { MasterIn t; setT(t, Ts[i]); sel[i].storage = -1; sel[i].whole = t.whole; sel[i].frac = t.frac; }
-        // file order, tried two ways, the smaller kept: (a) more bits first; (b) the master the core was derived from first, then the others more bits first
+        std::vector<laess::MasterSel> sel(paths.size()); for (size_t i = 0; i < paths.size(); i++) { MasterIn t; setT(t, Ts[i]); sel[i].storage = -1; sel[i].whole = t.whole; sel[i].frac = t.frac; sel[i].name = names[i]; sel[i].flags = mflags[i]; }
+        if (!menuList.empty()) for (size_t i = 0; i < paths.size(); i++) for (size_t p = 0; p < menuList.size(); p++) if (menuList[p] == given[i]) sel[i].menu = (int)p + 1;
+        // file order, tried two ways, the smaller kept: (a) more bits first; (b) the master the core was derived from first, then the others more bits first.
+        // More than 16 masters (2026-11-11): order (a) only.
         std::vector<std::vector<size_t>> orders(1, std::vector<size_t>(paths.size())); for (size_t i = 0; i < paths.size(); i++) orders[0][i] = i;
-        if (coreSrc != SIZE_MAX && coreSrc != 0) { std::vector<size_t> b(1, coreSrc); for (size_t i = 0; i < paths.size(); i++) if (i != coreSrc) b.push_back(i); orders.push_back(b); }
+        if (coreSrc != SIZE_MAX && coreSrc != 0 && paths.size() <= 16) { std::vector<size_t> b(1, coreSrc); for (size_t i = 0; i < paths.size(); i++) if (i != coreSrc) b.push_back(i); orders.push_back(b); }
         std::vector<MasterInfo> info; std::string bodyPath; long long bodySize = -1; std::vector<size_t> pick;
         laess::CandCache cache;   // with two orders, the second takes the sizes of the candidates the first coded (only its chosen ones are coded again)
         const std::string cacheLog = g.p + "/cache.txt";   // the cache's entries as they are made (resume)
@@ -494,15 +846,17 @@ int main(int argc, char** argv) {
         { std::string t; if (resumed && laess::getState(pickP, t)) { laess::StateR r(t); const int64_t pi = r.i(); const std::string ts = r.str(); if (!r.bad && ts == tsig && pi >= 0 && pi < (int64_t)orders.size()) picked = (int)pi; } }
         for (size_t oi = 0; oi < orders.size(); oi++) { if (picked >= 0 && (int)oi != picked) continue;
             const auto& ord = orders[oi]; std::vector<const laess::Prep*> m2; std::vector<laess::MasterSel> s2; for (size_t k : ord) { m2.push_back(&pm[k]); s2.push_back(sel[k]); }
+            { bool same = true; for (size_t k = 0; k < s2.size(); k++) same &= s2[k].menu == 0 || s2[k].menu == (int)k + 1; if (same) for (auto& s : s2) s.menu = 0; }   // the menu order is the file order: nothing to store
             std::vector<MasterInfo>& i2 = oinfo[oi]; const std::string bp = g.p + "/body" + std::to_string(oi), stO = g.p + "/o" + std::to_string(oi) + ".done";
-            if (resumed) { std::string t; std::error_code ec; if (laess::getState(stO, t)) { laess::StateR r(t); const long long sz = r.i(); const std::string ts = r.str(); const int64_t n = r.i(); i2.assign((size_t)std::max<int64_t>(0, std::min<int64_t>(n, 16)), MasterInfo());
+            if (resumed) { std::string t; std::error_code ec; if (laess::getState(stO, t)) { laess::StateR r(t); const long long sz = r.i(); const std::string ts = r.str(); const int64_t n = r.i(); i2.assign((size_t)std::max<int64_t>(0, std::min<int64_t>(n, 255)), MasterInfo());
                   for (auto& I : i2) laess::getInfo(r, I);
                   if (!r.bad && ts == tsig && n == (int64_t)ord.size() && fs::exists(bp, ec) && sz == (long long)fs::file_size(bp, ec)) { osz[oi] = sz; continue; }   // made by an earlier run
                   // a stale o<oi>.done (other T, damaged, body gone): the whole order is made again. Without one the order was not
                   // finished: its masters' choice states stay, each checked (files' sizes, T) when encodeLaesS restores it.
                   fs::remove(stO, ec); for (size_t mi = 0; mi < ord.size(); mi++) fs::remove(g.p + "/o" + std::to_string(oi) + "_m" + std::to_string(mi) + ".done", ec); } }
             std::vector<std::string> kept;
-            const std::string err = laess::encodeLaesS(core32, base, m2, s2, i2, bp, g.p + "/o" + std::to_string(oi), asFlac ? 1 : 0, piece, threads, orders.size() > 1 ? &cache : nullptr, cacheLog, &kept);
+            laes::Head hd; hd.coreFlags = coreFlags; if (defGiven) for (size_t k = 0; k < ord.size(); k++) if (given[ord[k]] == (size_t)defGiven) hd.def = (int)k + 1;   // the default in this file order
+            const std::string err = laess::encodeLaesS(core32, base, m2, s2, i2, bp, g.p + "/o" + std::to_string(oi), asFlac ? 1 : 0, piece, threads, orders.size() > 1 ? &cache : nullptr, cacheLog, &kept, nullptr, hd);
             if (!err.empty()) { printf("%s\n", err.c_str()); return 2; } osz[oi] = (long long)fs::file_size(bp);
             { laess::StateW w; w.i(osz[oi]); w.str(tsig); w.i((int64_t)i2.size()); for (const auto& I : i2) laess::putInfo(w, I); laess::putState(stO, w.s); }
             for (const std::string& f : kept) { std::error_code ec; fs::remove(f, ec); } }   // the chosen layers, now in the payload
@@ -511,8 +865,18 @@ int main(int argc, char** argv) {
         for (size_t oi = 0; oi < orders.size(); oi++) { const std::string bp = g.p + "/body" + std::to_string(oi); if (bp != bodyPath) { std::error_code ec; fs::remove(bp, ec); } }
         laess::diskCheck(true);   // the largest size: before the work folder goes
         stage("candidates, payload");
-        { std::vector<std::string> p2; std::vector<laess::Prep> q2; for (size_t k : pick) { p2.push_back(paths[k]); q2.push_back(pm[k]); } paths.swap(p2); pm.swap(q2); }
+        { std::vector<std::string> p2, n2; std::vector<laess::Prep> q2; std::vector<size_t> g2; std::vector<int> f2; for (size_t k : pick) { p2.push_back(paths[k]); q2.push_back(pm[k]); n2.push_back(names[k]); g2.push_back(given[k]); f2.push_back(mflags[k]); }
+          paths.swap(p2); pm.swap(q2); names.swap(n2); given.swap(g2); mflags.swap(f2); }
+        std::vector<int> menus(paths.size(), 0);   // the menu position of each master in the file order (all 0 when it is the file order)
+        if (!menuList.empty()) { bool same = true; for (size_t k = 0; k < paths.size(); k++) { for (size_t p = 0; p < menuList.size(); p++) if (menuList[p] == given[k]) menus[k] = (int)p + 1; same &= menus[k] == (int)k + 1; } if (same) std::fill(menus.begin(), menus.end(), 0); }
         printf("file order:"); for (size_t k = 0; k < paths.size(); k++) printf(" %zu = %s;", k + 1, paths[k].c_str()); printf("%s\n", orders.size() > 1 ? " (the smaller of two orders)" : "");
+        { bool any = false; for (size_t k = 0; k < paths.size(); k++) any |= !names[k].empty() || mflags[k] != 0 || given[k] != k + 1 || menus[k] != 0;
+          if (any) for (size_t k = 0; k < paths.size(); k++) printf("  given %zu -> master %d in menus, %zu in the file%s%s\n", given[k], menus[k] ? menus[k] : (int)k + 1, k + 1, names[k].empty() ? "" : (" \"" + names[k] + "\"").c_str(),
+                                                                    (mflags[k] & laes::kNoDerive) ? " (no derived versions)" : ""); }
+        laes::Head headF; headF.coreFlags = coreFlags; for (size_t k = 0; k < paths.size(); k++) if (defGiven && given[k] == (size_t)defGiven) headF.def = (int)k + 1;   // in the file order kept
+        if (headF.def) printf("default: given %ld -> master %d in menus%s\n", defGiven, menus[(size_t)headF.def - 1] ? menus[(size_t)headF.def - 1] : headF.def, names[(size_t)headF.def - 1].empty() ? "" : (" \"" + names[(size_t)headF.def - 1] + "\"").c_str());
+        else printf("default: the core master\n");
+        if (coreFlags & laes::kNoDerive) printf("  the core master: no derived 16-bit version\n");
         if (asFlac) {   // FLAC form, then read back: core, MD5 and LAES block must come back unchanged
             std::vector<uint8_t> si;   // "fLaC" and STREAMINFO (42 bytes)
             const std::vector<uint8_t> tagBlocks = laestag::flacBlocks(tags, bodySize == 0);
@@ -584,7 +948,9 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < info.size(); i++) { const std::string tier = info[i].refTier == 0 ? "the core master" : "master " + std::to_string(info[i].refTier);
             const std::string how = info[i].storage == 1 ? "full" : info[i].storage == 0 ? "difference to " + tier + " at the base level"
                                   : "difference to " + tier + " at " + std::to_string(base << std::min(info[i].stages, info[info[i].refTier - 1].stages)) + " Hz";
-            printf("  master %zu: %d Hz %d-bit, %s, layers %.1f kb/s\n", i + 1, info[i].rate, info[i].bits, how.c_str(), info[i].layerBits / secs / 1000); }
+            const std::string nmq = i < names.size() && !names[i].empty() ? " \"" + names[i] + "\"" : std::string();
+            printf("  master %zu%s: %d Hz %d-bit, %s, layers %.1f kb/s\n", i + 1, nmq.c_str(), info[i].rate, info[i].bits, how.c_str(), info[i].layerBits / secs / 1000); }
+        { std::vector<MasterInfo> vi(info); for (size_t i = 0; i < vi.size() && i < names.size(); i++) { vi[i].name = names[i]; vi[i].flags = mflags[i]; } printf("  payload version %d\n", laes::payloadVersionFor(vi, headF)); }
         if (timing) printf("timing:\n%s", tlog.c_str());
         if (timing) printf("  work folder, largest   %8.1f MB\n", dg.peak / 1048576.0);
         return 0; }
@@ -616,9 +982,14 @@ int main(int argc, char** argv) {
         if (bodySize < 8 || memcmp(mg, "LAE2", 4)) { printf("%s: no LAES extension (LAE2) found\n", argv[2]); return 2; }
         printf("format: LAES (lossless, extension LAE2)\n");
         int maxSt = 0; for (int s = 1; s <= 3; s++) maxSt = s;   // pieces sized for the highest rate a master can have
-        const int64_t piece = pieceFor(maxSt); std::vector<laess::DecMaster> dec; std::string de = laess::decodeLaesS(bodyPath, core, core.rate, g.p, dec, piece, threads);
+        const int64_t piece = pieceFor(maxSt); std::vector<laess::DecMaster> dec; laes::Head head; std::string de = laess::decodeLaesS(bodyPath, core, core.rate, g.p, dec, piece, threads, &head);
         if (!de.empty()) { printf("%s: %s (the core master is still playable)\n", argv[2], de.c_str()); return 2; }
-        bool all = true; for (size_t i = 0; i < dec.size(); i++) { printf("master %zu: %d Hz %d-bit, %lld frames, SHA-256 %s\n", i + 1, dec[i].I.rate, dec[i].I.bits, (long long)dec[i].I.frames, dec[i].shaOk ? "ok" : "MISMATCH"); all &= dec[i].shaOk; }
+        bool all = true; { std::vector<MasterInfo> mi0; for (auto& D : dec) mi0.push_back(D.I); const std::vector<size_t> mo = laesc::menuOrder(mi0);   // in the menu order, numbered as in menus
+          for (size_t p = 0; p < mo.size(); p++) { const size_t i = mo[p]; printf("master %zu%s: %d Hz %d-bit, %lld frames, SHA-256 %s%s\n", p + 1, dec[i].I.name.empty() ? "" : (" \"" + dec[i].I.name + "\"").c_str(), dec[i].I.rate, dec[i].I.bits,
+                                                     (long long)dec[i].I.frames, dec[i].shaOk ? "ok" : "MISMATCH", mo[p] != p ? (" (master " + std::to_string(i + 1) + " in the file)").c_str() : ""); all &= dec[i].shaOk; }
+          if (head.def) { const MasterInfo& D = dec[(size_t)head.def - 1].I; printf("default: master %d%s (set when encoded)\n", laesc::displayNo(mi0, (size_t)head.def - 1), D.name.empty() ? "" : (" \"" + D.name + "\"").c_str()); }
+          else printf("default: the core master\n");
+          if (head.coreFlags & laes::kNoDerive) printf("the core master: no derived 16-bit version\n"); }
         // a choice's samples: the core (memory), a master (top level << w) or a rate level (level << w, limited to the word length)
         struct Src { int kind = 0; size_t m = 0; int k = 0; int rate = 0, bits = 0; long long n = 0; };
         auto readSrc = [&](const Src& s, int c, long long a, long long b, V& out) { out.resize((size_t)(b - a));
@@ -629,27 +1000,46 @@ int main(int argc, char** argv) {
         if (cmd == "dec") {
             // every choice the file offers: the core, each master, each master's rate levels (lossless), and a 16-bit version derived
             // from the longest-word choice at each rate that has no 16-bit choice of its own (a new master: lossy against its source)
-            struct Choice { std::string name, what; Src s; bool derived = false; int from = -1; };
-            std::vector<Choice> ch; { Src s; s.rate = core.rate; s.bits = core.bits; s.n = core.frames(); ch.push_back({"core", "the core master (lossless)", s}); }
-            for (size_t i = 0; i < dec.size(); i++) { const std::string mk = "master_" + std::to_string(i + 1); const MasterInfo& I = dec[i].I;
-                if (!dec[i].shaOk) { printf("master %zu: SHA-256 mismatch: not offered (nor its rate levels)\n", i + 1); continue; }
-                { Src s; s.kind = 1; s.m = i; s.rate = I.rate; s.bits = I.bits; s.n = I.frames; ch.push_back({mk + "_" + std::to_string(I.rate) + "_" + std::to_string(I.bits), "master " + std::to_string(i + 1) + " (lossless)", s}); }
-                for (int k = I.stages - 1; k >= 0; k--) { Src s; s.kind = 2; s.m = i; s.k = k; s.rate = I.rate >> (I.stages - k); s.bits = I.bits; s.n = levLen(I.frames, I.stages - k);
-                    ch.push_back({mk + "_level_" + std::to_string(s.rate) + "_" + std::to_string(s.bits), "rate level of master " + std::to_string(i + 1) + " (lossless)", s}); } }
-            { std::vector<int> rates; for (auto& c : ch) if (std::find(rates.begin(), rates.end(), c.s.rate) == rates.end()) rates.push_back(c.s.rate);
-              for (int r : rates) { int best = -1; bool has16 = false; for (size_t j = 0; j < ch.size(); j++) if (ch[j].s.rate == r) { has16 |= ch[j].s.bits == 16; if (best < 0 || ch[j].s.bits > ch[best].s.bits) best = (int)j; }
-                  if (has16 || best < 0 || ch[best].s.bits <= 16) continue;
-                  const Choice& sc = ch[(size_t)best]; Choice dv; dv.derived = true; dv.s = sc.s; dv.s.bits = 16; dv.from = best;
-                  dv.name = "derived16_" + std::to_string(r) + "_from_" + sc.name; dv.what = "16-bit master derived from " + (sc.name == "core" ? std::string("the core master") : sc.name) + " by TPDF requantisation: lossless relative to its definition (bit-identical on every decoder), not lossless relative to its " + std::to_string(sc.s.bits) + "-bit source";
-                  ch.push_back(dv); } }
-            if (flag(argc, argv, "--list")) { printf("choices (use --pick=<n>[,<n>...] or --pick=<rate>:<bits>):\n");
-                for (size_t j = 0; j < ch.size(); j++) printf("  %2zu  %6d Hz %2d-bit  %s\n", j + 1, ch[j].s.rate, ch[j].s.bits, ch[j].what.c_str()); return all ? 0 : 2; }
+            // every choice the file offers (laes_choices.h, SPEC 10; the same list as the plug-ins): the core master, then per master its
+            // own group - the master, its rate levels (lossless), its derived 16-bit versions (unless the file turns them off for it)
+            struct Choice { std::string name, what; Src s; bool derived = false; int from = -1; int kind = 0; int no = 0; };   // no: the master's number in the menu order
+            std::vector<MasterInfo> infos; std::vector<bool> offered; for (size_t i = 0; i < dec.size(); i++) { infos.push_back(dec[i].I); offered.push_back(dec[i].shaOk);
+                if (!dec[i].shaOk) printf("master %zu: SHA-256 mismatch: not offered (nor its rate levels or derived versions)\n", i + 1); }
+            const std::vector<laesc::Spec> specs = laesc::build(core.rate, core.bits, core.frames(), infos, &offered, &head); const int defJ = laesc::defaultIndex(specs, head);
+            std::vector<Choice> ch; for (const laesc::Spec& sp : specs) { Choice c; c.name = sp.name; c.what = sp.what; c.kind = sp.kind;
+                c.no = sp.no; c.s.kind = sp.kind == 3 ? 0 : sp.kind; c.s.rate = sp.rate; c.s.bits = sp.bits; c.s.n = sp.frames; if (sp.m >= 0) c.s.m = (size_t)sp.m; c.s.k = sp.level;
+                if (sp.kind == 3) { c.derived = true; c.from = sp.from; c.s = ch[(size_t)sp.from].s; c.s.bits = 16; } ch.push_back(c); }
+            const bool listAll = arg(argc, argv, "--list") == "all";
+            if (flag(argc, argv, "--list") || listAll) { printf("choices (use --pick=<n>[,<n>...], --pick=<rate>:<bits> (masters only), --pick=master:<k> or --pick=name:<text>):\n");
+                // --list: the first level only (the masters with their whole description, nothing derived; spec/lossless/SPEC.md, Section 10.3): the core master
+                // and each master - number, rate, word length, name, "lossless", length, the default marked. --list=all: also each master's
+                // rate levels and derived versions under it, marked "-". The numbers are those of --pick either way.
+                int hidden = 0;
+                for (size_t j = 0; j < ch.size(); j++) { if (!listAll && ch[j].kind >= 2) { hidden++; continue; } std::string extra; if (ch[j].kind <= 1) { const int64_t sec = ch[j].s.rate ? ch[j].s.n / ch[j].s.rate : 0; char t[48]; snprintf(t, sizeof t, "  %lld:%02lld", (long long)(sec / 60), (long long)(sec % 60)); extra = t; if ((int)j == defJ) extra += "  [default]"; }
+                    printf("  %3zu  %6d Hz %2d-bit  %s%s%s\n", j + 1, ch[j].s.rate, ch[j].s.bits, ch[j].kind >= 2 ? "  - " : "", ch[j].what.c_str(), extra.c_str()); }
+                if (hidden) printf("(%d rate levels and derived versions not shown: --list=all)\n", hidden);
+                return all ? 0 : 2; }
             std::vector<size_t> pick; const std::string pk = arg(argc, argv, "--pick");
-            if (pk.empty()) { pick.push_back(0); for (size_t j = 1; j < ch.size(); j++) if (!ch[j].derived && (ch[j].what.rfind("master", 0) == 0 || flag(argc, argv, "--levels"))) pick.push_back(j); }
-            else { size_t a = 0; for (;;) { const size_t b = pk.find(',', a); const std::string t = pk.substr(a, b == std::string::npos ? std::string::npos : b - a); const size_t col = t.find(':'); bool found = false;
-                    if (col == std::string::npos) { const size_t j = (size_t)atoi(t.c_str()); if (j >= 1 && j <= ch.size()) { pick.push_back(j - 1); found = true; } }
-                    else { const int r = atoi(t.c_str()), bb = atoi(t.c_str() + col + 1); for (size_t j = 0; j < ch.size() && !found; j++) if (ch[j].s.rate == r && ch[j].s.bits == bb) { pick.push_back(j); found = true; } }
-                    if (!found) { printf("--pick: '%s' is not one of the choices (see --list)\n", t.c_str()); return 2; } if (b == std::string::npos) break; a = b + 1; } }
+            if (pk.empty()) { pick.push_back(0); for (size_t j = 1; j < ch.size(); j++) if (ch[j].kind == 1 || (ch[j].kind == 2 && flag(argc, argv, "--levels"))) pick.push_back(j); }
+            else { size_t a = 0; for (;;) { const size_t b = pk.find(',', a); const std::string t = pk.substr(a, b == std::string::npos ? std::string::npos : b - a); const size_t col = t.find(':');
+                    // <n>: the n-th line of --list. <rate>:<bits>: the master (never a rate level or a derived version) with that rate and word
+                    // length; more than one: refused, with the candidates. master:<k>: master k. name:<text>: the master with exactly this name.
+                    std::vector<size_t> hit;
+                    if (col == std::string::npos) { std::vector<long> v; if (laespick::parseRanges(t, v)) { bool okR = true; for (long j : v) okR = okR && j >= 1 && j <= (long)ch.size(); if (okR) for (long j : v) hit.push_back((size_t)j - 1); } }   // <n> or a range <a>-<b>
+                    else if (t.rfind("master:", 0) == 0) { char* e = nullptr; const long k = strtol(t.c_str() + 7, &e, 10); for (size_t j = 0; j < ch.size(); j++) if (!*e && ch[j].kind == 1 && (long)ch[j].no == k) hit.push_back(j); }
+                    else if (t.rfind("name:", 0) == 0) { const std::string nm = t.substr(5); for (size_t j = 0; j < ch.size(); j++) if (ch[j].kind == 1 && !nm.empty() && infos[ch[j].s.m].name == nm) hit.push_back(j); }
+                    else { const int r = atoi(t.c_str()), bb = atoi(t.c_str() + col + 1); for (size_t j = 0; j < ch.size(); j++) if (ch[j].kind == 1 && ch[j].s.rate == r && ch[j].s.bits == bb) hit.push_back(j); }
+                    if (hit.empty()) { printf("--pick: '%s' is not one of the choices (see --list)\n", t.c_str()); return 2; }
+                    // several masters fit (the same rate and word length, or the same name): the user ticks the ones to write;
+                    // in a console a tick list (laes_pick.h), else the candidates are listed and nothing is written
+                    if (hit.size() > 1 && col != std::string::npos) {
+                        std::vector<laespick::Item> it; for (size_t j : hit) { char lb[48]; snprintf(lb, sizeof lb, "%6d Hz %2d-bit  ", ch[j].s.rate, ch[j].s.bits); it.push_back({(long)j + 1, lb + laesc::masterLabel((size_t)ch[j].no, infos[ch[j].s.m])}); }
+                        char tl[256]; snprintf(tl, sizeof tl, "--pick: '%s' fits %zu masters. Tick the ones to write:", t.c_str(), hit.size());
+                        if (!laespick::interactive()) { printf("%s\n", tl); for (const auto& x : it) printf("  %4ld  %s\n", x.no, x.line.c_str());
+                            printf("Not in a console: give the numbers with --pick=<n>, several --pick=<n>,<n>, a range --pick=<a>-<b>. Nothing written.\n"); return 1; }
+                        const std::vector<long> got = laespick::tick(tl, it, "e.g. " + std::to_string(it.front().no) + "," + std::to_string(it.back().no) + " or " + std::to_string(it.front().no) + "-" + std::to_string(it.back().no));
+                        if (got.empty()) return 1; hit.clear(); for (long x : got) hit.push_back((size_t)x - 1); }
+                    for (size_t j : hit) if (std::find(pick.begin(), pick.end(), j) == pick.end()) pick.push_back(j); if (b == std::string::npos) break; a = b + 1; } }
             fs::create_directories(argv[3]); const std::string d = std::string(argv[3]) + "\\";
             for (size_t j : pick) { const Choice& C = ch[j]; const Src& S = C.derived ? ch[(size_t)C.from].s : C.s; const int by = C.s.bits / 8; const long long n = C.s.n, db = n * 2 * by;
                 Pcm hdr; hdr.rate = C.s.rate; hdr.bits = C.s.bits; std::vector<uint8_t> h = wavBytes(hdr, nullptr); const uint32_t fmtLen = C.s.bits > 16 ? 40 : 16;

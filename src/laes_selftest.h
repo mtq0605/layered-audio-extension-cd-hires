@@ -58,6 +58,23 @@ static int run() {
     report("fractional and negative T (+0.37, -1.62 base samples)", roundTrip({M(synth(176400, 24, 0.5, 8)), M(synth(176400, 32, 0.5, 9))}, {0.37, -1.62}, 44100, 16, true, why), why);
     report("unused low bits (22 of 24 bits; FLAC wasted bits)", roundTrip({M(synth(88200, 24, 0.5, 10, 2))}, {0}, 44100, 24, true, why), why);
     report("short master (1500 frames; core master shorter than one FLAC block)", roundTrip({M(synth(88200, 24, 1500.0 / 88200, 11))}, {0}, 44100, 24, true, why), why);
+    {   // payload version 2 (2026-11-11): names (UTF-8), the no-derive flag, more than 16 masters; version 1 when nothing needs version 2
+        std::vector<MasterIn> ms = {M(synth(176400, 24, 0.2, 40)), M(synth(176400, 24, 0.2, 41)), M(synth(88200, 16, 0.2, 42))};
+        ms[0].name = u8"原版 \"A\" \U0001F3B5"; ms[1].name = std::string(255, 'x'); ms[1].flags = kNoDerive;
+        std::vector<MasterInfo> info; std::vector<uint8_t> f; Pcm core; bool ok = roundTrip(ms, {0, 0, 0}, 44100, 16, false, why, &f, &core, &info);
+        if (ok) { size_t at = 0; for (size_t i = 0; i + 4 <= f.size(); i++) if (!memcmp(&f[i], "LAE2", 4)) { at = i; break; }
+            const size_t blen = at >= 4 ? (size_t)(f[at - 4] | f[at - 3] << 8 | f[at - 2] << 16 | (uint32_t)f[at - 1] << 24) : 0; std::vector<uint8_t> body(f.begin() + (long long)at, f.begin() + (long long)std::min(f.size(), at + blen)); std::vector<Pcm> dec; std::vector<MasterInfo> di; std::vector<bool> okm; const std::string de = decodeLaes(body, core, 44100, dec, di, okm);
+            if (!de.empty() || body[4] != 2) { ok = false; why = "version 2: " + (de.empty() ? std::string("version field") : de); }
+            else if (di[0].name != ms[0].name || di[1].name != ms[1].name || di[2].name != "" || di[1].flags != kNoDerive || di[0].flags) { ok = false; why = "names or flags differ after decoding"; }
+            else { const std::vector<laesc::Spec> ch = laesc::build(44100, 16, core.frames(), di); int d0 = 0, d1 = 0; for (const auto& c : ch) if (c.kind == 3) { if (ch[(size_t)c.from].m == 0) d0++; if (ch[(size_t)c.from].m == 1) d1++; }
+                if (d0 != 3 || d1 != 0) { ok = false; why = "derived versions: master 1 " + std::to_string(d0) + " (3 expected), master 2 " + std::to_string(d1) + " (0 expected)"; } } }
+        report("payload version 2: names, no-derive flag, per-master derived versions", ok, why);
+        std::string e1; std::vector<MasterIn> bad = {M(synth(88200, 24, 0.05, 43))}; bad[0].name = "a\tb"; std::vector<MasterInfo> bi; const Pcm c0 = synth(44100, 16, 0.05, 44);
+        encodeLaes(c0, 44100, bad, bi, e1); report("a name with a control character is refused", !e1.empty(), e1.empty() ? std::string("accepted") : std::string());
+        std::vector<MasterIn> many; for (int k = 0; k < 20; k++) many.push_back(M(synth(88200, 24, 0.02, 50 + (uint64_t)k)));
+        std::vector<double> Tz(many.size(), 0.0); std::vector<uint8_t> f2; Pcm c2; ok = roundTrip(many, Tz, 44100, 16, true, why, &f2, &c2);
+        if (ok) { bool v2 = false; for (size_t i = 0; i + 6 <= f2.size(); i++) if (!memcmp(&f2[i], "LAE2LAE2", 8)) { v2 = f2[i + 8] == 2; break; } if (!v2) { ok = false; why = "20 masters: not version 2"; } }
+        report("20 masters (version 2), FLAC form", ok, why); }
     report("odd length (9001 frames at 352.8 kHz)", roundTrip({M(synth(352800, 24, 9001.0 / 352800, 12))}, {0}, 44100, 24, true, why), why);
     report("base-rate master (24-bit / 44.1 kHz, no octave layers)", roundTrip({M(synth(44100, 24, 0.5, 13))}, {0}, 44100, 16, false, why), why);
     {   // storage 2: the same mix in 32 / 24 / 16 bit; the 24 and 16 bit masters must be stored against an earlier master at 176.4 kHz,

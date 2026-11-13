@@ -112,7 +112,9 @@ public final class Play {
             if (a < c0) { computeInto(a, b, out, outOff); return; }   // behind the window: computed again, not kept
             if (a > c1) { csize = 0; chead = 0; c0 = a; }   // a jump forward: the window starts again
             final long e1 = c0 + csize;
-            if (b > e1) { final long e = Math.min(n, Math.max(b, e1 + chunk)); final int k = (int) (e - e1); reserve(k); computeInto(e1, e, cbuf, chead + csize); csize += k; }
+            // no read-ahead: exactly what is asked (port of laes_play.h, 2026-11-12: any rounding up grows level by level along a reference
+            // chain, and the SHA-256 passes then recomputed dropped samples, level after level)
+            if (b > e1) { final long e = b; final int k = (int) (e - e1); reserve(k); computeInto(e1, e, cbuf, chead + csize); csize += k; }
             System.arraycopy(cbuf, chead + (int) (a - c0), out, outOff, (int) (b - a));
             final long drop = a - keep - c0; if (drop > chunk) { chead += (int) drop; csize -= (int) drop; c0 += drop; } }
         // room for k values after the kept ones (as the C++ append: the kept values moved to the front, or a larger buffer)
@@ -225,8 +227,19 @@ public final class Play {
         // port of laes_play.h:AddRefNode::compute
         long[] compute(long a, long b) { long[] out = new long[(int) (b - a)]; computeInto(a, b, out, 0); return out; }
         // Java (2026-11-04): into dst, the reference from the node's workspace (the same values)
-        void computeInto(long a, long b, long[] dst, int off) { e.get(a, b, dst, off); final long[] r = Stream.refPieceW(src, h, wj, up, a, b, threads, ws);
-            final int k = (int) (b - a); for (int i = 0; i < k; i++) dst[off + i] += r[i]; } }
+        int dc = -1000;   // port of laes_play.h:AddRefNode::dc (-1000: not looked at yet; -999: h is a filter; else the one tap's offset)
+        long[] tmp = new long[0];
+        // 2026-11-12 (port of laes_play.h): the layer straight from its node's decoded blocks (this node is the layer's only reader), and a
+        // whole-sample reference added straight into dst (the values of refPieceW's own shortcut), without the +-127 window and the result array
+        void computeInto(long a, long b, long[] dst, int off) { e.computeInto(a, b, dst, off); final int k = (int) (b - a);
+            if (dc == -1000) { int c = -1, nz = 0; for (int t = 0; t < h.length; t++) if (h[t] != 0) { nz++; c = t; } dc = (nz == 1 && h[c] == (1L << 31)) ? c - 127 : -999; }
+            final long s0 = a + wj + dc, s1 = b + wj + dc;
+            if (dc != -999 && s0 >= 0 && s1 <= src.n) { if (tmp.length < k) tmp = new long[k]; src.get(s0, s1, tmp, 0);
+                if (up >= 0) { for (int i = 0; i < k; i++) dst[off + i] += tmp[i] << up; }
+                else { final int sh = -up; final long rnd = 1L << (sh - 1); for (int i = 0; i < k; i++) dst[off + i] += (tmp[i] + rnd) >> sh; }
+                return; }
+            final long[] r = Stream.refPieceW(src, h, wj, up, a, b, threads, ws);
+            for (int i = 0; i < k; i++) dst[off + i] += r[i]; } }
     // one inverse stage: x (n values) from s (lower level) and d (octave layer)
     /** port of laes_play.h:UpNode */
     static final class UpNode extends Node { Stream.Sig s = null, d = null;
@@ -284,7 +297,8 @@ public final class Play {
     public static final class Master { public LaesFile.MasterInfo I = new LaesFile.MasterInfo(); public int j = 0; public long[][] layOff = new long[2][4], layLen = new long[2][4]; }
     /** port of laes_play.h:Choice: kind 0 core, 1 master, 2 rate level, 3 derived 16-bit */
     public static final class Choice { public int kind = 0; public int m = -1, level = 0, from = -1; public int rate = 0, bits = 0; public long frames = 0; public String name = "", what = "";
-        Choice copy() { Choice c = new Choice(); c.kind = kind; c.m = m; c.level = level; c.from = from; c.rate = rate; c.bits = bits; c.frames = frames; c.name = name; c.what = what; return c; } }
+        public int no = 0;   // Java addition: the master's menu number (Choices.Spec.no; 0 for the core master)
+        Choice copy() { Choice c = new Choice(); c.kind = kind; c.m = m; c.level = level; c.from = from; c.rate = rate; c.bits = bits; c.frames = frames; c.name = name; c.what = what; c.no = no; return c; } }
     /** a tag (key, value) */
     public static final class Tag { public final String key, value; Tag(String k, String v) { key = k; value = v; } }
 
@@ -298,6 +312,10 @@ public final class Play {
         public boolean flac = false; public int baseRate = 0, coreBits = 0; public long coreFrames = 0;
         public byte[] fileSha = new byte[32]; public String why = "";            // why: "" when the payload passed every check; else the reason (the core still plays)
         public List<Master> ms = new ArrayList<Master>(); public List<Choice> choices = new ArrayList<Choice>(); public List<Tag> tags = new ArrayList<Tag>();
+        /** the header's default master and core master flags (payload version 2; 2026-11-12) */
+        public LaesFile.Head head = new LaesFile.Head();
+        /** the choice a player plays when the user has chosen nothing (spec/lossless/SPEC.md, Section 10.3): the default master, else the core master (0) */
+        public int defaultChoice = 0;
         private final Object idxM = new Object(); private final TreeMap<Long, LayerIdx> idx = new TreeMap<Long, LayerIdx>();
         SegSrc payload = new SegSrc(); public boolean quick = false;
         /** Java addition (tests, tools): the payload's size, and the file offset of payload byte at (-1 outside the payload) */
@@ -363,7 +381,7 @@ public final class Play {
                 if (fmtTag != 1 || fmtCh != 2 || (coreBits != 16 && coreBits != 24 && coreBits != 32) || !haveData) return "core master is not 2-channel 16/24/32-bit integer PCM";
                 payload.add(laeOff, laeLen); coreFrames = audioLen / (2 * (coreBits / 8)); }
             laeMagic[0] = "LAE2";
-            if (quick) { why = payload.total < 68 ? "LAES block too short" : parsePayload(); makeChoices(); return ""; }
+            if (quick) { why = payload.total < 68 ? "LAES block too short" : parsePayload(); limitMasters(); makeChoices(); return ""; }
             return openFull(src, n, audioOff, audioLen, fi);
         }
 
@@ -378,6 +396,14 @@ public final class Play {
         CoreStore cs = null; private final Flac.Frame frO = new Flac.Frame();   // frO: Java, the frame decoded in open(), reused
         /** the memory budget in bytes for the decoding of this file (Java only; see LaesDecoder.laes_set_memory) */
         public long memBudget = 64L << 20;
+        /**
+         * Java only (2026-11-12; phones do not have the memory for 255 masters, so a limit applies until devices allow more): the largest number of masters a file may
+         * have for this decoder to offer them; a file with more plays its core master only, with the reason in why (as a payload that failed a
+         * check). Measured on a PC (Java, 64 MB budget, 44.1 kHz masters in a reference chain): about 1 MB more heap per master of the chain
+         * (40 deep: 76 MB) and decoding time growing with the chain; 255 masters do not fit a phone. Raise it when phones can do more.
+         */
+        public static int maxMasters = 16;
+        private void limitMasters() { if (why.isEmpty() && ms.size() > maxMasters) { why = "this file has " + ms.size() + " masters; this player offers files with up to " + maxMasters + " (the core master plays)"; ms.clear(); } }
         // the core's SHA-256 as parsePayload computes it in the C++ (16 bit: int16 LE; 24 / 32 bit: int32 LE), fed sample by sample
         private void shaPut(int v) { if (coreBits == 16) { shb[shf++] = (byte) v; shb[shf++] = (byte) (v >>> 8); } else { shb[shf++] = (byte) v; shb[shf++] = (byte) (v >>> 8); shb[shf++] = (byte) (v >>> 16); shb[shf++] = (byte) (v >>> 24); }
             if (shf >= (1 << 16) - 8) { coreShaD.update(shb, 0, shf); shf = 0; } }
@@ -442,25 +468,31 @@ public final class Play {
             why = ""; if (payload.total < 68) why = "LAES block too short";
             else { byte[] t = new byte[4]; payload.read(payload.total - 4, t, 0, 4); if (le32(t, 0) != crcV) why = "LAES block damaged (CRC-32)"; }
             if (why.isEmpty()) why = parsePayload();
+            limitMasters();
             makeChoices(); return ""; }
         /** the core samples [a, b) of channel c (Java addition: the core is read on demand, see CoreStore) */
         public void getCore(int c, long a, long b, long[] out, int off) { if (cs == null) fail("opened for track info only"); cs.get(c, a, b, out, off); }
 
         // port of laes_play.h:File::parsePayload
         private String parsePayload() {
-            ms.clear(); final long end = payload.total - 4; final long[] pos = {0}; final boolean[] trunc = {false}; final byte[] t8 = new byte[8];
+            ms.clear(); head = new LaesFile.Head(); final long end = payload.total - 4; final long[] pos = {0}; final boolean[] trunc = {false}; final byte[] t8 = new byte[8];
             class Rd { long u(int k) { if (pos[0] + k > end) { trunc[0] = true; return 0; } payload.read(pos[0], t8, 0, k); pos[0] += k; long v = 0; for (int i = 0; i < k; i++) v |= (long) (t8[i] & 0xFF) << (8 * i); return v; } }
             Rd R = new Rd();
-            long magic = R.u(4), ver = R.u(2), hs = R.u(2), base = R.u(4), cbits = R.u(1), ch = R.u(1), nm = R.u(1), cmode = R.u(1), nc = R.u(8); byte[] csha = new byte[32]; if (pos[0] + 32 <= end) { payload.read(pos[0], csha, 0, 32); pos[0] += 32; } else trunc[0] = true; R.u(8);
-            if (trunc[0] || magic != 0x3245414CL) return "not an LAES block"; if (ver != 1 || hs != 64) return "unsupported LAES version";
-            if ((base != 44100 && base != 48000) || (int) base != baseRate || (int) cbits != coreBits || ch != 2 || cmode > 1 || nm < 1 || nm > 16) return "invalid LAES header";
+            long magic = R.u(4), ver = R.u(2), hs = R.u(2), base = R.u(4), cbits = R.u(1), ch = R.u(1), nm = R.u(1), cmode = R.u(1), nc = R.u(8); byte[] csha = new byte[32]; if (pos[0] + 32 <= end) { payload.read(pos[0], csha, 0, 32); pos[0] += 32; } else trunc[0] = true;
+            final byte[] hb = new byte[8]; if (pos[0] + 8 <= end) { payload.read(pos[0], hb, 0, 8); pos[0] += 8; } else trunc[0] = true;
+            if (trunc[0] || magic != 0x3245414CL) return "not an LAES block"; if ((ver != 1 && ver != 2) || hs != 64) return "unsupported LAES version";
+            if ((base != 44100 && base != 48000) || (int) base != baseRate || (int) cbits != coreBits || ch != 2 || cmode > 1 || !LaesFile.headerCountOk(ver, nm) || !LaesFile.headFrom(ver, hb, 0, nm, head)) return "invalid LAES header";
             if (nc != coreFrames) return "core master length differs from the LAES header";
             if (!quick) {   // the core's SHA-256 (16 bit: int16 LE; 24 / 32 bit: int32 LE), computed in the pass of open() (Java: the core is not kept)
                 if (!java.util.Arrays.equals(coreShaV, csha)) return "core master differs from the one this LAES block was made for (SHA-256)"; }
             for (long mi = 0; mi < nm; mi++) { Master M = new Master(); LaesFile.MasterInfo I = M.I;
-                I.bits = (int) R.u(1); I.stages = (int) R.u(1); I.w = (int) R.u(1); I.storage = (int) R.u(1); I.refTier = (int) R.u(1); R.u(3); I.rate = (int) R.u(4); R.u(4); final long F64 = R.u(8);
+                I.bits = (int) R.u(1); I.stages = (int) R.u(1); I.w = (int) R.u(1); I.storage = (int) R.u(1); I.refTier = (int) R.u(1);
+                final long nl = R.u(1), fl = R.u(1), mp = R.u(1); I.rate = (int) R.u(4); R.u(4); final long F64 = R.u(8);
                 I.whole = R.u(8); I.frac = (int) R.u(4); R.u(4); if (pos[0] + 32 <= end) { payload.read(pos[0], I.sha, 0, 32); pos[0] += 32; } else trunc[0] = true;
                 if (trunc[0]) return "LAES block truncated";
+                if (ver == 2) { if (pos[0] + nl > end) return "LAES block truncated"; final byte[] nb = new byte[(int) nl]; if (nl != 0) payload.read(pos[0], nb, 0, (int) nl); pos[0] += nl;
+                    if ((fl & ~(long) LaesFile.NO_DERIVE) != 0) return "invalid master record"; if (!LaesFile.validMasterName(nb, 0, nb.length)) return "invalid master name";
+                    I.name = LaesFile.nameOf(nb, 0, nb.length); I.flags = (int) fl; I.menu = (int) mp; }
                 if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                     || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))
                     || I.whole <= -(1L << 40) || I.whole >= (1L << 40)) return "invalid master record";
@@ -468,22 +500,18 @@ public final class Play {
                 M.j = I.storage == 2 ? Math.min(I.stages, ms.get(I.refTier - 1).I.stages) : 0;
                 for (int c = 0; c < 2; c++) for (int k = M.j; k <= I.stages; k++) { final long l = R.u(4); if (trunc[0] || pos[0] + l > end) return "LAES block truncated"; M.layOff[c][k - M.j] = pos[0]; M.layLen[c][k - M.j] = l; pos[0] += l; }
                 ms.add(M); }
+            { List<LaesFile.MasterInfo> mi = new ArrayList<LaesFile.MasterInfo>(); for (Master M : ms) mi.add(M.I); if (!LaesFile.menuOk(mi)) return "invalid menu positions"; }
             if (pos[0] != end) return "unexpected bytes after the last master";
             return ""; }
 
         // port of laes_play.h:File::makeChoices  (the same list and order as `laes dec --list` (all masters offered until a run proves otherwise))
         private void makeChoices() {
-            choices.clear(); { Choice c = new Choice(); c.kind = 0; c.rate = baseRate; c.bits = coreBits; c.frames = coreFrames; c.name = "core"; c.what = "the core master (lossless)"; choices.add(c); }
-            if (!why.isEmpty()) return;
-            for (int i = 0; i < ms.size(); i++) { final LaesFile.MasterInfo I = ms.get(i).I; final String mk = "master_" + (i + 1);
-                { Choice c = new Choice(); c.kind = 1; c.m = i; c.level = I.stages; c.rate = I.rate; c.bits = I.bits; c.frames = I.frames; c.name = mk + "_" + I.rate + "_" + I.bits; c.what = "master " + (i + 1) + " (lossless)"; choices.add(c); }
-                for (int k = I.stages - 1; k >= 0; k--) { Choice c = new Choice(); c.kind = 2; c.m = i; c.level = k; c.rate = I.rate >> (I.stages - k); c.bits = I.bits; c.frames = LaesFile.levLen(I.frames, I.stages - k);
-                    c.name = mk + "_level_" + c.rate + "_" + c.bits; c.what = "rate level of master " + (i + 1) + " (lossless)"; choices.add(c); } }
-            List<Integer> rates = new ArrayList<Integer>(); for (Choice c : choices) if (!rates.contains(c.rate)) rates.add(c.rate);
-            for (int r : rates) { int best = -1; boolean has16 = false; for (int j = 0; j < choices.size(); j++) if (choices.get(j).rate == r) { has16 |= choices.get(j).bits == 16; if (best < 0 || choices.get(j).bits > choices.get(best).bits) best = j; }
-                if (has16 || best < 0 || choices.get(best).bits <= 16) continue;
-                Choice dv = choices.get(best).copy(); dv.kind = 3; dv.from = best; dv.bits = 16; dv.name = "derived16_" + r + "_from_" + choices.get(best).name;
-                dv.what = "16-bit master derived from " + (choices.get(best).name.equals("core") ? "the core master" : choices.get(best).name) + " by TPDF requantisation: lossless relative to its definition (bit-identical on every decoder), not lossless relative to its " + choices.get(best).bits + "-bit source"; choices.add(dv); } }
+            choices.clear();
+            final List<LaesFile.MasterInfo> mi = new ArrayList<LaesFile.MasterInfo>(); if (why.isEmpty()) for (Master M : ms) mi.add(M.I);   // a rejected payload: the core master only
+            final LaesFile.Head hd = why.isEmpty() ? head : new LaesFile.Head();
+            final List<Choices.Spec> sp = Choices.build(baseRate, coreBits, coreFrames, mi, null, hd); defaultChoice = Choices.defaultIndex(sp, hd);
+            for (Choices.Spec s : sp) { Choice c = new Choice(); c.kind = s.kind; c.m = s.m; c.level = s.level; c.from = s.from; c.rate = s.rate; c.bits = s.bits; c.frames = s.frames;
+                c.name = s.name; c.what = s.what; c.no = s.no; choices.add(c); } }
 
         // every layer of every master: byte range, values, block length
         // port of laes_play.h:File::layerList
@@ -586,6 +614,13 @@ public final class Play {
         static final class MD { int idx = -1; List<Node> own = new ArrayList<Node>(); Node[] top = new Node[2]; Node[][] lev = new Node[2][]; Hasher sha = new Hasher(); long hashed = 0; boolean shaOk = false; }
         List<MD> chain = new ArrayList<MD>(); CoreNode[] coreSig = {new CoreNode(), new CoreNode()};
         long[] rng = {20261029L + 0x9E3779B97F4A7C15L * 1, 20261029L + 0x9E3779B97F4A7C15L * 2};
+        // port of laes_play.h:Player::xs64Apply / xs64Jump (2026-11-12): the derived 16-bit dither's xorshift64 state after `steps` steps
+        // (2 per sample) in O(log steps), as a 64 x 64 bit matrix power over GF(2); steps is a uint64 in a long (shifted with >>>)
+        static long xs64Apply(long[] M, long s) { long r = 0; for (int j = 0; j < 64; j++) if (((s >>> j) & 1) != 0) r ^= M[j]; return r; }
+        static long xs64Jump(long s, long steps) {
+            long[] M = new long[64], M2 = new long[64]; for (int j = 0; j < 64; j++) { long v = 1L << j; v ^= v << 13; v ^= v >>> 7; v ^= v << 17; M[j] = v; }
+            while (steps != 0) { if ((steps & 1) != 0) s = xs64Apply(M, s); for (int j = 0; j < 64; j++) M2[j] = xs64Apply(M, M[j]); System.arraycopy(M2, 0, M, 0, 64); steps >>>= 1; }
+            return s; }
         // Java (2026-11-04, memory bound): unit = the values a node computes ahead per request (its chunk), the frames of one internal read or
         // hash step; tabs[m] = master m's time origin on the core's time line (base samples): T of the master plus the tabs of its tier
         long[][] px = {new long[0], new long[0]}; long[] ha = new long[0], hb = new long[0];   // Java (2026-11-04): arrays reused from step to step (readStep, hashTo)
@@ -595,7 +630,8 @@ public final class Play {
         public void close() { for (MD d : chain) { for (int i = d.own.size() - 1; i >= 0; i--) d.own.get(i).close(); d.sha.close(); } }
         // allMasters: every master of the file is decoded and checked in this run (one pass), not only the ones the choice needs
         // startFrame > 0: output begins at that frame (the layers begin at their noted block positions, see LayerIdx); no SHA-256 is computed,
-        // so this is only for a master already verified for this file content. Not for derived 16-bit versions (their dither runs from frame 0).
+        // so this is only for a master already verified for this file content. A derived 16-bit version starts there too: its dither state
+        // is moved to that frame (xs64Jump), the output is the same bit for bit as when decoded from frame 0 (2026-11-12).
         // port of laes_play.h:Player::start
         public String start(File file, int choice, int nThreads, boolean allMasters, long startFrame) {
             f = file; threads = Math.max(1, nThreads); close(); chain.clear(); pos = 0; done = false; ok = false; noHash = false; err = "";
@@ -603,7 +639,8 @@ public final class Play {
             if (choice < 0 || choice >= f.choices.size()) return "no such choice";
             C = f.choices.get(choice);
             if (startFrame < 0 || startFrame > C.frames) return "start position outside the track";
-            if (startFrame > 0) { if (C.kind == 3) return "a derived 16-bit version starts at the beginning (its dither runs from frame 0)"; pos = startFrame; noHash = true; }
+            for (int c = 0; c < 2; c++) rng[c] = xs64Jump(20261029L + 0x9E3779B97F4A7C15L * (c + 1), 2 * startFrame);   // the dither state at the start frame (0: the seed)
+            if (startFrame > 0) { pos = startFrame; noHash = true; }
             for (int c = 0; c < 2; c++) { coreSig[c].v = f.cs; coreSig[c].c = c; coreSig[c].n = f.coreFrames; }
             tabs = new double[f.ms.size()]; tHashed = Double.NaN;
             for (int m = 0; m < tabs.length; m++) { final LaesFile.MasterInfo I = f.ms.get(m).I; tabs[m] = (double) I.whole + (double) (I.frac & 0xFFFFFFFFL) / 4294967296.0 + (I.refTier > 0 ? tabs[I.refTier - 1] : 0.0); }
@@ -623,7 +660,9 @@ public final class Play {
                 int layers = 0; double W = 0; for (MD d : chain) for (Node nd : d.own) { W += (1.0 + (nd instanceof UpNode ? 0.5 : nd instanceof AddRefNode ? 0.3 : 0.0) + (ahead.containsKey(nd) ? 0.4 : 0.0)) / (1 << nd.sh); if (nd instanceof LayerNode) layers++; }
                 long u = (long) (f.memBudget * 0.4 / (64.0 * W)); u = Math.max(4096, Math.min(1 << 17, u)) & ~1023L; unit = u;   // about 8 x chunk values of 8 bytes per node at most
                 final int win = (int) Math.max(1 << 14, Math.min(1 << 20, f.memBudget / 16 / Math.max(1, layers)));
-                for (MD d : chain) for (Node nd : d.own) { nd.chunk = Math.max(1024, u >> nd.sh); nd.keep = 2 * nd.chunk + 4096; if (nd instanceof LayerNode) { ((LayerNode) nd).ahead = nd.chunk; ((LayerNode) nd).rd.win = win; } }
+                long span = 0; for (MD d : chain) { final LaesFile.MasterInfo I = f.ms.get(d.idx).I; span = Math.max(span, Math.abs(I.whole) + 2); }
+                final long chainReach = (long) chain.size() * ((span << 3) + 256);   // 2026-11-12: each level of a reference chain runs at most the filter's reach (128 + T) ahead
+                for (MD d : chain) for (Node nd : d.own) { nd.chunk = Math.max(1024, u >> nd.sh); nd.keep = 2 * nd.chunk + 4096 + chainReach; if (nd instanceof LayerNode) { ((LayerNode) nd).ahead = nd.chunk; ((LayerNode) nd).rd.win = win; } }
                 for (MD d : chain) for (UpNode U : plan) if (d.own.contains(U)) { final AheadNode A = new AheadNode((Node) U.s); U.s = A; d.own.add(A); } }
             catch (RuntimeException x) { return String.valueOf(x.getMessage()); }
             catch (OutOfMemoryError x) { return "bad allocation"; }

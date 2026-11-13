@@ -59,10 +59,14 @@ public final class LaeEncoder {
         public String manualText; public int manualSg = 1; public long manualI, manualF, manualFs = 1, manualPlace, manualPhi, manualT; public double manualMove;
         public String alignNote = "", alignReport = ""; WavIn.Info wi = new WavIn.Info();
         // --tag / --cover / --picture (2026-11-06, a85dd40): the LIST/INFO + "id3 " chunks written after "fmt "; presetTags = tags the app gives directly
+        public boolean asFlac = false;   // the FLAC form (2026-11-10): tagChunks then holds the VORBIS_COMMENT / PICTURE blocks
         public byte[] tagChunks = new byte[0]; public com.lae.laes.LaesTags.Tags presetTags;
         // noise=<marks.laenoise>, g (2026-11-04): the marking file, the master length it was checked against, the whole offset the master was placed at
         public String noisePath; public boolean gOpt; public char gLevel = 'd'; NoiseMarks.Marks noiseMk = new NoiseMarks.Marks(); long LmIn; public long placeT = 0;
         boolean resume, partLeft = false; Set<String> doneSteps = new HashSet<String>(); String manifest;
+        // extension packs (2026-11-10; port of lae_enc.cpp: PackOpt pk[8], nPacks, alignOut, rawRate, cdAddLead / cdAddTail, packRecs, packReport)
+        final PackOpt[] pk = new PackOpt[8]; int nPacks = 0; String alignOut; int rawRate = 0; public long cdAddLead = 0, cdAddTail = 0;
+        final List<byte[]> packRecs = new ArrayList<byte[]>(); String packReport = ""; String mainName = "";   // mainName: master1name=<text>, the main body's name ("" = none stored)
         // port of lae_enc.cpp:encode lambda T
         public String T(String n) { return new File(tmp, n).getPath(); }
         // port of lae_enc.cpp:encrun::oldNote (the lambda oldNote of encode)
@@ -136,6 +140,35 @@ public final class LaeEncoder {
     static long fileSize(String p) { File f = new File(p); return f.isFile() ? f.length() : -1; }
     static byte[] slurp(String p) { return EncIo.readAll(p); }   // a missing or unreadable file stops the encoder
 
+    /** port of lae_enc.cpp:PackOpt: one further master (master2= .. master9=) */
+    static final class PackOpt { String path = "", align = "", name = "", edge = ""; boolean accept = false, any = false; }
+    // port of lae_enc.cpp:packOptArg
+    static boolean packOptArg(String a) { if (!a.startsWith("master") || a.length() < 8 || a.charAt(6) < '2' || a.charAt(6) > '9') return false;
+        final String r = a.substring(7); return r.startsWith("=") || r.startsWith("align=") || r.startsWith("name=") || r.startsWith("edge=") || r.equals("accept"); }
+    // port of lae_enc.cpp:packOptParse (pk[0] = master2 .. pk[7] = master9; "" or the reason)
+    static String packOptParse(String a, PackOpt[] pk) {
+        final int k = a.charAt(6) - '2'; if (pk[k] == null) pk[k] = new PackOpt(); final PackOpt q = pk[k]; final String r = a.substring(7), key = a.substring(0, 7); q.any = true;
+        if (r.startsWith("=")) { if (r.length() == 1) return key + "=: give the master's file"; q.path = r.substring(1); return ""; }
+        if (r.startsWith("align=")) { if (r.length() == 6) return key + "align=: give the offset, as for cdalign="; q.align = r.substring(6); return ""; }
+        if (r.startsWith("name=")) { if (utf8(r.substring(5)).length > 255) return key + "name=: a name has at most 255 bytes"; q.name = r.substring(5); return ""; }
+        if (r.startsWith("edge=")) { final String v = r.substring(5); if (!v.equals("cut") && !v.equals("pad")) return key + "edge=: pad or cut, as for cdedge="; q.edge = v; return ""; }
+        q.accept = true; return ""; }
+    static byte[] utf8(String s) { try { return s.getBytes("UTF-8"); } catch (java.io.UnsupportedEncodingException e) { return new byte[0]; } }
+    // std::filesystem::copy_file (overwrite): the aligned master of rawin=
+    static void copyFile(String from, String to) {
+        try { java.io.FileInputStream in = new java.io.FileInputStream(from); try { FileOutputStream out = new FileOutputStream(to); try { byte[] b = new byte[1 << 20]; for (int n; (n = in.read(b)) > 0;) out.write(b, 0, n); } finally { out.close(); } } finally { in.close(); } }
+        catch (IOException e) { throw EncIo.fail("cannot copy " + from + ": " + e.getMessage()); } }
+    // port of lae_enc.cpp:encode lambda padRawFile: a zero frames + the file + b zero frames
+    static void padRawFile(EncEnv env, String f, long a, long b) {
+        final String nf = f + ".new"; { final long n = fileSize(f) / 8; BlkIo.View m = new BlkIo.View(f); BlkIo.Writer wr = new BlkIo.Writer(env, nf); try { int[] z = new int[1 << 19]; final long BS = 1L << 18;
+              for (long k = 0; k < a; k += BS) wr.put(z, 0, (int) (Math.min(BS, a - k) * 2));
+              for (long i = 0; i < n; i += BS) { final long e = Math.min(n, i + BS); int[] xx = new int[(int) (e - i) * 2]; for (long j = i; j < e; j++) { xx[(int) (j - i) * 2] = m.get(j * 2); xx[(int) (j - i) * 2 + 1] = m.get(j * 2 + 1); } wr.put(xx); }
+              for (long k = 0; k < b; k += BS) wr.put(z, 0, (int) (Math.min(BS, b - k) * 2));
+              wr.finish(); wr = null; } finally { if (wr != null) wr.close(); m.close(); } }
+        if (!rename(nf, f)) throw EncIo.fail("cannot replace " + f + ": rename failed"); }
+    // the CD layer of the work folder's b16.s16 without its padding (C++: the vector core)
+    static short[] coreOf(String b16, long pbA) { byte[] b = EncIo.readAll(b16); final int n = b.length / 2 - (int) (4 * pbA); short[] c = new short[n]; EncIo.toShorts(b, (int) (4 * pbA), c, 0, n); return c; }
+
     // port of lae_enc.cpp:encode
     static int encode(final Ctx x, final String[] argv, String workDir) {
         final EncEnv env = x.env; final int argc = argv.length; x.argv = argv;
@@ -147,15 +180,19 @@ public final class LaeEncoder {
         final String modeName = argc > 3 ? argv[3] : "3"; final int mi = PartitionFormat.modeIndex(modeName); if (mi < 0) { env.printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }
         x.mi = mi;
         boolean equal = false, zsOpt = false, bits24 = false; int wm = 0, scheme = 1; long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once
+        final int formSel = LaeRetag.outputForm(env, outPath, argv, 4); if (formSel < 0) { env.printf("nothing encoded\n"); return 1; } x.asFlac = formSel == 1;
         { final com.lae.laes.LaesTags.Tags tags = new com.lae.laes.LaesTags.Tags(); final String e = LaeRetag.tagArgs(argv, 4, tags); if (!e.isEmpty()) { env.printf("%s: nothing encoded\n", e); return 1; }   // read and checked before any work
           if (x.presetTags != null) { tags.kv.addAll(x.presetTags.kv); tags.pics.addAll(x.presetTags.pics); final String e2 = com.lae.laes.LaesTags.checkAll(tags); if (!e2.isEmpty()) { env.printf("%s: nothing encoded\n", e2); return 1; } }
-          x.tagChunks = com.lae.laes.LaesTags.wavChunks(tags, LaeRetag.kLaeyEncoder); }
+          x.tagChunks = x.asFlac ? com.lae.laes.LaesTags.flacBlocks(tags, false, LaeRetag.kLaeyEncoder) : com.lae.laes.LaesTags.wavChunks(tags, LaeRetag.kLaeyEncoder); }   // FLAC form: VORBIS_COMMENT + PICTURE blocks, before the "LAE1" blocks
         for (int i = 4; i < argc; i++) { final String a = argv[i];
-            if (LaeRetag.isTagOpt(a)) continue;
+            if (LaeRetag.isTagOpt(a) || LaeRetag.isFormOpt(a)) continue;
+            if (a.startsWith("master1name=")) { if (utf8(a.substring(12)).length > 255) { env.printf("master1name=: a name has at most 255 bytes\n"); return 1; } x.mainName = a.substring(12); continue; }   // port of lae_enc.cpp: the main body's name
             if (a.equals("equal")) equal = true; else if (a.equals("energy")) wm = 1; else if (a.equals("s2")) scheme = 2; else if (a.equals("s1")) scheme = 1;
             else if (a.equals("zs")) zsOpt = true; else if (a.startsWith("cd=") && a.length() > 3) x.cdPath = a.substring(3); else if (a.equals("cdcheck")) x.cdCheck = true;
             else if (a.equals("cdaccept")) x.cdAccept = true; else if (a.equals("cdedge=pad")) x.cdEdge = EDGE_PAD; else if (a.equals("cdedge=cut")) x.cdEdge = EDGE_CUT; else if (a.equals("bits=24")) bits24 = true; else if (a.equals("resume")) x.resume = true;
             else if (a.startsWith("noise=") && a.length() > 6) x.noisePath = a.substring(6); else if (a.equals("g") || a.equals("g=d")) { x.gOpt = true; x.gLevel = 'd'; } else if (a.equals("g=c")) { x.gOpt = true; x.gLevel = 'c'; } else if (a.equals("g=b")) { x.gOpt = true; x.gLevel = 'b'; }
+            else if (a.startsWith("alignout=") && a.length() > 9) x.alignOut = a.substring(9); else if (a.startsWith("rawin=") && Fmt.atoi(a.substring(6)) > 0) x.rawRate = Fmt.atoi(a.substring(6));
+            else if (packOptArg(a)) { final String e = packOptParse(a, x.pk); if (!e.isEmpty()) { env.printf("%s: nothing encoded\n", e); return 1; } }   // extension packs (2026-11-10)
             else if (a.startsWith("mem=")) { final double g = Fmt.atof(a.substring(4)); if (!(g > 0) || g > 1e6) { env.printf("mem=%s: give the memory budget in GB (for example mem=8)\n", a.substring(4)); return 1; } memBudget = Cv.d2ul(g * 1073741824.0); }
             else if (a.equals("cdalign=none")) { env.printf("cdalign=none was removed (2026-10-22): every CD is checked. A small remaining difference can be accepted with cdaccept, a known offset given with cdalign=<offset>; nothing encoded\n"); return 1; }
             else if (a.startsWith("cdalign=")) {   // master samples, whole or with a fraction (v6): digits, optionally '.' and up to 9 digits
@@ -166,9 +203,15 @@ public final class LaeEncoder {
                 if (ni == 0 || !ok || p < v.length() || I > 2000000000L) { env.printf(v.indexOf(',') >= 0 ? "cdalign=%s: write the fraction with a point (for example cdalign=3.5)\n"
                                                                                   : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
                 x.manual = true; x.manualText = v; x.manualSg = sg; x.manualI = I; x.manualF = F; x.manualFs = Fs; }
-            else { env.printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume)\n", a); return 1; } }
+            else { env.printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> --form=flac --form=wav resume)\n", a); return 1; } }
         x.run.keepTmp = x.resume;
         if ((x.cdCheck || x.cdAccept || x.manual || x.cdEdge >= 0) && x.cdPath == null) { env.printf("cdcheck, cdalign, cdaccept and cdedge= need cd=<CD.wav>\n"); return 1; }
+        for (int k = 0; k < 8; k++) { if (x.pk[k] == null || !x.pk[k].any) continue;
+            if (x.pk[k].path.isEmpty()) { env.printf("master%d...: master%d=<master.wav> is missing: nothing encoded\n", k + 2, k + 2); return 1; }
+            if (k != x.nPacks) { env.printf("master%d=: the further masters are numbered without a gap (master%d= is missing): nothing encoded\n", k + 2, x.nPacks + 2); return 1; }
+            x.nPacks++; }
+        if (x.alignOut != null && (x.cdPath == null || x.nPacks != 0 || x.resume || x.cdCheck)) { env.printf("alignout= is an internal step of the extension packs: nothing encoded\n"); return 1; }
+        if (x.nPacks != 0 && (x.noisePath != null || x.resume || x.cdCheck)) { env.printf("further masters (master2= ...) cannot be combined with noise=, resume or cdcheck in this version: nothing encoded\n"); return 1; }
         if (mi >= PartitionFormat.MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
         x.partLeft = exists(partPath);   // with resume, decided once the work folder's notes are read (port of lae_enc.cpp, 2026-11-05)
         if (x.partLeft && !x.resume) { env.printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath); return 1; }
@@ -182,7 +225,9 @@ public final class LaeEncoder {
                                             + "  84 MB per hour of music (44.1 kHz family; about 94 MB for 48 kHz), i.e. about 9 minutes less music per CD-Extra disc.\n");
         // only the header is read here; the samples go straight to m0.raw once the work folder exists (the master is never held whole in memory)
         final WavIn.Info wi = x.wi;
-        if (!(WavIn.probe(argv[1], wi) && wi.ch == 2)) { env.printf("need a stereo integer PCM WAV\n"); x.oldNote(); return 1; }
+        if (x.rawRate > 0) { final long rb = fileSize(argv[1]); if (rb < 8) { env.printf("rawin=: the aligned master is missing\n"); return 2; }   // internal: an aligned master of this run (stereo int32, 24 bit left-aligned)
+            wi.rate = x.rawRate; wi.ch = 2; wi.bits = 24; wi.dataBytes = rb / 8 * 6; }
+        else if (!(WavIn.probe(argv[1], wi) && wi.ch == 2)) { env.printf("need a stereo integer PCM WAV\n"); x.oldNote(); return 1; }
         x.rate = wi.rate; x.bits = wi.bits; final int wrate = wi.rate;
         String note32 = "";
         if (x.bits == 32) {   // LAE v5 carries at most 24 bit: say what reducing the master would drop, then end or continue as the user chooses
@@ -234,20 +279,100 @@ public final class LaeEncoder {
     /** the streams of one layer (C++ std::vector&lt;std::vector&lt;uint8_t&gt;&gt;) */
     static final class Streams { List<byte[]> s = new ArrayList<byte[]>(); }
 
+    // port of lae_enc.cpp:encode lambda nested: one further master, this encoder run as a step of this run with its own work folder
+    static int nested(Ctx x, List<String> a, String zs, String rf, String rd, boolean hadUnits) {
+        final EncEnv env = x.env; Ctx y = new Ctx(); y.env = env; int rc;
+        try { rc = encode(y, a.toArray(new String[0]), null); }
+        catch (EncEnv.Cancelled c) { throw c; }
+        catch (LaeException e) { env.printf("further master: stopped: %s\n", e.getMessage()); rc = 2; }
+        catch (OutOfMemoryError e) { env.printf("further master: stopped: out of memory\n"); rc = 2; }
+        clearModuleEnv(env); env.set("ZSIGN", zs != null ? zs : ""); env.set("RULE_F", rf != null ? rf : ""); env.set("RULE_D", rd != null ? rd : ""); env.set("DITHERFLAGS", x.T("dither.flags"));   // this run's own module settings again
+        if (!hadUnits) env.set("LAE_BLOCKUNITS", "");
+        return rc; }
+    static void writeCore(EncEnv env, String coreW, short[] core, int base) {
+        byte[] h = WavIo.hdr(base, 2, 16, core.length * 2L, 0), d = new byte[core.length * 2]; EncIo.toBytes(core, 0, core.length, d);
+        byte[] o = new byte[h.length + d.length]; System.arraycopy(h, 0, o, 0, h.length); System.arraycopy(d, 0, o, h.length, d.length); EncIo.writeVec(env, coreW, o); }
+    // port of lae_enc.cpp:encode, the extension-pack block (2026-11-10): every further master is aligned to the core by the master's own
+    // alignment, the largest need of digital silence on each side goes to the core once and to every master, then each aligned master
+    // is encoded against the final core as a run of its own. Returns -1 to continue with the main body, or the rc encode() returns.
+    static int packPhase(final Ctx x, final String[] argv, final double base, final int stages, final int P, final int scheme, final String modeName) {
+        final EncEnv env = x.env; final long pbA = P >> stages; short[] core = coreOf(x.T("b16.s16"), pbA); final int n = x.nPacks;
+        final String coreW = x.T("core.wav"); writeCore(env, coreW, core, (int) base);
+        List<String> common = new ArrayList<String>(); common.add(modeName); common.add(scheme == 2 ? "s2" : "s1");   // the coding options are the same for every pack
+        for (int i = 4; i < argv.length; i++) { final String a = argv[i]; if (a.equals("zs") || a.equals("energy") || a.equals("equal") || a.equals("bits=24") || a.startsWith("mem=") || a.equals("g") || a.startsWith("g=")) common.add(a); }   // g: every pack on its own master (2026-11-11)
+        final boolean hadUnits = env.get("LAE_BLOCKUNITS") != null; boolean stopA = false;
+        final String zs = env.get("ZSIGN"), rf = env.get("RULE_F"), rd = env.get("RULE_D");
+        final long upM = 1L << stages; final boolean bits24c = common.contains("bits=24");
+        String[] raws = new String[n]; int[] rates = new int[n]; long[] ups = new long[n], leads = new long[n], tails = new long[n];
+        for (int k = 0; k < n; k++) { final PackOpt q = x.pk[k]; final String num = Integer.toString(k + 2), pre = "master" + num + " (pack " + (k + 1) + "): ", raw = x.T("al" + num + ".raw");
+            env.printf("%saligning %s to the core (%zu frames) with the master's alignment. In its lines below, \"the master\" is this master, \"the CD\" / \"independent CD\" is the core, cdalign= stands for master%salign=, cdaccept for master%saccept, cdedge= for master%sedge=\n",
+                       pre, q.path, (long) (core.length / 2), num, num, num);
+            List<String> a = new ArrayList<String>(); a.add("lae_enc"); a.add(q.path); a.add(x.T("al" + num + ".wav")); a.add("3"); a.add("cd=" + coreW); a.add("alignout=" + raw);
+            if (!q.align.isEmpty()) a.add("cdalign=" + q.align); if (q.accept) a.add("cdaccept"); if (!q.edge.isEmpty()) a.add("cdedge=" + q.edge); if (bits24c) a.add("bits=24");
+            final int rc = nested(x, a, zs, rf, rd, hadUnits);
+            if (rc != 0 || !exists(raw + ".txt")) { stopA = true;
+                if (q.align.isEmpty()) env.printf("%snot placed yet: choose its position from the two searches above and give it as master%salign=<offset>\n", pre, num);
+                else env.printf("%snot aligned at master%salign=%s (see the lines above)\n", pre, num, q.align);
+                continue; }
+            long Lx, aL, aT; int rx;
+            try { final String[] t = EncIo.readText(raw + ".txt").trim().split(" "); if (t.length != 4) throw new NumberFormatException(); Lx = Long.parseLong(t[0]); aL = Long.parseLong(t[1]); aT = Long.parseLong(t[2]); rx = Integer.parseInt(t[3]); }
+            catch (NumberFormatException e) { throw EncIo.fail("internal error: alignment result of master" + num); }
+            if (aL < 0 || aT < 0 || rx <= 0) throw EncIo.fail("internal error: alignment result of master" + num);
+            x.packReport += "pack " + (k + 1) + " (master" + num + "): " + q.path + "\n" + EncIo.readText(raw + ".report.txt");
+            new File(raw + ".txt").delete(); new File(raw + ".report.txt").delete();
+            final long upX = rx / (int) base;
+            if (upX < 2 || Lx / upX != (long) (core.length / 2) + aL + aT) { env.printf("%sinternal error: the aligned master has %lld frames at %d Hz, the core %zu + %ld + %ld; nothing encoded\n", pre, Lx, rx, (long) (core.length / 2), aL, aT); x.oldNote(); return 2; }
+            if (aL != 0 || aT != 0) env.printf("%sits alignment needs %ld frame(s) of digital silence before the core and %ld after\n", pre, aL, aT);
+            raws[k] = raw; rates[k] = rx; ups[k] = upX; leads[k] = aL; tails[k] = aT; }
+        if (stopA) { env.printf("further masters: nothing encoded\n"); x.oldNote(); return 1; }
+        long maxL = 0, maxT = 0; for (int k = 0; k < n; k++) { maxL = Math.max(maxL, leads[k]); maxT = Math.max(maxT, tails[k]); }
+        if (maxL != 0 || maxT != 0) {   // the largest need on each side: the core gets that digital silence once, and the master and every further master the same
+            env.printf("further masters: the core gets %ld frame(s) of digital silence before and %ld after (the largest need of any master); the master and every further master get the same\n", maxL, maxT);
+            { short[] o = new short[(int) (core.length + 2 * maxL + 2 * maxT)]; System.arraycopy(core, 0, o, (int) (2 * maxL), core.length); core = o; }
+            padRawFile(env, x.T("m0.raw"), maxL * upM, maxT * upM); x.Lm += (maxL + maxT) * upM;
+            if (!x.fitsLength(x.Lm)) { env.printf("further masters: the time line (%lld frames) is outside this encoder's length limits: nothing encoded\n", x.Lm); x.oldNote(); return 1; }
+            if (!x.derive()) return 2;
+            if (x.cdPath != null) {   // the given CD with its digital silence is the CD layer again, as after the master's own alignment
+                byte[] b = slurp(x.T("b16.s16")); if (b.length / 4 != core.length / 2 + 2 * pbA) throw EncIo.fail("internal error: core length after padding");
+                byte[] cb = new byte[core.length * 2]; EncIo.toBytes(core, 0, core.length, cb); System.arraycopy(cb, 0, b, (int) (4 * pbA), cb.length); EncIo.writeVec(env, x.T("b16.s16"), b);
+                byte[] df = slurp(x.T("dither.flags")); java.util.Arrays.fill(df, (byte) 0); EncIo.writeVec(env, x.T("dither.flags"), df); }
+            else { final int want = core.length; core = coreOf(x.T("b16.s16"), pbA);   // derived core: derived again from the padded master
+                if (core.length != want) throw EncIo.fail("internal error: derived core length after padding"); }
+            for (int k = 0; k < n; k++) if (maxL - leads[k] != 0 || maxT - tails[k] != 0) padRawFile(env, raws[k], (maxL - leads[k]) * ups[k], (maxT - tails[k]) * ups[k]);
+            writeCore(env, coreW, core, (int) base); }
+        for (int k = 0; k < n; k++) { final PackOpt q = x.pk[k]; final String num = Integer.toString(k + 2), pre = "master" + num + " (pack " + (k + 1) + "): ", outK = x.T("pk" + num + ".wav");
+            env.printf("%sencoding the aligned master against the core (%zu frames) as an extension of its own (position 0: nothing is moved again)\n", pre, (long) (core.length / 2));
+            List<String> a = new ArrayList<String>(); a.add("lae_enc"); a.add(raws[k]); a.add(outK); a.addAll(common); a.add("cd=" + coreW); a.add("cdalign=0"); a.add("rawin=" + rates[k]);
+            if (q.accept) a.add("cdaccept");
+            final int rc = nested(x, a, zs, rf, rd, hadUnits);
+            if (rc != 0 || !exists(outK)) { stopA = true; env.printf("%snot encoded (see the lines above)\n", pre); continue; }
+            WavIo.Wav pw = new WavIo.Wav(); if (!WavIo.readCD(outK, pw) || pw.lae.length < 60) throw EncIo.fail("internal error: the pack of master" + num + " could not be read back");
+            if (!java.util.Arrays.equals(pw.pcm16, core)) { env.printf("%sinternal error: the pack's core differs from the file's core (%zu frames instead of %zu, or other samples); nothing encoded\n", pre, (long) (pw.pcm16.length / 2), (long) (core.length / 2)); x.oldNote(); return 2; }
+            new File(raws[k]).delete();
+            final byte[] nmb = utf8(q.name); final int rn = 1 + nmb.length + pw.lae.length - 4; byte[] r = new byte[8 + rn];
+            r[0] = 'L'; r[1] = 'P'; r[2] = 'A'; r[3] = 'K'; for (int i = 0; i < 4; i++) r[4 + i] = (byte) (rn >>> (8 * i));
+            r[8] = (byte) nmb.length; System.arraycopy(nmb, 0, r, 9, nmb.length); System.arraycopy(pw.lae, 0, r, 9 + nmb.length, pw.lae.length - 4);   // the pack's payload without its CRC: one CRC covers the whole chunk
+            env.printf("%sencoded: %zu B\n", pre, (long) r.length); x.packRecs.add(r);
+            new File(outK).delete(); new File(outK + ".align.txt").delete(); }
+        new File(coreW).delete();
+        if (stopA) { env.printf("further masters: nothing encoded\n"); x.oldNote(); return 1; }
+        return -1; }
+
     // the part of encode() after the work folder exists (inside the C++ Guard's scope)
     static int encodeBody(final Ctx x, final String[] argv, final long T0, final double base, final int stages, final int P, final int wm, final boolean equal, final int scheme,
                           final long memBudget, final String modeName, final String note32) {
         final EncEnv env = x.env; final int mi = x.mi; final int wrate = x.rate; final String outPath = x.outPath, partPath = x.partPath;
         if (!x.spaceOk(0)) return 2;
         String masterMd5;   // MD5 of the master's data bytes, computed once while reading (RM-1)
-        { long[] fr = new long[2]; masterMd5 = WavIn.toRaw(env, argv[1], x.wi, x.T("m0.raw"), fr);
+        if (x.rawRate > 0) { copyFile(argv[1], x.T("m0.raw")); masterMd5 = ""; }
+        else { long[] fr = new long[2]; masterMd5 = WavIn.toRaw(env, argv[1], x.wi, x.T("m0.raw"), fr);
             if (fr[0] != x.Lm) throw EncIo.fail("internal error: master length"); }
         // resume (block-wise, without cd=): every finished step is noted in resume.txt in the work folder, together with a key made of this
         // encoder build, the options and the master's MD5. A run with the same key continues after the last finished step; any other key
         // starts from the beginning. The notes are read only by this encoder and never go into the LAE file.
         x.manifest = x.T("resume.txt");
         if (x.resume) { StringBuilder key = new StringBuilder("lae_enc java-port " + LaeyEncoder.VERSION + " | options");
-            for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i])) key.append(" ").append(argv[i]);
+            for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i])) key.append(" ").append(argv[i]);
             key.append(" | master ").append(masterMd5);
             if (x.noisePath != null) { final String t = EncIo.readText(x.noisePath); long h = 0xcbf29ce484222325L;   // FNV-1a of the marking file (1469598103934665603)
                 for (int i = 0; i < t.length(); i++) { h ^= (t.charAt(i) & 0xFF); h *= 1099511628211L; }
@@ -270,6 +395,12 @@ public final class LaeEncoder {
         if (x.cdPath != null) {   // independent CD: lae_enc.cpp lines 308-492 (part 2 of the port)
             CdHook h = cdHook; if (h == null) { env.printf("cd= (independent CD) is not part of this build of the Java encoder: nothing encoded\n"); x.oldNote(); return 1; }
             int r = h.run(x); if (r >= 0) return r; }
+        if (x.alignOut != null) {   // internal step of the extension packs: this master now lies on the given core's time line; hand it to the calling run
+            if (!rename(x.T("m0.raw"), x.alignOut)) throw EncIo.fail("cannot write " + x.alignOut + ": rename failed");
+            EncIo.writeText(env, x.alignOut + ".report.txt", x.alignReport.isEmpty() ? "\n" : x.alignReport);
+            EncIo.writeText(env, x.alignOut + ".txt", x.Lm + " " + x.cdAddLead + " " + x.cdAddTail + " " + wrate + "\n");
+            env.printf("further master aligned: %lld frames on the core's time line (digital silence added to the core: %ld frame(s) before, %ld after)\n", x.Lm, x.cdAddLead, x.cdAddTail); return 0; }
+        if (x.nPacks != 0) { final int rp = packPhase(x, argv, base, stages, P, scheme, modeName); if (rp >= 0) return rp; }
         if (x.noisePath != null && (x.placeT != 0 || x.Lm != x.LmIn)) {   // the user (2026-11-04): alignment and its confirmation come first, the marking is made on the aligned master
             env.printf("noise=: the master was placed on the CD's time line here (whole offset %+lld master samples, length %lld -> %lld frames), so the marked cells no longer lie on the grid they were marked on.\n"
                      + "  Make the marking on the aligned master (lae_enc plan writes it) and encode that one with cdalign=0; nothing encoded\n", x.placeT, x.LmIn, x.Lm); x.oldNote(); return 1; }
@@ -392,11 +523,17 @@ public final class LaeEncoder {
             boolean renamed = false; for (int k = 0; k < 20; k++) { if (rename(partPath, outPath)) { renamed = true; break; } sleep(250); }
             if (!renamed) { env.printf("cannot rename %s to %s: %s (the output may be open in another program)\n", partPath, outPath, "rename failed"); x.oldNote(); return 2; }
             x.run.partMine = false; x.run.keepTmp = false; }   // finished: the work folder goes, also after a resumed run
+        if (x.nPacks != 0) {   // the file's packs: printed, and their alignment reports go into the report beside the file
+            long all = 0; for (byte[] r : x.packRecs) all += r.length;
+            env.printf("extension packs: %d further pack(s), %zu B in all (pack 0 = the main body, from %s)\n", x.nPacks, all, argv[1]);
+            for (int k = 0; k < x.nPacks; k++) { final PackOpt q = x.pk[k]; env.printf("  pack %d: %s%s%s%s, %zu B\n", k + 1, q.path, q.name.isEmpty() ? "" : " (\"", q.name, q.name.isEmpty() ? "" : "\")", (long) x.packRecs.get(k).length); }
+            if (!x.packReport.isEmpty()) { if (x.alignReport.isEmpty()) x.alignReport = "LAE alignment report (further masters)\noutput: " + outPath + "\n"; x.alignReport += x.packReport; } }
         if (!x.alignReport.isEmpty()) { final String rp = outPath + ".align.txt"; boolean okr = true;
             try { FileOutputStream f = new FileOutputStream(rp); try { f.write(EncIo.latin1(x.alignReport)); } finally { f.close(); } } catch (IOException e) { okr = false; }
             env.printf(okr ? "alignment report: %s\n" : "WARNING: the alignment report %s could not be written (the LAE file itself is complete)\n", rp); }
         long sd = dL[0].s.get(0).length + dR[0].s.get(0).length, sf = 0; for (byte[] s : fM[0].s) sf += s.length; for (byte[] s : fS[0].s) sf += s.length;
         String extra = ""; if (!note32.isEmpty()) extra += " | " + note32; if (!x.alignNote.isEmpty()) extra += " | " + x.alignNote;
+        if (x.asFlac) env.printf("FLAC form: CD layer %llu B as FLAC frames (%.1f %% of its %llu B of PCM), extension in %zu LAE1 block(s)\n", ck.cdfBytes, cdBytes != 0 ? 100.0 * ck.cdfBytes / cdBytes : 0.0, cdBytes, ck.flacPieces);
         env.printf("LAE encode OK: %s | CD %d Hz cut-off %.0f Hz | scheme %d, mode %s (share by %s) %s | CD PCM %zu B, depth %zu B, frequency %zu B in %zu octave segment(s), chunk %zu B | beyond full scale before limiter %s | %.1f s%s\n",
                    argv[2], (int) base, fc, scheme, PartitionFormat.MODES[mi].name, wm == 2 ? "cells+energy" : (wm != 0 ? "energy" : "cells"), equal ? "equal" : "unequal", cdBytes, sd, sf, (long) fM[0].s.size(), chunk,
                    nclip >= 0 ? Long.toString(nclip) : "not measured", (System.nanoTime() - T0) / 1e9, extra);
@@ -453,14 +590,65 @@ public final class LaeEncoder {
             put32(pc, Cv.d2i(fc)); put32(pc, mi); put32(pc, equal ? 1 : 0); put32(pc, wm); put32(pc, (int) nb); put32(pc, (int) pb);
             byte[] eb = new byte[edge.length * 2]; EncIo.toBytes(edge, 0, edge.length, eb); pc.add(eb); put32(pc, dfl.length); pc.add(dfl);
             putS(pc, dL.s.get(0)); putS(pc, dR.s.get(0)); put32(pc, fM.s.size()); for (byte[] s : fM.s) putS(pc, s); for (byte[] s : fS.s) putS(pc, s);
+            for (byte[] r : x.packRecs) pc.add(r);   // extension packs: one record each, after the main body's last stream and inside the one CRC
+            if (!x.mainName.isEmpty()) { final byte[] nb = utf8(x.mainName), r = new byte[5 + nb.length]; r[0] = 'L'; r[1] = 'N'; r[2] = 'A'; r[3] = 'M'; r[4] = (byte) nb.length;   // the optional "LNAM" record: the main body's name, display only
+                System.arraycopy(nb, 0, r, 5, nb.length); pc.add(r); }
             int c = 0xFFFFFFFF;
             for (byte[] q : pc) for (int i = 0; i < q.length; i++) c = CRC_T[(c ^ q[i]) & 0xFF] ^ (c >>> 8);   // = crc32() of part_stream.h over the whole chunk
             put32(pc, c ^ 0xFFFFFFFF);   // v3: CRC-32 of everything before it (integrity check, whole chunk)
             long n = 0; for (byte[] q : pc) n += q.length; return n; }
         static void put32(List<byte[]> pc, int v) { byte[] b = new byte[4]; com.lae.core.Le.put32(b, 0, v); pc.add(b); }
         static void putS(List<byte[]> pc, byte[] s) { put32(pc, s.length); pc.add(s); }
-        // port of lae_enc.cpp:encode lambda fileBytes: the bytes of the output file (as wavio::writeCD writes them), handed to f piece by piece
-        boolean fileBytes(List<byte[]> pc, long laeN, Out f) {
+        // FLAC form (2026-11-10): the CD layer coded once into FLAC frames (block size 4096, two independent channels, 16 bits: the frame
+        // writer of the LAES FLAC form), kept in the work folder as cd.flacframes; STREAMINFO needs the smallest and the largest frame and
+        // the MD5 of the samples. Coded in batches; each frame depends only on its own samples, so the bytes do not depend on the threads.
+        // port of lae_enc.cpp:encode struct CdFlac and lambda makeCdFlac
+        boolean cdfMade = false; long cdfMin = 0, cdfMax = 0, cdfBytes = 0, flacPieces = 0; byte[] cdfMd5 = new byte[16];
+        boolean makeCdFlac() { if (cdfMade) return true; final EncEnv env = x.env; final String path = x.T("cd.flacframes");
+            final long n = nb - 2 * pb; final int B = 4096; final long nf = (n + B - 1) / B; if (n < 16) { env.printf("the CD layer is too short for the FLAC form (fewer than 16 samples): nothing written\n"); return false; }
+            BlkIo.ReaderS r = new BlkIo.ReaderS(x.T("b16.s16")); AlignHash.Md5 md = new AlignHash.Md5(); BufferedOutputStream f;
+            try { f = new BufferedOutputStream(new FileOutputStream(path), 1 << 16); } catch (IOException e) { r.close(); env.printf("cannot write %s\n", path); return false; }
+            final int batch = 512; long fmin = 0xFFFFFF, fmax = 0, bytes = 0; boolean okw = true; byte[] xb = new byte[0];
+            final int th = Math.min(16, Math.max(1, Runtime.getRuntime().availableProcessors()));
+            try {
+                for (long k0 = 0; k0 < nf && okw; k0 += batch) { env.checkCancel(); final long k1 = Math.min(nf, k0 + batch), a = k0 * B, b = Math.min(n, k1 * B); final int cnt = (int) (k1 - k0), len = (int) (b - a);
+                    final short[] s = r.read(pb + a, pb + b); if (xb.length != s.length * 2) xb = new byte[s.length * 2]; EncIo.toBytes(s, 0, s.length, xb); md.update(xb, 0, xb.length);   // 16-bit little-endian, interleaved: the bytes STREAMINFO's MD5 is defined on
+                    final int[] c0 = new int[len], c1 = new int[len]; for (int i = 0; i < len; i++) { c0[i] = s[i * 2]; c1[i] = s[i * 2 + 1]; }
+                    final com.lae.laes.FlacEnc.Ch[] ch = {new com.lae.laes.FlacEnc.IntCh(c0), new com.lae.laes.FlacEnc.IntCh(c1)}; final byte[][] fr = new byte[cnt][]; final long first = k0; final int rateF = base;
+                    com.lae.laes.Par.forBlocks(cnt, th, new com.lae.laes.Par.Block() { public void run(int k) { fr[k] = com.lae.laes.FlacEnc.encodeFrame(ch, (long) k * B, (int) Math.min((long) B, len - (long) k * B), first + k, rateF, 16); } }, null);
+                    for (byte[] q : fr) { fmin = Math.min(fmin, q.length); fmax = Math.max(fmax, q.length); bytes += q.length; try { f.write(q); } catch (IOException e) { okw = false; } } }
+            } finally { r.close(); try { f.close(); } catch (IOException e) { okw = false; } }
+            if (!okw) { env.printf("cannot write %s\n", path); return false; }
+            final String h = md.hex(); for (int i = 0; i < 16; i++) cdfMd5[i] = (byte) Integer.parseInt(h.substring(i * 2, i * 2 + 2), 16);
+            cdfMin = fmin; cdfMax = fmax; cdfBytes = bytes; cdfMade = true; return true; }
+        // the bytes of the FLAC form: "fLaC" | STREAMINFO | VORBIS_COMMENT, PICTURE (the tags, if any) | the chunk body in "LAE1" APPLICATION
+        // blocks of at most 2^24 - 5 bytes each (the last one carries the "last metadata block" flag) | the audio frames. No SEEKTABLE,
+        // no CUESHEET, no padding, nothing between the pieces.
+        // port of lae_enc.cpp:encode lambda fileBytesFlac
+        boolean fileBytesFlac(List<byte[]> pc, long laeN, Out f) {
+            final long n = nb - 2 * pb; final int bs = n >= 4096 ? 4096 : (int) Math.max(16L, n);
+            final byte[] o = new byte[42]; o[0] = 'f'; o[1] = 'L'; o[2] = 'a'; o[3] = 'C'; o[7] = 34;   // block header: not last, type 0, length 34
+            o[8] = (byte) (bs >> 8); o[9] = (byte) bs; o[10] = (byte) (bs >> 8); o[11] = (byte) bs;
+            o[12] = (byte) (cdfMin >> 16); o[13] = (byte) (cdfMin >> 8); o[14] = (byte) cdfMin; o[15] = (byte) (cdfMax >> 16); o[16] = (byte) (cdfMax >> 8); o[17] = (byte) cdfMax;
+            final long v = (long) base << 44 | 1L << 41 | 15L << 36 | n; for (int i = 0; i < 8; i++) o[18 + i] = (byte) (v >>> (8 * (7 - i)));   // rate (20 bits), channels - 1 (3), bits - 1 (5), samples (36)
+            System.arraycopy(cdfMd5, 0, o, 26, 16);
+            if (!f.put(o, 0, o.length)) return false; if (x.tagChunks.length != 0 && !f.put(x.tagChunks, 0, x.tagChunks.length)) return false;
+            long left = laeN, room = 0, blocks = 0; long pieceMax = LaeyFlac.kPiece;
+            { final String tp = x.env.get("LAEY_TEST_PIECE"); if (tp != null) { final long tv = Fmt.atoi(tp); if (tv >= 1 && tv < LaeyFlac.kPiece) pieceMax = tv; } }   // test only: smaller pieces, to exercise the split
+            for (byte[] q : pc) { int p = 0, k = q.length;
+                while (k > 0) { if (room == 0) { room = Math.min(pieceMax, left); final long L = room + 4; final byte[] bh = {(byte) ((left == room ? 0x80 : 0) | 2), (byte) (L >> 16), (byte) (L >> 8), (byte) L, 'L', 'A', 'E', '1'};
+                        blocks++; if (!f.put(bh, 0, 8)) return false; }
+                    final int t = (int) Math.min((long) k, room); if (!f.put(q, p, t)) return false; p += t; k -= t; room -= t; left -= t; } }
+            if (left != 0 || room != 0) return false; flacPieces = blocks;
+            FileInputStream ff; try { ff = new FileInputStream(x.T("cd.flacframes")); } catch (IOException e) { return false; }
+            try { final byte[] buf = new byte[1 << 20]; long total = 0;
+                  for (;;) { final int k = ff.read(buf); if (k < 0) break; if (k == 0) continue; total += k; if (!f.put(buf, 0, k)) return false; }
+                  return total == cdfBytes; }
+            catch (IOException e) { return false; }
+            finally { try { ff.close(); } catch (IOException e) { /* a reader */ } } }
+        boolean fileBytes(List<byte[]> pc, long laeN, Out f) { return x.asFlac ? fileBytesFlac(pc, laeN, f) : fileBytesWav(pc, laeN, f); }
+        // port of lae_enc.cpp:encode lambda fileBytesWav: the bytes of the output file (as wavio::writeCD writes them), handed to f piece by piece
+        boolean fileBytesWav(List<byte[]> pc, long laeN, Out f) {
             final long extra = laeN == 0 ? 0 : 8 + laeN + (laeN & 1); byte[] o = WavIo.hdr(base, 2, 16, cdBytes, extra + x.tagChunks.length);
             if (x.tagChunks.length != 0) { if (!f.put(o, 0, 36) || !f.put(x.tagChunks, 0, x.tagChunks.length) || !f.put(o, 36, o.length - 36)) return false; }   // tags after "fmt " (RIFF 12 + fmt 24 bytes), before "data"
             else if (!f.put(o, 0, o.length)) return false;
@@ -473,7 +661,8 @@ public final class LaeEncoder {
             return (laeN & 1) == 0 || f.put(new byte[1], 0, 1); }
         // port of lae_enc.cpp:encode lambda writeFile: written to <out>.part and read back: the file on disk must hold exactly this CD layer and this chunk
         long writeFile() { final EncEnv env = x.env; List<byte[]> pc = new ArrayList<byte[]>(); final long laeN = pieces(pc);
-            if (!WavIo.fits32(cdBytes, 8L + laeN + 1 + x.tagChunks.length)) { env.printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return 0; }
+            if (x.asFlac) { if (laeN == 0 || laeN > 0x7FFFFFFFL || !makeCdFlac()) { if (laeN > 0x7FFFFFFFL) env.printf("the extension would exceed 2 GB: nothing written\n"); return 0; } }
+            else if (!WavIo.fits32(cdBytes, 8L + laeN + 1 + x.tagChunks.length)) { env.printf("output would exceed the 4 GB limit of WAV: nothing written\n"); return 0; }
             x.run.partMine = true; x.markDone("part");   // resume: this run owns the .part from here on
             boolean okw = false; { BufferedOutputStream[] f = {null}; try { f[0] = new BufferedOutputStream(new FileOutputStream(x.partPath), 1 << 16); } catch (IOException e) { f[0] = null; }
                 if (f[0] != null) { final BufferedOutputStream fo = f[0];

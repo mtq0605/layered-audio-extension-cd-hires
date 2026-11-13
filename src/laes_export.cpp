@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
         else if (!a.rfind("--dir=", 0)) dir = a.substr(6); else if (!a.rfind("--index=", 0)) index = a.substr(8); else out = a; }
     const int64_t first = std::min<int64_t>(C.frames, (int64_t)(from * C.rate + 0.5)), count = len < 0 ? C.frames - first : std::min<int64_t>(C.frames - first, (int64_t)(len * C.rate + 0.5));
     const bool whole = seg <= 0 && first == 0 && count == C.frames;
-    if (C.kind == 3 && first != 0) { printf("a derived 16-bit version is exported whole only (its dither runs from frame 0)\n"); return 1; }
+    // a derived 16-bit version starts at any frame too: the player moves its dither state there (2026-11-12), bit for bit as from frame 0
     if (!whole) {   // the block positions: from the record, else made now (and saved when a record path is given)
         std::vector<uint8_t> rec; if (!index.empty()) { FILE* fi = fopen(index.c_str(), "rb"); if (fi) { int ch; while ((ch = fgetc(fi)) != EOF) rec.push_back((uint8_t)ch); fclose(fi); } }
         if (rec.empty() || !f.importIndex(rec.data(), rec.size())) { std::atomic<bool> no{false}; f.indexLayers(&no, (int)std::max(1u, std::thread::hardware_concurrency()));

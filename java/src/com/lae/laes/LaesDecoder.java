@@ -5,7 +5,7 @@ package com.lae.laes;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Port of the LAE Lossless part of the C API (src/laes_api.cpp, src/lae_api.h: the laes_* functions, API version 5), on top of Play.
+ * Port of the LAE Lossless part of the C API (src/laes_api.cpp, src/lae_api.h: the laes_* functions, API version 9), on top of Play.
  * Differences forced by Java (no pointers):
  *   - the read callback is Play.ReadFn (offset, buffer, offset in the buffer, length) -&gt; 0 on success (lae_read_fn without ctx);
  *   - out-parameters (lae_magic, err, key / value) are String[1] arrays (may be null); strings are not truncated to errlen;
@@ -66,6 +66,26 @@ public final class LaesDecoder {
     // port of laes_api.cpp:laes_get_tag
     public static int laes_get_tag(LaesFileH h, int i, String[] key, String[] value) {
         if (h == null || i < 0 || i >= h.f.tags.size()) return -1; if (key != null) key[0] = h.f.tags.get(i).key; if (value != null) value[0] = h.f.tags.get(i).value; return 0; }
+    /** port of lae_api.h:LAES_MASTER_NO_DERIVE (API 7) */
+    public static final int LAES_MASTER_NO_DERIVE = LaesFile.NO_DERIVE;
+    // port of laes_api.cpp:laes_master_name  (API 7; m = the file index of choice_info.master; "" = no name; null = no such master)
+    public static String laes_master_name(LaesFileH h, int m) {
+        if (h == null || !h.f.why.isEmpty() || m < 0 || m >= h.f.ms.size()) return null; return h.f.ms.get(m).I.name; }
+    // port of laes_api.cpp:laes_master_flags  (API 7)
+    public static int laes_master_flags(LaesFileH h, int m) {
+        if (h == null || !h.f.why.isEmpty() || m < 0 || m >= h.f.ms.size()) return -1; return h.f.ms.get(m).I.flags; }
+    // port of laes_api.cpp:laes_master_number  (API 7; the number shown in menus: the place in the menu order; 0 = no such master)
+    public static int laes_master_number(LaesFileH h, int m) {
+        if (h == null || !h.f.why.isEmpty() || m < 0 || m >= h.f.ms.size()) return 0; final java.util.List<LaesFile.MasterInfo> mi = new java.util.ArrayList<LaesFile.MasterInfo>();
+        for (Play.Master M : h.f.ms) mi.add(M.I); return Choices.displayNo(mi, m); }
+    // port of laes_api.cpp:laes_default_choice  (API 9, 2026-11-12: the default master written when encoded, else the core master, 0;
+    // a player that cannot play it plays the core master; never chosen by bit rate, size or device state)
+    public static int laes_default_choice(LaesFileH h) { return h != null ? h.f.defaultChoice : 0; }
+    // port of laes_api.cpp:laes_core_flags  (API 9: bit 0 = the core master offers no derived 16-bit version)
+    public static int laes_core_flags(LaesFileH h) { return h != null && h.f.why.isEmpty() ? h.f.head.coreFlags : 0; }
+    // port of laes_api.cpp:laes_choice_from  (API 7; a derived 16-bit choice: the choice it is made from; else -1)
+    public static int laes_choice_from(LaesFileH h, int i) {
+        if (h == null || i < 0 || i >= h.f.choices.size()) return -1; final Play.Choice c = h.f.choices.get(i); return c.kind == 3 ? c.from : -1; }
     // port of laes_api.cpp:startImpl
     static LaesPlayH startImpl(LaesFileH h, int choice, int threads, boolean all, String[] err, long frame) {
         if (h == null) { setErrS(err, "no file"); return null; }

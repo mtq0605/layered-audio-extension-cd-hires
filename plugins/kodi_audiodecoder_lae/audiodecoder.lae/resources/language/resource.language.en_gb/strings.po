@@ -8,27 +8,35 @@ msgid "General"
 msgstr ""
 
 msgctxt "#30001"
-msgid "What plays"
+msgid "LAEY layers"
 msgstr ""
 
 msgctxt "#30002"
-msgid "Highest sample rate"
+msgid "Maximum sample rate"
 msgstr ""
 
 msgctxt "#30003"
-msgid "LAES: highest word length"
+msgid "LAES maximum bit depth"
+msgstr ""
+
+msgctxt "#30004"
+msgid "LAEY extension pack"
 msgstr ""
 
 msgctxt "#30010"
-msgid "All layers / the master"
+msgid "All layers"
 msgstr ""
 
 msgctxt "#30011"
-msgid "CD layer + depth layer (base rate)"
+msgid "Bit-depth layer only"
 msgstr ""
 
 msgctxt "#30012"
-msgid "CD layer only"
+msgid "CD/core layer only"
+msgstr ""
+
+msgctxt "#30013"
+msgid "Frequency layer only"
 msgstr ""
 
 msgctxt "#30020"
@@ -48,15 +56,51 @@ msgid "No limit"
 msgstr ""
 
 msgctxt "#30031"
-msgid "16 bit"
+msgid "16-bit"
 msgstr ""
 
 msgctxt "#30032"
-msgid "24 bit"
+msgid "24-bit"
 msgstr ""
 
 msgctxt "#30033"
-msgid "32 bit"
+msgid "32-bit"
+msgstr ""
+
+msgctxt "#30040"
+msgid "Pack 1"
+msgstr ""
+
+msgctxt "#30041"
+msgid "Pack 2"
+msgstr ""
+
+msgctxt "#30042"
+msgid "Pack 3"
+msgstr ""
+
+msgctxt "#30043"
+msgid "Pack 4"
+msgstr ""
+
+msgctxt "#30044"
+msgid "Pack 5"
+msgstr ""
+
+msgctxt "#30045"
+msgid "Pack 6"
+msgstr ""
+
+msgctxt "#30046"
+msgid "Pack 7"
+msgstr ""
+
+msgctxt "#30047"
+msgid "Pack 8"
+msgstr ""
+
+msgctxt "#30048"
+msgid "Pack 9"
 msgstr ""
 
 msgctxt "#30100"
@@ -64,10 +108,9 @@ msgid "LAE decoder: LAES"
 msgstr ""
 
 msgctxt "#30101"
-msgid "First play of this file: checking all masters (SHA-256), once per file"
+msgid "Verifying all masters (SHA-256, first playback only)"
 msgstr ""
 
 msgctxt "#30200"
-msgid "LAE audio (LAES lossless / LAEY)"
+msgid "LAE audio (LAES / LAEY)"
 msgstr ""
-

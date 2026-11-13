@@ -43,7 +43,15 @@ public final class LaeyDecoder {
     public interface ReadFn { int read(long offset, byte[] buf, int off, int len); }
 
     // ---- struct lae_track
-    CdPcm cd; byte[] lae; final Info info = new Info(); RandomAccessFile file;   // file: Java only, the open file the CD layer is read from on demand (closed by lae_close)
+    CdPcm cd; byte[] lae; final Info info = new Info(); SharedFile file;   // file: Java only, the open file the CD layer is read from on demand (closed by the last lae_close of the track and its copies)
+    boolean crcOk = false;   // Java only: lae passed the CRC check when the track was opened (later starts skip that pass over the whole chunk)
+    // Java only: lae_dup's copy of the source's checkpoints (adopted by this copy's first start of the same pack)
+    private LaeDecoder.Decoder.MarkSnap seed; private int seedPack = -1;
+    /** Java only: an open file shared by a track and its lae_dup copies: reads are serialised, the last release closes it */
+    static final class SharedFile { final RandomAccessFile f; private int refs = 1; SharedFile(RandomAccessFile x) { f = x; }
+        synchronized int read(long offset, byte[] buf, int off, int len) { try { if (offset < 0) return -1; f.seek(offset); f.readFully(buf, off, len); return 0; } catch (IOException e) { return -1; } }
+        synchronized void retain() { refs++; }
+        synchronized void release() { if (--refs == 0) { try { f.close(); } catch (IOException e) { /* read-only file */ } } } }
     /** Java only: the default memory budget of lae_open_file for the CD layer read on demand (bytes; the decoder's other memory does not grow with the track length) */
     public static final long DEFAULT_CD_CACHE = 4L << 20;
     LaeDecoder.Decoder dec; int route = -1, outRate = 0, wrate = 0, bits = 0; long pos = 0, outFrames = 0; boolean err = false;
@@ -60,8 +68,29 @@ public final class LaeyDecoder {
     private static LaeyDecoder finish(CdPcm cd, byte[] lae, int pair) {
         LaeyDecoder t = new LaeyDecoder(); t.cd = cd; t.lae = lae;
         { LaeDecoder.Decoder D = new LaeDecoder.Decoder(); int[] code = {0}; String e = D.openCd(t.cd, t.lae, "full", 0, code); if (!e.isEmpty()) throw new LaeException(e);
-          Info i = t.info; i.master_rate = D.rate; i.base_rate = D.base; i.stages = D.stages; i.cutoff_hz = D.fc; i.cd_frames = D.ncd; i.master_frames = D.Lm; }
+          Info i = t.info; i.master_rate = D.rate; i.base_rate = D.base; i.stages = D.stages; i.cutoff_hz = D.fc; i.cd_frames = D.ncd; i.master_frames = D.Lm;
+          { PackInfo p0 = new PackInfo(); p0.rate = D.rate; p0.stages = D.stages; p0.name = D.mainName; t.packList.add(p0); }
+          for (LaeDecoder.Decoder.PackInfo q : D.packs) { PackInfo p = new PackInfo(); p.rate = q.rate; p.stages = q.stages; p.name = q.name; t.packList.add(p); } }
+        t.crcOk = true;   // openCd above checked the CRC of this array (t.lae is never changed afterwards)
         t.info.cd_md5 = t.cd.md5(); t.info.from_pair = pair; return t; }
+
+    // Extension packs (2026-11-10, spec/lossy/SPEC.md, Section 5.6): one core, several mutually independent extensions. Pack 0 is the
+    // main body; the others carry the name their publisher gave. Only the caller chooses a pack - the app's menu or setting; nothing
+    // here chooses one by itself, and the choice is never written into the file. The C interface (lae_api.h) gets the same three calls.
+    public static final class PackInfo { public int rate, stages; public String name = ""; }
+    private final java.util.ArrayList<PackInfo> packList = new java.util.ArrayList<PackInfo>(); private int pack = 0, decPack = 0;
+    /** the number of extension packs in the file, the main body included (1 = an ordinary file) */
+    public int lae_pack_count() { return packList.size(); }
+    /** pack k's master rate, octave count and name (k = 0: the main body; its name is that of the optional "LNAM" record, else ""); null if there is no such pack */
+    public PackInfo lae_pack_info(int k) { if (k < 0 || k >= packList.size()) return null; PackInfo s = packList.get(k), r = new PackInfo(); r.rate = s.rate; r.stages = s.stages; r.name = s.name; return r; }
+    /** the pack the next lae_start decodes (0 = the main body, the default). The track is unstarted afterwards and lae_get_info describes
+     *  the chosen pack. Throws if the file has no such pack. */
+    public void lae_select_pack(int k) {
+        if (k < 0 || k >= packList.size()) throw new LaeException("this file has no extension pack of that number");
+        try { LaeDecoder.Decoder D = new LaeDecoder.Decoder(); D.pack = k; D.crcChecked = crcOk; int[] code = {0}; String e = D.openCd(cd, lae, "full", 0, code); if (!e.isEmpty()) throw new LaeException(e);
+            info.master_rate = D.rate; info.stages = D.stages; info.cutoff_hz = D.fc; info.master_frames = D.Lm; }
+        catch (OutOfMemoryError e) { throw new LaeException("out of memory or internal error", e); }
+        pack = k; dec = null; route = -1; err = false; pos = 0; }
 
     // port of lae_cdx_read.h:parseWav (the part lae_open_memory uses: 16-bit stereo PCM and the last "LAE " chunk; lae[0] receives it)
     static String parseWav(byte[] b, long size, int[] rate, short[][] pcm, byte[][] lae) {
@@ -82,8 +111,18 @@ public final class LaeyDecoder {
     private static int u16(byte[] q, int o) { return (q[o] & 0xFF) | (q[o + 1] & 0xFF) << 8; }
     private static long u32(byte[] q, int o) { return ((q[o] & 0xFF) | (q[o + 1] & 0xFF) << 8 | (q[o + 2] & 0xFF) << 16 | (long) (q[o + 3] & 0xFF) << 24); }
 
+    // port of lae_api.cpp:openFlac: the FLAC form (LaeyFlac): the CD layer from the FLAC audio frames, the extension from the "LAE1"
+    // APPLICATION blocks; checked against STREAMINFO (sample count, MD5). From there on the track is the same as one opened from a WAV.
+    // (The C++ also takes the file's SHA-256 here, the key of the player's checkpoint record; the Java port keeps no such record.)
+    private static LaeyDecoder openFlac(ReadFn rd, long size) {
+        int[] rate = {0}; short[][] pcm = {null}; byte[][] lae = {null}; boolean[] notLaey = {true};
+        final String e = LaeyFlac.read(rd, size, rate, pcm, lae, notLaey); if (!e.isEmpty()) throw new LaeException(e);
+        return finish(pcm[0], lae[0], 0); }
+
     // port of lae_api.cpp:openBytes
-    private static LaeyDecoder openBytes(byte[] b, long len) {
+    private static LaeyDecoder openBytes(final byte[] b, final long len) {
+        if (len >= 4 && tag(b, 0, "fLaC")) return openFlac(new ReadFn() { @Override public int read(long offset, byte[] buf, int off, int n) {   // FLAC form
+            if (offset < 0 || offset > len || n > len - offset) return -1; System.arraycopy(b, (int) offset, buf, off, n); return 0; } }, len);
         int[] rate = {0}; short[][] pcm = {null}; byte[][] lae = {new byte[0]}; String e = parseWav(b, len, rate, pcm, lae); if (!e.isEmpty()) throw new LaeException(e);
         if (lae[0].length == 0) throw new LaeException("no LAE chunk: plain CD audio");
         return finish(pcm[0], lae[0], 0); }
@@ -96,6 +135,7 @@ public final class LaeyDecoder {
     private static LaeyDecoder openReader(ReadFn rd, long size, long cdCache) {
         byte[] h = new byte[12]; if (U.lt(size, 12)) throw new LaeException("not a WAV file");
         if (rd.read(0, h, 0, 12) != 0) throw new LaeException("cannot read the file");
+        if (tag(h, 0, "fLaC")) return openFlac(rd, size);   // FLAC form (2026-11-10)
         if (!tag(h, 0, "RIFF") || !tag(h, 8, "WAVE")) throw new LaeException("not a WAV file");
         long p = 12, dOff = 0, dLen = 0, lOff = 0, lLen = 0; int fmt = 0, ch = 0, bits = 0; boolean haveFmt = false, haveData = false, haveLae = false;
         byte[] c = new byte[8];
@@ -143,11 +183,10 @@ public final class LaeyDecoder {
         try { if (path == null) throw new LaeException("cannot read the file");
             try { f = new RandomAccessFile(new File(path), "r"); } catch (IOException e) { throw new LaeException("cannot read the file", e); }
             long n; try { n = f.length(); } catch (IOException e) { throw new LaeException("cannot read the file", e); }
-            final RandomAccessFile ff = f;
-            LaeyDecoder t = openReader(new ReadFn() {   // port of lae_api.cpp:readFile: lae_read_fn over a file
-                @Override public int read(long offset, byte[] buf, int off, int len) {
-                    try { if (offset < 0) return -1; ff.seek(offset); ff.readFully(buf, off, len); return 0; } catch (IOException e) { return -1; } } }, n, cdCacheBytes);
-            if (cdCacheBytes > 0) { t.file = f; keep = true; }
+            final SharedFile ff = new SharedFile(f);
+            LaeyDecoder t = openReader(new ReadFn() {   // port of lae_api.cpp:readFile: lae_read_fn over a file (Java: serialised, lae_dup copies share the file)
+                @Override public int read(long offset, byte[] buf, int off, int len) { return ff.read(offset, buf, off, len); } }, n, cdCacheBytes);
+            if (cdCacheBytes > 0) { t.file = ff; keep = true; }
             return t; }
         catch (OutOfMemoryError e) { throw new LaeException("out of memory or internal error", e); }
         finally { if (f != null && !keep) { try { f.close(); } catch (IOException e) { /* read-only file: closing cannot lose data (C++ ignores fclose here too) */ } } } }
@@ -177,10 +216,12 @@ public final class LaeyDecoder {
             String m = route == LAE_ROUTE_CD24 ? "cd24" : route == LAE_ROUTE_16 ? "16" : route == LAE_ROUTE_FULL ? "full" : null;
             if (m == null) throw new LaeException("unknown route");
             if (!MdctTb.selftestOK()) throw new LaeException("decoder self-test failed in this thread (floating-point state): play the CD layer");
-            LaeDecoder.Decoder D = new LaeDecoder.Decoder(); int[] code = {0};
+            LaeDecoder.Decoder D = new LaeDecoder.Decoder(); int[] code = {0}; D.pack = pack; D.crcChecked = crcOk;   // the chosen extension pack (0 = the main body)
             String e = D.openCd(cd, lae, m, route == LAE_ROUTE_CD24 ? 0 : out_rate, code); if (!e.isEmpty()) throw new LaeException(e);
             if (route == LAE_ROUTE_CD24 && out_rate != 0 && out_rate != D.wrate) throw new LaeException("the CD24 route plays at the base rate only");
-            if (old != null) D.adoptMarks(old);   // a restart or another route keeps the seek checkpoints decoded so far
+            if (old != null && decPack == pack) D.adoptMarks(old);   // a restart or another route keeps the seek checkpoints decoded so far (of the same pack only)
+            else if (seed != null && seedPack == pack) D.adoptMarks(seed);   // Java only: a lae_dup copy starts with its source's checkpoints
+            decPack = pack;
             this.route = route; outRate = out_rate; wrate = D.wrate; bits = 24; outFrames = D.Lo; dec = D; }
         catch (OutOfMemoryError e) { throw new LaeException("out of memory or internal error", e); } }
 
@@ -223,9 +264,29 @@ public final class LaeyDecoder {
     // 0 on the CD route), or -1 when not started
     public long lae_stream_bytes() { if (route < 0) return -1; return dec != null ? dec.streamBytes() : 0; }
 
+    /**
+     * Java only (2026-11-12, for a route change in a player without a gap): a second track over the same opened file. It shares what lae_open_*
+     * read and checked (the CD layer, the "LAE " chunk, the information with cd_md5; nothing is read or hashed again) and has its own
+     * route, pack choice and decoding state. It starts unstarted, with this track's pack chosen, and its first lae_start of that pack
+     * takes over this track's seek checkpoints decoded so far (output unchanged: a seek from a checkpoint gives the samples of a decode
+     * from the start). The two tracks may then be decoded in two threads at once; each must still be used by one thread at a time.
+     * Call lae_dup in the thread that uses this track. A file opened with lae_open_file stays open until both are closed; with
+     * lae_open_reader and a CD cache, the host's read function must accept calls from both threads. Throws when the track is closed.
+     */
+    public LaeyDecoder lae_dup() {
+        if (cd == null) throw new LaeException("the track is closed");
+        try { LaeyDecoder t = new LaeyDecoder(); t.cd = cd.share(); t.lae = lae; t.crcOk = crcOk;
+            Info s = info, i = t.info; i.master_rate = s.master_rate; i.base_rate = s.base_rate; i.stages = s.stages; i.cutoff_hz = s.cutoff_hz;
+            i.cd_frames = s.cd_frames; i.master_frames = s.master_frames; i.cd_md5 = s.cd_md5; i.from_pair = s.from_pair;
+            t.packList.addAll(packList); t.pack = pack;   // PackInfo entries are never changed after open (lae_pack_info returns copies)
+            if (dec != null) { t.seed = dec.snapMarks(); t.seedPack = decPack; } else if (seed != null) { t.seed = seed; t.seedPack = seedPack; }
+            if (file != null) { file.retain(); t.file = file; }
+            return t; }
+        catch (OutOfMemoryError e) { throw new LaeException("out of memory or internal error", e); } }
+
     // port of lae_api.cpp:lae_close
-    public void lae_close() { dec = null; if (cd != null) cd.close(); cd = null; route = -1;
-        if (file != null) { try { file.close(); } catch (IOException e) { /* read-only file */ } file = null; } }
+    public void lae_close() { dec = null; seed = null; if (cd != null) cd.close(); cd = null; route = -1;
+        if (file != null) { file.release(); file = null; } }
 
     /** Java only: the exception that a C++ catch (...) would have turned into the -1 of the last failed read or seek (null if none) */
     public Throwable lastFailure() { return lastFailure; }

@@ -44,7 +44,7 @@ extern "C" {
 enum lae_route {
     LAE_ROUTE_CD = 0,     /* the CD layer itself (16-bit, base rate) */
     LAE_ROUTE_CD24 = 1,   /* CD layer + depth layer (24-bit, base rate) */
-    LAE_ROUTE_16 = 2,     /* CD layer + frequency layer (24-bit, master rate or an octave below) */
+    LAE_ROUTE_16 = 2,     /* CD layer + frequency layer (16-bit, delivered in 24-bit words; master rate or an octave below) */
     LAE_ROUTE_FULL = 3    /* all layers (24-bit, master rate or an octave below) */
 };
 typedef struct lae_info {

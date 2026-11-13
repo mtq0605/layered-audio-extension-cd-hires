@@ -89,7 +89,7 @@ std::string fillLaey(lae_any& a) {
     add(LAE_ROUTE_CD, 0, cd ? "cd" : "core", "the " + bl + " (what a player without LAE support reads from this file)");
     add(LAE_ROUTE_CD24, 0, cd ? "cd24" : "core24", bl + " + depth layer (24-bit, base rate)");
     for (int st = 1; st <= in.stages; st++) { const int r = in.base_rate << st;
-        add(LAE_ROUTE_16, r, "16_" + std::to_string(r), "route 16: " + bl + " + frequency layer (24-bit words, the band of the " + bl + " at 16-bit precision)" + std::string(r == in.master_rate ? ", master rate" : ", an octave level")); }
+        add(LAE_ROUTE_16, r, "16_" + std::to_string(r), "route 16: " + bl + " + frequency layer, 16-bit (the band of the " + bl + " at 16-bit precision; samples in 24-bit words)" + std::string(r == in.master_rate ? ", master rate" : ", an octave level")); }
     for (int st = 1; st <= in.stages; st++) { const int r = in.base_rate << st;
         add(LAE_ROUTE_FULL, r, "full_" + std::to_string(r), "route full: all layers (24-bit)" + std::string(r == in.master_rate ? ", master rate" : ", an octave level")); }
     lae_start(a.y, -1, 0, nullptr, 0);   // leaves the track unstarted (an unknown route is refused after the old decoder is dropped)
@@ -103,7 +103,7 @@ std::string fillLaey(lae_any& a) {
         if (lae_select_pack(a.y, k)) { packFail.push_back(lb); continue; }
         const size_t first = a.ch.size();
         add(LAE_ROUTE_CD24, 0, pk + (cd ? "_cd24" : "_core24"), lb + ": " + bl + " + depth layer (24-bit, base rate)");
-        for (int st = 1; st <= ps; st++) { const int r = in.base_rate << st; add(LAE_ROUTE_16, r, pk + "_16_" + std::to_string(r), lb + ": route 16, " + bl + " + frequency layer" + std::string(r == pr ? ", master rate" : ", an octave level")); }
+        for (int st = 1; st <= ps; st++) { const int r = in.base_rate << st; add(LAE_ROUTE_16, r, pk + "_16_" + std::to_string(r), lb + ": route 16, " + bl + " + frequency layer, 16-bit" + std::string(r == pr ? ", master rate" : ", an octave level")); }
         for (int st = 1; st <= ps; st++) { const int r = in.base_rate << st; add(LAE_ROUTE_FULL, r, pk + "_full_" + std::to_string(r), lb + ": route full, all layers (24-bit)" + std::string(r == pr ? ", master rate" : ", an octave level")); }
         for (size_t i = first; i < a.ch.size(); i++) a.ch[i].pack = k; }
     lae_select_pack(a.y, 0);

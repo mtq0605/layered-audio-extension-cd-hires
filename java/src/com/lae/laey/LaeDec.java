@@ -76,7 +76,7 @@ final class LaeDec {
         finally { if (fo != null) try { fo.close(); } catch (IOException x) { /* failure path */ } }
         streamErr[0] = D.err.v;
         if (D.err.v) { new File(argv[2]).delete(); env.printf("corrupt stream (values out of range): refusing to decode\n"); return 3; }
-        env.printf("LAE decode OK: %s -> %s | %s, %d Hz 24 bit, %ld samples/ch | mode %s (share by %s) %s, CD cut-off %d Hz | frequency segments used %d of %d | hard-limited samples %ld | format LAEY (extension LAE1)\n",
-                   argv[1], argv[2], mode.equals("16") ? "16-bit route" : (mode.equals("cd24") ? "CD + depth" : "24-bit route"), D.wrate, D.Lo, PartitionFormat.MODES[D.mi].name, D.wm == 2 ? "cells+energy" : (D.wm != 0 ? "energy" : "cells"), D.eq != 0 ? "equal" : "unequal", D.fc, D.nused, D.nseg, D.clip);
+        env.printf("LAE decode OK: %s -> %s | %s, %d Hz %s, %ld samples/ch | mode %s (share by %s) %s, CD cut-off %d Hz | frequency segments used %d of %d | hard-limited samples %ld | format LAEY (extension LAE1)\n",
+                   argv[1], argv[2], mode.equals("16") ? "16-bit route" : (mode.equals("cd24") ? "CD + depth" : "24-bit route"), D.wrate, mode.equals("16") ? "16 bit (in 24-bit words)" : "24 bit", D.Lo, PartitionFormat.MODES[D.mi].name, D.wm == 2 ? "cells+energy" : (D.wm != 0 ? "energy" : "cells"), D.eq != 0 ? "equal" : "unequal", D.fc, D.nused, D.nseg, D.clip);
         return 0; }
 }

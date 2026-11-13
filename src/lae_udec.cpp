@@ -10,7 +10,7 @@
 //                                       decodes one choice (default: LAEY the route full at the master rate, LAES the default entry the file names, else the core master)
 //   lae_udec verify <file> [--pick=..]  every check of the format, nothing written (LAES: every master's SHA-256 in one run)
 // A choice: LAEY cd | cd24 (core | core24 in a 48 kHz file) | 16_<rate> | full_<rate> (also 16, full = at the master rate); LAES core | master_<k>_<rate>_<bits> |
-// master_<k>_level_<rate>_<bits> | derived16_<rate>_from_<name>. <rate>:<bits> picks LAEY the fullest route at that rate; LAES (SPEC 10.3): <rate>:<bits>,
+// master_<k>_level_<rate>_<bits> | derived16_<rate>_from_<name>. <rate>:<bits> picks LAEY the fullest route at that rate and bit depth (16 = route 16, which has no depth layer); LAES (SPEC 10.3): <rate>:<bits>,
 // master:<k> (k = the number shown) and name:<text> (the publisher's name, exactly) fit masters themselves only; when several masters fit,
 // a tick list is shown (number, rate, word length, name; numbers and ranges can be typed below it), outside a console they are
 // listed and nothing is written. Several ticked: each goes to its own file, <out name>_<choice name><out suffix>.
@@ -61,10 +61,13 @@ void printFormat(const lae_probe_info& pi, const char* path, bool damaged) {
     else printf("format: no LAE extension (%s)\n", pi.container == LAE_CONTAINER_NONE ? "not a WAV or FLAC file" : "a plain WAV / FLAC file");
     printf("recognised by content (the name's suffix \"%s\" decides nothing; %s)  %s\n", suffix.c_str(), cont, u8"\u6309\u5185\u5bb9\u8bc6\u522b\uff0c\u4e0d\u770b\u6587\u4ef6\u540d"); }
 
+// the bit depth shown for a choice: route 16 (no depth layer) is 16-bit; its samples come in 24-bit words, which is only the carrier
+static int shownBits(const lae_any_choice& c) { return c.route == LAE_ROUTE_16 ? 16 : c.bits; }
+
 void printChoices(const lae_any* a, const lae_any_info& in, int picked) {
     printf("choices (* = default%s):\n", picked >= 0 ? ", > = picked" : "");
     for (int i = 0; i < in.choices; i++) { lae_any_choice c; if (lae_any_get_choice(a, i, &c)) break;
-        printf(" %c%c%2d  %-34s %6d Hz %2d-bit  %12llu frames  %s\n", i == in.default_choice ? '*' : ' ', i == picked ? '>' : ' ', i + 1, c.name, c.rate, c.bits, (unsigned long long)c.frames, c.what); } }
+        printf(" %c%c%2d  %-34s %6d Hz %2d-bit  %12llu frames  %s\n", i == in.default_choice ? '*' : ' ', i == picked ? '>' : ' ', i + 1, c.name, c.rate, shownBits(c), (unsigned long long)c.frames, c.what); } }
 
 // returns the number of failed checks; open = false: every check, true: only those already made
 int printChecks(const lae_any* a, const lae_any_info& in, const char* when) {
@@ -97,7 +100,7 @@ int pickChoice(const lae_any* a, const lae_any_info& in, const std::string& pk, 
         if (hit.size() > 1) { several = hit; return -2; }
         return hit.empty() ? -1 : hit[0]; }
     if (col != std::string::npos && pk.find_first_not_of("0123456789:") == std::string::npos) { const int r = atoi(pk.c_str()), b = atoi(pk.c_str() + col + 1); int hit = -1;
-        for (int i = 0; i < in.choices; i++) { lae_any_choice c; lae_any_get_choice(a, i, &c); if (c.rate == r && c.bits == b) hit = i; }   // LAEY: the fullest route at that rate
+        for (int i = 0; i < in.choices; i++) { lae_any_choice c; lae_any_get_choice(a, i, &c); if (c.rate == r && shownBits(c) == b) hit = i; }   // LAEY: the fullest route at that rate and bit depth (16 = route 16)
         return hit; }
     return -1; }
 
@@ -190,7 +193,7 @@ int main(int argc, char** argv) {
         if (code == 0 && !wrote) { printf("cannot write %s (disk full?)\n", part.c_str()); code = 3; }
         if (code == 0) { fs::rename(fs::u8path(part), fs::u8path(out), ec); if (ec) { printf("cannot rename %s to %s\n", part.c_str(), out.c_str()); code = 3; } }
         if (code != 0) { fs::remove(fs::u8path(part), ec); printf("nothing written%s\n", failed ? " (a check failed; the file's own audio is still read by any WAV / FLAC tool)" : ""); } }
-    if (code == 0) { if (cmd == "dec") printf("%s decode OK: %s -> %s | %s, %d Hz %d-bit, %llu frames/ch | every check passed\n", lae_format_name(info.format), in, out.c_str(), C.name, C.rate, C.bits, (unsigned long long)got);
+    if (code == 0) { if (cmd == "dec") printf("%s decode OK: %s -> %s | %s, %d Hz %d-bit%s, %llu frames/ch | every check passed\n", lae_format_name(info.format), in, out.c_str(), C.name, C.rate, shownBits(C), C.route == LAE_ROUTE_16 ? " (in 24-bit words)" : "", (unsigned long long)got);
         else printf("%s verify OK: %s | %s decoded to its end, every check passed\n", lae_format_name(info.format), in, C.name); }
     else if (cmd == "verify") printf("%s verify FAILED: %s\n", lae_format_name(info.format), in);
     if (code > worst) worst = code; }

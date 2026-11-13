@@ -1924,7 +1924,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
 
 ### 17.1 Format and tiers
 
-- **LAE Lossless (LAES).** Specified in [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (stable, payload version 1, 2026-11-07); reference tool `laes`. Every master (16, 24 or 32 bit, at the base rate × 1, 2, 4 or 8) and each of its rate levels is reconstructed bit for bit. The carriers are a WAV file, a FLAC file (APPLICATION blocks with ID `LAE2`) and CD-Extra (extension block type 2). How many masters fit on a CD-Extra disc depends on the album length. Files larger than 4 GiB use the RF64 form (spec/lossless/SPEC.md, Section 7). Future work: streaming decoding.
+- **LAE Lossless (LAES).** Specified in [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (stable, payload version 2, 2026-11-12); reference tool `laes`. Every master (16, 24 or 32 bit, at the base rate × 1, 2, 4 or 8) and each of its rate levels is reconstructed bit for bit. The carriers are a WAV file, a FLAC file (APPLICATION blocks with ID `LAE2`) and CD-Extra (extension block type 2). How many masters fit on a CD-Extra disc depends on the album length. Files larger than 4 GiB use the RF64 form (spec/lossless/SPEC.md, Section 7). Streaming export for services is implemented (`laes_export`, Section 14.9).
 - **Containers.** The WAV container and CD-Extra packaging are implemented. The encapsulation specification is a draft; it is to be revised after the measurements of a real burn (Section 17.3). The `.lae` file layout of LAEY remains unspecified; an LAES `.lae` file is an LAES file in the FLAC or WAV form (`laes enc --form`).
 - **Channels.** Only stereo is supported.
 

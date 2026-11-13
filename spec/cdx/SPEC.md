@@ -54,7 +54,7 @@ This specification does not define:
 
 - the v5 bitstream and its decoding (see [SPEC]);
 - the content of the extension block of LAE Lossless (LAES). The trailer record identifies such a block as type 2 ([X2], Section 8); its content and its relation to the CD layer are defined in the LAES specification (spec/lossless/SPEC.md, Section 9), and the layout and reading rules of this specification apply to it unchanged;
-- "keep CD / keep master" and per-layer provenance (see Section 8);
+- per-layer provenance (see Section 8);
 - concrete implementations of placement, search and other algorithms;
 - the transport of LAE streams (protocol, segmentation, buffering);
 - the user interface.
@@ -588,7 +588,7 @@ The result of the placement MUST satisfy all of the following:
   - Sound of one CD sample or more that only the master contains leads to a stop under [P10].
 - Samples added to the master for alignment are all digital zero, and they are added only at positions where the CD is also digital zero.
 
-The concrete placement algorithm is a matter of implementation. Automatic placement is not performed if the master or the CD has non-silent content that the other lacks; content consisting only of dither noise also counts as content. This case belongs to the future "keep CD / keep master" task (Section 8). Version 0 stops under [P10] and states this.
+The concrete placement algorithm is a matter of implementation. Automatic placement is not performed if the master or the CD has non-silent content that the other lacks; content consisting only of dither noise also counts as content. Version 0 stops under [P10] and states that only one side has the content. Sound that only the master has at the start or the end of a single piece is handled when that piece is encoded, by the publisher's choice of `cdedge=pad` or `cdedge=cut` in the reference encoder.
 
 **[P10]** In any of the following cases, the tool MUST stop, write no file, state the reason and list the time ranges concerned:
 
@@ -887,8 +887,8 @@ The report MUST give the reason category. Reasons are decided by counts only, wi
 | I1 | Tracks unchanged | All offsets are 0; passes |
 | I2 | 2 s of digital zero inserted between two tracks; the publisher marks it as INDEX 00 of the following track | Passes; the high-resolution output is digital silence in the gap |
 | I3 | 300 CD samples of digital zero added before track 2 | Passes |
-| I4 | The first 1 s of track 3 removed | Stops; the statement indicates that the case belongs to the future "keep CD / keep master" task |
-| I5 | Noise at −70 dBFS in a gap between tracks | Stops; the statement indicates that the case belongs to the future "keep CD / keep master" task |
+| I4 | The first 1 s of track 3 removed | Stops; the statement indicates that only one side has the content |
+| I5 | Noise at −70 dBFS in a gap between tracks | Stops; the statement indicates that only one side has the content |
 | I6 | Polarity of one track inverted | A warning is displayed; passes |
 | I7 | Order of two tracks swapped | Stops |
 | I8 | An all-zero track of 4 s (300 sectors) | Sample-by-sample comparison instead of the statistical decision ([P8]); passes |
@@ -929,7 +929,7 @@ In every passing case, session 1 is sample-identical to the publisher's programm
 | C26 | LAE stream (simulated): the CD layer of each track of disc S stored as FLAC and delivered to the reader track by track together with the .lax files: (a) delivered unchanged; (b) 1 sample changed in the base-layer file of track 2 | (a) Every track passes, and re-encapsulation is byte-identical. (b) The whole-track MD5 of track 2 does not match. The track does not pair, is not found under Section 6 either (reason "no match"), and only the base layer is played. Tracks 1 and 3 pass | F6 R1 |
 | C27 | Production refusals: (a) a CD produced from a 48 kHz-family master (sample-rate field of a Track A excerpt changed to 384 000); (b) disc S divided at 5 s and 8 s instead (track 2 is 3 s, shorter than 4 s); (c) a track list with 99 audio tracks; (d) a v5 file of one track with a corrupted CRC in its `LAE ` chunk; (e) insufficient capacity (C set artificially small) | All stop and leave no output. (e) The available options are listed, and no track or octave is removed automatically | L1 L2 L10 P1 P2 P18 |
 | C28 | Derived mode, continuous master: (a) disc S; (b) disc S with the start of track 2 moved to 5 s plus 1000 master samples (off the grid) | (a) The track boundaries equal the positions given by the publisher, and z_k = 0. [0, A2 × 588) of session 1 = the CD layers of the tracks without gaps. The MD5 of each track's range = trailer-record MD5. (b) The tool stops, lists this start, asks the publisher to give it on the grid, and writes no file | L13 P3 P5 P7 |
-| C29 | Independent-CD mode, I1–I10 as listed in 7.1 (the short track of I8 is a 4 s (300-sector) all-zero track; in I10 the publisher's CD has non-silent content in INDEX 00 of track 1) | I1, I2, I3 and I8 pass, and session 1 is sample-identical to the publisher's programme. I6 passes after displaying a warning. I4, I5, I7, I9 and I10 stop, write no file and state the reason. For I4 and I5, the statement indicates that the case belongs to the future "keep CD / keep master" task | L4 L11 L14 P3 P8 P9 P10 P11 |
+| C29 | Independent-CD mode, I1–I10 as listed in 7.1 (the short track of I8 is a 4 s (300-sector) all-zero track; in I10 the publisher's CD has non-silent content in INDEX 00 of track 1) | I1, I2, I3 and I8 pass, and session 1 is sample-identical to the publisher's programme. I6 passes after displaying a warning. I4, I5, I7, I9 and I10 stop, write no file and state the reason. For I4 and I5, the statement indicates that only one side has the content | L4 L11 L14 P3 P8 P9 P10 P11 |
 | C30 | Independent-CD mode: the publisher's CD marks a 2 s INDEX 00 before track 2 that contains music (the master contains it as well, and encapsulation succeeds); per-track rip with the gaps omitted | Track 1 falls back with reason "unknown samples"; the other tracks pass | L14 R4 R11 |
 | C31 | Disc X ripped and read at offset 0 and at offset +667 | All output files of the two runs are byte-identical, which shows that the offset has entered no file | R16 |
 | C32 | During the self-check: (a) a positive case is made to fail artificially; (b) the reader is made to accept a modified track artificially | (a) The image is void. (b) The image is void, and the process stops | P16 P17 |
@@ -962,7 +962,8 @@ In every passing case, session 1 is sample-identical to the publisher's programm
   - The reader treats the extension block as opaque bytes and passes it unchanged to the corresponding decoder. Therefore, the CD layout, the trailer record and the reading rules of this specification need no change when LAES is added.
 - **Container version 5 unchanged.** This specification does not require v6.
 - **Not in version 0; to be specified later:**
-  - keep CD / keep master, and per-layer provenance. This is a future task that this specification does not address. It also covers the case in independent-CD mode in which master and CD differ in non-silent content (version 0 stops; [P10]);
+  - per-layer provenance. This is a future task that this specification does not address;
+  - automatic placement in independent-CD mode when master and CD differ in non-silent content (version 0 stops; [P10]). The CD layer is the publisher's CD in every case ([P11]);
   - a dedicated direct reader (one-step operation on inserting the disc). It is only another kind of input to [R1] and likewise follows Section 6. It may re-read tracks with a slip ([R10]). Details are to be specified later;
   - the interface and host of plug-ins;
   - the transport of LAE streams (protocol, segmentation, buffering);

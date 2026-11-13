@@ -1924,7 +1924,7 @@ SPEC.md 中定义的比特流对容器版本 5 已冻结。
 
 ### 17.1 格式与层级
 
-- **LAE Lossless（LAES）。**规定于 [spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md)（正式，有效载荷版本 1，2026-11-07）；参考工具为 `laes`。每个母带（16、24 或 32 位，采样率为基础采样率 × 1、2、4 或 8）及其各采样率档位都逐位重建。载体为 WAV 文件、FLAC 文件（ID 为 `LAE2` 的 APPLICATION 块）和 CD-Extra（扩展块类型 2）。一张 CD-Extra 光盘能容纳多少母带取决于专辑时长。大于 4 GiB 的文件使用 RF64 形式（spec/lossless/SPEC.md 第 7 节）。未来工作：流式解码。
+- **LAE Lossless（LAES）。**规定于 [spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md)（正式，有效载荷版本 2，2026-11-12）；参考工具为 `laes`。每个母带（16、24 或 32 位，采样率为基础采样率 × 1、2、4 或 8）及其各采样率档位都逐位重建。载体为 WAV 文件、FLAC 文件（ID 为 `LAE2` 的 APPLICATION 块）和 CD-Extra（扩展块类型 2）。一张 CD-Extra 光盘能容纳多少母带取决于专辑时长。大于 4 GiB 的文件使用 RF64 形式（spec/lossless/SPEC.md 第 7 节）。面向流媒体服务的流式导出已实现（`laes_export`，第 14.9 节）。
 - **容器。**WAV 容器和 CD-Extra 封装均已实现。封装规范为草案，将在完成真实刻录的测量之后修订（第 17.3 节）。LAEY 的 `.lae` 文件布局仍未规定；LAES 的 `.lae` 文件是 FLAC 或 WAV 形式的 LAES 文件（`laes enc --form`）。
 - **声道。**仅支持立体声。
 

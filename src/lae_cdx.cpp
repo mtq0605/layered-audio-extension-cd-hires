@@ -142,13 +142,15 @@ static void publisherText(const fs::path& p, map<int, string>& title, map<int, s
     fclose(f); }
 static string readme() {
     return "LAE (Layered Audio Extension) / LAE 分层音频扩展\r\n\r\n"
-           "This is a CD-Extra disc. Session 1 is an ordinary audio CD that plays in every CD player.\r\n"
-           "The folder LAE holds the extension files. An LAE reader or an LAE player plugin combines the CD audio\r\n"
-           "with these files and gives the high-resolution version of each track. Rip the audio tracks with any\r\n"
-           "ripping program and any ripping settings, then give the rip and this folder to the LAE reader.\r\n\r\n"
-           "这是一张 CD-Extra 光盘。会话 1 是普通的音乐 CD，任何 CD 机都能播放。\r\n"
-           "LAE 文件夹里是扩展文件。LAE 读取器或 LAE 播放器插件把 CD 音频和这些文件合在一起，得到每一轨的高解析版本。\r\n"
-           "用任何抓轨软件、任何设置翻录音频轨，再把翻录和这个文件夹交给 LAE 读取器即可。\r\n"; }
+           "This is a CD-Extra disc. Session 1 is an ordinary audio CD that plays in every CD player; its audio tracks\r\n"
+           "are the CD layer of each track.\r\n"
+           "The folder LAE holds the extension files. Rip the audio tracks with any ripping program and any ripping\r\n"
+           "settings, then give the rip and this folder to the LAE reader (lae_cdx read). It combines the CD layer of\r\n"
+           "each track with its extension file and gives the LAE file, from which an LAE decoder or player plays the\r\n"
+           "high-resolution versions.\r\n\r\n"
+           "这是一张 CD-Extra 光盘。第 1 区段是普通的音乐 CD，任何 CD 机都能播放；它的音轨就是每一轨的 CD 层。\r\n"
+           "LAE 文件夹里是扩展文件。用任何抓轨软件、任何设置抓下音轨，再把抓轨结果和这个文件夹交给 LAE 读取器（lae_cdx read）。\r\n"
+           "读取器把每一轨的 CD 层和它的扩展文件合成 LAE 文件，LAE 解码器或播放器再用它播放高解析度版本。\r\n"; }
 static vector<iso::File> dataFiles(const vector<vector<uint8_t>>& lax, const vector<int>& trackNo) {
     vector<iso::File> f; string rm = readme(); f.push_back({"README.TXT", vector<uint8_t>(rm.begin(), rm.end())});
     for (size_t k = 0; k < lax.size(); k++) { char nm[32]; snprintf(nm, sizeof nm, "LAE/TRACK%02d.LAX", trackNo[k]); f.push_back({nm, lax[k]}); } return f; }
@@ -236,14 +238,16 @@ static string burnText(const Image& im) {
          "Route B (two passes): burn SESSION1.CUE and leave the disc open (multisession). Read the next writable address N of the disc\r\n"
          "  (READ TRACK INFORMATION); it must equal A2 + 11400. Then run\r\n"
          "    lae_cdx data LAE <N> DATA_N.ISO\r\n"
-         "  (LAE = the folder with the TRACKnn.LAX files) and write DATA_N.ISO as the second session (MODE2/2048).\r\n"
+         "  (LAE = the folder with the TRACKnn.LAX files) and write DATA_N.ISO as session 2 (MODE2/2048).\r\n"
          "Acceptance: the disc plays in a CD player; a computer shows README.TXT and the LAE folder; rip the audio tracks with any program\r\n"
          "  and run lae_cdx read on the rip and the LAE folder of the disc: every track with an extension file must be verified.\r\n\r\n"
          "路线 A（一次写完）：用 ImgBurn 以 DAO/SAO 方式刻录 IMAGE.CUE。刻录前先把 ImgBurn 显示的地址和上表核对。\r\n"
-         "路线 B（两步）：先刻 SESSION1.CUE，光盘保持开放（多会话）；读出下一可写地址 N（应等于 A2 + 11400），\r\n"
-         "  运行上面的命令生成 DATA_N.ISO，作为第二个会话写入（MODE2/2048）。\r\n"
-         "验收：CD 机能播放；电脑上能看到 README.TXT 和 LAE 文件夹；用任何软件翻录音频轨，再对翻录和光盘上的 LAE 文件夹运行\r\n"
-         "  lae_cdx read，每一条带扩展文件的轨都必须验证通过。\r\n";
+         "路线 B（两次写入）：先刻 SESSION1.CUE，光盘保持开放（多区段）。读出光盘的下一可写地址 N（READ TRACK INFORMATION），\r\n"
+         "  它必须等于 A2 + 11400。然后运行\r\n"
+         "    lae_cdx data LAE <N> DATA_N.ISO\r\n"
+         "  （LAE 是放 TRACKnn.LAX 文件的文件夹），把 DATA_N.ISO 作为第 2 区段写入（MODE2/2048）。\r\n"
+         "验收：CD 机能播放；电脑上能看到 README.TXT 和 LAE 文件夹；用任何软件抓下音轨，再对抓轨结果和光盘上的 LAE 文件夹运行\r\n"
+         "  lae_cdx read：每一条带扩展文件的轨都必须通过验证。\r\n";
     return b; }
 
 // ---- simulated discs and rips (tests and the self-check). Disc audio: LBA 0 .. A2; pregap and lead-out read as digital silence.

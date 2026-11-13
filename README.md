@@ -1581,7 +1581,7 @@ The code is standard C++17 and uses no third-party libraries. The encoder is bui
 `lae_enc` and `lae_dec` build on Windows with MSVC and on Linux with GCC and Clang; `lae_cdx` has been built and tested on Windows with MSVC. Example commands:
 
 ```
-cl /O2 /EHsc /std:c++17 /D_USE_MATH_DEFINES src\lae_dec.cpp
+cl /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES src\lae_dec.cpp
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_dec src/lae_dec.cpp
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_enc src/lae_enc.cpp
 ```

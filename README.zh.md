@@ -1581,7 +1581,7 @@ CD-Extra 抓轨必须先用 `lae_cdx read` 还原（第 10.8 节）。
 `lae_enc` 和 `lae_dec` 可在 Windows 上用 MSVC 构建，也可在 Linux 上用 GCC 和 Clang 构建；`lae_cdx` 已在 Windows 上用 MSVC 构建并测试。示例命令：
 
 ```
-cl /O2 /EHsc /std:c++17 /D_USE_MATH_DEFINES src\lae_dec.cpp
+cl /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES src\lae_dec.cpp
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_dec src/lae_dec.cpp
 g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_enc src/lae_enc.cpp
 ```

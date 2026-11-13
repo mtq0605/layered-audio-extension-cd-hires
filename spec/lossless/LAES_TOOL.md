@@ -32,7 +32,7 @@ The tool consists of a single C++17 source file, `src/laes_tool.cpp`, and its he
 Windows (Visual Studio 2022, x64 Native Tools prompt):
 
 ```
-cl /nologo /O2 /EHsc /std:c++17 /fp:strict /bigobj /D_USE_MATH_DEFINES /Fe:laes.exe src\laes_tool.cpp
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /bigobj /D_USE_MATH_DEFINES /Fe:laes.exe src\laes_tool.cpp
 ```
 
 Linux and macOS: the source contains POSIX code paths (`g++ -O2 -std=c++17 -ffp-contract=off -pthread`), but the project's CI does not yet build or test `laes` on these systems. Until it does, use the Windows build for files that you publish.

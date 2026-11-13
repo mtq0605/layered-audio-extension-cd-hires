@@ -32,7 +32,7 @@
 Windows（Visual Studio 2022，x64 Native Tools 命令提示符）：
 
 ```
-cl /nologo /O2 /EHsc /std:c++17 /fp:strict /bigobj /D_USE_MATH_DEFINES /Fe:laes.exe src\laes_tool.cpp
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /bigobj /D_USE_MATH_DEFINES /Fe:laes.exe src\laes_tool.cpp
 ```
 
 Linux 和 macOS：源代码中包含 POSIX 代码路径（`g++ -O2 -std=c++17 -ffp-contract=off -pthread`），但本项目的 CI 尚未在这些系统上编译或测试 `laes`。在此之前，用于发布的文件应使用 Windows 版本制作。

@@ -1675,7 +1675,7 @@ lae_udec verify <file>
 | Route | Layers | Output |
 |---|---|---|
 | `full` (default) | CD + depth + frequency | Master rate or the selected lower octave, 24 bit |
-| `16` | CD + frequency | As above; CD band at 16-bit precision |
+| `16` | CD + frequency | Master rate or the selected lower octave, 16 bit (delivered in 24-bit words) |
 | `cd24` | CD + depth | 44.1/48 kHz, 24 bit |
 
 In the `full` and `16` routes, the output rate may be the master rate or any lower octave down to twice the base rate; other rates are rejected. Frequency streams above the selected octave are neither read nor decoded.

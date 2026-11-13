@@ -11,6 +11,7 @@ An LAE file is an ordinary WAV or FLAC file. A player without LAE support plays 
 | File | Container | Played without LAE (core master, or CD layer for LAEY) | What it skips |
 |---|---|---|---|
 | LAEY (`.wav`) | RIFF WAVE | the `data` chunk: 16-bit PCM, 44.1 or 48 kHz (the CD layer) | the `"LAE "` chunk (depth and frequency layers) |
+| LAEY, FLAC form (`.flac`) | FLAC | the audio frames: 16-bit, 44.1 or 48 kHz (the CD layer) | the `LAE1` APPLICATION blocks (depth and frequency layers, extension packs), which come before the audio frames. Checked 2026-11-10 with GStreamer `flacdec`: the output equals the CD layer of the WAV form. Windows' own FLAC decoder: limitation 1 applies once the extension exceeds about 4 MiB (after a few tens of seconds of music) |
 | LAES, WAV form (`.wav`) | RIFF WAVE, or RF64 above 4 GiB | the `data` chunk: the core master (16 bit by default) | the `"LAE "` chunk (the masters) |
 | LAES, FLAC form (`.flac`) | FLAC | the audio frames: the core master (up to 24 bit by default) | the `LAE2` APPLICATION blocks (the masters), which come before the audio frames |
 

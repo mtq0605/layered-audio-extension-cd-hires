@@ -16,6 +16,10 @@
 - [Changing tags: `laes tag`](#changing-tags-laes-tag)
 - [Looking inside: `laes parts`](#looking-inside-laes-parts)
 - [Decoding: `laes dec`](#decoding-laes-dec)
+- [Menu order: `--menu-order`](#menu-order---menu-order)
+- [Changing master names: `laes names`](#changing-master-names-laes-names)
+- [Adding masters: `laes add`](#adding-masters-laes-add)
+- [Extracting masters into a new file: `laes extract`](#extracting-masters-into-a-new-file-laes-extract)
 - [Checking: `laes verify`](#checking-laes-verify)
 - [Time position: `laes align`](#time-position-laes-align)
 - [Test helpers](#test-helpers)
@@ -41,6 +45,9 @@ Linux and macOS: the source contains POSIX code paths (`g++ -O2 -std=c++17 -ffp-
 |---|---|
 | `laes enc <out> ...` | Creates an LAES file from one or more masters. |
 | `laes tag <in> <out> ...` | Writes a new file with different tags and pictures, without re-encoding. |
+| `laes names <in> <out> ...` | Writes a new file with different master names, menu order, default or derived-version settings, without re-encoding. |
+| `laes add <in> <out> <master> ...` | Adds masters to an existing LAES file and writes the result as a new file; the old parts stay byte for byte unchanged. |
+| `laes extract <in> <out> --pick=...` | Packs one or several chosen masters into a new LAES file. |
 | `laes parts <file>` | Shows the blocks or chunks, the SHA-256 of the audio bytes and of the payload, and the tags. |
 | `laes dec <in> <dir> ...` | Writes the core master, the masters and other versions as WAV files. |
 | `laes verify <in> <master.wav> ...` | Decodes every master and compares it bit for bit with the given files. |
@@ -65,8 +72,13 @@ laes enc <out.flac | out.wav | out.lae> (--derive-core | --core=<core.wav>) <mas
 
 ### Masters
 
-- A master is a 16-, 24- or 32-bit stereo WAV file (RIFF, or RF64 beyond 4 GiB) or a FLAC file, at 1, 2, 4 or 8 times 44.1 or 48 kHz. A file can contain up to 16 masters.
-- The order on the command line does not matter: the tool chooses the order and the way each master is stored, selecting whichever is smallest.
+- A master is a 16-, 24- or 32-bit stereo WAV file (RIFF, or RF64 beyond 4 GiB) or a FLAC file, at 1, 2, 4 or 8 times 44.1 or 48 kHz. A file can contain up to 255 masters. Every rate and every word length can hold an independent master, and several masters may have the same rate and word length.
+- The order on the command line does not change the file size: the tool chooses the order in the file and the way each master is stored, selecting whichever is smallest. The order on the command line is the menu order (see [Menu order](#menu-order---menu-order)).
+- `--name=<k>:<text>`: names the k-th master on the command line (counting from 1; repeat the option for other masters). The name is free text from the publisher: UTF-8, at most 255 bytes (about 255 Latin letters or 85 Chinese characters; emoji are allowed), without control characters (line breaks, tabs). Players show it as it is; a name never chooses anything. The tool never fills in a file name, path or date as a name. At the end, it prints "given k -> master n -> name".
+- `--no-derive`: no derived 16-bit version at all, neither for the masters nor for the core master. `--no-derive=<k>`: only the k-th master on the command line offers none. `--no-derive=core`: only the core master offers none.
+- `--default=<k>`: the k-th master on the command line is what players play when the listener has chosen nothing. `--default=core`, or no `--default`: the core master. The default is always a master itself, never a rate level or a derived version. A player that cannot play it plays the core master. At the end, the tool prints `default: given k -> master n in menus`.
+- With a name, `--no-derive`, `--default=<k>`, more than 16 masters, or a menu order other than the file order chosen by the encoder, the file is written in payload version 2; players and tools from before 2026-11-11 play only the core master of such a file. Otherwise, the file is written in payload version 1, byte for byte as before.
+- With more than 16 masters, the reference of each master is first tried on four fixed short excerpts, and only the three smallest candidates are coded in full; only one file order is tried. Measured on 10-second excerpts: with 20 masters, the file is byte for byte the one that a full search gives; 64 masters take about 8 minutes.
 - `<master>@T`: the time position of the master on the time line of the core master, in base-rate samples (a decimal number, for example `master.wav@-0.37`). The default is 0, which is correct for a derived core master.
 - `<master>@auto`: for a master produced independently of the given core master (for example, the hi-res master of a released CD). The tool measures T against `--core` with the same search as `laes align`, which needs `lae_enc` next to `laes` or given with `--lae-enc=<path>`. If the alignment error is above −60 dB, the tool displays it and asks for confirmation; `--accept` accepts it without asking. If it is not accepted, nothing is written. Two conditions apply: the core master given with `--core` is 16-bit (CD or DVD), and the master to be aligned is supplied as a WAV file, because the search reads WAV; a FLAC master is refused. A derived core master does not need `@auto`: its masters are at T = 0.
 
@@ -169,15 +181,85 @@ Lists the FLAC metadata blocks or the RIFF chunks with their sizes. It prints th
 ```
 laes dec <in> <out dir> [--levels]
 laes dec <in> --list
-laes dec <in> <out dir> --pick=<n>[,<n> ...] | --pick=<rate>:<bits>
+laes dec <in> <out dir> --pick=<n>[,<n> ...] | <a>-<b> | <rate>:<bits> | master:<k> | name:<text>
 ```
 
 - Without options, it writes the core master (`core.wav`) and every master (`master_<k>_<rate>_<bits>.wav`).
 - `--levels` additionally writes every rate level of every master (`master_<k>_level_<rate>_<bits>.wav`). A rate level is the master at half, a quarter or an eighth of its rate, and is lossless.
-- `--list` shows every choice with a number. `--pick` writes only the selected choices, by number or by rate and word length.
-- **Derived 16-bit masters:** for each rate that has no 16-bit choice of its own, a 16-bit version is offered (`derived16_<rate>_from_<name>.wav`). It is made from the choice with the longest word length at that rate by a fixed TPDF rule ([SPEC.md](SPEC.md), Section 10.1), so every decoder reproduces it bit for bit. It is lossless relative to that rule. It is not lossless relative to the choice it is made from: that choice is requantised to 16 bits with TPDF dither and cannot be recovered from it. It is a derived master, not the original master, and it is written only when picked.
-- A master that fails its SHA-256 check is not offered, and neither are its rate levels. The core master and the other masters are not affected.
+- `--list` shows every choice with a number, in the order of [SPEC.md](SPEC.md), Section 10.3: the core master first, then one group per master (the master itself, then its rate levels and derived versions, marked with "-"). If a master has a name, the name is shown with the master, its levels and its derived versions.
+- `--pick` writes only the selected choices:
+  - `<n>`: the n-th entry of the list; several separated by commas, for example `--pick=2,6`;
+  - `<a>-<b>`: entries a to b of the list, for example `--pick=6-12`; ranges and single numbers can be mixed, for example `--pick=2-4,9`;
+  - `<rate>:<bits>`: masters only, never a rate level or a derived version. If one master matches, it is written; if several match, you tick the ones you want (see "When several masters match" below);
+  - `master:<k>`: master k;
+  - `name:<text>`: the masters with exactly this name. If several match, you tick them as above; if none matches, the request is refused.
+- **Derived 16-bit masters:** every master above 16 bits has one at its own rate and at each of its rate levels (`derived16_<rate>_from_<source>.wav`), shown as "derived from" the master, with the name of the source master; a core master above 16 bits has one as well. A master for which derived versions were turned off with `--no-derive` has none. A derived master is made by a fixed TPDF rule ([SPEC.md](SPEC.md), Section 10.1), so every decoder reproduces it bit for bit. It is lossless relative to that rule. It is not lossless relative to the master it is made from: that master is requantised to 16 bits with TPDF dither and cannot be recovered from it. It is a derived master, not the original master; it never replaces an independent master with the same rate and word length, and it is written only when picked.
+- A master that fails its SHA-256 check is not offered, and neither are its rate levels and derived versions. The core master and the other masters are not affected.
 - Output above 16 bits is written as `WAVE_FORMAT_EXTENSIBLE`.
+
+**When several masters match: the tick list**
+
+When a rate and word length (or a name) match several masters, the tool does not decide for you; it lists the masters for you to tick:
+
+```
+--pick: '176400:24' fits 2 masters. Tick the ones to write:
+> [ ]    6  176400 Hz 24-bit  master 2 "Original master"
+  [ ]   12  176400 Hz 24-bit  master 3 "Original master"
+Up / Down: move   Space: tick   Enter: done   Esc: cancel
+Or type numbers or ranges (e.g. 6,12 or 6-12), then Enter to tick them:
+Numbers:
+```
+
+- Each line shows the box, the number, the rate, the word length and the name of the master.
+- **Ticking with the keys:** Up and Down move, Space ticks or unticks, and Enter writes the ticked masters. Esc cancels; nothing is written.
+- **Typing below the list:** after `Numbers:`, type numbers or ranges and press Enter.
+  - Forms: one number, `6`; several separated by commas, `6,12`; a range with a hyphen, `6-12`, meaning 6 to 12 inclusive; mixed, for example `6,8-12`.
+  - Enter ticks the candidates whose numbers are in what you typed and unticks the others. Numbers that are not candidates are ignored.
+  - A second Enter writes the ticked masters.
+  - An error (for example `7-`) is shown, the line is cleared and you can type again; Backspace deletes one character.
+- If you press Enter with nothing ticked, you are asked to tick at least one master.
+- The tick list appears only in a console window. In a script (input or output redirected), the tool does not wait: it lists the candidates (with the same number, rate, word length and name), writes nothing and exits with code 1. Give them with `--pick=<n>`, `--pick=<n>,<n>` or `--pick=<a>-<b>`.
+
+## Menu order: `--menu-order`
+
+The order of the masters in the file is still chosen by the encoder (for the smallest file); the order in menus and selection is the one that you mark. The two orders are independent.
+
+- `laes enc`: without an option, the menu order is the order in which the masters are given on the command line; for another order, use `--menu-order=3,1,2` (the numbers refer to the masters as given).
+- If the menu order equals the file order, nothing is stored and the file can be version 1; otherwise, the menu order is stored and the file is version 2 (players from before 2026-11-11 play only the core master).
+- The menu order does not choose the default; the default is set with `--default` (otherwise, the core master). `--list`, `--pick=master:<k>`, the decoded file names `master_<k>_…` and the k of `laes names` all use the menu numbers.
+
+## Changing master names: `laes names`
+
+```
+laes names <in> <out> [--name=<k>:<text> ...] [--no-derive[=<k>|core]] [--derive[=<k>|core]] [--menu-order=<k1>,<k2>,...] [--default=<k>|core]
+```
+
+- Writes a new file without re-encoding; the old file is kept, and an existing `<out>` is refused.
+- k is the present number of the master in menus ("master k" in `laes dec --list`). `--name=<k>:` with an empty text removes the name; `--derive` turns derived versions back on; `--menu-order=` gives a new menu order by the present numbers; `--default=<k>` or `--default=core` sets the default; `--no-derive=core` or `--derive=core` turns the derived version of the core master off or on.
+- `laes names <in> --in-place --default=<k>|core [--no-derive=core | --derive=core]` changes the file itself instead of writing a new one. Only these options are allowed, because they keep the size of the file: at most 7 bytes change (the payload version, the two header bytes and the CRC-32). The tool prints each changed byte with its old and new value, then decodes every master and checks its SHA-256; on any failure, it writes the old bytes back. The result is byte for byte the file that a direct encode with the same options writes.
+- The layers, the core master and the tags are copied byte for byte; only the master records and the CRC-32 change. Afterwards, every master is checked against its SHA-256.
+- With every name and flag removed and at most 16 masters, the file is payload version 1 again, byte for byte the file that a direct encode writes.
+
+## Adding masters: `laes add`
+
+```
+laes add <in> <out> <new master>[@T] ... [--name=<k>:<text>] [--no-derive[=<k>]] [--menu-order=<k1>,<k2>,...]
+```
+
+- Writes a new file: the core master and the record and layers of every old master are copied byte for byte, without re-encoding. The new masters are placed at the end of the payload; each is coded against the core master and every master before it, and the smallest result is kept (as in `laes enc`).
+- The k of `--name` and `--no-derive` refers to the new masters as given. By default, the new masters go to the end of the menu; `--menu-order=` gives the menu order of all masters: the old ones by their present numbers, the new ones numbered after them in the order given.
+- The old masters are decoded once (they are the references of the new ones); afterwards, every master is checked against its SHA-256. Tags, pictures and the audio bytes of the core master stay as they are.
+
+## Extracting masters into a new file: `laes extract`
+
+```
+laes extract <in> <out> --pick=<p>[,<p> ...]      p = master:<k> | name:<text> | <rate>:<bits>
+```
+
+- Writes a new file with only the chosen masters (one or several). `<rate>:<bits>` and `name:` take the master that matches; if several match, you tick them in the same tick list as in `laes dec` (there, the numbers are the k of `master:<k>`). `master:<a>-<b>` takes masters a to b.
+- The chosen masters are decoded and encoded again in full (with the same core master), each choosing its reference among the masters kept; nothing is cut out of the old payload.
+- The order in `--pick` is the menu order of the new file; names and "no derived versions" settings go with their masters; tags, pictures and the audio bytes of the core master stay as they are. Afterwards, every master is checked against its SHA-256.
+- To get WAV files without packing them, use `laes dec --pick=...`.
 
 ## Checking: `laes verify`
 

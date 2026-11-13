@@ -5,8 +5,8 @@
 
 **English** | [中文](SPEC.zh.md)
 
-**Status:** Stable, payload version 1, 2026-11-07.
-**Applies to:** LAE Lossless (short name LAES), the lossless tier of the LAE (Layered Audio Extension) format family, payload version 1.
+**Status:** Stable, payload version 2, 2026-11-12 (payload version 1: 2026-11-07).
+**Applies to:** LAE Lossless (short name LAES), the lossless tier of the LAE (Layered Audio Extension) format family, payload versions 1 and 2.
 **Licence of this document:** CC BY 4.0. (c) 2026 mtq0605.
 
 This document specifies the LAES payload, its three carriers (WAV file, FLAC file and CD-Extra disc) and the decoding process. It aims to let an independent implementer write a conforming decoder without other material. It replaces the design document `spec/lossless/DESIGN.md` (2026-10-18), which is informative: this document is the normative description, and where the two differ, this document applies.
@@ -24,6 +24,7 @@ The reference implementation is normative wherever this text is silent or ambigu
 | `src/laes_flac.h` | the FLAC reader for the FLAC form (Section 8) |
 | `src/lae_cdx.h` | the CD-Extra extension file and trailer record (Section 9) |
 | `src/laes_tool.cpp` | the command-line tool `laes`: decoder outputs and derived 16-bit master (Section 10); its encoder choices (Section 11) are informative |
+| `src/laes_choices.h` | the list of entries a file offers, their order and the text shown (Section 10.3) |
 
 `src/laes_lift.h` contains faster forms of the lifting and the reference. They give identical results (verified against `src/laes_math.h` on test recordings during development) and are informative. The encoder files (`src/laes_*_enc.h`, for example `src/laes_stream_enc.h`, cited in Section 11.1) are informative, like Section 11.
 
@@ -36,7 +37,7 @@ The reference implementation is normative wherever this text is silent or ambigu
 LAES stores, in one file or on one disc:
 
 * a **core master**: two-channel integer PCM at a **base rate** of 44 100 Hz or 48 000 Hz, with 16, 24 or 32 bits, which an ordinary player plays unchanged;
-* one to sixteen **masters**: two-channel integer PCM with 16, 24 or 32 bits, each at the base rate × 1, 2, 4 or 8. The masters are independent of one another: each may come from a different production (for example, a 16-bit master at 88.2 kHz and a 24-bit master at 352.8 kHz of the same piece).
+* one to 255 **masters** (at most sixteen in payload version 1; Section 6.1): two-channel integer PCM with 16, 24 or 32 bits, each at the base rate × 1, 2, 4 or 8. The masters are independent of one another: each may come from a different production (for example, a 16-bit master at 88.2 kHz and a 24-bit master at 352.8 kHz of the same piece). Every rate and every word length can hold a real, independent master, and several masters may have the same rate and word length. Each master may carry a **name** given by the publisher (Section 6.2).
 
 Every master is restored **bit for bit**. From each master, the decoder also obtains its **rate levels** by the lifting of Section 3: the master at its rate / 2, / 4 and / 8, down to the base rate. The rate levels are exactly defined integer signals and are not stored separately.
 
@@ -58,7 +59,7 @@ A conforming decoder:
 
 1. MUST check the payload as specified in Section 6.7 and the carrier as specified in Sections 7 to 9;
 2. MUST reproduce every master exactly as specified in Section 6.6;
-3. MUST compare each reconstructed master with its SHA-256 (Section 6.5) and MUST NOT present a master whose hash does not match as that master;
+3. MUST compare each reconstructed master with its SHA-256 (Section 6.5) and MUST NOT present a master whose hash does not match as that master. A player MUST NOT play a master (or its rate levels or derived versions) before a complete decode of that master and of every master in its chain of tiers has matched their SHA-256 values. It MAY remember this result for the same file content (for example, keyed by the SHA-256 of the whole file), so that the file plays at once the next time;
 4. MUST, when the payload is missing, damaged or fails a check, still play the core master unchanged ("core master only"), except in the FLAC form when the STREAMINFO MD5 of the core master is missing or wrong (Section 8): then the payload MUST NOT be used, and the reference tools refuse the file; a player MAY play the core master with a warning to the user, or refuse the file;
 5. MAY produce any of the outputs of Section 10.
 
@@ -251,16 +252,20 @@ The payload is a byte string followed by its CRC-32 (4 bytes). The CRC-32 is the
 | Offset | Size | Field | Value |
 |---|---|---|---|
 | 0 | 4 | magic | `LAE2` |
-| 4 | 2 | version | 1 |
+| 4 | 2 | version | 1 or 2 (see Section 6.2) |
 | 6 | 2 | header size | 64 |
 | 8 | 4 | base rate | 44 100 or 48 000 |
 | 12 | 1 | core master bits | 16, 24 or 32 |
 | 13 | 1 | channels | 2 |
-| 14 | 1 | number of masters M | 1 … 16 |
+| 14 | 1 | number of masters M | version 1: 1 … 16; version 2: 1 … 255 |
 | 15 | 1 | core master mode | 0 = core master in a WAV `data` chunk or on CD audio tracks; 1 = core master in FLAC audio frames |
 | 16 | 8 | core master frames | number of core master samples per channel |
 | 24 | 32 | core master SHA-256 | Section 6.5 |
-| 56 | 8 | reserved | 0 |
+| 56 | 1 | default master | version 2: 0 = the core master, k = master k in payload order (1 … M): the entry that a player plays when the user has chosen nothing (Section 10.3); version 1: reserved, 0 |
+| 57 | 1 | core master flags | version 2: bit 0 = 1: the core master offers no derived 16-bit version (Section 10.2); bits 1 … 7 are 0; version 1: reserved, 0 |
+| 58 | 6 | reserved | 0 |
+
+The encoder sets bytes 56 and 57 as the publisher chooses; if the publisher chooses nothing, both are 0.
 
 ### 6.2 Master record (72 bytes), followed by its layers
 
@@ -271,7 +276,9 @@ The payload is a byte string followed by its CRC-32 (4 bytes). The CRC-32 is the
 | 2 | 1 | w | unused low bits, w < bits |
 | 3 | 1 | storage | 0, 1 or 2 (Section 6.4) |
 | 4 | 1 | reference tier | 0 = core master; k = the k-th master of this payload (1-based) |
-| 5 | 3 | reserved | 0 |
+| 5 | 1 | name length N | version 2: 0 … 255 (0 = no name); version 1: reserved, 0 |
+| 6 | 1 | flags | version 2: bit 0 = 1: this master offers no derived 16-bit versions (Section 10.2); bits 1 … 7 are 0; version 1: reserved, 0 |
+| 7 | 1 | menu position | version 2: 0, or 1 … M (see below); version 1: reserved, 0 |
 | 8 | 4 | rate | base × 2^S |
 | 12 | 4 | reserved | 0 |
 | 16 | 8 | frames F | samples per channel, ≥ 1 |
@@ -280,7 +287,15 @@ The payload is a byte string followed by its CRC-32 (4 bytes). The CRC-32 is the
 | 36 | 4 | reserved | 0 |
 | 40 | 32 | master SHA-256 | Section 6.5 |
 
-The masters follow one another in payload order: the record of master 1, its layers, the record of master 2, its layers, and so on. The CRC-32 follows the layers of the last master. The tier of a master MUST be the core master or a master that comes earlier in the payload.
+In version 2, each master record is followed directly by the N bytes of its **name** and then by its layers; version 1 has no names.
+
+The masters follow one another in payload order: the record of master 1 (in version 2 with its name), its layers, the record of master 2, its layers, and so on. The CRC-32 follows the layers of the last master. The tier of a master MUST be the core master or a master that comes earlier in the payload.
+
+**Version.** When a payload can be written as version 1 (at most sixteen masters, no names, all flags and menu positions 0, header bytes 56 and 57 both 0), a writer MUST write version 1; the payload is then byte for byte the one that a writer of payload version 1 writes. Otherwise, it writes version 2. A decoder that knows only version 1 rejects a version 2 payload and plays the core master only (Section 1.3).
+
+**Menu positions.** The order of the masters in the file is chosen by the encoder (for the smallest file; a master can refer only to earlier masters). The order in menus and in selection is the one that the publisher marks; the two orders are independent. The menu positions are either all 0 (the menu order is then the file order) or a permutation of 1 … M, each value occurring exactly once. The number of a master in menus is its menu position or, without marks, its place in the file. A menu position is an order only: it carries no kind, no priority and no automatic choice, and it does not make a master the default (the default is header byte 56).
+
+**Names.** A name is free text from the publisher: well-formed UTF-8 (shortest forms, no surrogates, at most U+10FFFF), at most 255 bytes, without the control characters U+0000 … U+001F and U+007F. A reader shows it as it is, without parsing or changing it. A name takes no part in reconstruction, tiers, storage, hashes or any automatic choice (Section 10.3); changing a name changes no sample of any master. A master without a name is referred to by its number only.
 
 ### 6.3 Layers of a master
 
@@ -331,7 +346,9 @@ Level j of a tier master t is obtained from its reconstructed samples: x_t = sam
 A decoder MUST reject the payload (and play the core master only) if any of the following holds:
 
 * the CRC-32 does not match;
-* the magic, version (1) or header size (64) differs; the base rate is not 44 100 or 48 000, or differs from the rate of the carrier's core master; the core master bits differ from those of the carrier's core master; channels ≠ 2; core master mode > 1; M is not 1 … 16;
+* the magic, version (1 or 2) or header size (64) differs; the base rate is not 44 100 or 48 000, or differs from the rate of the carrier's core master; the core master bits differ from those of the carrier's core master; channels ≠ 2; core master mode > 1; M is not 1 … 16 (version 1) or 1 … 255 (version 2);
+* version 2: the menu positions are neither all 0 nor a permutation of 1 … M;
+* version 2: flag bits 1 … 7 of a master are not 0; a name is not well-formed UTF-8, contains a control character, or runs past the end of the payload;
 * the core master frames differ from the length of the carrier's core master, or the core master SHA-256 differs;
 * for a master: bits is not 16, 24 or 32; S > 3; w ≥ bits; storage > 2; rate ≠ base × 2^S; F < 1; `levLen(F, S)` > core master frames + 2^24; |T whole| ≥ 2^40. Core master frames and F are uint64 and MUST be compared without truncation; a decoder that cannot hold a master of F samples MUST reject the payload rather than truncate the master;
 * storage 0 or 2 with a tier that is not earlier in the payload; storage 2 with tier 0; storage 1 with a tier other than 0;
@@ -412,7 +429,12 @@ The outputs that a decoder may offer for each file (Section 1.3, item 5) are:
 
 ### 10.1 Derived 16-bit version
 
-For a rate at which the file offers no 16-bit output, a decoder MAY offer a derived master: a 16-bit version derived from the output with the most bits at that rate (b bits, b > 16, s = b − 16). The outputs considered are the core master, every master whose SHA-256 matched, and their rate levels (after limiting). On a tie, the first in the following order is used: the core master; then, for each master in payload order, the master and its rate levels from high rate to low rate.
+A decoder MAY offer one derived master, a 16-bit version, derived from each of the following **sources** (b bits, b > 16, s = b − 16):
+
+* the core master, if it has more than 16 bits and bit 0 of header byte 57 is clear;
+* every master with more than 16 bits whose SHA-256 matched and whose flag bit 0 is clear: the master itself and each of its rate levels (after limiting).
+
+Each derived version belongs to its source alone. A 16-bit output at the same rate (a 16-bit core master, a 16-bit master or one of its levels) or a derived version of another master does not affect it, and a derived version never replaces or hides a master. (Before 2026-11-11, decoders offered at most one derived version per rate, from the first output with the most bits at that rate, and only where the rate had no 16-bit output. Under the present rule, the derived versions of master 1 are bit-identical to those.)
 
 ```
 per channel, a xorshift64 generator with state st = 20261029 + 0x9E3779B97F4A7C15 · (channel + 1)  (mod 2^64; channel 0 = left)
@@ -420,12 +442,45 @@ next():  st ^= st << 13;  st ^= st >> 7;  st ^= st << 17;  return st >> (64 − 
 for each sample v in order:  r1 = next(); r2 = next();  y = clamp((v + r1 − r2 + 2^(s−1)) >> s, −32768, 32767)
 ```
 
+*Informative (starting at frame n, for seeking):* the state depends only on the channel and on n, never on the audio. It is the state after 2n calls of next() (r1 and then r2, as above). next() is linear over GF(2), so a decoder can compute this state directly, for example by raising a 64 × 64 bit matrix to the power 2n. The output from frame n onwards is then bit for bit the same as when decoding from frame 0.
+
 The result is a derived 16-bit master (TPDF dither of ±1 LSB):
 
 * **Lossless relative to this definition:** every decoder reproduces it bit for bit, on every run and every platform. Decoding it again, or with another decoder, never changes a sample.
 * **Not lossless relative to the master from which it is made:** its b − 16 low bits are dropped and TPDF dither is added. That master cannot be recovered from it.
 
-It is not the original master. A decoder MUST label it as a derived master wherever it offers it and state relative to what it is lossless (for example "derived 16-bit master: lossless relative to its definition, not lossless relative to its source master").
+It is not the original master. Wherever a decoder offers it, the decoder MUST state from which master it is derived (for example, `derived from master 3 "Name" · 88.2 kHz / 16-bit`); the description of the output states that it is lossless relative to its definition and not lossless relative to the master from which it is made.
+
+### 10.2 Turning derived versions off when encoding
+
+When flag bit 0 of a master record (version 2) is 1, a decoder offers no derived 16-bit version of that master; bit 0 of header byte 57 does the same for the core master. The flag decides only whether these derived versions are listed: it carries no parameters, does not choose between ways of deriving, and does not affect the master itself, its rate levels, reconstruction, checks or the fallback.
+
+### 10.3 Selection and display (players and tools)
+
+**Entries and their order:**
+
+1. The core master; if it has more than 16 bits and its flag (header byte 57) allows it, its derived 16-bit version immediately after it.
+2. One group per master, in menu order (Section 6.2; without marks, payload order): the master itself; its rate levels from high to low; its derived 16-bit versions (first at the rate of the master, then for each level from high to low).
+
+**Menus:** the first level lists only the core master and the masters themselves. The rate levels and derived versions of a master are in the submenu of that master, never mixed with those of another master. An interface that can show only one level (a command line, for example) lists them in the order above and shows to which master each sub-entry belongs.
+
+**Text shown:**
+
+* The number is always shown. Names may repeat or be missing; the number keeps every entry distinct.
+* The first level shows the whole description of each master and nothing derived: number, name (if it has one), rate, word length, length, "lossless", and a mark on the default; for example, `master 3 "XX Records 2019 remaster" · 176.4 kHz / 24-bit · 13:23 · lossless · default`. The same applies to the core master.
+* Only the core master and the masters themselves are called lossless. Rate levels and derived 16-bit versions are both "derived from" their master and carry its number and name: `derived from master 3 "XX Records 2019 remaster" · 88.2 kHz / 24-bit` and `derived from master 3 "XX Records 2019 remaster" · 88.2 kHz / 16-bit`. Nothing further is written after the rate and word length.
+* A long name may be shortened on screen, but the whole name MUST remain reachable (for example, in a tooltip or a properties page).
+* A master whose SHA-256 did not match is marked "not available" and is not silently left out; the same applies to every master whose chain of tiers contains it.
+* In Chinese interfaces, the core master is called "核心母带", never "核心" alone.
+
+**Default and automatic choices:**
+
+* The default (what a player plays when the user has chosen nothing) is the master in header byte 56, chosen by the publisher when the file is encoded; if byte 56 is 0, or in a version 1 file, it is the core master. The default is always a master itself or the core master, never a rate level or a derived version. If the player cannot play it (it does not decode, or its SHA-256 does not match), the player plays the core master. The default is never chosen by bit rate, size, device capability, network or load. This specification gives no number, menu position or name any meaning of kind.
+* The number of a master (the "master k" shown, `master:<k>`, the file name `master_<k>_…`) is always its number in the menu.
+* Limits set by the user (highest rate, longest word length) apply only within the selected master: its highest level within the limits; if its word length is above the limit, its own derived 16-bit version. A limit MUST NOT switch to another master.
+* There is no automatic choice by device capability, name, file category or defaults in a configuration file, and no name is carried over from one file to the next. A player that remembers the choice of the user remembers, per file, the number that the user picked.
+
+**Command line (`laes dec --pick` of the reference tool):** `<n>` = the n-th entry of the list; `<rate>:<bits>` and `name:<text>` match masters only (never a rate level or a derived version), and one match is written; if several match, the user ticks them: each candidate is shown with its number, rate, word length and name, and is ticked one by one or by numbers and ranges typed below the list (`6,12`, `6-12`); outside a console, nothing is written and the candidates are listed; `<a>-<b>` = entries a to b; `master:<k>` = master k.
 
 ---
 
@@ -456,6 +511,8 @@ The arithmetic is exact except for the two additions of u() and the addition of 
 ### 11.2 Storage, tier and order
 
 For each master, the reference encoder tries storage 1; storage 0 against the core master and against every earlier master; and storage 2 against every earlier master when both have a level above the base level. It keeps the smallest result, with one choice per master. It writes the masters in whichever of two orders is smaller: either longer word lengths first, then higher rates first; or, when the core master was derived from a master that is not already first, that master first and the others in the same order as before. A master can refer only to earlier masters, and a master with a shorter word length can be stored cheaply against one with a longer word length.
+
+With more than sixteen masters (since 2026-11-11), each candidate is first coded on four short excerpts (2^15 base-rate samples each, × 2^j at level j), placed at the centres of the four quarters of the piece and aligned down to the block length; their positions depend on the length alone, never on the content. The candidates are ranked by this size scaled up to the whole length; only the three smallest are coded in full, and the smallest of these is kept. Only the first of the two file orders is used. All of this is a method of the encoder: nothing about the trial excerpts, the candidates or the ranking is stored in the file. Measured on 10-second excerpts: with 20 masters, the file is byte for byte the one that a full search gives; with 64 masters, every master is restored bit for bit.
 
 ### 11.3 Time position
 
@@ -546,3 +603,4 @@ The fast forms (`src/laes_lift.h` and the fast paths in `src/laes_codec.h`) were
 * The time position T replaces any moving of masters: masters are stored unmoved.
 * The core master may have 16, 24 or 32 bits. The FLAC form and the CD-Extra extension type 2 are specified.
 * Decoder outputs include a derived 16-bit master, labelled as derived (lossless relative to Section 10.1, not lossless relative to the master from which it is made).
+* 2026-11-11 and 2026-11-12: payload version 2: up to 255 masters, and per master a name, a flag that turns its derived versions off, and a menu position; in the header, a default master and a flag for the core master. A payload that fits version 1 is still written as version 1, byte for byte unchanged. Derived 16-bit versions are now one per source (the core master, each master and each of its levels); Section 10.3 sets out selection and display. The file order remains the smallest one found by the encoder; the menu order is the one that the publisher marks. A player plays a master only after the master and its chain of tiers have matched their SHA-256 values (Section 1.3).

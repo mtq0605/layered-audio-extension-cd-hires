@@ -26,13 +26,14 @@ The reference decoder is normative wherever this text is silent or ambiguous. It
 * `src/mdct_tables.h`
 * `src/halfband.h`
 * `src/wavio.h`
+* `src/lae_flacmeta.h`, `src/laey_flac.h` and `src/laes_flac.h` (the FLAC form, Section 3.4)
 
 The encoder's partition search is in `src/partition.h`. That file is not needed by a decoder. Items that are not yet specified are listed in Appendix C.
 
 The format family is called LAE. It has two tiers:
 
 * the lossy tier, LAE Lossy (LAEY), specified here;
-* the lossless tier, LAE Lossless (LAES): specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (stable, payload version 1), which supersedes the design document [spec/lossless/DESIGN.md](../lossless/DESIGN.md).
+* the lossless tier, LAE Lossless (LAES): specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (stable, payload version 2), which supersedes the design document [spec/lossless/DESIGN.md](../lossless/DESIGN.md).
 
 The encapsulation of the extension on CD-Extra discs and in separate extension files is specified in [spec/cdx/SPEC.md](../cdx/SPEC.md) (draft).
 
@@ -44,17 +45,19 @@ The RIFF chunk identifier is `LAE `, with a trailing space. The chunk magic is `
 
 ### 1.1 Scope
 
-An LAE Lossy file is a RIFF/WAVE file with two parts:
+An LAE Lossy file is a RIFF/WAVE file (the WAV form, Section 3.1) or a FLAC stream (the FLAC form, Section 3.4) with two parts:
 
-* **CD layer.** The `data` chunk holds ordinary 16-bit two-channel PCM at a base rate of 44 100 Hz or 48 000 Hz. Any WAV player can play it unchanged.
-* **Extension.** A chunk with identifier `LAE ` follows the audio. It carries two layers:
+* **CD layer.** Ordinary 16-bit two-channel PCM at a base rate of 44 100 Hz or 48 000 Hz: the `data` chunk of the WAV form, or the audio frames of the FLAC form. Any WAV or FLAC player can play it unchanged. At 48 kHz, this layer is called the core layer; the rules are the same.
+* **Extension.** A chunk with identifier `LAE ` after the audio (WAV form), or APPLICATION metadata blocks with ID `LAE1` before the audio (FLAC form). It carries two layers:
   * a **depth layer**, which extends the CD layer towards 24-bit resolution at the base rate, with one plane per channel L and R;
   * a **frequency layer**, which extends the bandwidth up to a master rate of base × 2, × 4 or × 8. It is stored as mid/side (M, S) planes, split into streams by frequency segment: one stream per segment, or two where the encoder option `g` codes the layer a second time; each stream is one segment record, and segments may overlap in frequency (Sections 5.2 and 9.5).
 
+  The extension may also hold up to eight further **extension packs**, each made from its own master against the same CD layer (Section 5.6). A decoder decodes the CD layer with exactly one pack, chosen by the user.
+
 **Distribution and file extensions.**
 
-* Files are distributed with the extension `.wav`, so that every player plays the CD layer. Distribution as `.flac` is planned (Appendix C, item 7); carriage in FLAC is not specified for container version 5.
-* `.lae` is the format's own file extension. The layout of `.lae` files is not specified for container version 5; it will be specified in a later revision.
+* `.wav` names the WAV form and `.flac` the FLAC form; every WAV or FLAC player plays the CD layer (for limits of some built-in decoders, see Section 3.4).
+* `.lae` is the format's own file extension. A `.lae` file holds either form; readers tell the forms apart by content, never by name (Section 3.4).
 
 A decoder can produce the following outputs. All of them are written as 24-bit two-channel PCM.
 
@@ -66,7 +69,7 @@ A decoder can produce the following outputs. All of them are written as 24-bit t
 
 When an output rate below the master rate is selected, the frequency-layer streams that start at or above the output Nyquist frequency are skipped without being decoded (Section 5.4). The result is then brought down to the selected rate with the half-band decimators of Section 10.
 
-LAE Lossless (LAES), the lossless tier, is not specified here; it is specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (stable, payload version 1).
+LAE Lossless (LAES), the lossless tier, is not specified here; it is specified in [spec/lossless/SPEC.md](../lossless/SPEC.md) (stable, payload version 2).
 
 ### 1.2 Decoding model (informative)
 
@@ -155,6 +158,8 @@ Builds that generate x87 floating-point code are not supported (Section 13). The
 
 ## 3. File structure
 
+An LAE Lossy file has one of two forms: the WAV form (Sections 3.1 to 3.3), which is the default, and the FLAC form (Section 3.4). Both carry the same CD layer and the same extension bytes. Where Sections 4 to 13 refer to the `LAE ` chunk, this means, for the FLAC form, the extension assembled from the `LAE1` blocks (Section 3.4).
+
 ### 3.1 RIFF/WAVE
 
 An LAE Lossy file is a RIFF/WAVE file. The first 4 bytes MUST be `RIFF` and bytes 8 to 11 MUST be `WAVE`. Chunks follow from offset 12. Each chunk consists of:
@@ -232,6 +237,37 @@ A decoder MUST verify the CRC **before** interpreting any other byte of the chun
 In the rest of this document, the **payload** means bytes `0 ... n-5`, that is, the chunk body without the CRC. Offsets are relative to its start.
 
 A field that would extend beyond the end of the payload is an error. The reference reader returns 0 for such a field, and the subsequent validation then always fails.
+
+### 3.4 FLAC form
+
+The WAV form (Section 3.1) is the default form of an LAE Lossy file. A file may also be a FLAC stream (RFC 9639): the CD layer is the FLAC audio, and the extension is carried in APPLICATION metadata blocks. The container version stays 5: the extension bytes are those of the WAV form; only the container differs. Structure:
+
+```
+"fLaC" | STREAMINFO | VORBIS_COMMENT, PICTURE (optional) | APPLICATION blocks with ID "LAE1" (1 or more) | other metadata blocks (optional) | audio frames = the CD layer
+```
+
+* **STREAMINFO:** 2 channels, 16 bits, the base rate (44 100 or 48 000), the number of CD-layer frames (MUST NOT be 0) and the MD5 of the CD layer (MUST be present and correct; RFC 9639 defines it over the interleaved 16-bit little-endian samples). A decoder that finds the MD5 missing (all zero) or wrong MUST NOT use the extension: the audio is not the CD layer for which the extension was made. In that case, the reference tools refuse the file; a player MAY play the FLAC audio as plain CD audio.
+* **The extension** is the body of the `LAE ` chunk of Section 3.3, byte for byte: it begins with the magic `LAE1` (Section 4) and ends with its CRC-32. It is split into pieces of at most 2^24 − 5 bytes. Each piece is the data of one APPLICATION block whose 4-byte ID is `LAE1` (0x4C 0x41 0x45 0x31), registered by IANA in the FLAC Application Metadata Block IDs registry (RFC 9639, Section 12.2; 2026-10-31). Writers place these blocks after STREAMINFO and after the VORBIS_COMMENT and PICTURE blocks, if any, consecutively with no other block between them. A reader concatenates the data of all APPLICATION blocks with ID `LAE1`, in file order, wherever they stand among the metadata blocks.
+* **Tags and pictures** (optional): at most one VORBIS_COMMENT block and any number of PICTURE blocks (RFC 9639, Sections 8.6 and 8.8). Writers place them before the `LAE1` blocks, so that a player reads them without skipping the extension. One set describes the whole file (CD layer, depth layer and frequency layer); nothing in the extension refers to them, and they take no part in decoding.
+* **The audio frames** hold the CD layer, coded with independent left and right channels: channel assignment 0b0001 in every frame header, with no inter-channel decorrelation. Within this channel assignment, any valid FLAC coding of the CD layer is allowed.
+* **No SEEKTABLE or CUESHEET block is written.** The extension is stored whole, before the audio frames; nothing is interleaved with the frames, and the file contains no table of positions within the extension.
+
+**Equivalence with the WAV form.** The decoded FLAC audio is the CD layer of Section 3.2, and the joined pieces are the `LAE ` chunk body of Section 3.3. Sections 4 to 13 apply to this pair without change, so every route gives the same output samples from both forms of the same encoding. Converting a file from one form to the other loses nothing.
+
+**Validation, in this order:**
+
+1. The FLAC structure: STREAMINFO first, 2 channels, 16 bits, a sample count, at least one `LAE1` block.
+2. Every audio frame: header CRC-8, frame CRC-16, block sizes within the limits of STREAMINFO, and a total equal to the sample count.
+3. The MD5.
+4. The checks of Section 4.3 on the extension and the CD layer.
+
+A file that fails item 2, 3 or 4 is damaged: the decoder MUST NOT decode the extension (exit status 3 in the reference decoder). A FLAC file without `LAE1` blocks is plain FLAC audio; a FLAC file with `LAE2` blocks is an LAES file ([spec/lossless/SPEC.md](../lossless/SPEC.md), Section 8). A reader of one format that finds the other MUST state which format it found and MUST NOT decode it as its own.
+
+**File names.** `.flac` names the FLAC form and `.wav` the WAV form; `.lae` may hold either (the reference encoder writes the WAV form unless instructed otherwise). Readers MUST decide by the content (the first 4 bytes are `fLaC`, or `RIFF` … `WAVE`), never by the name.
+
+*Informative (other decoders):* every FLAC decoder that implements RFC 9639 in full plays the CD layer and skips the APPLICATION blocks (checked 2026-11-10 with GStreamer `flacdec`: its output equals the CD layer of the WAV form). The built-in FLAC decoder of Windows (Media Foundation, also used by Explorer) does not recognise a FLAC file whose first audio frame starts more than about 4 MiB into the file (measured on LAES FLAC files; see [COMPATIBILITY.md](../COMPATIBILITY.md)). An LAEY extension exceeds 4 MiB after a few tens of seconds of music, so most LAEY files in the FLAC form do not play there; the WAV form does.
+
+*Informative (reference implementation):* `src/lae_flacmeta.h` reads the structure and the tags without decoding; `src/laey_flac.h` decodes the CD layer from the FLAC frames and checks the MD5, using the FLAC reader `src/laes_flac.h`; `src/lae_enc.cpp` writes the FLAC form with the frame writer `src/laes_flac_enc.h`. The reference writer uses a fixed block size of 4096, two independently coded channels, LPC orders up to 12, a precision of up to 15 and Rice partition orders up to 8 (the FLAC streamable subset at 44.1 / 48 kHz). The reference reader decodes only frames with independently coded channels. Measured on a 10-second excerpt (352.8 kHz / 24 bit, mode 3, scheme s1): the CD layer takes 434 056 bytes as FLAC frames instead of 1 764 000 bytes of PCM, and the whole file 2 078 616 bytes instead of 3 408 562 bytes (61.0 %); the depth and frequency layers are the same bytes in both forms, and the decoded output of every route is identical.
 
 ---
 
@@ -342,7 +378,7 @@ The stream data consist of a 40-byte stream header followed by `nbytes - 40` byt
 
 A decoder MUST parse every record in order, including records whose content it does not decode, because each record is located from the end of the previous one.
 
-The reference decoder ignores any bytes between the end of the last S record and the CRC. The reference encoder writes no such bytes; the CRC follows the last S record directly (`src/lae_enc.cpp`). Encoders SHOULD NOT write any.
+After the last S record, the payload MAY contain extension pack records and a main-body name record (Section 5.6). A decoder that does not support extension packs ignores any bytes between the end of the last S record and the CRC, as the reference decoder did before extension packs were defined. Encoders MUST NOT write any other bytes there; without further masters or a main-body name, the reference encoder writes no such bytes, and the CRC follows the last S record directly (`src/lae_enc.cpp`).
 
 ### 5.3 Stream header
 
@@ -393,6 +429,59 @@ A stream describes a plane `X[m][k]` with `m` in `[0, K)` and `k` in `[0, 512)`.
 * Bins `[k0, k1)` are grouped into `nc = ceil((k1 - k0) / 8)` **cells** of `CW = 8` bins.
 * Cell `cc` covers bins `kb = k0 + 8*cc` up to `min(k1, kb + 8) - 1`. The last cell may therefore be narrower than 8 bins.
 * Cells are grouped into **root blocks** of `ROOTF = 16` cells × `ROOTT = 8` frames. Root blocks at the high-frequency edge and at the end of the track may be smaller.
+
+### 5.6 Extension packs
+
+This section changes no rule for files without extension packs: such files, and their decoding, are exactly as specified in the other sections.
+
+**Model.** A file has one CD layer (Section 3.2) and one or more **extension packs**. Each pack is a complete container version 5 extension (main header, edge samples, dither flags, depth streams and frequency streams; Sections 4 and 5), computed as a whole from one master against that CD layer.
+
+* **Pack 0** is the payload of Section 3.3, as specified in the other sections: the main body.
+* **Packs 1 … 8** are optional. Each is carried in one pack record.
+
+The packs are mutually independent. Nothing in one pack refers to, predicts from, or shares a parameter with another pack; removing a pack record leaves every other pack decodable and unchanged. A decoder decodes the CD layer with exactly one pack.
+
+**Pack records.** After the last S stream record of pack 0, the payload MAY contain up to 8 pack records, one after the other. A pack record is:
+
+| Field | Size (bytes) | Content |
+|---|---|---|
+| tag | 4 | the bytes `L P A K` |
+| `n` | 4 | `uint32`: the number of bytes that follow in this record |
+| `nl` | 1 | length of the name in bytes, `0 … 255` |
+| name | `nl` | the name that the publisher gave this pack, UTF-8; shown where a pack is chosen |
+| pack payload | `n - 1 - nl` | a complete container version 5 payload as in Sections 4 and 5, from its `magic` (`LAE1`) to the end of its last S stream record, without a CRC |
+
+Requirements:
+
+* The single CRC-32 of Section 3.3 covers the whole payload, pack records included. A pack record has no check value of its own.
+* A pack payload MUST satisfy every rule of Sections 4 and 5 by itself. Its `base` MUST equal the `base` of pack 0. Its `rate`, `stages`, `Lm`, `fc`, modes and streams are its own and MAY differ from those of pack 0. Validation V13 applies to it with the CD layer of the file: `ncd == nb - 2*pb`.
+* A pack payload MUST NOT contain pack records.
+* An encoder MUST NOT write anything between pack records and MUST NOT write more than 8 pack records.
+* A pack record carries nothing else: no offsets, delays, gains, time stamps, hashes, position tables or type codes. Every pack record has the same tag.
+
+**Main-body name record.** Between the last pack record (or, without pack records, the last S stream record of pack 0) and the CRC, an encoder MAY write one main-body name record and nothing else:
+
+```
+"LNAM" | 1 byte nl | nl bytes: the name of pack 0 (the main body), UTF-8
+```
+
+It gives pack 0 a name for display, just as the name field of a pack record does for packs 1 to 8. It is optional; without it, pack 0 has no name. A decoder reads it after the pack list (the next four bytes are `LNAM`, and at least `1 + nl` bytes follow them before the CRC); a decoder that does not know it ends its pack list at the same place and ignores it. Like every name, it is for display only: it selects nothing, and no meaning is attached to it. A pack name is stored only in the payload; it MUST NOT be repeated in tags or in any other container-level structure.
+
+**Decoding.** A decoder that supports extension packs takes a **pack number** `k` from its caller; the default is 0.
+
+1. Verify the CRC (V1), and locate the end of the last S stream record of pack 0 by walking the structure of Sections 4 and 5 (the 52-byte header, `8*pb` edge bytes, `ndf` and the dither flags, two depth stream records, `nseg`, `2*nseg` frequency stream records), checking each length against the payload.
+2. From there, read pack records while at least 9 bytes remain, the next four bytes are `LPAK`, `1 <= n`, the record fits in the payload, `1 + nl + 52 <= n`, and the pack payload starts with `magic` `LAE1` and `version` 5. The first record that fails any of these conditions ends the list; this is not an error. At most 8 records are read.
+3. `k = 0`: decode pack 0 exactly as specified in the other sections. `k >= 1`: if the list has fewer than `k` records, reject the request; otherwise, decode the payload of pack `k` by Sections 4 to 11 without change, with the CD layer of the file as the CD layer.
+
+A decoder MUST NOT combine streams of different packs, and MUST NOT choose a pack by itself: not by device capability, network, load, loudness, content or any field of a record. The pack is chosen by the user (in a menu, a setting or an argument); the name is for display only and never drives any processing. A decoder MUST NOT write the choice back into the file.
+
+A decoder that does not support extension packs is a conforming container version 5 decoder: it reads pack 0 and ignores the bytes after its last S stream record (Section 5.2), so it plays the CD layer with pack 0.
+
+The other choices (the output rate by octave, Section 11.1; the 24-bit, 16-bit and cd24 routes) apply within the chosen pack. A player SHOULD list each pack with its `rate` and its name.
+
+**Other carriers.** In the FLAC form (Section 3.4), the pack records are part of the extension that is split over the `LAE1` APPLICATION blocks; nothing else changes. In the extension files of the CD-Extra encapsulation ([spec/cdx/SPEC.md](../cdx/SPEC.md)), the extension block is carried as it is, pack records included.
+
+*Informative (reference implementation):* `src/lae_decoder.h` (`Decoder::pack`, `packs`, `bodyEnd`, `scanPacks`), `src/lae_dec.cpp` (option `pack=<n>`), `src/lae_enc.cpp`; liblae (`lae_pack_count`, `lae_pack_info`, `lae_select_pack`, `src/lae_api.h`); Java: `java/src/com/lae/laey/LaeDecoder.java` and `LaeDec.java`. The encoder options are described in Section 14.
 
 ---
 
@@ -986,6 +1075,8 @@ The CD layer is ordinary PCM and is never affected by an error in the extension.
 | V12 fails (dither flags) | MUST refuse | 3 |
 | V13 fails (CD length differs: edited or misaligned CD layer) | MUST refuse | 3 |
 | Output rate invalid for the route (Section 11.1); checked after V13, before the stream records | MUST refuse | 1 |
+| A pack number `k >= 1` for which the file has no pack record (Section 5.6) | MUST refuse the request | 1 |
+| FLAC form: a failed frame check or a missing or wrong MD5 (Section 3.4) | MUST NOT decode the extension | 3 |
 | A stream record outside the payload; a decoded stream header invalid (Section 5.3); `nseg` outside `[1, 8]` | MUST refuse | 3 |
 | Output exceeds the WAV size limit (Section 11.8) | MUST refuse | 1 |
 | `CORRUPT` raised during decoding (Sections 7.4, 7.5, 8.3, 9.4) | MUST report the stream as corrupt and MUST NOT deliver the output. The reference decoder deletes the file it has written | 3 |
@@ -1051,6 +1142,13 @@ Unless another source is cited, the statements in this section are based on the 
   * The CD cut-off is found by a coherence test (threshold 0.98) instead of the transfer test; the coherence test does not depend on the gain of the CD.
   * The extension codes the master minus the CD path.
   * The edge samples (Section 4.1) are still taken from the CD layer that the encoder derives from the master.
+* **Extension packs** (Section 5.6). The reference encoder takes further masters as `master2=<file>` … `master9=<file>`, each with `master<n>align=<offset>` (its position on the time line of the CD layer, written like `cdalign=`) and, optionally, `master<n>name=`, `master<n>accept` and `master<n>edge=pad|cut`.
+  * Every further master is aligned to the same given CD layer by the alignment of the independent CD input (`cd=`), each one separately. Where an alignment needs digital silence before or after the CD layer, the largest need of any master is added to the CD layer once, and the same silence is added to every master. The samples of the CD layer itself are never changed.
+  * Each aligned master is then encoded against the final CD layer in a run of its own. Its pack payload is byte for byte the `LAE ` payload that `lae_enc <that master> cd=<the CD layer> cdalign=0` writes.
+  * Pack 0 and the CD layer are what the encoder writes without further masters for the same CD layer.
+  * `master1name=<name>` (at most 255 bytes) names the main body: the encoder writes the main-body name record of Section 5.6 after the last pack record. Without this option, nothing is written and the output is unchanged. It may be used without further masters.
+  * In the present version, further masters cannot be combined with `noise=`, `resume` or `cdcheck`.
+* **Form.** The reference encoder writes the FLAC form (Section 3.4) for an output name ending in `.flac` or with the option `--form=flac`, and the WAV form otherwise (also for `.lae`). `--form=wav` or `--form=flac` must agree with a `.wav` or `.flac` name; only `.lae` leaves the choice open. The WAV form is byte-identical to the output of the encoder before the FLAC form was added. `lae_enc tag` writes new tags without re-encoding and keeps the form.
 * **Partition search** (`src/partition.h`).
   * The search runs per root block, in parallel. The number of threads does not affect the encoded stream ([docs/BUILD.md](../../docs/BUILD.md)).
   * The search aims at the D and C share targets of the selected mode (`src/partition_format.h`). The share targets exist only in the encoder.
@@ -1158,6 +1256,8 @@ LAE Lossy is built from the following published techniques:
 | Self-test hash initial value / prime | 1469598103934665603 (`0x14650FB0739D0383`) / 1099511628211 | 13 |
 | CRC-32 | reflected `0xEDB88320`, init and final XOR `0xFFFFFFFF` | 3.3 |
 | Number of modes | 6 | 4, 14 |
+| FLAC APPLICATION ID | `LAE1` (`0x4C 0x41 0x45 0x31`), pieces of at most 2^24 − 5 bytes | 3.4 |
+| Extension packs | at most 8 pack records (tag `LPAK`) after pack 0; main-body name record `LNAM`; names at most 255 bytes | 5.6 |
 
 ## Appendix B. Test vectors
 
@@ -1176,6 +1276,6 @@ The conformance vectors and their hash values are listed in [tests/vectors/MANIF
 4. Document the values that the reference encoder writes into the stream-header fields `rate` and `L` (Section 5.3).
 5. State a guaranteed bound below which no `int64` overflow occurs, and specify the treatment of streams that exceed it (Section 10.4).
 6. Confirm whether `CORRUPT` must be detected in the whole stream or only in the parts a route needs (Section 7.6).
-7. Specify the layout of `.lae` files and the planned carriage in FLAC (Section 1.1). Neither is specified for container version 5.
+7. Specify the layout of `.lae` files and the planned carriage in FLAC (Section 1.1). Done: the FLAC form is specified in Section 3.4; a `.lae` file holds the WAV form or the FLAC form.
 8. Document how the reference encoder computes the per-cell exponents from which the leaf exponent `E` is derived (Section 8.2).
 9. Confirm whether reserved `rule` values must be decoded with the default rule or rejected (Section 8.2).

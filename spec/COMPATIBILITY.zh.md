@@ -11,6 +11,7 @@ LAE 文件是普通的 WAV 或 FLAC 文件。不支持 LAE 的播放器播放 LA
 | 文件 | 容器 | 不使用 LAE 时播放的内容（核心母带；LAEY 为 CD 层） | 跳过的部分 |
 |---|---|---|---|
 | LAEY（`.wav`） | RIFF WAVE | `data` 块：16 bit PCM，44.1 或 48 kHz（CD 层） | `"LAE "` 块（位深层和频率层） |
+| LAEY，FLAC 形式（`.flac`） | FLAC | 音频帧：16 bit，44.1 或 48 kHz（CD 层） | 位于音频帧之前的 `LAE1` APPLICATION 块（位深层、频率层和扩展包）。2026-11-10 用 GStreamer `flacdec` 核对：输出与 WAV 形式的 CD 层相同。Windows 自带的 FLAC 解码器：扩展数据超过约 4 MiB（几十秒音乐之后）时，适用限制 1 |
 | LAES，WAV 形式（`.wav`） | RIFF WAVE，超过 4 GiB 时为 RF64 | `data` 块：核心母带（默认 16 bit） | `"LAE "` 块（母带） |
 | LAES，FLAC 形式（`.flac`） | FLAC | 音频帧：核心母带（默认至多 24 bit） | 位于音频帧之前的 `LAE2` APPLICATION 块（母带） |
 

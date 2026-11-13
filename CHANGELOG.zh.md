@@ -4,7 +4,7 @@
 
 本文件记录 LAE（Layered Audio Extension）及其有损层级 LAE Lossy（LAEY）和无损层级 LAE Lossless（LAES）的重要变更，按时间由新到旧排列。
 
-## {NEXT_DATE}（{NEXT_VERSION}）
+## 2026-11-14（v5-2026-11-14）
 
 - **LAEY 的 FLAC 形式（2026-11-10）。**LAEY 文件可以是 FLAC 文件：CD 层就是 FLAC 音频，左右声道独立编码；扩展（与 `LAE ` 块的主体逐字节相同）放在音频之前 ID 为 `LAE1` 的 APPLICATION 块中（[spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md) 第 3.4 节）。输出文件名为 `.flac` 或带 `--form=flac` 时，`lae_enc` 写出这种形式；`.lae` 和 `.wav` 的文件名得到 WAV 形式，与以前的编码器逐字节相同。`lae_dec`、`liblae`、各插件和 Java 库都读取两种形式，并按内容区分。容器版本仍是 5。
 - **LAEY 扩展包（2026-11-11 和 11-12）。**一个文件除主体外，还可以有最多八个另加的扩展，每个由各自的母带对着同一个 CD 层生成，互相独立（第 5.6 节）。编码器选项 `master2=` … `master9=`，以及 `master<n>align=`、`master<n>name=`、`master<n>accept`、`master<n>edge=`；`master1name=` 给主体起名（可选的 `LNAM` 记录）。不支持扩展包的解码器播放主体；`lae_dec pack=<n>` 和 `liblae`（`lae_select_pack`）解码别的包，包只由用户选择。不用这些选项时，输出与以前的编码器逐字节相同。测试：`tests/check_packs.sh`。

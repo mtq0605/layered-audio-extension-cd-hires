@@ -4,7 +4,7 @@
 
 This file records the notable changes to LAE (Layered Audio Extension), its lossy tier LAE Lossy (LAEY) and its lossless tier LAE Lossless (LAES), newest first.
 
-## {NEXT_DATE} ({NEXT_VERSION})
+## 2026-11-14 (v5-2026-11-14)
 
 - **LAEY FLAC form (2026-11-10).** An LAEY file may be a FLAC file: the CD layer is the FLAC audio, coded with independent channels, and the extension, byte for byte the body of the `LAE ` chunk, is carried in APPLICATION blocks with the ID `LAE1` before the audio ([spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 3.4). `lae_enc` writes it for a `.flac` output name or with `--form=flac`; `.lae` and `.wav` names give the WAV form, byte-identical to the previous encoder. `lae_dec`, `liblae`, the plug-ins and the Java library read both forms and tell them apart by content. The container version stays 5.
 - **LAEY extension packs (2026-11-11 and 11-12).** One file may hold, besides the main body, up to eight further extensions, each made from its own master against the same CD layer and mutually independent (Section 5.6). Encoder options `master2=` … `master9=` with `master<n>align=`, `master<n>name=`, `master<n>accept`, `master<n>edge=`; `master1name=` names the main body (optional `LNAM` record). A decoder without pack support plays the main body; `lae_dec pack=<n>` and `liblae` (`lae_select_pack`) decode another pack, chosen by the user only. Without these options, the output is byte-identical to the previous encoder. Test: `tests/check_packs.sh`.

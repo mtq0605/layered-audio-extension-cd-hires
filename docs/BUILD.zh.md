@@ -77,7 +77,7 @@ laes selftest
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_udec.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_udec.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
 ```
 
-`liblae`（LAE Lossy 解码器，`src/lae_api.cpp`）以 `/fp:precise` 编译，满足 [spec/lossy/SPEC.zh.md](../spec/lossy/SPEC.zh.md) 第 2.2 节的浮点规则（在 MSVC 上不进行收缩）。插件中的 LAE Lossless 解码器（`src/laes_api.cpp`）以 `/fp:strict` 编译。经验证的标志见各插件的构建脚本，例如 `plugins/foo_input_lae/build_fb2k.cmd`。
+`liblae`（LAE Lossy 解码器，`src/lae_api.cpp`）以 `/fp:precise` 编译，满足 [spec/lossy/SPEC.zh.md](../spec/lossy/SPEC.zh.md) 第 2.2 节的浮点规则：不进行收缩，因为构建脚本（MSVC 2022）不带 `/arch:AVX2` 或更高的选项，编译器没有可用的融合乘加指令。不要加这样的选项。插件中的 LAE Lossless 解码器（`src/laes_api.cpp`）以 `/fp:strict` 编译。经验证的标志见各插件的构建脚本，例如 `plugins/foo_input_lae/build_fb2k.cmd`。
 
 ### 辅助程序
 

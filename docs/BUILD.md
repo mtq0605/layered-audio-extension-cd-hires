@@ -77,7 +77,7 @@ Example (Windows, the unified decoder `lae_udec`, which links `liblae` staticall
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_udec.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_udec.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
 ```
 
-`liblae` (the LAE Lossy decoder, `src/lae_api.cpp`) is compiled with `/fp:precise`, which meets the floating-point rules of [spec/lossy/SPEC.md](../spec/lossy/SPEC.md), Section 2.2 (no contraction on MSVC). The LAE Lossless decoder of the plug-ins (`src/laes_api.cpp`) is compiled with `/fp:strict`. The verified flags are given in the build scripts of the plug-ins, for example `plugins/foo_input_lae/build_fb2k.cmd`.
+`liblae` (the LAE Lossy decoder, `src/lae_api.cpp`) is compiled with `/fp:precise`, which meets the floating-point rules of [spec/lossy/SPEC.md](../spec/lossy/SPEC.md), Section 2.2: no contraction, because the build scripts (MSVC 2022) give no `/arch:AVX2` or higher option, so the compiler has no fused multiply-add instruction to emit. Do not add such an option. The LAE Lossless decoder of the plug-ins (`src/laes_api.cpp`) is compiled with `/fp:strict`. The verified flags are given in the build scripts of the plug-ins, for example `plugins/foo_input_lae/build_fb2k.cmd`.
 
 ### Auxiliary programs
 

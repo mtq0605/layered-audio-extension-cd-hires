@@ -1240,7 +1240,7 @@ CD-Extra applies to the 44.1 kHz family only. On a CD-Extra disc, the CD layer i
 
 | Constant | Value |
 |---|---|
-| 80-minute disc | 360,000 sectors at 75 sectors per second |
+| 80-minute disc | 360,000 sectors at 75 sectors per second (80 × 60 × 75). `lae_cdx` uses 359,849 sectors from LBA 0 unless another capacity is given (spec/cdx/SPEC.md, Section 2.5), about 2 s less; the playing times below are computed with 360,000 |
 | Data sector (user data) | 2048 bytes, so one disc minute holds 9.22 MB of data |
 | Multisession overhead (first-session lead-out ≈ 6,750 sectors, second-session lead-in ≈ 4,500 sectors) | ≈ 11,250 sectors ≈ 2.5 min. These are commonly used Blue Book values; confirmation with an actual burn is future work (Section 17.3). |
 | ISO 9660 / Joliet file system [5][15] | about 1–2 MB (≈ 0.2 min), estimated; each file is aligned to 2048 bytes |

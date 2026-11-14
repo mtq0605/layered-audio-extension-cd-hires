@@ -29,7 +29,7 @@ The usual terms are *interpolation images* or *image components*.
 
 - A decoder plays the high-resolution version as the CD layer up-sampled to the master's rate, plus the frequency layer.
 - Up-sampling leaves the original samples and the 0–20 kHz content unchanged. It computes the new samples in between with a filter
-  that removes the spectral copies of the CD band. The filter's stopband is 120 dB, so each copy retains the music at about −120 dB.
+  that removes the spectral copies of the CD band. The filter is designed for a stopband attenuation of 120 dB (tools/gen_halfband.cpp; not yet measured, README Section 17.3), so each copy retains the music at about −120 dB.
   This remainder is G.
 - Normally the frequency layer holds "master − up-sampled CD", so it carries −G, and the two cancel during decoding.
 - In a tier-A cell the frequency layer is zero, so G remains in the decoded output. `g` treats two kinds of such cell:

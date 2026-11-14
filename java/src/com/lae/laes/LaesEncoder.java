@@ -373,17 +373,19 @@ public final class LaesEncoder {
             final List<Integer> ord = orders.get(oi); final List<StreamEnc.Prep> m2 = new ArrayList<StreamEnc.Prep>(); final List<StreamEnc.MasterSel> s2 = new ArrayList<StreamEnc.MasterSel>(); for (int k : ord) { m2.add(pm.get(k)); final StreamEnc.MasterSel c = sel.get(k), d = new StreamEnc.MasterSel(); d.storage = c.storage; d.refTier = c.refTier; d.whole = c.whole; d.frac = c.frac; d.name = c.name; d.flags = c.flags; d.menu = c.menu; s2.add(d); }
             { boolean same = true; for (int k = 0; k < s2.size(); k++) same &= s2.get(k).menu == 0 || s2.get(k).menu == k + 1; if (same) for (StreamEnc.MasterSel s : s2) s.menu = 0; }   // the menu order is the file order: nothing to store
             final List<LaesFile.MasterInfo> i2 = oinfo.get(oi); final String bp = wd + "/body" + oi, stO = wd + "/o" + oi + ".done";
+            final LaesFile.Head hd = new LaesFile.Head(); hd.coreFlags = coreFlags; if (defGiven != 0) for (int k = 0; k < ord.size(); k++) if (given.get(ord.get(k)) == defGiven) hd.def = k + 1;   // the default in this file order
+            final String hsig = headSig(hd, s2);   // FU26-1: the names, flags, menu positions and default this body holds
             if (resumed) { final String t = StreamEnc.getState(stO);
                 if (t != null) { final StreamEnc.StateR r = new StreamEnc.StateR(t); final long sz = r.i(); final String ts = r.str(); final long n = r.i(); i2.clear(); for (long q = 0; q < Math.max(0, Math.min(n, 255)); q++) { final LaesFile.MasterInfo I = new LaesFile.MasterInfo(); StreamEnc.getInfo(r, I); i2.add(I); }
-                    if (!r.bad && ts.equals(tsig) && n == ord.size() && new File(bp).isFile() && sz == new File(bp).length()) { osz[oi] = sz; continue; }   // made by an earlier run
-                    // a stale o<oi>.done (other T, damaged, body gone): the whole order is made again. Without one the order was not
+                    final String hs = r.str();   // a state without this line (made before FU26-1) is bad: the order is made again
+                    if (!r.bad && ts.equals(tsig) && hs.equals(hsig) && n == ord.size() && new File(bp).isFile() && sz == new File(bp).length()) { osz[oi] = sz; continue; }   // made by an earlier run
+                    // a stale o<oi>.done (other T, other names / flags / menu order / default, damaged, body gone): the whole order is made again. Without one the order was not
                     // finished: its masters' choice states stay, each checked (files' sizes, T) when encodeLaesS restores it (C++ e6eab9f).
                     new File(stO).delete(); for (int mi = 0; mi < ord.size(); mi++) new File(wd + "/o" + oi + "_m" + mi + ".done").delete(); } }
             final List<String> kept = new ArrayList<String>();
-            final LaesFile.Head hd = new LaesFile.Head(); hd.coreFlags = coreFlags; if (defGiven != 0) for (int k = 0; k < ord.size(); k++) if (given.get(ord.get(k)) == defGiven) hd.def = k + 1;   // the default in this file order
             final String err = StreamEnc.encodeLaesS(core, base, m2, s2, i2, bp, wd + "/o" + oi, asFlac ? 1 : 0, piece, ctx, orders.size() > 1 ? cache : null, cacheLog, kept, hd);
             if (!err.isEmpty()) { say(L, err); return 2; } osz[oi] = new File(bp).length();
-            { final StreamEnc.StateW w = new StreamEnc.StateW(); w.i(osz[oi]); w.str(tsig); w.i(i2.size()); for (LaesFile.MasterInfo I : i2) StreamEnc.putInfo(w, I); StreamEnc.putState(stO, w.s.toString()); }
+            { final StreamEnc.StateW w = new StreamEnc.StateW(); w.i(osz[oi]); w.str(tsig); w.i(i2.size()); for (LaesFile.MasterInfo I : i2) StreamEnc.putInfo(w, I); w.str(hsig); StreamEnc.putState(stO, w.s.toString()); }
             for (String f : kept) new File(f).delete(); }   // the chosen layers, now in the payload
         for (int oi = 0; oi < orders.size(); oi++) if (osz[oi] >= 0 && (bodySize < 0 || osz[oi] < bodySize)) { bodyPath = wd + "/body" + oi; bodySize = osz[oi]; info = oinfo.get(oi); pick = orders.get(oi); picked = oi; }
         { final StreamEnc.StateW w = new StreamEnc.StateW(); w.i(picked); w.str(tsig); StreamEnc.putState(pickP, w.s.toString()); }   // before the other body goes
@@ -414,7 +416,7 @@ public final class LaesEncoder {
         // the file is removed and nothing is written
         if (opt.selfCheckFlip != null) flipByte(out + ".part", CStd.atoll(opt.selfCheckFlip));   // tests only
         ctx.stage = "self-check"; ctx.done = 0; ctx.total = 0; for (StreamEnc.Prep m : pm) ctx.total += m.frames;
-        { final String why = selfCheckFile(out + ".part", pm, ctx);
+        { final String why = selfCheckFile(out + ".part", pm, ctx, headF, names, mflags, menus);
           if (!why.isEmpty()) { new File(out + ".part").delete(); say(L, "self-check failed: " + why + "; nothing written"); return 2; } }
         stage(tlog, t0, "self-check");
         { final File o = new File(out); o.delete(); if (!new File(out + ".part").renameTo(o)) { say(L, "cannot write " + out); return 2; } }
@@ -528,17 +530,31 @@ public final class LaesEncoder {
         if (!md5ok || !same || size != nCore) return "";
         return null; }
 
+    // FU26-1: the default master, the core master's flags and every master's name, flags and menu position of a body (in its file order), as
+    // one line for the state o<oi>.done (names as hex of their UTF-8 bytes); a body made for other values is not used again
+    static String headSig(LaesFile.Head hd, List<StreamEnc.MasterSel> s2) {
+        final StringBuilder b = new StringBuilder("def ").append(hd.def).append(" core ").append(hd.coreFlags);
+        for (StreamEnc.MasterSel s : s2) { b.append(" |"); for (byte x : LaesFile.nameBytes(s.name)) b.append(String.format("%02x", x & 0xFF)); b.append(' ').append(s.flags).append(' ').append(s.menu); }
+        return b.toString(); }
+
     // the self-check of a written LAES file, read exactly as a player reads it (laes_play.h): open (file SHA-256, payload CRC-32, core), then
     // every master decoded in time order and compared sample by sample with its input (pm: in file order; read where they are: StreamEnc.masterFrames).
     // "" when everything matches, else the reason.
+    // FU26-1 (Java): also the default master, the core master's flags and every master's name, flags and menu position against the ones given
+    // (wantHead, names, mflags, menus: in file order; menus all 0 when the menu order is the file order)
     // port of laes_tool.cpp:selfCheckFile
-    static String selfCheckFile(String path, List<StreamEnc.Prep> pm, StreamEnc.Ctx ctx) {
+    static String selfCheckFile(String path, List<StreamEnc.Prep> pm, StreamEnc.Ctx ctx, LaesFile.Head wantHead, List<String> names, List<Integer> mflags, int[] menus) {
         final RandomAccessFile fp; try { fp = new RandomAccessFile(path, "r"); } catch (IOException e) { return "cannot read " + path; }
         try { final long size; try { size = fp.length(); } catch (IOException e) { return "cannot read " + path; }
             Play.FnSrc src = new Play.FnSrc(); src.n = size; src.fn = new Play.ReadFn() { public int read(long at, byte[] d, int off, int k) { try { fp.seek(at); fp.readFully(d, off, k); return 0; } catch (IOException e) { return 1; } } };
             Play.File f = new Play.File(); final String[] mg = {""}; String e; try { e = f.open(src, mg, false); } catch (RuntimeException x) { e = String.valueOf(x.getMessage()); } catch (OutOfMemoryError x) { e = "bad allocation"; }
             if (e.isEmpty() && !f.why.isEmpty()) e = f.why;   // the payload failed a check
             if (!e.isEmpty()) return e;
+            if (f.head.def != wantHead.def) return "the default master in the file differs from the one given";
+            if (f.head.coreFlags != wantHead.coreFlags) return "the core master's flags in the file differ from the ones given";
+            if (f.ms.size() != names.size()) return "the file has " + f.ms.size() + " masters, " + names.size() + " were given";
+            for (int i = 0; i < names.size(); i++) { final LaesFile.MasterInfo I = f.ms.get(i).I;
+                if (!I.name.equals(names.get(i)) || I.flags != mflags.get(i).intValue() || I.menu != menus[i]) return "master " + (i + 1) + ": the name, flags or menu position in the file differ from the ones given"; }
             final int P = 1 << 16; final int[] a = new int[P * 2];
             for (int i = 0; i < pm.size(); i++) {
                 int j = -1; for (int k = 0; k < f.choices.size(); k++) if (f.choices.get(k).kind == 1 && f.choices.get(k).m == i) j = k;

@@ -1077,6 +1077,16 @@ static int encode(int argc, char** argv) {
     return 0;
 }
 
+// Test switches (2026-11-15): the environment variables that only tests use act only with the master switch LAE_TEST_MODE=1. Without it
+// they are removed at the start, so no inherited variable changes what this program does; with it every run says which are active.
+// Outside the master switch stay the harmless diagnostics that change no output byte: TIMING (times printed), KEEPTMP (the work
+// folder is kept), TIERSTAT (statistics printed). The encoder's own module variables (clearModuleEnv) are not test switches.
+static void testSwitches() {
+    static const char* const kTest[] = {"LAEY_TEST_PIECE", "LAE_TESTMAXFRAMES", "LAE_TESTFAIL", "LAE_BLOCKUNITS", "LAE_TESTSEQUENTIAL", "PARTTHREADS"};
+    const char* tm = getenv("LAE_TEST_MODE"); const bool on = tm && !strcmp(tm, "1"); std::string act;
+    for (const char* k : kTest) { const char* v = getenv(k); if (!v) continue; if (on) act += std::string(act.empty() ? "" : ", ") + k + "=" + v; else env(k, ""); }
+    if (on) { printf("TEST MODE (LAE_TEST_MODE=1): active test switches: %s. Unset LAE_TEST_MODE to return to normal behaviour.\n", act.empty() ? "none" : act.c_str()); fflush(stdout); } }
+
 int main(int argc, char** argv) {
     std::set_terminate(encrun::onTerminate); std::atexit(encrun::onExit);
     std::signal(SIGINT, encrun::onSignal); std::signal(SIGTERM, encrun::onSignal);
@@ -1085,6 +1095,7 @@ int main(int argc, char** argv) {
     std::signal(SIGBREAK, encrun::onSignal);
 #endif
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h); after signal(), so Ctrl+C sets the console back first
+    testSwitches();
     int rc;
     try { rc = argc > 1 && !strcmp(argv[1], "plan") ? m_plan::planMain(argc, argv) : argc > 1 && !strcmp(argv[1], "tag") ? m_tag::retag(argc, argv) : encode(argc, argv); }
     catch (const encio::Fail& e) { encrun::emergency(e.what()); return 2; }

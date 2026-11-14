@@ -4,7 +4,7 @@
 # LAEY FLAC form (spec/lossy/SPEC.md, Section 3.4): encodes one master excerpt in the WAV form and in the FLAC form and checks that
 #   * every route decodes to the same bytes from both forms; .lae = the WAV form (the default), .lae --form=flac = the FLAC form, byte for byte;
 #   * the FLAC file's "LAE1" data equals the WAV file's "LAE " chunk body (cmp of the extracted bytes);
-#   * a smaller piece size (test hook LAEY_TEST_PIECE) gives several LAE1 blocks and the same decode;
+#   * a smaller piece size (test hook LAEY_TEST_PIECE, with the master switch LAE_TEST_MODE=1) gives several LAE1 blocks and the same decode;
 #   * tags: encoding with tags equals tagging afterwards; removing the tags gives the untagged file; the form cannot be changed by tag;
 #   * damaged files are refused with exit code 3, a plain FLAC and a wrong --form with exit code 1.
 # usage: check_flacform.sh <lae_enc> <lae_dec> <master.wav (10 s is enough)> <scratch folder> [mode, default 3]
@@ -45,7 +45,7 @@ if [ "$(od -An -tu1 -j 42 -N 1 "$W/a.flac" | tr -d ' ')" = 130 ]; then
     same "$W/ext.bin" "$W/chunk.bin" "the LAE1 data differs from the LAE chunk body"
 else echo "note: the extension is in more than one block; the byte comparison with the LAE chunk is skipped"; fi
 
-LAEY_TEST_PIECE=300000 "$ENC" "$M" "$W/p.flac" "$MODE" > "$W/enc_piece.txt" 2>&1 || fail "encode with small pieces"
+LAE_TEST_MODE=1 LAEY_TEST_PIECE=300000 "$ENC" "$M" "$W/p.flac" "$MODE" > "$W/enc_piece.txt" 2>&1 || fail "encode with small pieces"
 grep -q "extension in 1 LAE1 block" "$W/enc_piece.txt" && fail "the small-piece file has one block" || pass
 "$DEC" "$W/p.flac" "$W/p.out" full > /dev/null 2>&1; same "$W/p.out" "$W/ref.out" "the multi-block file decodes differently"
 

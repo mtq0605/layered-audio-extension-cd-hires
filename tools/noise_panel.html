@@ -83,7 +83,11 @@ const TEXT = {
     info: (m, r, len, cw, ms, st) => `${m}：${r} Hz，${len} 秒；格子 ${cw} Hz × ${ms} ms；显示步长 ${st} 帧`,
     axis: (t0, t1, k, cw) => `横轴 ${t0} – ${t1} 秒；纵轴 0 – ${k} kHz（每行一列格子，${cw} Hz）；实线 = 已勾选，虚线 = 候选`,
     checked: n => `已勾选 ${n} 个位置`, wrongCand: "候选文件不是这个母带的（SHA-256、长度或采样率不同）。", wrongMarks: "标定文件不是这个母带的（SHA-256、长度或采样率不同）。",
-    noCell: "这个范围里没有完整的格子。" },
+    noCell: "这个范围里没有完整的格子。",
+    badFile: w => `这个文件不能用作标记文件：${w}。什么都没有读入。`, rLine: n => `第 ${n} 行：`, rFirst: "第一行必须是“LAENOISE 1”", rMagic2: "第二个 LAENOISE 行",
+    rMaster2: "第二个 master 行", rGrid2: "第二个 grid 行", rOrder: "master 行和 grid 行必须在所有 pos 行之前", rMasterF: "应为“master sha256 <64 位小写十六进制> frames <L> rate <fs>”",
+    rGridF: "应为“grid mdct 512 cell 8”", rPosF: "应为“pos <m0> <m1> <c0> <c1>”，都是整数", rNoMagic: "没有“LAENOISE 1”行", rNoMaster: "没有 master 行", rNoGrid: "没有 grid 行",
+    rOutside: n => `第 ${n} 个位置不在这个母带的网格里` },
   en: { title: "LAE Noise Marker", fSpec: "Display data (lae_noise spectro)", fCand: "Candidates (lae_noise scan)", fMarks: "Saved marks (optional)", fPrev: "Preview folder (lae_noise preview)",
     openFirst: "Open the display data first.", view: "View", start: "Start", length: "Length", s: "s", level: "Level", to: "to", manualIn: "Enter by hand", add: "Add (snaps to cells)",
     dragHint: "Or drag a rectangle on the spectrogram.", hMark: "Mark", hStart: "Start s", hEnd: "End s", hLen: "Length s", hF0: "From Hz", hF1: "To Hz", hLevel: "Level", hLine: "Line Hz",
@@ -94,7 +98,11 @@ const TEXT = {
     info: (m, r, len, cw, ms, st) => `${m}: ${r} Hz, ${len} s; cell ${cw} Hz × ${ms} ms; display step ${st} frames`,
     axis: (t0, t1, k, cw) => `Across: ${t0} – ${t1} s; up: 0 – ${k} kHz (one row per column of cells, ${cw} Hz); solid = checked, dashed = candidate`,
     checked: n => `${n} position${n === 1 ? "" : "s"} checked`, wrongCand: "This candidate file belongs to a different master (SHA-256, length or sample rate differ).",
-    wrongMarks: "This marking file belongs to a different master (SHA-256, length or sample rate differ).", noCell: "There is no whole cell in this range." } };
+    wrongMarks: "This marking file belongs to a different master (SHA-256, length or sample rate differ).", noCell: "There is no whole cell in this range.",
+    badFile: w => `This file cannot be used as a marking file: ${w}. Nothing was read.`, rLine: n => `line ${n}: `, rFirst: "the first line must be \"LAENOISE 1\"", rMagic2: "a second LAENOISE line",
+    rMaster2: "a second master line", rGrid2: "a second grid line", rOrder: "the master and grid lines must come before the pos lines", rMasterF: "expected \"master sha256 <64 lower-case hex digits> frames <L> rate <fs>\"",
+    rGridF: "expected \"grid mdct 512 cell 8\"", rPosF: "expected \"pos <m0> <m1> <c0> <c1>\" with whole numbers", rNoMagic: "no \"LAENOISE 1\" line", rNoMaster: "no master line", rNoGrid: "no grid line",
+    rOutside: n => `position ${n} lies outside the grid of this master` } };
 const defaultLang = () => /^zh/i.test(navigator.language || "") ? "zh" : "en";
 let lang = defaultLang(); try { const v = localStorage.getItem("laeNoiseLang"); if (v === "zh" || v === "en") lang = v; } catch (e) {}
 const T = k => TEXT[lang][k];
@@ -113,13 +121,32 @@ const colHz = c => c * CW() * D.rate / (2 * N());
 const K = () => Math.floor((D.frames + N() - 1) / N()) + 1;
 function snapTime(t0, t1) { return [Math.max(0, Math.ceil((t0 * D.rate + N() / 2) / N())), Math.min(K(), Math.floor((t1 * D.rate - N() / 2) / N()) + 1)]; }
 function snapFreq(f0, f1) { const w = colHz(1); return [Math.max(0, Math.ceil(f0 / w - 1e-9)), Math.min(D.ncol, Math.floor(f1 / w + 1e-9))]; }
-function parseMarks(text) { const out = { sha: "", frames: 0, rate: 0, pos: [] };
-  for (const raw of text.split(/\r?\n/)) { const note = raw.includes("#") ? raw.slice(raw.indexOf("#") + 1) : ""; const line = raw.split("#")[0].trim();
-    let m;
-    if ((m = line.match(/^master sha256 (\S+) frames (\d+) rate ([\d.]+)/))) { out.sha = m[1]; out.frames = +m[2]; out.rate = +m[3]; }
-    else if ((m = line.match(/^pos (\d+) (\d+) (\d+) (\d+)/))) { const lv = note.match(/level (-?[\d.]+)/), at = note.match(/narrow at ([\d.]+) Hz/);
-      out.pos.push({ m0: +m[1], m1: +m[2], c0: +m[3], c1: +m[4], lv: lv ? +lv[1] : NaN, at: at ? +at[1] : NaN }); } }
+// FU17-9 (2026-11-14): the reading rules of SPEC_LAENOISE.md Section 4, as in nmk::readMarks (src/noise_marks.h) and NoiseMarks.java:
+// comments (# to the end of the line), CR and blank lines are skipped; the first line is exactly "LAENOISE 1"; exactly one master and
+// one grid line (mdct 512 cell 8), both before the first pos line; LAENOISE, master, grid and pos lines have exactly their fields;
+// other lines are ignored. why: "" or the reason the file is refused (shown by the caller; nothing of the file is used then).
+function parseMarks(text) { const out = { sha: "", frames: 0, rate: 0, pos: [], why: "" };
+  const digits = (s, n) => s.length > 0 && s.length <= n && /^[0-9]+$/.test(s);
+  let magic = false, haveMaster = false, haveGrid = false, ln = 0; const bad = (n, w) => { out.why = (n ? T("rLine")(n) : "") + T(w); out.pos = []; return out; };
+  for (const raw of text.split("\n")) { ln++; const note = raw.includes("#") ? raw.slice(raw.indexOf("#") + 1) : ""; const t = raw.split("#")[0].split(/[ \t\r]+/).filter(x => x);
+    if (!t.length) continue;
+    if (!magic) { if (t.length === 2 && t[0] === "LAENOISE" && t[1] === "1") { magic = true; continue; } return bad(ln, "rFirst"); }
+    if (t[0] === "LAENOISE") return bad(ln, "rMagic2");
+    if (t[0] === "master") { if (haveMaster) return bad(ln, "rMaster2"); if (out.pos.length) return bad(ln, "rOrder");
+      if (t.length !== 7 || t[1] !== "sha256" || t[3] !== "frames" || t[5] !== "rate" || !/^[0-9a-f]{64}$/.test(t[2]) || !digits(t[4], 18) || !digits(t[6], 9)) return bad(ln, "rMasterF");
+      out.sha = t[2]; out.frames = +t[4]; out.rate = +t[6]; haveMaster = true; }
+    else if (t[0] === "grid") { if (haveGrid) return bad(ln, "rGrid2"); if (out.pos.length) return bad(ln, "rOrder");
+      if (t.length !== 5 || t[1] !== "mdct" || t[3] !== "cell" || !digits(t[2], 9) || !digits(t[4], 9) || +t[2] !== 512 || +t[4] !== 8) return bad(ln, "rGridF"); haveGrid = true; }
+    else if (t[0] === "pos") { if (!haveMaster || !haveGrid) return bad(ln, "rOrder");
+      if (t.length !== 5 || !digits(t[1], 18) || !digits(t[2], 18) || !digits(t[3], 9) || !digits(t[4], 9)) return bad(ln, "rPosF");
+      const lv = note.match(/level (-?[\d.]+)/), at = note.match(/narrow at ([\d.]+) Hz/);
+      out.pos.push({ m0: +t[1], m1: +t[2], c0: +t[3], c1: +t[4], lv: lv ? +lv[1] : NaN, at: at ? +at[1] : NaN }); } }
+  if (!magic) return bad(0, "rNoMagic"); if (!haveMaster) return bad(0, "rNoMaster"); if (!haveGrid) return bad(0, "rNoGrid");
   return out; }
+// every position inside the grid of the open master (as nmk::checkGrid): the 1-based number of the first that is not, or 0
+function outsideGrid(mk) { const i = mk.pos.findIndex(p => p.m0 >= p.m1 || p.m1 > K() || p.c0 >= p.c1 || p.c1 > D.ncol); return i + 1; }
+function refused(mk) { if (mk.why) { alert(T("badFile")(mk.why)); return true; } return false; }
+function offGrid(mk) { const n = outsideGrid(mk); if (n) { alert(T("badFile")(T("rOutside")(n))); return true; } return false; }
 function sameMaster(mk) { return D && mk.sha === D.sha256 && mk.frames === D.frames && Math.abs(mk.rate - D.rate) < 0.5; }
 function sortRows() { rows.sort((a, b) => a.m0 - b.m0 || a.c0 - b.c0 || (b.m1 - b.m0) - (a.m1 - a.m0) || b.c1 - a.c1); }
 function key(r) { return [r.m0, r.m1, r.c0, r.c1].join(","); }
@@ -128,12 +155,12 @@ function showInfo() { $("info").textContent = T("info")(D.master, D.rate, (D.fra
 $("fSpec").onchange = async e => { const f = e.target.files[0]; if (!f) return; D = JSON.parse(await f.text());
   showInfo();
   $("vLen").value = Math.min(30, Math.ceil(D.frames / D.rate)); $("bSave").disabled = false; rows = []; render(); };
-$("fCand").onchange = async e => { const f = e.target.files[0]; if (!f || !D) return; const mk = parseMarks(await f.text());
-  if (!sameMaster(mk)) { alert(T("wrongCand")); return; }
+$("fCand").onchange = async e => { const f = e.target.files[0]; if (!f || !D) return; const mk = parseMarks(await f.text()); if (refused(mk)) return;
+  if (!sameMaster(mk)) { alert(T("wrongCand")); return; } if (offGrid(mk)) return;
   rows = rows.filter(r => r.src !== "cand");
   mk.pos.forEach((p, i) => rows.push({ ...p, src: "cand", on: false, idx: i + 1 })); sortRows(); render(); };
-$("fMarks").onchange = async e => { const f = e.target.files[0]; if (!f || !D) return; const mk = parseMarks(await f.text());
-  if (!sameMaster(mk)) { alert(T("wrongMarks")); return; }
+$("fMarks").onchange = async e => { const f = e.target.files[0]; if (!f || !D) return; const mk = parseMarks(await f.text()); if (refused(mk)) return;
+  if (!sameMaster(mk)) { alert(T("wrongMarks")); return; } if (offGrid(mk)) return;
   const have = new Map(rows.map(r => [key(r), r]));
   for (const p of mk.pos) { const r = have.get(key(p)); if (r) r.on = true; else rows.push({ ...p, src: "manual", on: true, idx: 0 }); }
   sortRows(); render(); };
@@ -176,9 +203,10 @@ function color(v, lo, hi) { const x = Math.max(0, Math.min(1, (v - lo) / (hi - l
   const r = Math.round(255 * Math.min(1, Math.max(0, 1.5 * x - 0.3))), g = Math.round(255 * Math.min(1, x * 1.1)), b = Math.round(255 * Math.max(0, 0.55 - x * 0.6));
   return [r, g, b]; }
 function fit(cv) { const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); return dpr; }
-function render() {
+function render(keepList) {   // keepList: the table stays as it is (hover, drag), only the row highlight and the drawing change (FU17-9)
   const sp = $("spec"), wv = $("wave"); const dpr = fit(sp); fit(wv); const g = sp.getContext("2d"), w = wv.getContext("2d");
-  g.clearRect(0, 0, sp.width, sp.height); w.clearRect(0, 0, wv.width, wv.height); renderList(); if (!D || !sp.width || !sp.height) return;   // not laid out (hidden): nothing to draw
+  g.clearRect(0, 0, sp.width, sp.height); w.clearRect(0, 0, wv.width, wv.height);
+  if (keepList) Array.from($("list").tBodies[0].rows).forEach((tr, j) => { tr.className = j === hover ? "hi" : ""; }); else renderList(); if (!D || !sp.width || !sp.height) return;   // not laid out (hidden): nothing to draw
   const [t0, t1] = view(), W = sp.width, H = sp.height, lo = +$("dbLo").value, hi = +$("dbHi").value;
   const stepT = D.step * N() / D.rate, tFirst = frameT0(1);
   const img = g.createImageData(W, H);
@@ -206,14 +234,14 @@ function renderList() { const tb = $("list").tBodies[0]; tb.innerHTML = "";
     tr.innerHTML = `<td class="l"><input type="checkbox" data-i="${i}" ${r.on ? "checked" : ""}></td><td>${i + 1}</td><td>${fmt(frameT0(r.m0), 3)}</td><td>${fmt(frameT0(r.m1), 3)}</td>` +
       `<td>${fmt(frameT0(r.m1) - frameT0(r.m0), 2)}</td><td>${fmt(colHz(r.c0), 1)}</td><td>${fmt(colHz(r.c1), 1)}</td><td>${fmt(r.lv, 1)}</td><td>${fmt(r.at, 2)}</td>` +
       `<td class="l">${play("original", T("original"))} ${play("silenced", T("silenced"))} ${play("marked", T("marked"))}</td><td class="l">${T(r.src)}${r.idx ? " " + r.idx : ""}</td>`;
-    tr.onmouseenter = () => { hover = i; render(); }; tb.appendChild(tr); });
+    tr.onmouseenter = () => { if (hover !== i) { hover = i; render(true); } }; tb.appendChild(tr); });
   tb.querySelectorAll("input[type=checkbox]").forEach(cb => cb.onchange = () => { rows[+cb.dataset.i].on = cb.checked; render(); });
   tb.querySelectorAll("button").forEach(b => b.onclick = () => { const f = b.dataset.n && files[`pos_${b.dataset.n}_${b.dataset.k}.wav`]; if (!f) return;
     const p = $("player"); if (p.src) URL.revokeObjectURL(p.src); p.src = URL.createObjectURL(f); p.play(); });
   const n = rows.filter(r => r.on).length; $("saveNote").textContent = T("checked")(n); }
 // drag a rectangle on the spectrogram: time and frequency both from the drag
 $("spec").onmousedown = e => { if (!D) return; const r = e.target.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; drag = { x0: (e.clientX - r.left) * dpr, y0: (e.clientY - r.top) * dpr }; drag.x1 = drag.x0; drag.y1 = drag.y0; };
-window.onmousemove = e => { if (!drag) return; const r = $("spec").getBoundingClientRect(), dpr = window.devicePixelRatio || 1; drag.x1 = (e.clientX - r.left) * dpr; drag.y1 = (e.clientY - r.top) * dpr; render(); };
+window.onmousemove = e => { if (!drag) return; const r = $("spec").getBoundingClientRect(), dpr = window.devicePixelRatio || 1; drag.x1 = (e.clientX - r.left) * dpr; drag.y1 = (e.clientY - r.top) * dpr; render(true); };
 window.onmouseup = () => { if (!drag) return; const d = drag; drag = null; const sp = $("spec"), [t0, t1] = view();
   if (Math.abs(d.x1 - d.x0) < 4 || Math.abs(d.y1 - d.y0) < 4) { render(); return; }
   const tOf = x => t0 + (t1 - t0) * x / sp.width, fOf = y => (sp.height - y) / sp.height * D.rate / 2;

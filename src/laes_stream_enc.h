@@ -159,7 +159,7 @@ inline std::string probeWav(const std::string& path, WavInfo& wi, long long* lae
         if (dl >= 40 && (d[24] | d[25] << 8 | d[26] << 16 | (uint32_t)d[27] << 24) >= 1 && !memcmp(d + 28, "LAE ", 4)) dsLae = le64(32); }
     while (pos + 8 <= in.n) { uint8_t c[8]; in.read(pos, c, 8); uint64_t n = c[4] | c[5] << 8 | c[6] << 16 | (uint64_t)c[7] << 24; const long long body = pos + 8;
         if (rf64 && n == 0xFFFFFFFFu) n = !memcmp(c, "data", 4) ? dsData : !memcmp(c, "LAE ", 4) ? dsLae : n;
-        if (!memcmp(c, "data", 4) && n >> 63) return path + ": the header gives a data length of 2^63 bytes or more: the file is damaged or not a valid RF64 file";   // as a signed length it would be negative (2026-11-14)
+        if (!memcmp(c, "data", 4) && n >> 63) return path + ": the header gives a data length of 2^63 bytes or more";   // as a signed length it would be negative (2026-11-14)
         if (n > (uint64_t)(in.n - body)) n = (uint64_t)(in.n - body);   // a length beyond the end of the file: read as a cut-off file; compared unsigned, so pos only moves forward
         if (!memcmp(c, "fmt ", 4) && n >= 16) { uint8_t f[26] = {0}; in.read(body, f, n >= 26 ? 26 : 16); tag = f[0] | f[1] << 8; ch = f[2] | f[3] << 8; wi.rate = (int)(f[4] | f[5] << 8 | f[6] << 16 | (uint32_t)f[7] << 24); wi.bits = f[14] | f[15] << 8; if (tag == 0xFFFE && n >= 26) tag = f[24] | f[25] << 8; }
         else if (!memcmp(c, "data", 4)) { wi.dataOff = body; wi.dataBytes = (long long)n; }

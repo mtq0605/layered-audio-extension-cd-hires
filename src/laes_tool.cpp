@@ -1041,6 +1041,15 @@ static int laesMain(int argc, char** argv) {
                         if (got.empty()) return 1; hit.clear(); for (long x : got) hit.push_back((size_t)x - 1); }
                     for (size_t j : hit) if (std::find(pick.begin(), pick.end(), j) == pick.end()) pick.push_back(j); if (b == std::string::npos) break; a = b + 1; } }
             fs::create_directories(argv[3]); const std::string d = std::string(argv[3]) + "\\";
+            {   // FU16-5 (2026-11-14): the WAVs' size against the free space, before anything is written (as enc does for its work folder)
+                uint64_t need = 0; for (size_t j : pick) { const uint64_t db = (uint64_t)ch[j].s.n * 2 * (uint64_t)(ch[j].s.bits / 8); need += 128 + db + (db & 1); }
+                std::error_code ec; const fs::space_info sp = fs::space(fs::absolute(fs::path(argv[3]), ec), ec);
+                if (!ec && need > sp.available) { const bool force = flag(argc, argv, "--force-disk");
+                    printf("the WAVs need about %.1f GB, %.1f GB free on that disk%s\n", need / 1073741824.0, sp.available / 1073741824.0, force ? "; --force-disk: running anyway" : "; nothing written (--force-disk runs anyway)");
+                    printf("%s%.1f%s%.1f%s\n", u8"  输出大约需要 ", need / 1073741824.0, u8" GB，这块磁盘剩 ", sp.available / 1073741824.0,
+                           force ? u8" GB；--force-disk：照样开始" : u8" GB；没有开始，也没有写任何文件（加 --force-disk 可以照样开始）");
+                    if (!force) return 2; } }
+            bool wroteAll = true;
             for (size_t j : pick) { const Choice& C = ch[j]; const Src& S = C.derived ? ch[(size_t)C.from].s : C.s; const int by = C.s.bits / 8; const long long n = C.s.n, db = n * 2 * by;
                 Pcm hdr; hdr.rate = C.s.rate; hdr.bits = C.s.bits; std::vector<uint8_t> h = wavBytes(hdr, nullptr); const uint32_t fmtLen = C.s.bits > 16 ? 40 : 16;
                 for (int i = 0; i < 4; i++) { h[4 + i] = (uint8_t)((uint32_t)(4 + 8 + fmtLen + 8 + db + (db & 1)) >> (8 * i)); h[h.size() - 4 + i] = (uint8_t)((uint32_t)db >> (8 * i)); }
@@ -1058,9 +1067,11 @@ static int laesMain(int argc, char** argv) {
                                 v = std::max<int64_t>(-32768, std::min<int64_t>(32767, (v + r1 - r2 + (1LL << (sft - 1))) >> sft)); }
                             const uint32_t u = (uint32_t)(int32_t)v; for (int k = 0; k < by; k++) b.push_back((uint8_t)(u >> (8 * k))); }
                         o.put(b.data(), b.size()); }
-                    if (db & 1) { const uint8_t z = 0; o.put(&z, 1); } o.close(); } catch (const std::exception&) { okw = false; }
-                all &= okw; printf("%s.wav: %d Hz %d-bit, %s\n", C.name.c_str(), C.s.rate, C.s.bits, C.what.c_str()); }
-            printf("written to %s\n", argv[3]); }
+                    if (db & 1) { const uint8_t z = 0; o.put(&z, 1); } o.close(); }
+                catch (const std::exception& x) {   // FU16-5: said, and the part written is removed (the file is closed: o is gone)
+                    okw = false; std::error_code ec; fs::remove(d + C.name + ".wav", ec); printf("%s.wav: FAILED, the file was removed: %s\n", C.name.c_str(), x.what()); }
+                all &= okw; wroteAll &= okw; if (okw) printf("%s.wav: %d Hz %d-bit, %s\n", C.name.c_str(), C.s.rate, C.s.bits, C.what.c_str()); }
+            if (wroteAll) printf("written to %s\n", argv[3]); else printf("not every file was written: see above (%s)\n", argv[3]); }
         else { std::vector<bool> used(dec.size(), false);   // each given file must equal one decoded master (the file order may differ from the command line)
             for (int i = 3; i < argc; i++) { if (argv[i][0] == '-') continue; laess::WavInfo wi; std::string re = laess::probeWav(argv[i], wi); int hit = -1;
                 for (size_t k = 0; k < dec.size() && hit < 0 && re.empty(); k++) { if (used[k] || wi.rate != dec[k].I.rate || wi.bits != dec[k].I.bits || wi.frames != dec[k].I.frames) continue;

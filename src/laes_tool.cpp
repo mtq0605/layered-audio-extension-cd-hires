@@ -74,6 +74,7 @@
 #include "laes_pick.h"   // the tick list for several masters that fit one --pick (2026-11-11)
 #ifdef _WIN32
 static const char* kLaeEnc = "lae_enc.exe"; static const char* kQ = "\"";   // cmd.exe needs the whole command line quoted once more
+static const char* kShellBad = "%\"";   // FU15-1: characters cmd.exe changes inside the quotes (%NAME% is expanded)
 #else   // POSIX names of the same calls
 #include <strings.h>
 #define _fseeki64 fseeko
@@ -82,6 +83,7 @@ static const char* kLaeEnc = "lae_enc.exe"; static const char* kQ = "\"";   // c
 #define _popen popen
 #define _pclose pclose
 static const char* kLaeEnc = "lae_enc"; static const char* kQ = "";
+static const char* kShellBad = "$`\"\\";   // FU15-1: characters sh still reads inside double quotes ($(...), `...`, ", \)
 #endif
 using namespace laes;
 namespace fs = std::filesystem;
@@ -151,6 +153,8 @@ static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::stri
     if (st == 0) { A.why = "LAEY's search needs a master at 2, 4 or 8 times the core master rate; give T by hand (master.wav@T)"; return A; }
     if (!fs::exists(enc)) { A.why = "lae_enc not found: " + enc + " (give --lae-enc=<path>)"; return A; }
     const std::string dummy = (fs::temp_directory_path() / "laes_align_unused.lae").string();   // cdcheck encodes nothing
+    for (const std::string* p : {&enc, &mPath, &cdPath, &dummy}) if (p->find_first_of(kShellBad) != std::string::npos) {   // FU15-1 (2026-11-14): the command goes through the shell
+        A.why = "the path " + *p + " has a character the shell would change (" + kShellBad + "), so lae_enc cannot be run for the search; rename it or give T by hand (master.wav@T)"; return A; }
     const std::string cl = std::string(kQ) + "\"" + enc + "\" \"" + mPath + "\" \"" + dummy + "\" 3 \"cd=" + cdPath + "\" cdcheck" + (m.bits == 32 ? " bits=24" : "") + kQ;
     FILE* pp = _popen(cl.c_str(), "r"); if (!pp) { A.why = "cannot run lae_enc"; return A; }
     const char* nm[2] = {"whitened", "plain"}; std::string sug, why[2]; double pooled[2] = {1, 1}; char ln[8192];

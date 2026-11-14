@@ -205,8 +205,11 @@ struct Decoder {
     std::string open(std::vector<int16_t>&& cdLayer, std::vector<uint8_t>&& chunk, const std::string& route, int outRate, int* code) {
         cdOwn.swap(cdLayer); laeOwn.swap(chunk); return openRef(cdOwn, laeOwn, route, outRate, code); }
     // as open(), but the caller keeps cd and lae alive and unchanged while this decoder is used
+    bool opened = false;   // FU21-2: one object, one open (a second open would keep the former file's streams and checkpoints in the lists)
     std::string openRef(const std::vector<int16_t>& cd, const std::vector<uint8_t>& lae, const std::string& route, int outRate, int* code) {
-        mode = route; auto fail = [&](int c, const char* m) { if (code) *code = c; return std::string(m); };
+        auto fail = [&](int c, const char* m) { if (code) *code = c; return std::string(m); };
+        if (opened) return fail(1, "internal error: this decoder was opened before (use a new one for every open)");   // as the Java Decoder since G8; every caller makes a new one
+        opened = true; mode = route;
         if (mode != "full" && mode != "16" && mode != "cd24") return fail(1, "route must be full, 16 or cd24");
         if (lae.empty()) return fail(1, "no LAE chunk: plain CD audio");
         if (lae.size() < 8) return fail(3, "corrupt LAE chunk");

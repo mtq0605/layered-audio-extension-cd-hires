@@ -21,7 +21,8 @@ import com.lae.core.LaeException;
  * memory rule pieceFor). The masters are read into a work folder next to the output (&lt;out&gt;.laes.tmp), their levels and layers are coded
  * piece by piece (StreamEnc), the file is written as &lt;out&gt;.part, read back (FLAC form: the APPLICATION blocks and the audio frames;
  * then every master decoded by the playback decoder Play and compared with its input), and only then renamed to &lt;out&gt;. On any failure
- * nothing is left behind (the .part file and the work folder are removed), as in the C++.
+ * nothing is left behind (the .part file and the work folder are removed), as in the C++; only when that last rename fails is the finished
+ * &lt;out&gt;.part kept (and named), and an existing &lt;out&gt; stays as it was (FU26-4).
  *
  * The file written does not depend on the memory budget (piece length), the thread count or the cancellation checks.
  * Not ported: master.wav@auto (LAEY's alignment search, laes_tool autoAlign / acceptAlign, which runs lae_enc cdcheck): Options.aligner is
@@ -214,6 +215,14 @@ public final class LaesEncoder {
         if (new File(wd + "/job.txt").exists()) { say(L, "the work folder " + wd + " is kept: run the same command again to continue (--disk-stop-remove: removed instead)");
             say(L, "  工作文件夹 " + wd + " 已保留：再运行同一条命令，就从停下的地方接着做（加 --disk-stop-remove 时改为删除）"); } }
     static void say(Listener l, String s) { if (l != null) l.message(s); }
+    // FU26-4: part becomes dst; an existing dst is given up only once part has taken its place. One rename where it may replace a file
+    // (Android, Linux); else (Windows) dst is first renamed to dst.laes-old and put back when the rename fails. false: dst as before, part kept.
+    static boolean replaceWith(File part, File dst) {
+        if (part.renameTo(dst)) return true;
+        if (!dst.isFile()) return false;
+        final File bak = new File(dst.getPath() + ".laes-old"); if (bak.exists() || !dst.renameTo(bak)) return false;
+        if (part.renameTo(dst)) { bak.delete(); return true; }
+        bak.renameTo(dst); return false; }
     static String gb(double v) { return CStd.f(v / 1073741824.0, 1); }
     // the job a work folder belongs to (port of laes_tool.cpp:main "enc", job): the arguments the files depend on and every master's size
     // and time; Java: from the options (the C++ takes the arguments except --timing, --disk-stop*, --force-disk, --mem and the tags)
@@ -427,7 +436,7 @@ public final class LaesEncoder {
         { final String why = selfCheckFile(out + ".part", pm, ctx, headF, names, mflags, menus);
           if (!why.isEmpty()) { new File(out + ".part").delete(); say(L, "self-check failed: " + why + "; nothing written"); return 2; } }
         stage(tlog, t0, "self-check");
-        { final File o = new File(out); o.delete(); if (!new File(out + ".part").renameTo(o)) { say(L, "cannot write " + out); return 2; } }
+        if (!replaceWith(new File(out + ".part"), new File(out))) { say(L, "cannot write " + out + "; the finished file is kept as " + out + ".part"); return 2; }
         final double secs = (double) coreFrames / base; final long fsz = new File(out).length();
         say(L, out + ": " + (asFlac ? "FLAC" : "WAV") + " form, core master " + base + " Hz " + coreBitsW + "-bit, " + pm.size() + " master(s), LAES block " + CStd.f(bodySize * 8 / secs / 1000, 1)
                + " kb/s (file " + CStd.f((double) fsz / 1e6, 1) + " MB, " + CStd.f((double) fsz * 8 / secs / 1000, 1) + " kb/s)");

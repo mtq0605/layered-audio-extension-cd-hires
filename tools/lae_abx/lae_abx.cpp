@@ -261,7 +261,7 @@ static HANDLE decodeJob() { static HANDLE job = []() { HANDLE h = CreateJobObjec
 static bool startDecode(const std::wstring& dir, const std::wstring& src, const std::string& pick, Job& j, std::string& err) {
     SECURITY_ATTRIBUTES sa{ sizeof sa, nullptr, TRUE }; HANDLE log = CreateFileW(j.log.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS, 0, nullptr);
     STARTUPINFOW si{ sizeof si }; si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE; si.hStdOutput = log; si.hStdError = log; si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    PROCESS_INFORMATION pi{}; std::wstring c = L"\"" + dir + L"\\lae_udec.exe\" dec \"" + src + L"\" \"" + j.out + L"\" --pick=" + widen(pick);
+    PROCESS_INFORMATION pi{}; std::wstring c = L"\"" + dir + L"\\lae_udec.exe\" dec \"" + src + L"\" \"" + j.out + L"\" \"--pick=" + widen(pick) + L"\"";   // quoted: a master name may hold spaces (FU20-13)
     const BOOL ok = CreateProcessW(nullptr, &c[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi); if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
     if (!ok) { err = "cannot start lae_udec.exe"; return false; }
     if (decodeJob()) AssignProcessToJobObject(decodeJob(), pi.hProcess);   // FU20-12: the decoders end with this program
@@ -435,8 +435,8 @@ static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
         case ID_PA: playButton(0); return 0; case ID_PB: playButton(1); return 0; case ID_PX: playButton(2); return 0; case ID_PY: playButton(3); return 0;
         case ID_STOP: gPlayer.pause(); return 0;
         case ID_XA: choose(true); return 0; case ID_XB: choose(false); return 0;
-        case ID_SETSTART: if (gReady) { gPlayer.from = std::min<long long>(gPlayer.pos, gPlayer.to - gTest.rate / 2); updateRange(); } return 0;
-        case ID_SETEND: if (gReady) { gPlayer.to = std::max<long long>(gPlayer.pos, gPlayer.from + gTest.rate / 2); updateRange(); } return 0;
+        case ID_SETSTART: if (gReady) { gPlayer.from = std::max<long long>(0, std::min<long long>(gPlayer.pos, gPlayer.to - gTest.rate / 2)); updateRange(); } return 0;   // kept inside 0..len (FU20-13: a piece shorter than 0.5 s)
+        case ID_SETEND: if (gReady) { gPlayer.to = std::min<long long>(gPlayer.len, std::max<long long>(gPlayer.pos, gPlayer.from + gTest.rate / 2)); updateRange(); } return 0;
         case ID_RESET: if (gReady) { gPlayer.from = 0; gPlayer.to = gPlayer.len; updateRange(); } return 0; } break;
     case WM_HSCROLL: if ((HWND)lp == gPos && gReady) { const long long v = SendMessageW(gPos, TBM_GETPOS, 0, 0); gPlayer.pos = gPlayer.len * v / 1000; } return 0;
     case WM_TIMER: if (gReady) { SendMessageW(gPos, TBM_SETPOS, TRUE, (LPARAM)(gPlayer.len ? gPlayer.pos * 1000 / gPlayer.len : 0)); } return 0;
@@ -458,16 +458,17 @@ static HWND mk(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int 
 
 // ---------------------------------------------------------------- command-line preparation (checks)
 static int cliPrepare(int idx, int rate, const std::wstring& outDir) {
+    if (rate != 48000 && rate != 44100) { printf("the test rate must be 48000 or 44100\n"); return 1; }
     gSet = readSet(exeDir()); if (idx < 1 || idx > (int)gSet.size()) { printf("pair %d not in abx_set.txt (%zu pairs)\n", idx, gSet.size()); return 1; }
     CoInitializeEx(nullptr, COINIT_MULTITHREADED); MFStartup(MF_VERSION); Source s[2]; long long lag = 0; std::string err;
     const bool ok = preparePairSafe(gSet[(size_t)idx - 1], rate, s, lag, err, [](const std::string& m, double f) { static int last = -1; const int pct = f >= 0 ? (int)(f * 100) : last; if (pct != last) { last = pct; printf("  %3d %%  %s\n", pct, m.c_str()); } });
     MFShutdown(); removeWorkDir(); if (!ok) { printf("failed: %s\n", err.c_str()); return 1; }
     CreateDirectoryW(outDir.c_str(), nullptr);
-    for (int i = 0; i < 2; i++) { const std::wstring p = outDir + (i ? L"\\B.wav" : L"\\A.wav"); FILE* f = _wfopen(p.c_str(), L"wb"); const uint32_t n = (uint32_t)s[i].L.size(), bytes = n * 8;
+    for (int i = 0; i < 2; i++) { const std::wstring p = outDir + (i ? L"\\B.wav" : L"\\A.wav"); FILE* f = _wfopen(p.c_str(), L"wb"); if (!f) { printf("cannot write %s\n", narrow(p).c_str()); return 1; } const uint32_t n = (uint32_t)s[i].L.size(), bytes = n * 8;
         fwrite("RIFF", 1, 4, f); uint32_t v = 36 + bytes; fwrite(&v, 4, 1, f); fwrite("WAVEfmt ", 1, 8, f); v = 16; fwrite(&v, 4, 1, f); uint16_t t = 3, c = 2; fwrite(&t, 2, 1, f); fwrite(&c, 2, 1, f);
         v = (uint32_t)rate; fwrite(&v, 4, 1, f); v = (uint32_t)rate * 8; fwrite(&v, 4, 1, f); t = 8; fwrite(&t, 2, 1, f); t = 32; fwrite(&t, 2, 1, f); fwrite("data", 1, 4, f); fwrite(&bytes, 4, 1, f);
-        for (uint32_t k = 0; k < n; k++) { fwrite(&s[i].L[k], 4, 1, f); fwrite(&s[i].R[k], 4, 1, f); } fclose(f); }
-    FILE* f = _wfopen((outDir + L"\\prepare.txt").c_str(), L"wb"); fprintf(f, "pair: %s\nrate: %d\nlag of B: %lld\nframes: %zu\nA: %s sha256 %s\nB: %s sha256 %s\n", gSet[(size_t)idx - 1].name.c_str(), rate, lag, s[0].L.size(), s[0].name.c_str(), s[0].sha.c_str(), s[1].name.c_str(), s[1].sha.c_str()); fclose(f);
+        for (uint32_t k = 0; k < n; k++) { fwrite(&s[i].L[k], 4, 1, f); fwrite(&s[i].R[k], 4, 1, f); } const bool wbad = ferror(f) != 0; if (fclose(f) != 0 || wbad) { printf("cannot write %s\n", narrow(p).c_str()); return 1; } }
+    FILE* f = _wfopen((outDir + L"\\prepare.txt").c_str(), L"wb"); if (!f) { printf("cannot write prepare.txt in the out folder\n"); return 1; } fprintf(f, "pair: %s\nrate: %d\nlag of B: %lld\nframes: %zu\nA: %s sha256 %s\nB: %s sha256 %s\n", gSet[(size_t)idx - 1].name.c_str(), rate, lag, s[0].L.size(), s[0].name.c_str(), s[0].sha.c_str(), s[1].name.c_str(), s[1].sha.c_str()); fclose(f);
     printf("prepared: lag %lld, %zu frames at %d Hz\n", lag, s[0].L.size(), rate); return 0; }
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {

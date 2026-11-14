@@ -14,7 +14,7 @@ import com.lae.core.U;
  * Port of src/laes_file.h (namespace laes), decoder side: LAES file format and decoder. The field table below is payload version 1;
  * version 2 (spec/lossless/SPEC.md, Section 6, the normative description) adds: up to 255 masters; header byte 56 = the default master
  * (0 = the core master), byte 57 = the core master's flags (bit 0: no derived version); in each master record a name length, flags and
- * a menu position, and the names after the records (FU27-2). An LAES WAV file is an
+ * a menu position (record bytes 5, 6, 7), each name right after its record, before its layers (FU27-2). An LAES WAV file is an
  * LAE file whose "LAE " chunk carries an LAES payload:
  *   RIFF/WAVE: "fmt " (PCM, 2 ch, base rate, 16 bit) | "data" = the core master (can be CD-compatible: 44.1 kHz or 48 kHz, 16 bit) | "LAE " = payload + CRC-32
  *

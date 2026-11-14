@@ -138,8 +138,11 @@ static Pcm deriveCore(const std::vector<MasterIn>& ms, int base, int coreBits, s
             else { const double u1 = r.uni(), u2 = r.uni(); v = (int64_t)std::floor((double)x[i] / std::ldexp(1.0, drop) + u1 + u2 + 0.5); }   // TPDF dither; u1 first (the order is fixed: SPEC 11.1)
             core.c[c][i] = std::max(mn, std::min(mx, v)); } }   // a base level beyond full scale is limited; the layers keep the difference
     return core; }
-// T (base samples, decimal) -> whole + fraction in 2^-32 base samples
-static void setT(MasterIn& m, double T) { m.whole = (int64_t)std::floor(T); m.frac = (uint32_t)std::llround((T - std::floor(T)) * 4294967296.0); if (m.frac == 0 && T != std::floor(T)) m.whole += 1; }
+// T (base samples, decimal) -> whole + fraction in 2^-32 base samples. DEC 14 (2026-11-15): the whole part goes up by one only when the
+// fraction really rounds up to a whole (llround(fraction x 2^32) = 2^32); before, also when it rounded down to 0 (T = 0.00000000001 gave 1)
+static void splitT(double T, int64_t& whole, uint32_t& frac) { whole = (int64_t)std::floor(T); const long long q = std::llround((T - std::floor(T)) * 4294967296.0);
+    if (q >= 4294967296LL) { whole += 1; frac = 0; } else frac = (uint32_t)q; }
+static void setT(MasterIn& m, double T) { splitT(T, m.whole, m.frac); }
 // FU15-3 (2026-11-14): "<master>[@T]" of enc / add. The text after the last @ is T only when all of it is a finite decimal number
 // below 2^40 base samples (or "auto" for enc); otherwise the whole argument is the file name when that file exists (a name with
 // an @), else it is refused with the reason. Before, atof took any text: "m.wav@0,37" or "m.wav@abc" gave T = 0 without a word.
@@ -205,7 +208,7 @@ static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::stri
     // own check: the master's base level against the core moved by T, worst of three blocks (head / middle / tail, up to 5 s each)
     const int w = m.w, up = (m.bits - 16) - w; std::unique_ptr<laess::Sig> base[2] = {laess::levelOf(m, 0, 0), laess::levelOf(m, 1, 0)};   // the base level (samples >> w)
     const int64_t nb = base[0]->n, bl = std::max<int64_t>(1, std::min<int64_t>(nb / 3, 5 * (int64_t)cd.rate)), b0[3] = {0, (nb - bl) / 2, nb - bl};
-    int64_t wh = (int64_t)std::floor(A.T); uint32_t fr = (uint32_t)std::llround((A.T - std::floor(A.T)) * 4294967296.0); if (fr == 0 && A.T != std::floor(A.T)) wh++;
+    int64_t wh = 0; uint32_t fr = 0; splitT(A.T, wh, fr);   // DEC 14: the same rule as setT
     const auto h = refTaps(fr); A.resid = -200;
     for (int b = 0; b < 3; b++) { double eb = 0, er = 0; for (int c = 0; c < 2; c++) { const int64_t n = (int64_t)cd.c[c].size(); V bv((size_t)bl); base[c]->get(b0[b], b0[b] + bl, bv.data());
             for (int64_t i = b0[b]; i < b0[b] + bl; i++) { Acc a; for (int q = -127; q <= 128; q++) a.mac(h[q + 127], cd.c[c][mir(i + wh + q, n)]); const int s = 31 - up;

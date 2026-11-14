@@ -1044,7 +1044,7 @@ static int laesMain(int argc, char** argv) {
                         const std::vector<long> got = laespick::tick(tl, it, "e.g. " + std::to_string(it.front().no) + "," + std::to_string(it.back().no) + " or " + std::to_string(it.front().no) + "-" + std::to_string(it.back().no));
                         if (got.empty()) return 1; hit.clear(); for (long x : got) hit.push_back((size_t)x - 1); }
                     for (size_t j : hit) if (std::find(pick.begin(), pick.end(), j) == pick.end()) pick.push_back(j); if (b == std::string::npos) break; a = b + 1; } }
-            fs::create_directories(argv[3]); const std::string d = std::string(argv[3]) + "\\";
+            fs::create_directories(argv[3]); const fs::path d = fs::path(argv[3]);   // FU16-6: joined with /, a "\\" was part of the name on Linux
             {   // FU16-5 (2026-11-14): the WAVs' size against the free space, before anything is written (as enc does for its work folder)
                 uint64_t need = 0; for (size_t j : pick) { const uint64_t db = (uint64_t)ch[j].s.n * 2 * (uint64_t)(ch[j].s.bits / 8); need += 128 + db + (db & 1); }
                 std::error_code ec; const fs::space_info sp = fs::space(fs::absolute(fs::path(argv[3]), ec), ec);
@@ -1063,7 +1063,7 @@ static int laesMain(int argc, char** argv) {
                     auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; i++) r.push_back((uint8_t)(v >> (8 * i))); };
                     u64((uint64_t)(riff + 36)); u64((uint64_t)db); u64((uint64_t)n); r.insert(r.end(), {0, 0, 0, 0});
                     r.insert(r.end(), h.begin() + 12, h.end()); for (size_t i = r.size() - 4; i < r.size(); i++) r[i] = 0xFF; h.swap(r); }   // the data size: in ds64
-                bool okw = true; try { laess::Out o(d + C.name + ".wav"); o.put(h.data(), h.size()); V x0, x1; std::vector<uint8_t> b; const long long P = 1 << 18;
+                bool okw = true; try { laess::Out o((d / (C.name + ".wav")).string()); o.put(h.data(), h.size()); V x0, x1; std::vector<uint8_t> b; const long long P = 1 << 18;
                     uint64_t stc[2] = {20261029ull + 0x9E3779B97F4A7C15ull * 1, 20261029ull + 0x9E3779B97F4A7C15ull * 2}; const int sft = C.derived ? S.bits - 16 : 0;   // derive16: one stream per channel
                     for (long long a = 0; a < n; a += P) { const long long e = std::min(n, a + P); readSrc(S, 0, a, e, x0); readSrc(S, 1, a, e, x1); b.clear();
                         for (long long i = a; i < e; i++) for (int c = 0; c < 2; c++) { int64_t v = (c ? x1 : x0)[(size_t)(i - a)];
@@ -1073,7 +1073,7 @@ static int laesMain(int argc, char** argv) {
                         o.put(b.data(), b.size()); }
                     if (db & 1) { const uint8_t z = 0; o.put(&z, 1); } o.close(); }
                 catch (const std::exception& x) {   // FU16-5: said, and the part written is removed (the file is closed: o is gone)
-                    okw = false; std::error_code ec; fs::remove(d + C.name + ".wav", ec); printf("%s.wav: FAILED, the file was removed: %s\n", C.name.c_str(), x.what()); }
+                    okw = false; std::error_code ec; fs::remove((d / (C.name + ".wav")).string(), ec); printf("%s.wav: FAILED, the file was removed: %s\n", C.name.c_str(), x.what()); }
                 all &= okw; wroteAll &= okw; if (okw) printf("%s.wav: %d Hz %d-bit, %s\n", C.name.c_str(), C.s.rate, C.s.bits, C.what.c_str()); }
             if (wroteAll) printf("written to %s\n", argv[3]); else printf("not every file was written: see above (%s)\n", argv[3]); }
         else { std::vector<bool> used(dec.size(), false);   // each given file must equal one decoded master (the file order may differ from the command line)

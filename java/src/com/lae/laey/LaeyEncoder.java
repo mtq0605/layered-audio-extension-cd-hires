@@ -25,7 +25,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@link EncodeException}; the app asks the user and passes the option.
  */
 public final class LaeyEncoder {
-    /** the C++ commit this port reproduces, and the port's part */
+    /** the C++ commit this port reproduces, and the port's part. It is part of the resume key of the work folder: bump it (the part after
+     *  "java-") whenever the format or the meaning of the intermediate files in the work folder changes, so that a resume never continues
+     *  from files an older build wrote (decision 36, 2026-11-15). */
     public static final String VERSION = "1d96a60/java-1";
 
     /** options = the command line of lae_enc (see lae_enc.cpp) */

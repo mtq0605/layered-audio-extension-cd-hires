@@ -201,7 +201,8 @@ public final class LaesEncoder {
     static String workDir(String out) { return workDir(out + ".laes.tmp", "", null); }
     /** the work folder of an encode (Options.workDir, or &lt;out&gt;.laes.tmp) */
     public static String workDirOf(Options o) { return o.workDir != null ? o.workDir : o.out + ".laes.tmp"; }
-    /** the version in job.txt: a work folder made by another version of this encoder is not used again */
+    /** the version in job.txt: a work folder made by another version of this encoder is not used again. Change it whenever the format or
+     *  the meaning of the intermediate files in the work folder changes (decision 36, 2026-11-15). */
     public static final String JOB_VERSION = "java 2026-11-06 (laes_tool 77dc9ef)";
     // std::filesystem::remove_all (errors ignored, as with the error_code overload): only ever called on a laes work folder (it holds "laes.tmp")
     static void removeAll(File f) { if (!f.exists()) return; if (f.isDirectory()) { final File[] k = f.listFiles(); if (k != null) for (File c : k) removeAll(c); } f.delete(); }

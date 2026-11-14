@@ -255,8 +255,8 @@ vlc_module_begin()
     set_callbacks(Open, Close)
     add_shortcut("lae", "flac")   // "flac": VLC tries the module named for a file's extension first; this one turns plain FLAC down at once
     add_integer("lae-layers", 0, LT("LAEY layers", "LAEY 层"), LT("Layers decoded from LAEY files", "LAEY 文件解码的层"), false)
+        change_integer_list(kLayers, kLayersText)   // VLC attaches a list to the setting just before it
     add_integer("lae-pack", 0, LT("LAEY extension pack", "LAEY 扩展包"), LT("Extension pack played from LAEY files with several packs (0 = the first)", "有多个扩展包的 LAEY 文件播放哪个扩展包（0 = 第一个）"), false)
-        change_integer_list(kLayers, kLayersText)
     add_integer("lae-maxrate", 0, LT("Maximum sample rate", "最高采样率"), LT("Highest sample rate decoded", "解码的最高采样率"), false)
         change_integer_list(kRates, kRatesText)
     add_integer("lae-maxbits", 0, LT("LAES maximum bit depth", "LAES 最高位深"), LT("Highest bit depth of the LAES version played", "播放的 LAES 版本的最高位深"), false)

@@ -26,7 +26,7 @@ public final class LaesTool {
 
     // port of laes_tool.cpp:main  (args = the C++ argv[1..])
     public static int run(String[] args) {
-        if (args.length < 1) { System.out.println("laes enc | dec | verify | align | selftest | excerpt | mkcd  (see the source header)"); return 1; }
+        if (args.length < 1) { System.out.println("laes enc | dec | verify  (see the source header; the other commands of the C++ laes are not in this port)"); return 1; }
         final String cmd = args[0];
         if (cmd.equals("enc") && args.length >= 3) {
             final LaesEncoder.Options o = LaesEncoder.Options.fromArgs(args);

@@ -117,9 +117,10 @@ public final class Lift {
         final Object dm = new Object(); final int[] pending = {0}; final int helpers = Math.min(threads, nc) - 1;
         for (int k = 0; k < helpers; k++) { synchronized (dm) { pending[0]++; }
             Pool.get().push(new Runnable() { public void run() { try { work.run(); } finally { synchronized (dm) { if (--pending[0] == 0) dm.notifyAll(); } } } }); }
-        work.run();
+        work.run(); boolean intr = false;   // FU28-5 (as FU25-6): an interruption is set again after the wait, not inside it (wait(1) threw again at once: a busy loop)
         for (;;) { synchronized (dm) { if (pending[0] == 0) break; }
-            if (!Pool.get().runOne()) { synchronized (dm) { if (pending[0] != 0) { try { dm.wait(1); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } } } } }
+            if (!Pool.get().runOne()) { synchronized (dm) { if (pending[0] != 0) { try { dm.wait(1); } catch (InterruptedException e) { intr = true; } } } } }
+        if (intr) Thread.currentThread().interrupt();
         synchronized (dm) { for (Throwable x : xs) if (x != null) throw rethrow(x); }
     }
     // port of laes_lift.h:defaultThreads

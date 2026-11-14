@@ -39,12 +39,12 @@ lae_noise spectro master.wav spectro.json
 lae_noise preview master.wav candidates.laenoise previews
 ```
 
-对于每个候选，向 `previews` 写入三个文件：`pos_NNN_original.wav`（该时段原样）、`pos_NNN_silenced.wav`（该时段中属于该候选的格子已静音）和 `pos_NNN_marked.wav`（仅包含将被静音的内容）。每个试听片段最多覆盖该时段的前 10 s，两侧各附 1 s 上下文。写入同一文件夹的 `preview_check.txt` 确认这些格子以外的内容均未改变。`lae_noise preview-all master.wav <file.laenoise> <folder> <t0 s> <t1 s>` 写出一个所有位置同时静音的片段（`all_original.wav`、`all_silenced.wav`、`all_marked.wav`），并进行相同的核对。
+对于每个候选，向 `previews` 写入三个文件：`pos_NNN_original.wav`（该时段原样）、`pos_NNN_silenced.wav`（该时段中属于该候选的格子已静音）和 `pos_NNN_marked.wav`（仅包含将被静音的内容）。每个试听片段最多覆盖该时段的前 10 s，两侧各附 1 s 上下文。写入同一文件夹的 `preview_check.txt` 确认这些格子以外的内容均未改变。自 2026-11-14 起，`lae_noise preview` 还写出 `preview_list.txt`：其中有母带的 SHA-256、长度和采样率，以及每个 `pos_NNN` 按标定文件写法给出的格子矩形（只有几何信息；编码器不读它）。`lae_noise preview-all master.wav <file.laenoise> <folder> <t0 s> <t1 s>` 写出一个所有位置同时静音的片段（`all_original.wav`、`all_silenced.wav`、`all_marked.wav`），并进行相同的核对。
 
 **3. 在面板中选择。** 打开 `noise_panel.html`，载入 `spectro.json`、`candidates.laenoise` 和 `previews` 文件夹。
 - 所有候选初始均为未勾选状态；勾选需要去除的候选。
 - 如需手动添加区域，可在频谱图上拖出一个矩形，或输入时间和频率。该区域向内吸附到完整的格子。
-- 使用每一行中的三个按钮试听各试听片段。面板按 `preview_check.txt` 把每个试听片段对应到矩形相同的行；没有对应片段的行，按钮是灰的。手动添加的区域：先保存，对保存的文件运行 `lae_noise preview`，再载入那个文件夹。属于另一个母带的试听文件夹，或没有 `preview_check.txt` 的文件夹，不能试听，面板会说明原因。
+- 使用每一行中的三个按钮试听各试听片段。有 `preview_list.txt` 时，面板按 SHA-256、长度和采样率核对母带，并给每一行矩形完全相同的试听片段。旧版 `lae_noise` 写出的文件夹只有 `preview_check.txt`，这时面板按文件名核对母带，按四舍五入后的时间和频率对应矩形。没有对应片段的行，按钮是灰的。手动添加的区域：先保存，对保存的文件运行 `lae_noise preview`，再载入那个文件夹。属于另一个母带的试听文件夹，或两个文件都没有的文件夹，不能试听，面板会说明原因。
 - **保存标定文件** 仅写入已勾选的位置，例如保存为 `master.laenoise`。
 
 面板从不处理声音；它仅播放试听文件。

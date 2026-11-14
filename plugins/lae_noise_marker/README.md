@@ -53,17 +53,21 @@ lae_noise preview master.wav candidates.laenoise previews
 For every candidate, three files are written to `previews`: `pos_NNN_original.wav` (the span unchanged), `pos_NNN_silenced.wav`
 (the span with the cells of that candidate silenced) and `pos_NNN_marked.wav` (only the content that would be silenced). Each preview
 covers at most the first 10 s of the span, with 1 s of context on each side. `preview_check.txt`, written to the same folder,
-confirms that nothing outside those cells is changed. `lae_noise preview-all master.wav <file.laenoise> <folder> <t0 s> <t1 s>` writes
+confirms that nothing outside those cells is changed. Since 2026-11-14, `lae_noise preview` also writes `preview_list.txt`: the
+master's SHA-256, length and sample rate, and for each `pos_NNN` its rectangle in cells as in the marking file (geometry only; the
+encoder does not read it). `lae_noise preview-all master.wav <file.laenoise> <folder> <t0 s> <t1 s>` writes
 one excerpt with every position silenced together (`all_original.wav`, `all_silenced.wav`, `all_marked.wav`), with the same check.
 
 **3. Select in the panel.** Open `noise_panel.html` and load `spectro.json`, `candidates.laenoise` and the `previews` folder.
 - Every candidate is initially unchecked; check those to be removed.
 - To add a region manually, drag a rectangle on the spectrogram or enter the times and frequencies. The region snaps inward to
   whole cells.
-- Use the three buttons in each row to listen to the previews. The panel matches each preview to the row with the same rectangle,
-  using `preview_check.txt`; a row without a matching preview has its buttons greyed out. For a region added by hand, save first,
-  run `lae_noise preview` on the saved file and load that folder. A preview folder of another master, or one without
-  `preview_check.txt`, plays nothing, and the panel says why.
+- Use the three buttons in each row to listen to the previews. With `preview_list.txt`, the panel checks the master by its SHA-256,
+  length and sample rate and gives each row the preview of exactly its rectangle. A folder written by an older `lae_noise` has only
+  `preview_check.txt`; the panel then matches the master by its file name and each preview by its rectangle in rounded times and
+  frequencies. A row without a matching preview has its buttons greyed out. For a region added by hand, save first, run
+  `lae_noise preview` on the saved file and load that folder. A preview folder of another master, or one with neither file, plays
+  nothing, and the panel says why.
 - **Save marking file** writes only the checked positions, for example as `master.laenoise`.
 
 The panel never processes sound; it only plays the preview files.

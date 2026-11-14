@@ -503,7 +503,9 @@ public final class StreamEnc {
                     if (b != B.bits) return "internal error: a candidate coded again differs in size"; }   // its files were removed in the other order
                 if (kept != null && !restored) { final Cand B = cs.get(best); final StateW w = new StateW(); w.i(best); w.i(B.storage == 1 ? 0 : B.whole); w.i(B.storage == 1 ? 0 : (B.frac & 0xFFFFFFFFL)); w.d(B.bits);
                     w.str(B.e[0]); w.i(sizeOrMinus(B.e[0])); w.str(B.e[1]); w.i(sizeOrMinus(B.e[1])); putState(stP, w.s.toString()); }
-                final Cand B = cs.get(best); I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? 0 : B.whole; I.frac = B.storage == 1 ? 0 : B.frac; I.layerBits = B.bits;
+                // DEC 15 (2026-11-15, as laes_stream_enc.h): a master stored in full keeps its own T (relative to the core master, its tier 0) in the
+                // record; decoders do not use it (Section 6.6), but laes add / extract read it, so a master referring to it keeps its T relative to the core master
+                final Cand B = cs.get(best); I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? sel.get(mi).whole : B.whole; I.frac = B.storage == 1 ? sel.get(mi).frac : B.frac; I.layerBits = B.bits;
                 I.name = sel.get(mi).name; I.flags = sel.get(mi).flags; I.menu = sel.get(mi).menu; final byte[] nb = LaesFile.nameBytes(I.name);
                 o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? nb.length : 0, 1); o.u(ver == 2 ? I.flags : 0, 1); o.u(ver == 2 ? I.menu : 0, 1); o.u(I.rate, 4); o.u(0, 4); o.u(I.frames, 8);
                 o.u(I.whole, 8); o.u(I.frac & 0xFFFFFFFFL, 4); o.u(0, 4); o.put(I.sha, 0, 32); if (ver == 2) o.put(nb, 0, nb.length);

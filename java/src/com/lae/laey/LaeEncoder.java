@@ -228,7 +228,10 @@ public final class LaeEncoder {
         final WavIn.Info wi = x.wi;
         if (x.rawRate > 0) { final long rb = fileSize(argv[1]); if (rb < 8) { env.printf("rawin=: the aligned master is missing\n"); return 2; }   // internal: an aligned master of this run (stereo int32, 24 bit left-aligned)
             wi.rate = x.rawRate; wi.ch = 2; wi.bits = 24; wi.dataBytes = rb / 8 * 6; }
-        else if (!(WavIn.probe(argv[1], wi) && wi.ch == 2)) { env.printf("need a stereo integer PCM WAV\n"); x.oldNote(); return 1; }
+        else if (!(WavIn.probe(argv[1], wi) && wi.ch == 2)) {
+            if (wi.badLen) env.printf("the header of %s gives a data length of 2^63 bytes or more: the file is damaged or not a valid %s file; nothing encoded\n", argv[1], wi.kind);
+            else env.printf("need a stereo integer PCM WAV\n");
+            x.oldNote(); return 1; }
         x.rate = wi.rate; x.bits = wi.bits; final int wrate = wi.rate;
         String note32 = "";
         if (x.bits == 32) {   // LAE v5 carries at most 24 bit: say what reducing the master would drop, then end or continue as the user chooses

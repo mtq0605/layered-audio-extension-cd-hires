@@ -18,7 +18,8 @@ final class WavIn {
     private WavIn() {}
 
     /** port of wav_in.h:Info */
-    static final class Info { int rate = 0, ch = 0, bits = 0, fmt = 0; long dataOff = -1, dataBytes = 0; String kind = ""; }
+    static final class Info { int rate = 0, ch = 0, bits = 0, fmt = 0; long dataOff = -1, dataBytes = 0; String kind = "";
+        boolean badLen = false; }   // the header gives a data length of 2^63 bytes or more (RF64 / W64): no file has that; probe() refuses it
 
     // port of wav_in.h:le32 (uint32 as a non-negative long)
     static long le32(byte[] b, int o) { return (b[o] & 0xFFL) | (b[o + 1] & 0xFFL) << 8 | (b[o + 2] & 0xFFL) << 16 | (b[o + 3] & 0xFFL) << 24; }
@@ -49,18 +50,20 @@ final class WavIn {
                 while (p + 8 <= sz) { byte[] c = new byte[8]; if (!at(f, sz, p, c, 8)) break; long n = le32(c, 4); final long body = p + 8;
                     if (rf64 && eq(c, 0, "ds64")) { byte[] d = new byte[24]; if (n >= 24 && at(f, sz, body, d, 24)) ds64Data = le64(d, 8); }
                     if (rf64 && eq(c, 0, "data") && n == 0xFFFFFFFFL) n = ds64Data;
-                    if (n > sz - body) n = sz - body;   // a truncated last chunk is tolerated (as wavio::read); the C++ compares (long long)n, as here
+                    if (eq(c, 0, "data") && n < 0) { in.badLen = true; break; }   // 2^63 or more: as a signed length it would be negative (2026-11-14)
+                    if (com.lae.core.U.gt(n, sz - body)) n = sz - body;   // a truncated last chunk is tolerated (as wavio::read); compared unsigned, so p only moves forward
                     if (eq(c, 0, "fmt ")) { if (!fmtChunk(f, sz, body, n, in)) break; haveFmt = true; }
                     else if (eq(c, 0, "data")) { in.dataOff = body; in.dataBytes = n; }
                     p = body + n + (n & 1); }
-                ok = haveFmt && in.dataOff >= 0; }
+                ok = haveFmt && in.dataOff >= 0 && !in.badLen; }
             else if (sz >= 40 && at(f, sz, 0, h, 40)) {   // Wave64: GUID chunks, 64-bit sizes that include the 24-byte chunk header, 8-byte alignment
                 if (eq(h, 0, RIFF64) && eq(h, 24, "wave") && eq(h, 28, TAIL64)) { in.kind = "W64"; boolean haveFmt = false; long p = 40;
                     while (p + 24 <= sz) { byte[] c = new byte[24]; if (!at(f, sz, p, c, 24)) break; long n = le64(c, 16); if (U64.lt(n, 24)) break; final long body = p + 24; long len = n - 24;
-                        if (len > sz - body) len = sz - body;
+                        if (eq(c, 4, TAIL64) && eq(c, 0, "data") && len < 0) { in.badLen = true; break; }
+                        if (com.lae.core.U.gt(len, sz - body)) len = sz - body;
                         if (eq(c, 4, TAIL64)) { if (eq(c, 0, "fmt ")) { if (!fmtChunk(f, sz, body, len, in)) break; haveFmt = true; } else if (eq(c, 0, "data")) { in.dataOff = body; in.dataBytes = len; } }
                         p = body + ((len + 7) & ~7L); }
-                    ok = haveFmt && in.dataOff >= 0; } }
+                    ok = haveFmt && in.dataOff >= 0 && !in.badLen; } }
             return ok && in.fmt == 1 && (in.bits == 16 || in.bits == 24 || in.bits == 32); }
         finally { EncIo.close(f); } }
 
@@ -71,6 +74,7 @@ final class WavIn {
     // writes the raw stereo int32 file; frames = whole stereo frames; low8 = 32-bit samples with a non-zero lowest byte; md5 of the data bytes
     // (out[0] = frames, out[1] = low8; the MD5 text is returned)
     static String toRaw(EncEnv env, String path, Info in, String out, long[] res) {
+        if (in.dataBytes < 0 || in.dataOff < 0) throw EncIo.fail("internal error: data length of " + path);   // never sized from a negative length
         RandomAccessFile f = EncIo.open(path, "rb"); BlkIo.Writer w = null;
         try { final int bps = in.bits / 8; final long n = in.dataBytes / bps; res[0] = n / 2; res[1] = 0; MessageDigest m = md5();
             w = new BlkIo.Writer(env, out); byte[] b = new byte[0]; int[] s = new int[0]; final long BS = 1L << 18;   // frames per piece

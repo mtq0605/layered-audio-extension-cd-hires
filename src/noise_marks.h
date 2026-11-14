@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 #include "mdct_tb.h"
 #include "noise_io.h"
 #include "laes_file.h"   // laes::Sha256
@@ -32,6 +34,9 @@ inline void snapTime(double t0, double t1, double rate, long K, long& m0, long& 
 inline void snapFreq(double f0, double f1, double rate, int& c0, int& c1) {
     c0 = std::max(0, (int)ceil(f0 / colHz(1, rate) - 1e-9)); c1 = std::min(NCOL, (int)floor(f1 / colHz(1, rate) + 1e-9)); }
 
+// FU17-2 / FU17-6 (2026-11-14): true when path b names the same existing file as path a (any spelling): an output that is the master
+// itself is refused before it is opened for writing ("wb" would empty the master while it is being read)
+inline bool sameFile(const char* a, const char* b) { std::error_code ec; const bool eq = std::filesystem::equivalent(std::filesystem::path(a), std::filesystem::path(b), ec); return eq && !ec; }
 inline bool writeMarks(const char* path, const Marks& mk) {
     FILE* f = fopen(path, "wb"); if (!f) return false;   // "wb": LF line ends on every platform, so the file is the same everywhere
     fprintf(f, "LAENOISE 1\nmaster sha256 %s frames %lld rate %.0f\n", mk.sha.c_str(), mk.frames, mk.rate);
@@ -39,7 +44,7 @@ inline bool writeMarks(const char* path, const Marks& mk) {
     for (size_t i = 0; i < mk.pos.size(); i++) { const Pos& p = mk.pos[i];
         fprintf(f, "pos %ld %ld %d %d   # %zu: %.3f-%.3f s (%.2f s), %.1f-%.1f Hz%s%s\n", p.m0, p.m1, p.c0, p.c1, i + 1, frameT0(p.m0, mk.rate), frameT0(p.m1, mk.rate),
                 frameT0(p.m1, mk.rate) - frameT0(p.m0, mk.rate), colHz(p.c0, mk.rate), colHz(p.c1, mk.rate), i < mk.note.size() ? ", " : "", i < mk.note.size() ? mk.note[i].c_str() : ""); }
-    return fclose(f) == 0; }
+    const bool ok = !ferror(f); return fclose(f) == 0 && ok; }   // FU17-2: a write error (disk full) counts, not only fclose
 // Reading rules (SPEC_LAENOISE.md Section 4; strict since 2026-11-07, the same in NoiseMarks.java): a comment (# to the end of the
 // line), CR and blank lines are skipped. The first remaining line is exactly "LAENOISE 1". Then exactly one master line and exactly one
 // grid line, both before the first pos line. A line that begins with LAENOISE, master, grid or pos must have exactly its fields (a

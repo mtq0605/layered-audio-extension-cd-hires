@@ -36,6 +36,23 @@ public final class CStd {
         if (!any) return 0.0;
         if (k < n && (s.charAt(k) == 'e' || s.charAt(k) == 'E')) { int q = k + 1; if (q < n && (s.charAt(q) == '+' || s.charAt(q) == '-')) q++; final int q0 = q; while (q < n && dig(s.charAt(q))) q++; if (q > q0) k = q; }
         return Double.parseDouble(s.substring(st, k)); }
+    // C strtod(s, &e) with the whole string required (*e == 0): the value, or null when no number starts there or anything is left over
+    // (FU15-3 / DEC 23: laes_tool.cpp masterArg). The same parse as atof; the end is where atof's number ends.
+    public static Double strtodFull(String s) {
+        int i = 0; final int n = s.length(); while (i < n && space(s.charAt(i))) i++;
+        if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) i++;
+        final String rest = s.substring(i).toLowerCase(java.util.Locale.ROOT); int end;
+        if (rest.startsWith("infinity")) end = i + 8; else if (rest.startsWith("inf")) end = i + 3; else if (rest.startsWith("nan")) end = i + 3;
+        else if (rest.startsWith("0x")) { int k = i + 2; boolean any = false; while (k < n && hex(s.charAt(k))) { k++; any = true; }
+            if (k < n && s.charAt(k) == '.') { k++; while (k < n && hex(s.charAt(k))) { k++; any = true; } }
+            if (!any) end = i + 1;
+            else { end = k; if (k < n && (s.charAt(k) == 'p' || s.charAt(k) == 'P')) { int q = k + 1; if (q < n && (s.charAt(q) == '+' || s.charAt(q) == '-')) q++; final int q0 = q; while (q < n && dig(s.charAt(q))) q++; if (q > q0) end = q; } } }
+        else { int k = i; boolean any = false; while (k < n && dig(s.charAt(k))) { k++; any = true; }
+            if (k < n && s.charAt(k) == '.') { k++; while (k < n && dig(s.charAt(k))) { k++; any = true; } }
+            if (!any) return null;
+            if (k < n && (s.charAt(k) == 'e' || s.charAt(k) == 'E')) { int q = k + 1; if (q < n && (s.charAt(q) == '+' || s.charAt(q) == '-')) q++; final int q0 = q; while (q < n && dig(s.charAt(q))) q++; if (q > q0) k = q; }
+            end = k; }
+        if (end != n) return null; return atof(s); }
     // C atoll / atoi (strtol base 10; out of range: the limit, as the MSVC CRT)
     public static long atoll(String s) {
         int i = 0; final int n = s.length(); while (i < n && space(s.charAt(i))) i++;

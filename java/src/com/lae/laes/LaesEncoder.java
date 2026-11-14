@@ -41,6 +41,8 @@ public final class LaesEncoder {
     public static final class MasterArg { public String path; public double T = 0; public boolean auto = false;
         /** the publisher's name of this master ("" = none; UTF-8 of at most 255 bytes, no control characters) and its flags (LaesFile.NO_DERIVE) - payload version 2, 2026-11-11 */
         public String name = ""; public int flags = 0;
+        /** DEC 23 (FU15-3, as laes_tool.cpp masterArg): the reason this command-line argument is refused ("" = taken) */
+        public String argError = "";
         public MasterArg(String p, double t, boolean a) { path = p; T = t; auto = a; } }
     /** port of laes_tool.cpp:AutoT (the result of LAEY's alignment search; not ported, see Aligner) */
     public static final class AutoT { public boolean found = false; public double T = 0, err = 0, resid = 0; public String search = "", notes = "", why = "";
@@ -115,6 +117,16 @@ public final class LaesEncoder {
         static String arg(String[] args, String key) { final String k = key + "="; for (String a : args) if (a.startsWith(k)) return a.substring(k.length()); return ""; }
         // port of laes_tool.cpp:flag
         static boolean flag(String[] args, String key) { for (String a : args) if (a.equals(key)) return true; return false; }
+        // port of laes_tool.cpp:masterArg (DEC 23, FU15-3): "<master>[@T]" of enc. The text after the last @ is T only when all of it is a
+        // finite decimal number below 2^40 base samples (or "auto"); otherwise the whole argument is the file name when that file exists (a
+        // name with an @), else it is refused with the reason (argError). Before, atof took any text and the path was cut at the @.
+        static MasterArg masterArg(String a) {
+            final int at = a.lastIndexOf('@'); if (at < 0 || at <= 2) return new MasterArg(a, 0, false);
+            final String t = a.substring(at + 1); if (t.equals("auto")) return new MasterArg(a.substring(0, at), 0, true);
+            final Double v = t.isEmpty() ? null : CStd.strtodFull(t);   // "m.wav@" is no T
+            if (v != null && !Double.isInfinite(v) && !Double.isNaN(v) && Math.abs(v) < 1099511627776.0) return new MasterArg(a.substring(0, at), v, false);
+            final MasterArg m = new MasterArg(a, 0, false); if (new File(a).exists()) return m;   // a file whose name has an @
+            m.argError = a + ": the text after the last @ must be T in base samples (a decimal number below 2^40, e.g. -0.37) or auto"; return m; }
         /** the options from `laes_tool enc` arguments: args[0] = "enc", args[1] = out, then masters and options (as the C++ argv[1..]) */
         public static Options fromArgs(String[] args) {
             Options o = new Options(); o.out = args.length > 1 ? args[1] : ""; o.core = arg(args, "--core"); o.deriveCore = flag(args, "--derive-core");
@@ -128,9 +140,7 @@ public final class LaesEncoder {
             for (int i = 2; i < args.length; i++) if (args[i].startsWith("--name=") || args[i].equals("--no-derive") || args[i].startsWith("--no-derive=") || args[i].startsWith("--default=")) o.nameArgs.add(args[i]);
             o.menuOrder = arg(args, "--menu-order");
             final String th = arg(args, "--threads"); if (!th.isEmpty()) o.threads = CStd.atoi(th);   // Java only (the C++ skips arguments starting with '-')
-            for (int i = 2; i < args.length; i++) { if (args[i].length() > 0 && args[i].charAt(0) == '-') continue; String a = args[i]; double T = 0; boolean au = false; final int at = a.lastIndexOf('@');
-                if (at >= 0 && at > 2) { au = a.substring(at + 1).equals("auto"); T = au ? 0 : CStd.atof(a.substring(at + 1)); a = a.substring(0, at); }
-                o.masters.add(new MasterArg(a, T, au)); }
+            for (int i = 2; i < args.length; i++) { if (args[i].length() > 0 && args[i].charAt(0) == '-') continue; final MasterArg ma = masterArg(args[i]); o.masters.add(ma); }
             final String pe = LaesFile.testEnv("LAES_PIECE"); if (pe != null) o.piece = Math.max(4096, CStd.atoll(pe) / 4096 * 4096);
             o.forceRf64 = LaesFile.testEnv("LAES_FORCE_RF64") != null; o.selfCheckFlip = LaesFile.testEnv("LAES_SELFCHECK_FLIP"); o.keepTmp = System.getenv("KEEPTMP") != null;
             return o; }
@@ -229,6 +239,9 @@ public final class LaesEncoder {
         if (new File(wd + "/job.txt").exists()) { say(L, "the work folder " + wd + " is kept: run the same command again to continue (--disk-stop-remove: removed instead)");
             say(L, "  工作文件夹 " + wd + " 已保留：再运行同一条命令，就从停下的地方接着做（加 --disk-stop-remove 时改为删除）"); } }
     static void say(Listener l, String s) { if (l != null) l.message(s); }
+    // std::filesystem::equivalent: both exist and are the same file (Java: the same canonical path)
+    static boolean sameFile(String a, String b) { final File x = new File(a), y = new File(b); if (!x.exists() || !y.exists()) return false;
+        try { return x.getCanonicalFile().equals(y.getCanonicalFile()); } catch (IOException e) { return false; } }
     // a text that may hold several lines, or end without a new line (the questions of decision 21): one message per line; an unfinished last line is given as it is
     static void sayRaw(Listener l, String s) { if (l == null) return; int a = 0; for (int b; (b = s.indexOf('\n', a)) >= 0; a = b + 1) l.message(s.substring(a, b)); if (a < s.length()) l.message(s.substring(a)); }
     // port of laes_tool.cpp:longHeaderNote: a master or core master WAV whose header gives a data length beyond the end of the file
@@ -269,9 +282,13 @@ public final class LaesEncoder {
             say(L, "  给了 " + opt.masters.size() + " 个母带：Java / 手机播放器最多打开 " + Play.File.maxMasters + " 个母带的文件（母带更多时手机内存不够），所以这个编码器最多做 "
                    + Play.File.maxMasters + " 个；最多 255 个母带的文件请用 PC 上的工具（laes enc）制作；没有写任何文件");
             return 1; }
-        for (MasterArg a : opt.masters) { StreamEnc.WavInfo wi = new StreamEnc.WavInfo(); final String e = StreamEnc.probeMaster(a.path, wi); if (!e.isEmpty()) { say(L, e); return 2; } longHeaderNote(L, a.path, wi.hdrLen, wi.dataBytes); paths.add(a.path); Ts.add(a.T); autoT.add(a.auto); wis.add(wi); }
+        for (MasterArg a : opt.masters) { if (!a.argError.isEmpty()) { say(L, a.argError); return 1; }   // DEC 23 (FU15-3)
+            StreamEnc.WavInfo wi = new StreamEnc.WavInfo(); final String e = StreamEnc.probeMaster(a.path, wi); if (!e.isEmpty()) { say(L, e); return 2; } longHeaderNote(L, a.path, wi.hdrLen, wi.dataBytes); paths.add(a.path); Ts.add(a.T); autoT.add(a.auto); wis.add(wi); }
         if (paths.isEmpty()) { say(L, "no master given"); return 1; }
         if (paths.size() > 255) { say(L, "at most 255 masters"); return 1; }
+        {   // DEC 23 (FU16-7, as laes_tool.cpp): <out> must not be an input (before, a master given as the output was replaced by it)
+            final List<String> ins = new ArrayList<String>(paths); if (!opt.core.isEmpty()) ins.add(opt.core);
+            if (new File(out).exists()) for (String p : ins) if (sameFile(out, p)) { say(L, out + " is one of the inputs (" + p + "): choose another output name; nothing written"); return 1; } }
         // names and "no derived versions" (2026-11-11, payload version 2): --name=<k>:<text> (k = the k-th master as given, from 1; may repeat),
         // --no-derive (every master) or --no-derive=<k>. Names come only from here: nothing is filled in from file names, paths or dates.
         final List<String> names = new ArrayList<String>(); final List<Integer> mflags = new ArrayList<Integer>(); for (MasterArg a : opt.masters) { names.add(a.name); mflags.add(a.flags); }

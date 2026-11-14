@@ -2,12 +2,12 @@
 
 **English** | [中文](README.zh.md)
 
-This is an input (demux) module for VLC media player 3.0 (Windows, 64-bit). It opens LAE files: **LAE Lossless (LAES)** files (in WAV, RF64 or FLAC form) with their lossless masters, and **LAE Lossy (LAEY)** files (WAV, container version 5). VLC queries every input module about each file that it opens. This module accepts LAE files with **any extension** (`.lae`, `.flac`, `.wav`), so the masters play without the files being renamed. It rejects other files after reading only their structure, which takes milliseconds, and VLC's own modules continue to play plain FLAC and WAV files. The module delivers 2-channel PCM, with 16-bit samples or with 24-bit or 32-bit samples in 32-bit words, at the sample rate of what is played, and it supports seeking.
+This is an input (demux) module for VLC media player 3.0 (Windows, 64-bit). It opens LAE files: **LAE Lossless (LAES)** files (in WAV, RF64 or FLAC form) with their lossless masters, and **LAE Lossy (LAEY)** files (container version 5, WAV or FLAC form). VLC queries every input module about each file that it opens. This module accepts LAE files with **any extension** (`.lae`, `.flac`, `.wav`), so the masters play without the files being renamed. It rejects other files after reading only their structure, which takes milliseconds, and VLC's own modules continue to play plain FLAC and WAV files. The module delivers 2-channel PCM, with 16-bit samples or with 24-bit or 32-bit samples in 32-bit words, at the sample rate of what is played, and it supports seeking.
 
 ## Changes in this update
 
 - LAEY files in the FLAC form are opened as well ([spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4); files are recognised by content.
-- LAEY extension packs (Section 5.6 of the same specification): the option "LAEY extension pack" (`lae-pack`, 0 = the first) selects the pack; a file without that pack plays the first one, with a message in the log. No pack is chosen automatically.
+- LAEY extension packs (Section 5.6 of the same specification): the option "LAEY extension pack" (`lae-pack`) selects the pack. It counts from 0, as `lae_dec pack=`: 0 = the main body, the pack of master 1; n = the pack of master n + 1 (foobar2000 and Kodi count from 1 in their menus, so their "Pack n + 1" is n here; the log message "playing pack 1" counts in the same way as they do and means the main body). A file without that pack plays the main body, with a message in the log. No pack is chosen automatically.
 - The option "LAEY layers" (`lae-layers`) offers "All layers", "Frequency layer only", "Bit-depth layer only" and "CD/core layer only".
 - LAES payload version 2 ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3): when nothing else is set, the default master stored in the file plays; without one, the core master.
 - A master plays only after it and its chain of tiers have matched their SHA-256 values; the result is kept per file content. A derived 16-bit version starts at the seek position, bit for bit.
@@ -27,13 +27,14 @@ Alternatively, install the module manually: copy `liblae_plugin.dll` into VLC's 
 
 ## What plays
 
-The settings are in VLC > Tools > Preferences > Show settings: All > Input / Codecs > Demuxers > LAE. If no setting is made, the master plays at its own sample rate. For LAES, the masters and rate levels within the limits are ranked by sample rate, then word length, a master before a rate level (a master brought down to a lower rate), and the first is played, as in the other LAE players. For LAES, "CD layer + depth layer" plays the best choice at the base rate, and "CD layer only" plays the core master.
+The settings are in VLC > Tools > Preferences > Show settings: All > Input / Codecs > Demuxers > LAE. If no setting is made, an LAEY file plays all layers at the master rate, and an LAES file plays its default master (the master the publisher marked when encoding; a file without one, or whose payload failed its check, plays the core master). No master is chosen by its sample rate or bit depth ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3); this is the rule of the other LAE players. The limits work inside that master only: its highest rate level up to the maximum sample rate plays (a rate level is the master brought down to a lower rate), and a word length above the maximum bit depth plays that entry's own derived 16-bit version; when no level of the default master fits, the core master plays. For LAES, "Bit-depth layer only" plays the default master's level at the base rate, and "CD/core layer only" plays the core master.
 
 | Setting | Meaning |
 |---|---|
-| What plays (`--lae-layers`) | All layers / the master; CD layer + depth layer (at the base rate); CD layer only |
-| Highest sample rate (`--lae-maxrate`) | No limit, 192 kHz, 96 kHz or 48 kHz |
-| Highest word length (`--lae-maxbits`) | LAES: no limit, 16, 24 or 32 bit |
+| LAEY layers (`--lae-layers`) | 0 All layers (LAES: the master); 1 Bit-depth layer only (at the base rate); 2 CD/core layer only; 3 Frequency layer only (LAES: as 0) |
+| LAEY extension pack (`--lae-pack`) | 0 = the main body; n = the pack of master n + 1 (see above) |
+| Maximum sample rate (`--lae-maxrate`) | No limit, 192 kHz, 96 kHz or 48 kHz |
+| LAES maximum bit depth (`--lae-maxbits`) | No limit, 16-bit, 24-bit or 32-bit |
 
 ## Rules (as in the other LAE players)
 

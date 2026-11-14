@@ -5,9 +5,9 @@
 `lae_source.ax` 是供 PotPlayer、MPC-BE、MPC-HC、Windows Media Player（旧版）及其他 DirectShow 播放器使用的 DirectShow 源滤镜（Windows x64）。已测试 PotPlayer 和 MPC-BE（见[测试](#tested-windows-11)），未测试 MPC-HC 和 Windows Media Player。它可打开两类 LAE 文件：
 
 - **LAES**（LAE 无损；WAV、RF64 或 FLAC 形式），包括其中的无损母带。
-- **LAEY**（LAE 有损；WAV，容器版本 5）。
+- **LAEY**（LAE 有损；容器版本 5，WAV 或 FLAC 形式）。
 
-该滤镜输出未压缩 PCM，支持跳转，采样率为所播放内容的采样率（见[播放内容](#what-plays)）：
+该滤镜输出未压缩 PCM，支持跳转，采样率为所播放内容的采样率（见[播放内容](#播放内容)）：
 
 - 2 声道（LAE 文件为立体声）。
 - 16 位样本，或以 WAVE_FORMAT_EXTENSIBLE 形式置于 32 位容器中的 24 位和 32 位样本。
@@ -17,7 +17,7 @@
 ## 本次更新的变化
 
 - 也能打开 FLAC 形式的 LAEY 文件（[spec/lossy/SPEC.md](../../spec/lossy/SPEC.zh.md) 第 3.4 节）；文件按内容识别。
-- LAEY 扩展包（同一规范第 5.6 节）：`HKCU\Software\LAE\DirectShow` 中的注册表值 `pack`（DWORD，0 = 第一个扩展包）选择扩展包；文件中没有该扩展包时播放第一个。不会自动选择任何扩展包。
+- LAEY 扩展包（同一规范第 5.6 节）：`HKCU\Software\LAE\DirectShow` 中的注册表值 `pack`（DWORD）选择扩展包。它和 `lae_dec pack=` 一样从 0 数起：0 = 主体，即母带 1 的扩展包；n = 母带 n + 1 的扩展包（foobar2000 和 Kodi 的界面从 1 数起，那里的“扩展包 n + 1”就是这里的 n）。文件中没有该扩展包时播放主体（0）。不会自动选择任何扩展包。
 - LAES 有效载荷版本 2（[spec/lossless/SPEC.md](../../spec/lossless/SPEC.zh.md) 第 10.3 节）：没有其他设置时，播放文件中存储的默认母带；文件没有默认母带时播放核心母带。
 - 母带及其参照链的 SHA-256 全部相符后才播放该母带；核对结果按文件内容保存（保存在 `%APPDATA%\LAE`，与其他 LAE 插件共用）。派生 16 位版本从跳转位置开始播放，逐位相同。
 - 滤镜及其安装程序分英文（`-en`）和中文（`-zh`）两个独立版本。
@@ -41,11 +41,11 @@ regsvr32 lae_source.ax
 
 ## 播放内容
 
-播放由 `HKCU\Software\LAE\DirectShow` 下的 DWORD 注册表值控制。若未设置任何值，滤镜以母带自身的采样率播放母带。在 LAES 文件中下列限制所允许的母带和采样率档位中，滤镜播放采样率最高者，其次为字长最长者，母带优先于采样率档位；若 `maxbits` 小于核心母带的字长且无其他内容符合条件，则以基础采样率播放 16 位派生母带。
+播放由 `HKCU\Software\LAE\DirectShow` 下的 DWORD 注册表值控制。若未设置任何值，LAEY 文件以母带采样率播放全部层；LAES 文件播放其默认母带（出版方编码时标出的母带；没有标出，或载荷未通过检查时，播放核心母带）。不按采样率或位深自动选择母带（[spec/lossless/SPEC.md](../../spec/lossless/SPEC.zh.md) 第 10.3 节）。下列限制只在这个母带之内起作用：`maxrate` 选出它不高于限制的最高采样率档位；字长超过 `maxbits` 时，播放该条目自己的派生 16 位版本；默认母带没有合适的档位时，播放核心母带。
 
 | 值 | 含义 |
 |---|---|
-| `layers` | 0：全部层 / 母带；1：CD 层和位深层（基础采样率）；2：仅 CD 层 |
+| `layers` | 0：全部层 / 母带；1：仅位深层（CD 层或核心层 + 位深层，基础采样率；LAES：默认母带在基础采样率下的档位）；2：仅 CD 层或核心层（LAES：核心母带）；3：仅频率层（CD 层或核心层 + 频率层，16 位；LAES：同 0） |
 | `maxrate` | 最高采样率，单位 Hz；0 = 不限（例如，对于无法接受更高采样率的声卡或渲染器，设为 96000） |
 | `maxbits` | 仅适用于 LAES：最高字长；0 = 不限，16、24 或 32 |
 

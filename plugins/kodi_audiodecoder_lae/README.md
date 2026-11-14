@@ -2,12 +2,12 @@
 
 **English** | [中文](README.zh.md)
 
-This add-on plays LAE files in Kodi 21 (Omega). It supports **LAES** (LAE Lossless) files in WAV, RF64 or FLAC form, including their lossless masters, and **LAEY** (LAE Lossy) files in container version 5 WAV form.
+This add-on plays LAE files in Kodi 21 (Omega). It supports **LAES** (LAE Lossless) files in WAV, RF64 or FLAC form, including their lossless masters, and **LAEY** (LAE Lossy) files of container version 5 in WAV or FLAC form.
 
 ## Changes in this update
 
 - LAEY files in the FLAC form are decoded as well ([spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4). As before, Kodi passes only files with the extension `.lae` to the add-on.
-- LAEY extension packs (Section 5.6 of the same specification): the setting "LAEY extension pack" (Pack 1 … Pack 9) selects the pack; a file without that pack plays pack 1. No pack is chosen automatically.
+- LAEY extension packs (Section 5.6 of the same specification): the setting "LAEY extension pack" (Pack 1 … Pack 9) selects the pack. "Pack n" is the pack of master n, counted from 1 as in the foobar2000 menu; `lae_dec pack=`, DirectShow and VLC count from 0 and call it pack n − 1 ("Pack 1" is the main body, pack 0 in the log). A file without that pack plays pack 1. No pack is chosen automatically.
 - The setting "LAEY layers" offers "All layers", "Frequency layer only", "Bit-depth layer only" and "CD/core layer only".
 - LAES payload version 2 ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3): when nothing else is set, the default master stored in the file plays; without one, the core master.
 - A master plays only after it and its chain of tiers have matched their SHA-256 values; the result is kept per file content. A derived 16-bit version starts at the seek position, bit for bit.
@@ -30,11 +30,12 @@ The settings are under Add-ons → My add-ons → Audio decoder → LAE decoder 
 
 | Setting | Values |
 |---|---|
-| What plays | All layers / the master; CD layer + depth layer (base rate); CD layer only |
-| Highest sample rate | No limit; 192 kHz; 96 kHz |
-| LAES: highest word length | No limit; 16; 24; 32 bit |
+| LAEY layers | All layers (LAES: the master); Bit-depth layer only (CD or core layer + depth layer, base rate); CD/core layer only (LAES: the core master); Frequency layer only (LAES: as All layers) |
+| Maximum sample rate | No limit; 192 kHz; 96 kHz |
+| LAES maximum bit depth | No limit; 16-bit; 24-bit; 32-bit |
+| LAEY extension pack | Pack 1 … Pack 9 (see above) |
 
-For LAES, the highest sample rate within the limit is selected first, then the longest word length. Masters take precedence over rate levels (a rate level is a master brought down to half, a quarter or an eighth of its rate), as in the foobar2000 component.
+For LAES, the file's default master plays (the master the publisher marked when encoding; a file without one, or whose payload failed its check, plays the core master); no master is chosen by its sample rate or bit depth ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3). The limits work inside that master only: its highest rate level up to "Maximum sample rate" plays (a rate level is a master brought down to half, a quarter or an eighth of its rate), and a word length above "LAES maximum bit depth" plays that entry's own derived 16-bit version; when no level of the default master fits, the core master plays. This is the same rule as in the foobar2000 component.
 
 ## Rules (as in the foobar2000 component)
 

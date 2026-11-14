@@ -10,7 +10,7 @@ This component plays both LAE formats in foobar2000:
 A WAV or FLAC file without an LAE extension is rejected immediately and passed unchanged to foobar2000's own decoder.
 
 - Hosts: foobar2000 1.4, 1.5 (including the Chinese-localised edition) and 2.x, 32-bit and 64-bit. A single package contains both builds, and foobar2000 selects the one that matches.
-- Files: LAEY: `.wav` (with an `LAE ` chunk after the `data` chunk) and `.lae` (the same file with a different extension). LAES: `.wav` (with an `LAE ` chunk that begins with `LAE2`) and `.flac` (with `LAE2` APPLICATION blocks).
+- Files: LAEY: `.wav` (with an `LAE ` chunk after the `data` chunk), `.flac` (the FLAC form, with `LAE1` APPLICATION blocks) and `.lae` (either form with a different extension). LAES: `.wav` (with an `LAE ` chunk that begins with `LAE2`) and `.flac` (with `LAE2` APPLICATION blocks).
 - Decoders: liblae (`src/lae_api.*`) and the LAES decoder (`src/laes_*.h`, `src/laes_api.cpp`) from this repository (Apache-2.0), compiled into the DLL. No other files are required.
 
 The screenshots were taken in the Chinese-localised edition of foobar2000 1.5.1 (a clean portable installation containing only the test files). The component is built in two standalone versions, English (`-en`) and Chinese (`-zh`); each shows all of its text in its own language, whatever the system language. The English text is used below.
@@ -18,7 +18,7 @@ The screenshots were taken in the Chinese-localised edition of foobar2000 1.5.1 
 ## Changes in this update
 
 - **LAEY in the FLAC form** (`.flac`, or `.lae` holding the FLAC form; [spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4). Files are recognised by content, never by name.
-- **LAEY extension packs** (Section 5.6 of the same specification). The context menu entry "LAEY: Select layers…" lists the packs of a file by the names stored in it (a pack without a name: "Pack {n}"), each with its master sample rate; inside a pack, the entries are "All layers", "Frequency layer only" and "Bit-depth layer only", each with its sample rate and bit depth; "CD/core layer only" stays on the first level. The tier without the bit-depth layer is labelled 16-bit. The choice is kept by foobar2000 per file and is never written into the file; no pack is chosen automatically.
+- **LAEY extension packs** (Section 5.6 of the same specification). The context menu entry "LAEY: Select layers…" lists the packs of a file by the names stored in it (a pack without a name: "Pack {n}", counted from 1 like the masters: "Pack n" is the pack of master n, which `lae_dec pack=`, DirectShow and VLC count from 0 as pack n − 1), each with its master sample rate; inside a pack, the entries are "All layers", "Frequency layer only" and "Bit-depth layer only", each with its sample rate and bit depth; "CD/core layer only" stays on the first level. The tier without the bit-depth layer is labelled 16-bit. The choice is kept by foobar2000 per file and is never written into the file; no pack is chosen automatically.
 - **LAES payload version 2** ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Sections 6.2 and 10.3): master names, the menu order and the default master stored in the file. "LAES: Select master…" lists the core master and the masters on the first level (number, name, sample rate, bit depth, length, "Lossless", the default marked); the rate levels and derived 16-bit versions of a master are in its own submenu ("Derived from master {n} "{name}" · {rate} / {bits}"). When nothing is chosen, the default master of the file plays; without one, the core master.
 - A master plays only after it and every master in its chain of tiers have matched their SHA-256 values; the result is kept per file content. A master that failed stays in the menu, marked "(unavailable: SHA-256 mismatch)".
 - A derived 16-bit version starts at the seek position, bit for bit as when decoded from the start.
@@ -79,13 +79,13 @@ A selection made during playback takes effect immediately and continues from the
 
 ![Switching during playback](images/07_layer_switch.png)
 
-The same settings are also available under Preferences → Advanced → Decoding → LAE decoder, together with the option "Put LAE ahead of decoders that also take .wav files (automatically)":
+The same settings are also available under Preferences → Advanced → Decoding → LAE decoder, together with the option "Give LAE priority over other .wav / .flac decoders":
 
 ![Advanced settings](images/05_advanced.png)
 
 ## What is shown during playback
 
-- Status bar: `LAE all layers` / `LAE CD + depth layer` / `LAE CD layer`, followed by the decoded sample rate.
+- Status bar (LAEY): `LAEY · All layers` / `LAEY · Bit-depth layer only` / `LAEY · Frequency layer only` / `LAEY · CD layer only` (`core layer` in the 48 kHz family), with the pack between them when the file has extension packs (`LAEY · <pack name> · All layers`), followed by the decoded sample rate.
 - File properties → Details: the sample rate, the bit depth and the codec (LAE); under "Other": `lae_layers` (the layers that the file contains), `lae_master` (the master rate) and
   `lae_cd_layer` (the format of the CD layer).
 - Bit rate: LAE has a variable bit rate. The CD layer is fixed (1411.2 kbps in the 44.1 kHz family); the extension layers (depth layer and frequency layer) are entropy-coded and require more data for complex content and
@@ -97,7 +97,7 @@ The same settings are also available under Preferences → Advanced → Decoding
 ![Playing](images/06_playing.png)
 ![Properties](images/08_properties.png)
 
-When the extension is damaged (below, a test file in which one byte was deliberately changed), the whole track plays as the CD layer, the status bar shows "LAE CD layer (extension unusable)", and the console gives the reason:
+When the extension is damaged (below, a test file in which one byte was deliberately changed), the whole track plays as the CD layer, the status bar shows "LAEY · CD layer only · extension unusable", and the console gives the reason:
 
 ![Status bar of a damaged file](images/09_damaged_status.png)
 ![Console of a damaged file](images/10_damaged_console.png)
@@ -118,10 +118,10 @@ When the extension is damaged (below, a test file in which one byte was delibera
 
 ### What plays
 
-If no choice has been made for the track, the settings decide: "CD layer only" plays the core master (which can be CD-compatible only when it is 16 bit at 44.1 kHz); "CD layer + depth layer" plays the highest choice at the base rate; otherwise, the highest rate up to
-"Highest output sample rate" is played, then the longest word length up to "LAES (lossless): highest bit depth". Masters take precedence over rate levels; the derived 16-bit masters (lossless relative to their definition, not relative to their source master) are used only when nothing else fits.
+If no choice has been made for the track, the file's default master plays (the master the publisher marked when encoding; a file without one, or whose payload failed its check, plays the core master, which can be CD-compatible only when it is 16 bit at 44.1 kHz). No master is chosen by its sample rate or bit depth ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3).
+The settings work inside that master only: "CD/core layer only" plays the core master instead; "Bit-depth layer only" plays the default master's level at the base rate; otherwise its highest rate level up to "Maximum sample rate, Hz" plays. When its word length is above "LAES maximum bit depth", that entry's own derived 16-bit version plays (lossless relative to its definition, not relative to its source master). When no level of the default master fits, the core master plays.
 
-Right-click a track and select **LAES: choose what plays…** to choose the core master, a master or a rate level for that track. The choice overrides the settings, is stored per path (`laes_choices.txt`),
+Right-click a track and select **LAES: Select master…** to choose the core master, a master or a rate level for that track. The choice overrides the settings, is stored per path (`laes_choices.txt`),
 and takes effect immediately during playback: the new choice starts at the current position (with a short silence of about 0.2 s when the other masters are not kept ready, see [Switching and seeking](#switching-and-seeking); no repetition of what has already been heard). "Automatic" reverts to the settings.
 
 ### Verification: once per file, remembered
@@ -133,7 +133,7 @@ and takes effect immediately during playback: the new choice starts at the curre
 - Before this, the file itself is checked every time it is opened: the SHA-256 of all bytes, the CRC-32 of the extension, and the core master. The SHA-256 computation uses the SHA instructions of the CPU where available (about 1.9 GB/s on the test machine).
 - Checking ahead of playback:
   - Files added to the media library are checked in the background, one at a time, at low priority (a setting, on by default).
-  - Right-click → **Verify LAES (lossless)** checks the selected files immediately, with a progress bar; the results appear in the console.
+  - Right-click → **LAES: Verify masters** checks the selected files immediately, with a progress bar; the results appear in the console.
 
 ### Switching and seeking
 
@@ -148,11 +148,11 @@ and takes effect immediately during playback: the new choice starts at the curre
 
 | Setting | Default |
 |---|---|
-| LAES (lossless): highest bit depth (0 = no limit, 16, 24 or 32) | 0 |
-| LAES (lossless): check files in the background when they are added to the media library | on |
+| LAES maximum bit depth (0 = no limit, 16, 24, 32) | 0 |
+| LAES (lossless): check files in the background when they are added to the media library (then they play at once) | on |
 | LAES (lossless): keep the other masters ready while playing, for switching without a gap (uses more CPU) | on |
 
-"Layers" and "Highest output sample rate" apply to both LAEY and LAES.
+"LAEY layers" and "Maximum sample rate, Hz" apply to both LAEY and LAES (see [What plays](#what-plays)).
 
 ### Files
 

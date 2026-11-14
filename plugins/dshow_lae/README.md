@@ -5,7 +5,7 @@
 `lae_source.ax` is a DirectShow source filter for PotPlayer, MPC-BE, MPC-HC, Windows Media Player (legacy) and other DirectShow players (Windows x64). PotPlayer and MPC-BE were tested (see [Tested](#tested-windows-11)); MPC-HC and Windows Media Player were not. It opens two kinds of LAE file:
 
 - **LAES** (LAE Lossless; WAV, RF64 or FLAC form), with its lossless masters.
-- **LAEY** (LAE Lossy; WAV, container version 5).
+- **LAEY** (LAE Lossy; container version 5, WAV or FLAC form).
 
 The filter delivers uncompressed PCM, with seeking, at the sample rate of what is played (see [What plays](#what-plays)):
 
@@ -17,7 +17,7 @@ The filter delivers uncompressed PCM, with seeking, at the sample rate of what i
 ## Changes in this update
 
 - LAEY files in the FLAC form are opened as well ([spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4); files are recognised by content.
-- LAEY extension packs (Section 5.6 of the same specification): the registry value `pack` (DWORD, 0 = the first pack) in `HKCU\Software\LAE\DirectShow` selects the pack; a file without that pack plays the first one. No pack is chosen automatically.
+- LAEY extension packs (Section 5.6 of the same specification): the registry value `pack` (DWORD) in `HKCU\Software\LAE\DirectShow` selects the pack. It counts from 0, as `lae_dec pack=`: 0 = the main body, the pack of master 1; n = the pack of master n + 1 (foobar2000 and Kodi count from 1 in their menus, so their "Pack n + 1" is n here). A file without that pack plays the main body (0). No pack is chosen automatically.
 - LAES payload version 2 ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3): when nothing else is set, the default master stored in the file plays; without one, the core master.
 - A master plays only after it and its chain of tiers have matched their SHA-256 values; the result is kept per file content (in `%APPDATA%\LAE`, shared with the other LAE plug-ins). A derived 16-bit version starts at the seek position, bit for bit.
 - Two standalone builds of the filter and its installer, English (`-en`) and Chinese (`-zh`).
@@ -41,11 +41,11 @@ To unregister the filter, run `regsvr32 /u lae_source.ax`.
 
 ## What plays
 
-Playback is controlled by DWORD registry values under `HKCU\Software\LAE\DirectShow`. If no value is set, the filter plays the master at its own sample rate. Among the masters and rate levels of an LAES file that the limits below allow, it plays the one with the highest sample rate, then the longest word length, a master before a rate level; if `maxbits` is below the word length of the core master and nothing else fits, it plays the derived 16-bit master at the base rate.
+Playback is controlled by DWORD registry values under `HKCU\Software\LAE\DirectShow`. If no value is set, an LAEY file plays all layers at the master rate, and an LAES file plays its default master (the master the publisher marked when encoding; a file without one, or whose payload failed its check, plays the core master). No master is chosen by its sample rate or bit depth ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3). The limits below work inside that master only: `maxrate` selects its highest rate level up to the limit, and a word length above `maxbits` plays that entry's own derived 16-bit version; when no level of the default master fits, the core master plays.
 
 | Value | Meaning |
 |---|---|
-| `layers` | 0: all layers / the master; 1: CD layer and depth layer (base rate); 2: CD layer only |
+| `layers` | 0: all layers / the master; 1: bit-depth layer only (CD or core layer + depth layer, base rate; LAES: the default master's base-rate level); 2: CD or core layer only (LAES: the core master); 3: frequency layer only (CD or core layer + frequency layer, 16-bit; LAES: as 0) |
 | `maxrate` | Highest sample rate in Hz; 0 = no limit (for example, 96000 for a sound card or renderer that cannot accept higher rates) |
 | `maxbits` | LAES only: highest word length; 0 = no limit, 16, 24 or 32 |
 

@@ -58,6 +58,20 @@ static bool writeBytes(const fs::path& p, const void* d, size_t n) {
 #endif
     if (!f) return false; bool ok = n == 0 || fwrite(d, 1, n, f) == n; ok = (fclose(f) == 0) && ok;
     if (!ok) { std::error_code ec; fs::remove(p, ec); } return ok; }
+// an output that is an input (or the other output) would overwrite it: refused before anything is written (2026-11-14)
+static bool samePath(const fs::path& a, const fs::path& b) {
+    std::error_code ea, eb; if (fs::exists(a, ea) && fs::exists(b, eb)) { std::error_code ee; const bool eq = fs::equivalent(a, b, ee); if (!ee) return eq; }
+    std::error_code ca, cb; fs::path pa = fs::weakly_canonical(fs::absolute(a, ca), ca), pb = fs::weakly_canonical(fs::absolute(b, cb), cb); if (ca || cb) { pa = a; pb = b; }
+#ifdef _WIN32
+    return cdxr::lower(cdxr::u8(pa)) == cdxr::lower(cdxr::u8(pb));
+#else
+    return pa == pb;
+#endif
+}
+static string outputClash(const vector<string>& in, const vector<string>& out) {
+    for (size_t i = 0; i < out.size(); i++) { for (auto& x : in) if (samePath(fs::path(out[i]), fs::path(x))) return out[i] + " is the input file " + x + ": give another output name";
+        for (size_t j = 0; j < i; j++) if (samePath(fs::path(out[i]), fs::path(out[j]))) return out[j] + " and " + out[i] + " are the same file: give two output names"; }
+    return ""; }
 static string msf(long long sectors) { char b[16]; snprintf(b, sizeof b, "%02lld:%02lld:%02lld", sectors / 4500, sectors / 75 % 60, sectors % 75); return b; }
 static string arg(int argc, char** argv, const char* key, const string& def) { string k = string(key) + "="; for (int i = 1; i < argc; i++) if (!strncmp(argv[i], k.c_str(), k.size())) return argv[i] + k.size(); return def; }
 static vector<string> positional(int argc, char** argv, int from) { vector<string> v; std::error_code ec; for (int i = from; i < argc; i++) if (!strchr(argv[i], '=') || fs::exists(argv[i], ec)) v.push_back(argv[i]); return v; }
@@ -746,15 +760,18 @@ static int realMain(int argc, char** argv) {
     if (cmd == "selftest") return selftest();
     if (cmd == "test" && pos.size() == 1) return runTests(pos[0]);
     if ((cmd == "pack" && pos.size() == 2) || (cmd == "split" && pos.size() == 3)) {   // pack: extension file; split: base-layer WAV + extension file (F2)
+        { const string c = outputClash({pos[0]}, vector<string>(pos.begin() + 1, pos.end())); if (!c.empty()) { printf("%s; nothing written\n", c.c_str()); return 1; } }
         V5 v; string e = loadV5(fs::path(pos[0]), v); if (!e.empty()) { printf("%s: %s; nothing written\n", pos[0].c_str(), e.c_str()); return 1; }
         int track = atoi(arg(argc, argv, "track", "1").c_str()); if (track < 1 || track > 65535) { printf("track must be 1-65535 (1-98 on a CD); nothing written\n"); return 1; }
         auto lax = laxOf(v, (uint16_t)track); cdx::Trailer t; size_t bl = 0; string pe = cdx::parse(lax, t, bl);
         if (!pe.empty()) { printf("the extension file would not be readable (%s); nothing written\n", pe.c_str()); return 2; }
         const fs::path laxPath = fs::path(pos.back());
         if (cmd == "split") { auto base = canonV5(v.rate, v.cd, {}); if (!writeBytes(fs::path(pos[1]), base.data(), base.size())) { printf("cannot write %s\n", pos[1].c_str()); return 2; } }
-        if (!writeBytes(laxPath, lax.data(), lax.size())) { printf("cannot write %s\n", pos.back().c_str()); return 2; }
+        if (!writeBytes(laxPath, lax.data(), lax.size())) { std::error_code rc; if (cmd == "split" && fs::remove(fs::path(pos[1]), rc)) { printf("cannot write %s; %s removed again\n", pos.back().c_str(), pos[1].c_str()); return 2; }
+            printf("cannot write %s\n", pos.back().c_str()); return 2; }
         printf("%sextension file %s: track %d, %u CD frames at %u Hz, MD5 %s, extension block %zu bytes\n", cmd == "split" ? ("base layer " + pos[1] + "; ").c_str() : "", pos.back().c_str(), track, t.ncd, t.rate, t.md5hex().c_str(), bl); return 0; }
     if (cmd == "repack" && pos.size() == 3) {
+        { const string c = outputClash({pos[0], pos[1]}, {pos[2]}); if (!c.empty()) { printf("%s; nothing written\n", c.c_str()); return 1; } }
         vector<int16_t> pcm; int rate = 0; string e = cdxr::loadPcm(fs::path(pos[0]), "WAVE", pcm, rate, 0); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }
         vector<Ext> x(1); x[0].name = pos[1]; if (!cdxr::readBytes(fs::path(pos[1]), x[0].bytes)) { printf("cannot read %s\n", pos[1].c_str()); return 1; } cdxr::check(x[0]);
         if (!x[0].bad.empty()) { printf("%s: %s; only the base layer can be played\n", x[0].name.c_str(), x[0].bad.c_str()); return 3; }
@@ -812,10 +829,13 @@ static int realMain(int argc, char** argv) {
         if (!selfCheck(im, 0, arg(argc, argv, "verbose", "0") == "1")) { printf("nothing written\n"); return 2; }
         if (im.total > im.cap) { printf("does not fit after the self-check (P18); nothing written\n"); return 1; }
         fs::create_directories(out / "LAE", ec); string c1 = cueText(im, false), c2 = cueText(im, true), bt = burnText(im);
-        bool ok = writeBytes(out / "AUDIO.BIN", im.audio.data(), im.audio.size() * 2) && writeBytes(out / "DATA.ISO", im.iso.data(), im.iso.size())
-                  && writeBytes(out / "IMAGE.CUE", c2.data(), c2.size()) && writeBytes(out / "SESSION1.CUE", c1.data(), c1.size()) && writeBytes(out / "BURN.TXT", bt.data(), bt.size());
-        for (size_t k = 0; k < im.lax.size() && ok; k++) { if (im.lax[k].empty()) continue; char nm[32]; snprintf(nm, sizeof nm, "TRACK%02d.LAX", (int)k + 1); ok = writeBytes(out / "LAE" / nm, im.lax[k].data(), im.lax[k].size()); }
-        if (!ok) { printf("cannot write the deliverables in %s\n", pos[0].c_str()); return 2; }
+        vector<fs::path> written;   // the folder was new or empty: on a failure every file written here is removed again, by its name (2026-11-14)
+        auto put = [&](const fs::path& p, const void* d, size_t n) { if (!writeBytes(p, d, n)) return false; written.push_back(p); return true; };
+        bool ok = put(out / "AUDIO.BIN", im.audio.data(), im.audio.size() * 2) && put(out / "DATA.ISO", im.iso.data(), im.iso.size())
+                  && put(out / "IMAGE.CUE", c2.data(), c2.size()) && put(out / "SESSION1.CUE", c1.data(), c1.size()) && put(out / "BURN.TXT", bt.data(), bt.size());
+        for (size_t k = 0; k < im.lax.size() && ok; k++) { if (im.lax[k].empty()) continue; char nm[32]; snprintf(nm, sizeof nm, "TRACK%02d.LAX", (int)k + 1); ok = put(out / "LAE" / nm, im.lax[k].data(), im.lax[k].size()); }
+        if (!ok) { for (auto& p : written) { std::error_code rc; fs::remove(p, rc); } std::error_code rc; if (fs::is_empty(out / "LAE", rc) && !rc) fs::remove(out / "LAE", rc);
+            printf("cannot write the deliverables in %s; the %zu file(s) written so far were removed again, nothing written\n", pos[0].c_str(), written.size()); return 2; }
         printf("CD-Extra image written to %s: AUDIO.BIN, IMAGE.CUE, DATA.ISO, SESSION1.CUE, BURN.TXT, LAE\\TRACKnn.LAX\n", pos[0].c_str()); return 0; }
     if (cmd == "data" && pos.size() == 3) {   // session 2 of a CD: every file must be a CD extension file (track 1-98, 44100 Hz)
         vector<Ext> x; string e = cdxr::loadExtDir(fs::path(pos[0]), x, true); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }

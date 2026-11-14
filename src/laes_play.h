@@ -126,8 +126,9 @@ struct LayerNode : Node { BitRS rd; int64_t B = 4096; uint64_t restarts = 0; int
     ~LayerNode() { halt(); }
     void compute(int64_t a, int64_t b, V& out) override { LAESP_PROF(0); out.resize((size_t)(b - a));
         if (!started) start(a);
-        else if (a < q0) { halt(); restarts++; start(a); }   // behind the kept blocks
-        else if (a > qEnd + ahead && ix) { uint64_t p; if ((int64_t)ix->atMost((size_t)(a / B), p) * B > qEnd) { halt(); start(a); } }   // far ahead: jump
+        else { int64_t h0, hE; { std::lock_guard<std::mutex> g0(m); h0 = q0; hE = qEnd; }   // read under the lock: the thread moves them (FU14-4)
+          if (a < h0) { halt(); restarts++; start(a); }   // behind the kept blocks
+          else if (a > hE + ahead && ix) { uint64_t p; if ((int64_t)ix->atMost((size_t)(a / B), p) * B > hE) { halt(); start(a); } } }   // far ahead: jump
         std::unique_lock<std::mutex> g(m); if (b > want) { want = b; cv.notify_all(); }
         cv.wait(g, [&] { return err || qEnd >= b; }); if (err) std::rethrow_exception(err);
         int64_t at = q0; size_t qi = 0; for (int64_t i = a; i < b; qi++) { const V& blk = q[qi]; const int64_t e = at + (int64_t)blk.size();
@@ -135,9 +136,9 @@ struct LayerNode : Node { BitRS rd; int64_t B = 4096; uint64_t restarts = 0; int
         while (!q.empty() && q0 + (int64_t)q.front().size() <= a) { q0 += (int64_t)q.front().size(); q.pop_front(); }   // blocks wholly before this request
         cv.notify_all(); }
 private:
-    std::thread th; std::mutex m; std::condition_variable cv; std::deque<V> q; int64_t q0 = 0, qEnd = 0, want = 0; bool stop = false, started = false; std::exception_ptr err;
+    std::thread th; std::mutex m; std::condition_variable cv; std::deque<V> q; int64_t q0 = 0, qEnd = 0, want = 0, skip = 0; bool stop = false, started = false; std::exception_ptr err;   // skip: blocks wholly before it are not kept (FU14-4)
     void start(int64_t a) { uint64_t p = 0; const size_t k = ix ? ix->atMost((size_t)(a / B), p) : 0;
-        rd.reset(); rd.pos = k ? p : 0; q.clear(); q0 = qEnd = (int64_t)(k ? k : 0) * B; want = q0; stop = false; err = nullptr; started = true;
+        rd.reset(); rd.pos = k ? p : 0; q.clear(); q0 = qEnd = (int64_t)(k ? k : 0) * B; want = q0; skip = a; stop = false; err = nullptr; started = true;
         const int64_t s0 = q0; th = std::thread([this, s0] { produce(s0); }); }
     void halt() { { std::lock_guard<std::mutex> g(m); stop = true; cv.notify_all(); } if (th.joinable()) th.join(); }
     void produce(int64_t s) {
@@ -147,6 +148,7 @@ private:
             const int64_t k = (int64_t)std::min<int64_t>(B, n - s); V blk((size_t)k); bool ok = false;
             try { ok = laes::decodeBlock(rd, blk.data(), k); } catch (...) { std::lock_guard<std::mutex> g(m); err = std::current_exception(); cv.notify_all(); return; }
             std::lock_guard<std::mutex> g(m); if (!ok) { err = std::make_exception_ptr(laess::Fail("LAES layer damaged")); cv.notify_all(); return; }
+            if (q.empty() && s + k <= skip) { q0 += k; qEnd += k; s += k; cv.notify_all(); continue; }   // wholly before the request that started the thread: not kept (FU14-4)
             q.push_back(std::move(blk)); qEnd += k; s += k; cv.notify_all(); } } };
 // level j of a master stored as a difference: layer + the reference of its tier (laess::refPiece)
 struct AddRefNode : Node { Node* e = nullptr; laess::Sig* src = nullptr; std::vector<int64_t> h; int64_t wj = 0; int up = 0;
@@ -277,7 +279,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
         uint64_t p = 4; bool last = false, haveSi = false; bool lae1 = false;
         while (!last) { if (p + 4 > n) return "FLAC metadata truncated"; uint8_t bh[4]; src.read(p, bh, 4); last = bh[0] & 0x80; const int type = bh[0] & 0x7F; const uint64_t len = (uint64_t)bh[1] << 16 | bh[2] << 8 | bh[3]; p += 4;
             if (p + len > n) return "FLAC metadata truncated";
-            if (type == 0) { if (len != 34) return "bad STREAMINFO"; uint8_t s[34]; src.read(p, s, 34); laesflac::BR r{s, 34}; fi.minBs = (int)r.get(16); fi.maxBs = (int)r.get(16); r.get(24); r.get(24);
+            if (type == 0) { if (haveSi) return "two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return "bad STREAMINFO"; uint8_t s[34]; src.read(p, s, 34); laesflac::BR r{s, 34}; fi.minBs = (int)r.get(16); fi.maxBs = (int)r.get(16); r.get(24); r.get(24);
                 fi.rate = (int)r.get(20); fi.channels = (int)r.get(3) + 1; fi.bps = (int)r.get(5) + 1; fi.total = r.get(36); memcpy(fi.md5, s + 18, 16); haveSi = true; }
             else if (type == 2 && len >= 4) { uint8_t id[4]; src.read(p, id, 4); if (!memcmp(id, "LAE2", 4)) payload.add(p + 4, len - 4); else if (!memcmp(id, "LAE1", 4)) lae1 = true; }
             else if (type == 4 && len >= 8 && len < (1u << 24)) { std::vector<uint8_t> b((size_t)len); src.read(p, b.data(), b.size()); size_t q = 0;

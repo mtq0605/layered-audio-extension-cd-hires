@@ -396,7 +396,7 @@ public final class LaeEncoder {
         // no finished step is reused (see below, after the alignment).
         x.manifest = x.T("resume.txt");
         if (x.resume) { StringBuilder key = new StringBuilder("lae_enc java-port " + LaeyEncoder.VERSION + " | options");
-            for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i])) key.append(" ").append(argv[i]);
+            for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i]) && !argv[i].startsWith("mem=")) key.append(" ").append(argv[i]);   // mem=: only the block length, which changes no result (FU07-9)
             key.append(" | master ").append(masterMd5);
             if (x.noisePath != null) { final byte[] t = EncIo.readAll(x.noisePath); long h = 0xcbf29ce484222325L;   // FNV-1a of the marking file's bytes (1469598103934665603)
                 for (int i = 0; i < t.length; i++) { h ^= (t[i] & 0xFF); h *= 1099511628211L; }

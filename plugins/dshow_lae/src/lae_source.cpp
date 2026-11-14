@@ -148,13 +148,14 @@ struct Decoder {
         if (c.master >= 0) { if (g_verified.get(fi.file_sha256, c.master) == 0) checkAll(); if (g_verified.get(fi.file_sha256, c.master) != 1) { choice = 0; laes_get_choice(laes, 0, &c); } }
         rate = c.rate; bits = c.bits; frames = c.frames; if (!seek(0)) return false;
         const std::wstring rec = dataDir() + L"\\laes_index\\" + std::wstring(pfcw(hex(fi.file_sha256, 32))) + L".idx"; laes_file* f = laes;
-        indexer = std::thread([this, rec, f] { FpPin pin2; std::vector<uint8_t> d; FILE* r = _wfopen(rec.c_str(), L"rb");
+        indexer = std::thread([this, rec, f] { FpPin pin2; try {   // an exception here (memory) would end the player: without the record a seek decodes from the start
+            std::vector<uint8_t> d; FILE* r = _wfopen(rec.c_str(), L"rb");
             if (r) { _fseeki64(r, 0, SEEK_END); const int64_t n = _ftelli64(r); _fseeki64(r, 0, SEEK_SET); if (n > 0 && n < (64ll << 20)) { d.resize((size_t)n); if (fread(d.data(), 1, d.size(), r) != d.size()) d.clear(); } fclose(r); }
             if (!d.empty() && laes_index_load(f, d.data(), (int64_t)d.size()) == 0) return;
             laes_index_layers(f, &cancel, 0); if (cancel) return; const int64_t n = laes_index_save(f, nullptr, 0); if (n <= 0) return;
             std::vector<uint8_t> b((size_t)n); if (laes_index_save(f, b.data(), n) != n) return; CreateDirectoryW((dataDir() + L"\\laes_index").c_str(), nullptr);
             const std::wstring tmp = rec + L".part"; FILE* w = _wfopen(tmp.c_str(), L"wb"); if (!w) return; const bool ok = fwrite(b.data(), 1, b.size(), w) == b.size(); fclose(w);
-            if (!ok || !MoveFileExW(tmp.c_str(), rec.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str()); });
+            if (!ok || !MoveFileExW(tmp.c_str(), rec.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str()); } catch (...) {} });
         return true; }
     static std::wstring pfcw(const std::string& s) { return std::wstring(s.begin(), s.end()); }
     bool startLaey() {
@@ -286,7 +287,9 @@ public:
     STDMETHODIMP get_MoreInfoBannerURL(BSTR* s) override { if (s) *s = nullptr; return E_NOTIMPL; }
     STDMETHODIMP get_MoreInfoText(BSTR* s) override { if (s) *s = nullptr; return E_NOTIMPL; }
     // IFileSourceFilter
-    STDMETHODIMP Load(LPCOLESTR pszFileName, const AM_MEDIA_TYPE*) override { if (!pszFileName) return E_POINTER; m_name = pszFileName; return dec.open(pszFileName); }
+    // no C++ exception may leave a COM method (it would end the host player): memory running out fails the call instead
+    STDMETHODIMP Load(LPCOLESTR pszFileName, const AM_MEDIA_TYPE*) override { if (!pszFileName) return E_POINTER;
+        try { m_name = pszFileName; return dec.open(pszFileName); } catch (const std::bad_alloc&) { dec.close(); return E_OUTOFMEMORY; } catch (...) { dec.close(); return E_FAIL; } }
     STDMETHODIMP GetCurFile(LPOLESTR* ppszFileName, AM_MEDIA_TYPE* pmt) override {
         if (!ppszFileName) return E_POINTER; *ppszFileName = (LPOLESTR)CoTaskMemAlloc((m_name.size() + 1) * sizeof(wchar_t)); if (!*ppszFileName) return E_OUTOFMEMORY;
         wcscpy_s(*ppszFileName, m_name.size() + 1, m_name.c_str()); if (pmt) { ZeroMemory(pmt, sizeof *pmt); pmt->majortype = MEDIATYPE_Stream; } return S_OK; }
@@ -324,11 +327,11 @@ public:
         if (got) *got = k; return k == n ? S_OK : S_FALSE; }
     STDMETHODIMP Skip(ULONG n) override { m_at += n; return m_at <= 1 ? S_OK : S_FALSE; }
     STDMETHODIMP Reset() override { m_at = 0; return S_OK; }
-    STDMETHODIMP Clone(IEnumMediaTypes** pp) override { if (!pp) return E_POINTER; *pp = new EnumTypes(m_pin, m_at); (*pp)->AddRef(); return S_OK; }
+    STDMETHODIMP Clone(IEnumMediaTypes** pp) override { if (!pp) return E_POINTER; *pp = new (std::nothrow) EnumTypes(m_pin, m_at); if (!*pp) return E_OUTOFMEMORY; (*pp)->AddRef(); return S_OK; }
 private:
     std::atomic<long> m_ref{0}; LaePin* m_pin; ULONG m_at;
 };
-STDMETHODIMP LaePin::EnumMediaTypes(IEnumMediaTypes** ppEnum) { if (!ppEnum) return E_POINTER; *ppEnum = new EnumTypes(this); (*ppEnum)->AddRef(); return S_OK; }
+STDMETHODIMP LaePin::EnumMediaTypes(IEnumMediaTypes** ppEnum) { if (!ppEnum) return E_POINTER; *ppEnum = new (std::nothrow) EnumTypes(this); if (!*ppEnum) return E_OUTOFMEMORY; (*ppEnum)->AddRef(); return S_OK; }
 
 class EnumPinsImpl : public IEnumPins {   // the one pin of the filter
 public:
@@ -340,11 +343,11 @@ public:
     STDMETHODIMP Next(ULONG n, IPin** out, ULONG* got) override { ULONG k = 0; while (k < n && m_at < 1) { out[k++] = &m_f->m_pin; m_f->m_pin.AddRef(); m_at++; } if (got) *got = k; return k == n ? S_OK : S_FALSE; }
     STDMETHODIMP Skip(ULONG n) override { m_at += n; return m_at <= 1 ? S_OK : S_FALSE; }
     STDMETHODIMP Reset() override { m_at = 0; return S_OK; }
-    STDMETHODIMP Clone(IEnumPins** pp) override { if (!pp) return E_POINTER; *pp = new EnumPinsImpl(m_f, m_at); (*pp)->AddRef(); return S_OK; }
+    STDMETHODIMP Clone(IEnumPins** pp) override { if (!pp) return E_POINTER; *pp = new (std::nothrow) EnumPinsImpl(m_f, m_at); if (!*pp) return E_OUTOFMEMORY; (*pp)->AddRef(); return S_OK; }
 private:
     std::atomic<long> m_ref{0}; LaeSource* m_f; ULONG m_at;
 };
-STDMETHODIMP LaeSource::EnumPins(IEnumPins** ppEnum) { if (!ppEnum) return E_POINTER; *ppEnum = new EnumPinsImpl(this); (*ppEnum)->AddRef(); return S_OK; }
+STDMETHODIMP LaeSource::EnumPins(IEnumPins** ppEnum) { if (!ppEnum) return E_POINTER; *ppEnum = new (std::nothrow) EnumPinsImpl(this); if (!*ppEnum) return E_OUTOFMEMORY; (*ppEnum)->AddRef(); return S_OK; }
 
 STDMETHODIMP LaePin::Connect(IPin* pReceivePin, const AM_MEDIA_TYPE* pmt) {
     if (!pReceivePin) return E_POINTER; std::lock_guard<std::recursive_mutex> g(m_lock); if (m_peer) return VFW_E_ALREADY_CONNECTED;
@@ -363,7 +366,7 @@ void LaePin::startThread() {
     stopThread(); std::lock_guard<std::recursive_mutex> g(m_lock); if (!m_peer || !m_alloc) return;
     m_alloc->Commit(); m_stop = false; const Decoder& d = m_filter->dec; m_segFrame = d.pos; m_segStart = d.rate ? (REFERENCE_TIME)(d.pos * (uint64_t)kUnits / (uint64_t)d.rate) : 0;
     m_peer->NewSegment(m_segStart, (REFERENCE_TIME)(d.frames * (uint64_t)kUnits / (uint64_t)std::max(1, d.rate)), 1.0);
-    m_thread = std::thread([this] { push(); }); }
+    try { m_thread = std::thread([this] { push(); }); } catch (...) { m_stop = true; } }   // no thread: nothing is delivered (Pause and seeks still return)
 void LaePin::stopThread() { m_stop = true; IMemAllocator* a = nullptr; { std::lock_guard<std::recursive_mutex> g(m_lock); a = m_alloc; if (a) a->AddRef(); }
     if (a) { a->Decommit(); a->Release(); }   // a wait in GetBuffer returns
     if (m_thread.joinable() && m_thread.get_id() != std::this_thread::get_id()) m_thread.join(); }
@@ -371,8 +374,9 @@ void LaePin::stopThread() { m_stop = true; IMemAllocator* a = nullptr; { std::lo
 void LaePin::push() {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED); Decoder& d = m_filter->dec; const int by = d.bits == 16 ? 2 : 4; std::vector<int32_t> buf;
     for (;;) { if (m_stop) break; IMediaSample* s = nullptr; if (FAILED(m_alloc->GetBuffer(&s, nullptr, nullptr, 0)) || !s) break;
-        BYTE* p = nullptr; s->GetPointer(&p); const int64_t n = (int64_t)(s->GetSize() / (2 * by)); buf.resize((size_t)n * 2);
-        const uint64_t first = d.pos; const int64_t k = d.readFrames(buf.data(), n);
+        BYTE* p = nullptr; s->GetPointer(&p); const int64_t n = (int64_t)(s->GetSize() / (2 * by));
+        const uint64_t first = d.pos; int64_t k;
+        try { buf.resize((size_t)n * 2); k = d.readFrames(buf.data(), n); } catch (...) { k = -1; }   // memory: an error of this track, not of the player
         if (k <= 0) { s->Release(); if (!m_stop && m_peer) { m_peer->EndOfStream();
                 if (k < 0) {   // a decoding or read error is not the end of the track: the graph is told (EC_ERRORABORT), as a source filter does
                     IMediaEventSink* sink = nullptr; if (m_filter->m_graph && SUCCEEDED(m_filter->m_graph->QueryInterface(IID_IMediaEventSink, (void**)&sink)) && sink) { sink->Notify(EC_ERRORABORT, E_FAIL, 0); sink->Release(); } } }

@@ -121,7 +121,7 @@ static int planMain(int argc, char** argv) {
     // exception). 3. the slices (in memory). CD frames within R of the master's first or last sound in a piece are not decided by a
     // scan of the CD alone: they are checked in step 4 against the slice's own derived base, the encoder's rule (cdOnly).
     const long long R = 64;   // CD frames next to the master's sound that may carry the derivation filter's transition (it reaches about 45)
-    struct Slice { long long S = 0, len = 0; int lead = 0; std::vector<int32_t> m; std::vector<int16_t> c; std::vector<std::pair<long long, long long>> near; };
+    struct Slice { long long S = 0, len = 0, lo = LLONG_MIN, hi = LLONG_MAX; int lead = 0; std::vector<int32_t> m; std::vector<int16_t> c; std::vector<std::pair<long long, long long>> near; };
     std::vector<long long> cutAt(n, LLONG_MIN);   // where each piece's own master range starts (for the notice about the files' split points)
     auto build = [&](std::vector<Slice>& sl, bool say) -> int {   // 0 = built, 1 = stop (reason printed)
         std::vector<long long> lo(n, LLONG_MIN), hi(n, LLONG_MAX), spare(n, 0);   // the master range each piece owns
@@ -175,7 +175,7 @@ static int planMain(int argc, char** argv) {
                 if (say) { if (carried) printf("plan: piece %02zu: digital silence on the CD; its master slice is digital silence except its last %lld samples, the first sound of piece %02zu (less than one CD sample)\n", k + 1, carried, k + 2);
                            else printf("plan: piece %02zu: digital silence on the CD and in the master (scanned sample by sample)\n", k + 1); }
                 continue; }
-            s.lead = k == 0 ? L : 0; s.S = A[k] - s.lead * up; s.len = (nk[k] + s.lead) * up + spare[k]; s.m.assign((size_t)s.len * 2, 0); cutAt[k] = std::max(lo[k], s.S);
+            s.lead = k == 0 ? L : 0; s.S = A[k] - s.lead * up; s.len = (nk[k] + s.lead) * up + spare[k]; s.m.assign((size_t)s.len * 2, 0); cutAt[k] = std::max(lo[k], s.S); s.lo = lo[k]; s.hi = hi[k];   // lo, hi: the master range this piece owns (for the move)
             long long mf = -1, ml = -1;   // the piece's own master sound: first and last non-zero sample it owns
             for (long long i = 0; i < s.len; i++) { const long long g = s.S + i; if (g >= 0 && g < Lm && g >= lo[k] && g < hi[k]) { s.m[(size_t)i * 2] = (*src)[(size_t)g * 2]; s.m[(size_t)i * 2 + 1] = (*src)[(size_t)g * 2 + 1];
                     if (s.m[(size_t)i * 2] || s.m[(size_t)i * 2 + 1]) { if (mf < 0) mf = g; ml = g; } } }
@@ -243,7 +243,9 @@ static int planMain(int argc, char** argv) {
     std::vector<std::string> spill; std::vector<int32_t> Z;
     if (!laes) {   // laes: no move; the fraction becomes T
     Z = w.s; long long lostS = 0, lostE = 0; long nclipAll = 0; const long long Wd = 72;
-    auto gRange = [&](const std::vector<size_t>& g, long long& a, long long& b) { a = std::max(0LL, sl[g.front()].S); b = std::min(Lm, sl[g.back()].S + sl[g.back()].len); };
+    // a group moves only the master samples its pieces own (lo .. hi of build()): where the CD has silence between two pieces and the master
+    // joins them directly, the slice ranges S .. S + len of the two groups overlap, and moving both would add the overlap into Z twice
+    auto gRange = [&](const std::vector<size_t>& g, long long& a, long long& b) { a = std::max({0LL, sl[g.front()].S, sl[g.front()].lo}); b = std::min({Lm, sl[g.back()].S + sl[g.back()].len, sl[g.back()].hi}); };
     for (auto& g : G) { long long a, b; gRange(g, a, b); if (fr[g[0]] != 0 && b > a) std::fill(Z.begin() + (ptrdiff_t)a * 2, Z.begin() + (ptrdiff_t)b * 2, 0); }
     for (auto& g : G) { long long a, b; gRange(g, a, b); const double mvv = -fr[g[0]]; if (mvv == 0 || b <= a) continue;
         std::vector<int32_t> win((size_t)(b - a + 2 * Wd) * 2, 0); std::copy(w.s.begin() + (ptrdiff_t)a * 2, w.s.begin() + (ptrdiff_t)b * 2, win.begin() + (ptrdiff_t)Wd * 2);

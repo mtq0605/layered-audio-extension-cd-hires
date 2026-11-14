@@ -349,16 +349,17 @@ static void finish() {
     Sha256 h; h.add(log.data(), log.size()); const char salt[] = "lae_abx log 2026-11-12"; h.add(salt, sizeof salt - 1); log += "\r\nchecksum (shows accidental edits; not a signature): " + h.hex() + "\r\n";
     const std::wstring dir = exeDir() + L"\\results"; CreateDirectoryW(dir.c_str(), nullptr);
     std::string safe = gTest.pair.name; for (auto& c : safe) if (strchr("\\/:*?\"<>| ", c)) c = '_';
-    const std::wstring path = dir + L"\\" + widen(safe) + L"_" + widen(nowStamp()) + L".txt"; FILE* f = _wfopen(path.c_str(), L"wb"); if (f) { fwrite(log.data(), 1, log.size(), f); fclose(f); }
-    char b[1024]; snprintf(b, sizeof b, "Finished: %d of %d correct, p = %.4f (%s).\r\nA was: %s\r\nB was: %s\r\nLog: %s",
-        gTest.correct, gTest.trials, p, p < 0.05 ? "below 5 %: a difference was heard" : "not below 5 %: no reliable difference", A.name.c_str(), B.name.c_str(), narrow(path).c_str());
+    const std::wstring path = dir + L"\\" + widen(safe) + L"_" + widen(nowStamp()) + L".txt"; FILE* f = _wfopen(path.c_str(), L"wb"); bool logOk = f != nullptr; if (f) { logOk = fwrite(log.data(), 1, log.size(), f) == log.size(); if (fclose(f) != 0) logOk = false; }
+    char b[1024]; snprintf(b, sizeof b, "Finished: %d of %d correct, p = %.4f (%s).\r\nA was: %s\r\nB was: %s\r\n%s%s",
+        gTest.correct, gTest.trials, p, p < 0.05 ? "below 5 %: a difference was heard" : "not below 5 %: no reliable difference", A.name.c_str(), B.name.c_str(),
+        logOk ? "Log: " : "THE LOG COULD NOT BE WRITTEN (note the result shown here): ", narrow(path).c_str());
     char sl[400]; snprintf(sl, sizeof sl, "%-48s %2d/%-2d  p = %.4f  (A was %s)", gTest.pair.name.c_str(), gTest.correct, gTest.trials, p, A.name.c_str()); gSummary.push_back(sl);
     std::string msg = b; gQueuePos++;
     if (gQueuePos < gQueue.size()) { msg += "\r\n\r\nNext: " + gSet[(size_t)gQueue[gQueuePos]].name + ".  Press \"Next pair\" when you are ready."; SetWindowTextW(gPrepare, (L"Next pair (" + std::to_wstring(gQueue.size() - gQueuePos) + L" left)").c_str()); }
     else {   // the whole session in one summary file
         std::string sum = std::string(kVersion) + "\r\nsession " + gSessionStart + " - " + nowText() + ", test rate " + std::to_string(gTest.rate) + " Hz\r\n\r\n"; for (auto& l : gSummary) sum += l + "\r\n";
-        const std::wstring sp = dir + L"\\session_" + widen(nowStamp()) + L".txt"; FILE* g = _wfopen(sp.c_str(), L"wb"); if (g) { fwrite(sum.data(), 1, sum.size(), g); fclose(g); }
-        msg = "All ticked pairs done (" + std::to_string(gSummary.size()) + "). Summary: " + narrow(sp) + "\r\nLast pair: " + msg; SetWindowTextW(gPrepare, L"Start ticked pairs"); gQueue.clear(); gQueuePos = 0; }
+        const std::wstring sp = dir + L"\\session_" + widen(nowStamp()) + L".txt"; FILE* g = _wfopen(sp.c_str(), L"wb"); bool sumOk = g != nullptr; if (g) { sumOk = fwrite(sum.data(), 1, sum.size(), g) == sum.size(); if (fclose(g) != 0) sumOk = false; }
+        msg = "All ticked pairs done (" + std::to_string(gSummary.size()) + "). " + (sumOk ? "Summary: " : "THE SUMMARY COULD NOT BE WRITTEN: ") + narrow(sp) + "\r\nLast pair: " + msg; SetWindowTextW(gPrepare, L"Start ticked pairs"); gQueue.clear(); gQueuePos = 0; }
     setStatus(msg); }
 static void choose(bool saysXisA) {
     if (!gReady || gTest.done >= gTest.trials) return;

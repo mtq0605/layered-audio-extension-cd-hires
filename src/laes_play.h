@@ -179,6 +179,7 @@ struct DownNode : Node { laess::Sig* x = nullptr;
 struct Master { laes::MasterInfo I; int j = 0; uint64_t layOff[2][4] = {{0}}, layLen[2][4] = {{0}}; };   // layers per channel: [0] level j, [k - j] octave k
 struct Choice { int kind = 0; int m = -1, level = 0, from = -1; int rate = 0, bits = 0; int64_t frames = 0; std::string name, what; };   // kind 0 core, 1 master, 2 rate level, 3 derived 16-bit
 struct File {
+    uint64_t foreignFront = 0, foreignBehind = 0;   // DEC 19: bytes of ID3v2 tags in front of a FLAC file, of APEv2 / ID3v1 tags after its last frame (kept, not read)
     bool flac = false; int baseRate = 0, coreBits = 0; int64_t coreFrames = 0; std::vector<int32_t> core[2];
     uint8_t fileSha[32] = {0}; std::string why;            // why: "" when the payload passed every check; else the reason (the core still plays)
     std::vector<Master> ms; std::vector<Choice> choices; std::vector<std::pair<std::string, std::string>> tags;
@@ -271,12 +272,15 @@ inline bool coreFramesFit(uint64_t frames) { return frames <= (uint64_t)(SIZE_MA
 inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
     laeMagic[0] = 0; quick = quickInfo; crcTable(); { std::lock_guard<std::mutex> g(idxM); idx.clear(); } const uint64_t n = src.size(); if (n < 12) return "not LAES";
     // WAV: RIFF, or RF64 / BW64 (EBU Tech 3306, ITU-R BS.2088) for files beyond 4 GB: their 64-bit sizes are in the first chunk, "ds64"
-    uint8_t h[12]; src.read(0, h, 12); flac = !memcmp(h, "fLaC", 4); const bool rf64 = (!memcmp(h, "RF64", 4) || !memcmp(h, "BW64", 4)) && !memcmp(h + 8, "WAVE", 4);
+    uint8_t h[12]; src.read(0, h, 12);
+    foreignFront = laesflac::flacStart([&](uint64_t at, void* d, size_t k) { src.read(at, d, k); }, n); foreignBehind = 0;   // DEC 19: ID3v2 tags in front of "fLaC"
+    if (foreignFront) { if (n < foreignFront + 12) return "not LAES"; src.read(foreignFront, h, 12); if (memcmp(h, "fLaC", 4)) return "not LAES"; }
+    flac = !memcmp(h, "fLaC", 4); const bool rf64 = (!memcmp(h, "RF64", 4) || !memcmp(h, "BW64", 4)) && !memcmp(h + 8, "WAVE", 4);
     const bool wav = (!memcmp(h, "RIFF", 4) && !memcmp(h + 8, "WAVE", 4)) || rf64; if (!flac && !wav) return "not LAES";
     payload = SegSrc(); payload.base = &src; tags.clear();
     uint64_t audioOff = 0, audioLen = 0; laesflac::Info fi; int fmtTag = 0, fmtCh = 0;
     if (flac) {   // metadata: STREAMINFO, the "LAE2" APPLICATION pieces, VORBIS_COMMENT tags
-        uint64_t p = 4; bool last = false, haveSi = false; bool lae1 = false;
+        uint64_t p = foreignFront + 4; bool last = false, haveSi = false; bool lae1 = false;
         while (!last) { if (p + 4 > n) return "FLAC metadata truncated"; uint8_t bh[4]; src.read(p, bh, 4); last = bh[0] & 0x80; const int type = bh[0] & 0x7F; const uint64_t len = (uint64_t)bh[1] << 16 | bh[2] << 8 | bh[3]; p += 4;
             if (p + len > n) return "FLAC metadata truncated";
             if (type == 0) { if (haveSi) return "two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return "bad STREAMINFO"; uint8_t s[34]; src.read(p, s, 34); laesflac::BR r{s, 34}; fi.minBs = (int)r.get(16); fi.maxBs = (int)r.get(16); r.get(24); r.get(24);
@@ -290,6 +294,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
         if (!haveSi) return "no STREAMINFO";
         if (!payload.total) { if (lae1) memcpy(laeMagic, "LAE1", 5); return "not LAES"; }
         if (fi.total == 0 || fi.maxBs < 16 || fi.channels != 2 || (fi.bps != 16 && fi.bps != 24 && fi.bps != 32)) return "core master is not 2-channel 16/24/32-bit FLAC with a sample count";
+        foreignBehind = laesflac::trailerLen([&](uint64_t at, void* d, size_t k) { src.read(at, d, k); }, p, n);   // DEC 19: APEv2 / ID3v1 tags at the end (checked after the frames)
         audioOff = p; audioLen = n - p; baseRate = fi.rate; coreBits = fi.bps; coreFrames = (int64_t)fi.total; }
     else {   // RIFF/WAVE chunks (the last 'fmt ', 'data' and 'LAE ' count; sizes clamped to the file), LIST/INFO tags
         uint64_t pos = 12, laeOff = 0, laeLen = 0; bool haveLae = false, haveData = false;
@@ -322,7 +327,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
     std::vector<uint8_t> fb; size_t fbHead = 0; uint64_t frameNo = 0; std::string coreErr; alignhash::Md5 md5; const int by = coreBits / 8;
     std::vector<uint8_t> carry;   // WAV: bytes of a sample frame split across two reads
     auto flacFrames = [&](bool final) {   // decodes the complete frames in fb (a frame is at most a few hundred kB; 4 MB stay ahead unless final)
-        while (coreErr.empty() && fbHead < fb.size() && (final || fb.size() - fbHead > (4u << 20))) { V ch[2]; size_t used = 0;
+        while (coreErr.empty() && fbHead < fb.size() && (uint64_t)core[0].size() < fi.total && (final || fb.size() - fbHead > (4u << 20))) { V ch[2]; size_t used = 0;   // DEC 19: no frame after the last sample
             const std::string e = laesflac::decodeFrame(fb.data() + fbHead, fb.size() - fbHead, fi, frameNo, (uint64_t)core[0].size(), ch, used);
             if (!e.empty()) { coreErr = e; break; } fbHead += used; frameNo++;
             std::vector<uint8_t> mb; mb.reserve(ch[0].size() * 2 * ((fi.bps + 7) / 8));
@@ -338,11 +343,12 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
         uint64_t k0 = 0; if (T < 2 || fb.size() < (4u << 20) || !laesflac::frameHeaderAt(fb.data(), fb.size(), fi, k0) || k0 != 0) return false;
         // the parts begin at frame headers (sync, header CRC-8, a rising frame number) near equal byte shares; each part must then end exactly
         // where the next begins, with the frame number it begins with, or the core is decoded in order instead
+        const size_t fbEnd = fb.size() - (size_t)std::min<uint64_t>(foreignBehind, fb.size());   // DEC 19: the frames end before the tags at the end
         std::vector<size_t> off{0}; std::vector<uint64_t> num{0};
-        for (size_t t = 1; t < T; t++) { size_t p = std::max(off.back() + 1, fb.size() / T * t); uint64_t k = 0;
-            for (; p + 16 < fb.size(); p++) if (fb[p] == 0xFF && (fb[p + 1] & 0xFE) == 0xF8 && laesflac::frameHeaderAt(fb.data() + p, fb.size() - p, fi, k) && k > num.back()) break;
-            if (p + 16 >= fb.size()) break; off.push_back(p); num.push_back(k); }
-        const size_t S = num.size(); off.push_back(fb.size());
+        for (size_t t = 1; t < T; t++) { size_t p = std::max(off.back() + 1, fbEnd / T * t); uint64_t k = 0;
+            for (; p + 16 < fbEnd; p++) if (fb[p] == 0xFF && (fb[p + 1] & 0xFE) == 0xF8 && laesflac::frameHeaderAt(fb.data() + p, fb.size() - p, fi, k) && k > num.back()) break;
+            if (p + 16 >= fbEnd) break; off.push_back(p); num.push_back(k); }
+        const size_t S = num.size(); off.push_back(fbEnd);
         for (int c = 0; c < 2; c++) core[c].assign((size_t)fi.total, 0);
         const uint64_t tot = (uint64_t)core[0].size(); if (tot != fi.total) { for (int c = 0; c < 2; c++) core[c].clear(); return false; }   // every write below is checked against the arrays' own length
         std::vector<size_t> endOff(S, 0); std::vector<uint64_t> endNum(S, 0), endAt(S, 0); std::vector<int> bad(S, 0), shortAt(S, -1);
@@ -361,7 +367,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
         const int fby = (fi.bps + 7) / 8; std::vector<uint8_t> mb; mb.reserve(1u << 20);
         for (size_t i = 0; i < (size_t)fi.total; i++) { for (int c = 0; c < 2; c++) { const uint64_t v = (uint64_t)(int64_t)core[c][i]; for (int q = 0; q < fby; q++) mb.push_back((uint8_t)(v >> (8 * q))); }
             if (mb.size() >= (1u << 20)) { md5.update(mb.data(), mb.size()); mb.clear(); } }
-        md5.update(mb.data(), mb.size()); fbHead = fb.size(); frameNo = endNum[S - 1]; return true; };
+        md5.update(mb.data(), mb.size()); fbHead = fbEnd; frameNo = endNum[S - 1]; return true; };
     auto coreFeed = [&](const uint8_t* p, size_t k) {
         if (flac) { fb.insert(fb.end(), p, p + k); if (!par) flacFrames(false); return; }
         carry.insert(carry.end(), p, p + k); const size_t whole = carry.size() / (size_t)(2 * by) * (size_t)(2 * by);
@@ -383,6 +389,10 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
       { std::lock_guard<std::mutex> g(cm); cend = true; ccv.notify_all(); } ct.join(); hs.final(fileSha); }
     crc ^= 0xFFFFFFFFu; (void)fs;
     if (flac) { if (!(par && coreErr.empty() && flacParallel())) flacFrames(true); if (!coreErr.empty()) return "FLAC core master: " + coreErr;
+        {   // DEC 19: after the last frame only APEv2 / ID3v1 tags (before, any byte there was refused as a frame)
+            const size_t rest = fb.size() - fbHead; auto rdb = [&](uint64_t at, void* d, size_t k) { memcpy(d, fb.data() + fbHead + at, k); };
+            if (rest && laesflac::trailerLen(rdb, 0, rest) != rest) return "FLAC core master: bytes after the last audio frame that are no APEv2 / ID3v1 tag";
+            foreignBehind = rest; }
         if ((uint64_t)core[0].size() != fi.total) return "FLAC core master: sample count differs from STREAMINFO";
         std::string hx = md5.hex(); bool zero = true; for (int i = 0; i < 16; i++) zero &= fi.md5[i] == 0; uint8_t m[16]; for (int i = 0; i < 16; i++) m[i] = (uint8_t)std::stoul(hx.substr(i * 2, 2), nullptr, 16);
         if (zero || memcmp(m, fi.md5, 16)) return "FLAC core master: MD5 mismatch"; }

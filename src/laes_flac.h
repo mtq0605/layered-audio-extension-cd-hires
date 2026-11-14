@@ -77,11 +77,38 @@ inline bool readSubframe(BR& r, int64_t* x, int64_t n, int bps) {
     const int64_t lim = 1LL << (b - 1); for (int64_t i = 0; i < n; i++) if (x[i] < -lim || x[i] >= lim) return false;   // every sample inside the subframe's bit depth
     if (wasted) for (int64_t i = 0; i < n; i++) x[i] = (int64_t)((uint64_t)x[i] << wasted); return true; }
 inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, uint64_t frameNo, uint64_t have, V ch[2], size_t& used);
+// DEC 19 (2026-11-15): tags that other programs put around a FLAC stream are accepted and left in the file: ID3v2 tags in front of
+// "fLaC" (each "ID3", version, flags, a 28-bit synchsafe size; +10 bytes with a footer) and, after the last audio frame, APEv2 tags
+// (footer "APETAGEX", its size, a 32-byte header when flag bit 31 is set) and ID3v1 tags ("TAG", 128 bytes), in any order, at most 4.
+// They are not read. rd(offset, buffer, bytes) reads the file.
+inline uint64_t id3v2Len(const uint8_t h[10]) {   // the whole length of the ID3v2 tag that starts with these 10 bytes, 0 when it is none
+    if (memcmp(h, "ID3", 3) || h[3] == 0xFF || h[4] == 0xFF || ((h[6] | h[7] | h[8] | h[9]) & 0x80)) return 0;
+    return 10 + ((uint64_t)h[6] << 21 | (uint64_t)h[7] << 14 | (uint64_t)h[8] << 7 | h[9]) + ((h[5] & 0x10) ? 10 : 0); }
+template <class Rd> inline uint64_t flacStart(Rd&& rd, uint64_t n) {   // where "fLaC" is expected: after the ID3v2 tags in front (0 without)
+    uint64_t p = 0; for (int i = 0; i < 64 && p + 10 <= n; i++) { uint8_t h[10]; rd(p, h, 10); const uint64_t l = id3v2Len(h); if (!l || l > n - p) break; p += l; }
+    return p; }
+template <class Rd> inline uint64_t trailerLen(Rd&& rd, uint64_t from, uint64_t n) {   // the bytes at the end of [from, n) that are APEv2 / ID3v1 tags
+    uint64_t e = n;
+    for (int i = 0; i < 4; i++) {
+        if (e >= from + 128) { uint8_t t[3]; rd(e - 128, t, 3); if (!memcmp(t, "TAG", 3)) { e -= 128; continue; } }
+        if (e >= from + 32) { uint8_t f[32]; rd(e - 32, f, 32);
+            if (!memcmp(f, "APETAGEX", 8)) { const uint32_t sz = (uint32_t)f[12] | (uint32_t)f[13] << 8 | (uint32_t)f[14] << 16 | (uint32_t)f[15] << 24, fl = (uint32_t)f[20] | (uint32_t)f[21] << 8 | (uint32_t)f[22] << 16 | (uint32_t)f[23] << 24;
+                const uint64_t tot = (uint64_t)sz + ((fl >> 31) ? 32 : 0); if (sz >= 32 && tot <= e - from) { e -= tot; continue; } } }
+        break; }
+    return n - e; }
+// the note for the user (laes parts / dec / verify): what is kept, "" when there are no such tags
+inline std::string foreignNote(uint64_t front, uint64_t behind) {
+    if (!front && !behind) return ""; std::string s = "tags of other programs are in this file and are kept as they are (not read):";
+    if (front) s += " " + std::to_string((unsigned long long)front) + " bytes of ID3v2 in front of the FLAC stream"; if (front && behind) s += ";";
+    if (behind) s += " " + std::to_string((unsigned long long)behind) + " bytes of APEv2 / ID3v1 after its last audio frame"; return s; }
 // reads a whole FLAC file: STREAMINFO, the concatenated "LAE2" APPLICATION data, and the audio (two independent channels).
+// DEC 19: ID3v2 tags in front and APEv2 / ID3v1 tags after the last frame are skipped (the frames end when STREAMINFO's count is reached;
+// what follows must be such tags).
 // Returns "" or the reason. md5ok: the decoded audio matches STREAMINFO's MD5 (an all-zero MD5 counts as "not given").
 inline std::string readFlac(const std::vector<uint8_t>& f, Info& in, V ch[2], std::vector<uint8_t>& app, bool& md5ok) {
-    app.clear(); md5ok = false; if (f.size() < 8 || memcmp(f.data(), "fLaC", 4)) return "not a FLAC file";
-    size_t p = 4; bool last = false, haveSi = false;
+    app.clear(); md5ok = false; auto rdv = [&](uint64_t at, void* d, size_t k) { memcpy(d, f.data() + at, k); };
+    const size_t s0 = (size_t)flacStart(rdv, f.size()); if (f.size() < s0 + 8 || memcmp(f.data() + s0, "fLaC", 4)) return "not a FLAC file";
+    size_t p = s0 + 4; bool last = false, haveSi = false;
     while (!last) { if (p + 4 > f.size()) return "metadata truncated"; last = f[p] & 0x80; const int type = f[p] & 0x7F; const uint32_t len = (uint32_t)f[p + 1] << 16 | f[p + 2] << 8 | f[p + 3]; p += 4;
         if (p + len > f.size()) return "metadata truncated"; if (!haveSi && type != 0) return "STREAMINFO is not the first metadata block";
         if (type == 0) { if (haveSi) return "two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return "bad STREAMINFO"; BR r{f.data() + p, 34}; in.minBs = (int)r.get(16); in.maxBs = (int)r.get(16); r.get(24); r.get(24); in.rate = (int)r.get(20); in.channels = (int)r.get(3) + 1; in.bps = (int)r.get(5) + 1; in.total = r.get(36);
@@ -90,7 +117,8 @@ inline std::string readFlac(const std::vector<uint8_t>& f, Info& in, V ch[2], st
         p += len; }
     if (!haveSi) return "no STREAMINFO"; if (in.total == 0) return "STREAMINFO gives no sample count (an LAES core master always has one)"; if (in.maxBs < 16) return "bad STREAMINFO block size"; if (in.channels != 2) return "LAES core master must have 2 channels"; if (in.bps != 16 && in.bps != 24 && in.bps != 32) return "core master must be 16, 24 or 32 bit";
     ch[0].clear(); ch[1].clear(); uint64_t frameNo = 0;
-    while (p < f.size()) { size_t used = 0; const std::string e = decodeFrame(f.data() + p, f.size() - p, in, frameNo, ch[0].size(), ch, used); if (!e.empty()) return e; p += used; frameNo++; }
+    while (p < f.size() && ch[0].size() < in.total) { size_t used = 0; const std::string e = decodeFrame(f.data() + p, f.size() - p, in, frameNo, ch[0].size(), ch, used); if (!e.empty()) return e; p += used; frameNo++; }
+    if (p < f.size() && trailerLen(rdv, p, f.size()) != f.size() - p) return "bytes after the last audio frame that are no APEv2 / ID3v1 tag";   // DEC 19
     if (in.total && in.total != ch[0].size()) return "sample count differs from STREAMINFO";
     uint8_t m[16]; audioMd5(ch, (int64_t)ch[0].size(), in.bps, m); bool zero = true; for (int i = 0; i < 16; i++) zero &= in.md5[i] == 0; md5ok = !zero && !memcmp(m, in.md5, 16);
     return ""; }

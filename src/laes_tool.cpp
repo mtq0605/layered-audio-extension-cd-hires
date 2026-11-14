@@ -296,17 +296,23 @@ static std::string selfCheckFile(const std::string& path, const std::vector<laes
 // ---- the structure of an LAES / LAE file (2026-11-05, for laes tag / laes parts): FLAC metadata blocks or RIFF chunks, with their bodies
 struct Part { std::string id; int type = -1; long long off = 0, len = 0; };   // FLAC: type 0..126, id "" (APPLICATION: its 4-byte id); WAV: id, type -1
 struct Layout { bool flac = false, rf64 = false; std::vector<Part> parts; long long audioOff = 0, audioLen = 0; std::vector<std::pair<long long, long long>> payload;
+    long long front = 0, behind = 0;   // DEC 19 (FLAC): ID3v2 tags in front of "fLaC", APEv2 / ID3v1 tags after the audio frames: copied as they are
     long long dataPart = -1, laePart = -1;   // WAV: the index in parts of the "data" and "LAE " chunk used - the last of each, as a player reads it (SPEC 7)
     bool unused(size_t i) const { const std::string& id = parts[i].id; return !flac && ((id == "data" && (long long)i != dataPart) || (id == "LAE " && (long long)i != laePart)); } };   // FU15-8: not written again (writers write one of each)
 static std::string readLayout(laess::In& in, Layout& L) {
-    uint8_t h[12] = {0}; if (in.n < 12) return in.path + ": not FLAC or RIFF/WAVE"; in.read(0, h, 12); L = Layout(); L.flac = !memcmp(h, "fLaC", 4);
+    uint8_t h[12] = {0}; if (in.n < 12) return in.path + ": not FLAC or RIFF/WAVE"; in.read(0, h, 12); L = Layout();
+    L.front = (long long)laesflac::flacStart([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)in.n);   // DEC 19
+    if (L.front) { if (in.n < L.front + 12) return in.path + ": not FLAC or RIFF/WAVE"; in.read(L.front, h, 12); if (memcmp(h, "fLaC", 4)) return in.path + ": not FLAC or RIFF/WAVE"; }
+    L.flac = !memcmp(h, "fLaC", 4);
     L.rf64 = (!memcmp(h, "RF64", 4) || !memcmp(h, "BW64", 4)) && !memcmp(h + 8, "WAVE", 4);
-    if (L.flac) { long long p = 4; bool last = false;
+    if (L.flac) { long long p = L.front + 4; bool last = false;
         while (!last) { if (p + 4 > in.n) return in.path + ": FLAC metadata truncated"; uint8_t bh[4]; in.read(p, bh, 4); last = bh[0] & 0x80; Part q; q.type = bh[0] & 0x7F; q.len = bh[1] << 16 | bh[2] << 8 | bh[3]; q.off = p + 4;
             if (q.off + q.len > in.n) return in.path + ": FLAC metadata truncated";
             if (q.type == 2 && q.len >= 4) { char id[5] = {0}; in.read(q.off, id, 4); q.id = id; if (q.id == "LAE2" || q.id == "LAE1") L.payload.push_back({q.off + 4, q.len - 4}); }
             L.parts.push_back(q); p = q.off + q.len; }
-        if (L.parts.empty() || L.parts[0].type != 0) return in.path + ": no STREAMINFO first"; L.audioOff = p; L.audioLen = in.n - p; return ""; }
+        if (L.parts.empty() || L.parts[0].type != 0) return in.path + ": no STREAMINFO first";
+        L.behind = (long long)laesflac::trailerLen([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)p, (uint64_t)in.n);   // DEC 19
+        L.audioOff = p; L.audioLen = in.n - p - L.behind; return ""; }
     if ((memcmp(h, "RIFF", 4) && !L.rf64) || memcmp(h + 8, "WAVE", 4)) return in.path + ": not FLAC or RIFF/WAVE";
     uint64_t dsData = 0; std::vector<std::pair<std::string, uint64_t>> table; long long pos = 12; bool haveData = false;
     while (pos + 8 <= in.n) { uint8_t c[8]; in.read(pos, c, 8); Part q; q.id.assign((const char*)c, 4); uint64_t n = c[4] | c[5] << 8 | c[6] << 16 | (uint64_t)c[7] << 24; q.off = pos + 8;
@@ -344,14 +350,14 @@ static std::string checkStored(const std::string& path, int threads) {
 static std::string writeWithPayload(laess::In& in, const Layout& L, const std::string& bodyP, long long bsz, const std::string& outPart) {
         { laess::Out o(outPart); laess::In body(bodyP);
           if (L.flac) {   // the blocks in their order; the LAE2 APPLICATION blocks replaced, where the first one was, by the new payload's
-              const size_t pieceA = (1u << 24) - 1 - 4; const long long napp = (bsz + (long long)pieceA - 1) / (long long)pieceA; o.put("fLaC", 4);
+              const size_t pieceA = (1u << 24) - 1 - 4; const long long napp = (bsz + (long long)pieceA - 1) / (long long)pieceA; copyRange(in, o, 0, L.front); o.put("fLaC", 4);   // DEC 19: ID3v2 in front kept
               struct Em { int type; long long off, len; bool lae; long long a; }; std::vector<Em> em; bool done = false;
               for (const Part& q : L.parts) { if (q.type == 2 && q.id == "LAE2") { if (!done) for (long long i = 0; i < napp; i++) em.push_back({2, 0, std::min<long long>((long long)pieceA, bsz - i * (long long)pieceA), true, i * (long long)pieceA}); done = true; }
                   else em.push_back({q.type, q.off, q.len, false, 0}); }
               for (size_t i = 0; i < em.size(); i++) { const Em& e = em[i]; const long long L4 = e.lae ? e.len + 4 : e.len;
                   const uint8_t bh[4] = {(uint8_t)((i + 1 == em.size() ? 0x80 : 0) | e.type), (uint8_t)(L4 >> 16), (uint8_t)(L4 >> 8), (uint8_t)L4}; o.put(bh, 4);
                   if (e.lae) { o.put("LAE2", 4); copyRange(body, o, e.a, e.len); } else copyRange(in, o, e.off, e.len); }
-              copyRange(in, o, L.audioOff, L.audioLen); }
+              copyRange(in, o, L.audioOff, L.audioLen); copyRange(in, o, L.audioOff + L.audioLen, L.behind); }   // DEC 19: APEv2 / ID3v1 at the end kept
           else {   // RIFF / RF64: "fmt " and every chunk in its order (tags kept as they are); the "LAE " chunk with the new payload; ds64 / JUNK made again
               const Part* fmt = nullptr; std::vector<const Part*> keep; for (size_t i = 0; i < L.parts.size(); i++) { const Part& q = L.parts[i]; if (q.id == "fmt ") fmt = &q; else if (q.id == "ds64" || q.id == "JUNK" || L.unused(i)) continue; else keep.push_back(&q); }
               if (!fmt || fmt->len < 16) return "no fmt chunk";
@@ -441,9 +447,11 @@ static int laesMain(int argc, char** argv) {
     if (cmd == "parts" && argc >= 3) try {   // the structure and the SHA-256 of the audio bytes and of the payload (tests: unchanged by tags)
         laess::In in(argv[2]); Layout L; const std::string e = readLayout(in, L); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         printf("%s form%s\n", L.flac ? "FLAC" : "WAV", L.rf64 ? " (RF64)" : "");
+        if (L.front) printf("  ID3v2 tag(s) of another program, in front  %lld bytes (kept, not read)\n", L.front);   // DEC 19
         for (auto& q : L.parts) { if (L.flac) { static const char* nm[] = {"STREAMINFO", "PADDING", "APPLICATION", "SEEKTABLE", "VORBIS_COMMENT", "CUESHEET", "PICTURE"};
                 printf("  %s%s%s  %lld bytes\n", q.type <= 6 ? nm[q.type] : ("type " + std::to_string(q.type)).c_str(), q.id.empty() ? "" : " ", q.id.c_str(), q.len); }
             else printf("  \"%s\"  %lld bytes\n", q.id.c_str(), q.len); }
+        if (L.behind) printf("  APEv2 / ID3v1 tag(s) of another program, at the end  %lld bytes (kept, not read)\n", L.behind);
         printf("audio bytes SHA-256 %s (%lld bytes)\n", shaOf(in, {{L.audioOff, L.audioLen}}).c_str(), L.audioLen);
         long long pl = 0; for (auto& r : L.payload) pl += r.second; printf("payload SHA-256 %s (%lld bytes)\n", shaOf(in, L.payload).c_str(), pl);
         {   // the tags as the playback decoder reads them (laes_play.h: VORBIS_COMMENT, LIST/INFO)
@@ -470,10 +478,11 @@ static int laesMain(int argc, char** argv) {
           if (L.flac) {   // "fLaC" | STREAMINFO | the new tags | the other blocks as they were (old VORBIS_COMMENT, PICTURE, PADDING dropped) | audio frames
               std::vector<const Part*> keep; for (size_t i = 1; i < L.parts.size(); i++) { const int t = L.parts[i].type; if (t != 1 && t != 4 && t != 6 && t != 0) keep.push_back(&L.parts[i]); }
               const std::vector<uint8_t> tb = laestag::flacBlocks(tags, keep.empty());
-              std::vector<uint8_t> si(42); in.read(0, si.data(), 42); si[4] = (uint8_t)((tb.empty() && keep.empty() ? 0x80 : 0) | 0); o.put(si.data(), si.size()); o.put(tb.data(), tb.size());
+              copyRange(in, o, 0, L.front);   // DEC 19: ID3v2 tags in front kept as they are
+              std::vector<uint8_t> si(42); in.read(L.front, si.data(), 42); si[4] = (uint8_t)((tb.empty() && keep.empty() ? 0x80 : 0) | 0); o.put(si.data(), si.size()); o.put(tb.data(), tb.size());
               for (size_t i = 0; i < keep.size(); i++) { const Part& q = *keep[i]; const uint8_t bh[4] = {(uint8_t)((i + 1 == keep.size() ? 0x80 : 0) | q.type), (uint8_t)(q.len >> 16), (uint8_t)(q.len >> 8), (uint8_t)q.len};
                   o.put(bh, 4); copyRange(in, o, q.off, q.len); }
-              copyRange(in, o, L.audioOff, L.audioLen); }
+              copyRange(in, o, L.audioOff, L.audioLen); copyRange(in, o, L.audioOff + L.audioLen, L.behind); }   // DEC 19: APEv2 / ID3v1 kept
           else {   // RIFF (RF64 beyond 4 GB, as the encoder) | "fmt " | the new tags | the other chunks in their order (old LIST/INFO, id3 / ID3, ds64, JUNK dropped)
               const Part* fmt = nullptr; std::vector<const Part*> keep;
               for (size_t i = 0; i < L.parts.size(); i++) { const Part& q = L.parts[i]; if (q.id == "fmt ") fmt = &q; else if (q.id == "ds64" || q.id == "id3 " || q.id == "ID3 " || q.id == "JUNK" || L.unused(i)) continue;
@@ -1032,9 +1041,10 @@ static int laesMain(int argc, char** argv) {
         if (cmd == "dec" && argv[3][0] == '-' && strncmp(argv[3], "--list", 6) != 0) {   // FU16-9 (2026-11-14): an option is not taken as the output folder
             printf("give the output folder: laes dec <in> <out dir> [--levels] [--pick=...] (or laes dec <in> --list)\n"); return 1; }
         Gone g{workDir(std::string(argv[2]) + (cmd == "dec" ? ".dec" : ".verify"))}; const std::string bodyPath = g.p + "/body.bin"; Pcm core; long long bodySize = 0;
-        { laess::In in(argv[2]); uint8_t mg[4] = {0}; if (in.n >= 4) in.read(0, mg, 4);
+        { laess::In in(argv[2]); uint8_t mg[4] = {0}; const long long s0 = (long long)laesflac::flacStart([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)in.n);   // DEC 19: ID3v2 in front
+          if (in.n >= s0 + 4) in.read(s0, mg, 4); if (s0 && memcmp(mg, "fLaC", 4)) { printf("%s: no FLAC stream after the ID3v2 tag\n", argv[2]); return 2; }
           if (!memcmp(mg, "fLaC", 4)) {   // metadata: STREAMINFO kept, the "LAE2" APPLICATION blocks into the payload file; the audio through the FLAC reader
-              long long p = 4; bool last = false; std::vector<uint8_t> meta = {'f', 'L', 'a', 'C'}, b; laess::Out bo(bodyPath);
+              long long p = s0 + 4; bool last = false; std::vector<uint8_t> meta = {'f', 'L', 'a', 'C'}, b; laess::Out bo(bodyPath);
               while (!last) { if (p + 4 > in.n) { printf("%s: metadata truncated\n", argv[2]); return 2; } uint8_t bh[4]; in.read(p, bh, 4); last = bh[0] & 0x80; const int type = bh[0] & 0x7F; const long long len = bh[1] << 16 | bh[2] << 8 | bh[3];
                   if (p + 4 + len > in.n) { printf("%s: metadata truncated\n", argv[2]); return 2; }
                   if (type == 0 || (type != 2)) { b.resize((size_t)len + 4); in.read(p, b.data(), b.size()); if (type == 0) meta.insert(meta.end(), b.begin(), b.end()); }
@@ -1043,6 +1053,7 @@ static int laesMain(int argc, char** argv) {
               bo.close(); if (meta.size() > 4) meta[4] |= 0x80; std::vector<uint8_t> rest((size_t)(in.n - p)); in.read(p, rest.data(), rest.size()); meta.insert(meta.end(), rest.begin(), rest.end());
               laesflac::Info fi; bool md5ok; std::vector<uint8_t> app; std::string e = laesflac::readFlac(meta, fi, core.c, app, md5ok);
               if (!e.empty()) { printf("%s: %s\n", argv[2], e.c_str()); return 2; } core.rate = fi.rate; core.bits = fi.bps;
+              { const uint64_t tl = laesflac::trailerLen([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)p, (uint64_t)in.n); const std::string fn = laesflac::foreignNote((uint64_t)s0, tl); if (!fn.empty()) printf("note: %s\n", fn.c_str()); }   // DEC 19
               printf("FLAC core master: %d Hz %d-bit, %lld frames, MD5 %s\n", core.rate, core.bits, (long long)core.frames(), md5ok ? "ok" : "MISMATCH"); if (!md5ok) return 2; }
           else { laess::WavInfo wi; long long lo = -1, ll = 0; std::string e = laess::probeWav(argv[2], wi, &lo, &ll); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
               core.rate = wi.rate; core.bits = wi.bits; std::vector<int32_t> x; laess::wavFrames(in, wi, 0, wi.frames, x); for (int c = 0; c < 2; c++) { core.c[c].resize((size_t)wi.frames); for (int64_t i = 0; i < wi.frames; i++) core.c[c][(size_t)i] = x[(size_t)i * 2 + c]; }

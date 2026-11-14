@@ -177,7 +177,8 @@ inline void wavFrames(In& in, const WavInfo& wi, long long a, long long b, std::
     const int by = wi.bits / 8; std::vector<uint8_t> t((size_t)(b - a) * 2 * by); in.read(wi.dataOff + a * 2 * by, t.data(), t.size()); out.resize((size_t)(b - a) * 2); unpackPcm(t.data(), out.size(), by, out.data()); }
 // a FLAC master (2026-11-05): STREAMINFO (2 channels, 16 / 24 / 32 bits, a sample count) and where the audio frames start
 inline std::string probeFlac(const std::string& path, WavInfo& wi) {
-    In in(path); long long p = 4; bool last = false, haveSi = false; laesflac::Info& fi = wi.fi;
+    In in(path); long long p = (long long)laesflac::flacStart([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)in.n) + 4;   // DEC 19: after ID3v2 tags in front
+    bool last = false, haveSi = false; laesflac::Info& fi = wi.fi;
     while (!last) { if (p + 4 > in.n) return path + ": FLAC metadata truncated"; uint8_t bh[4]; in.read(p, bh, 4); last = bh[0] & 0x80; const int type = bh[0] & 0x7F; const long long len = (long long)bh[1] << 16 | bh[2] << 8 | bh[3]; p += 4;
         if (p + len > in.n) return path + ": FLAC metadata truncated";
         if (type == 0) { if (haveSi) return path + ": two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return path + ": bad STREAMINFO"; uint8_t s[34]; in.read(p, s, 34); laesflac::BR r{s, 34}; fi.minBs = (int)r.get(16); fi.maxBs = (int)r.get(16); r.get(24); r.get(24);
@@ -186,7 +187,8 @@ inline std::string probeFlac(const std::string& path, WavInfo& wi) {
     if (!haveSi) return path + ": no STREAMINFO";
     if (fi.channels != 2 || (fi.bps != 16 && fi.bps != 24 && fi.bps != 32) || fi.total == 0 || fi.maxBs < 16) return path + ": need a 2-channel 16/24/32-bit FLAC with a sample count";
     wi.flac = true; wi.rate = fi.rate; wi.bits = fi.bps; wi.frames = (int64_t)fi.total; wi.dataOff = p; wi.dataBytes = (long long)fi.total * 2 * (fi.bps / 8); return ""; }
-inline std::string probeMaster(const std::string& path, WavInfo& wi) { uint8_t h[4] = {0}; { In in(path); if (in.n >= 4) in.read(0, h, 4); } return !memcmp(h, "fLaC", 4) ? probeFlac(path, wi) : probeWav(path, wi); }
+inline std::string probeMaster(const std::string& path, WavInfo& wi) { uint8_t h[4] = {0};   // DEC 19: a FLAC master may have ID3v2 tags in front
+    { In in(path); const long long s0 = (long long)laesflac::flacStart([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)in.n); if (in.n >= s0 + 4) in.read(s0, h, 4); } return !memcmp(h, "fLaC", 4) ? probeFlac(path, wi) : probeWav(path, wi); }
 // one FLAC frame of a master (laesflac::decodeFrame, plus the stereo decorrelations a FLAC encoder uses: left / side, side / right,
 // mid / side, the side channel one bit wider). Appends to ch[0] / ch[1], used = its size in bytes.
 inline std::string masterFlacFrame(const uint8_t* fp, size_t avail, const laesflac::Info& in, uint64_t frameNo, uint64_t have, V ch[2], size_t& used) {

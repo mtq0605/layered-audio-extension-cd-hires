@@ -455,7 +455,7 @@ public final class Play {
                         if (e1 > o0) crc.update(buf, (int) (o0 - a), (int) (e1 - o0)); }
                     final long c0 = Math.max(a, audioOff), c1 = Math.min(a + k, audioOff + audioLen);   // core bytes in this read
                     if (c0 < c1) { final byte[] piece = (c0 == a && c1 == a + k) ? buf : java.util.Arrays.copyOfRange(buf, (int) (c0 - a), (int) (c1 - a));
-                        synchronized (cm) { while (cq.size() >= 4) { try { cm.wait(); } catch (InterruptedException x) { throw fail("interrupted"); } } cq.addLast(piece); cm.notifyAll(); } } }
+                        synchronized (cm) { while (cq.size() >= 4) { try { cm.wait(); } catch (InterruptedException x) { Thread.currentThread().interrupt(); throw fail("interrupted"); } } cq.addLast(piece); cm.notifyAll(); } } }
                 readAll = true;
             } finally { synchronized (cm) { cend = true; cm.notifyAll(); } joinQuiet(ct);
                 if (!readAll) hs.close(); }   // FU25-1: a read that failed half-way also ends the SHA-256 thread (it waited for ever, holding its buffers)

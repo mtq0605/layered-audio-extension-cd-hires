@@ -67,7 +67,7 @@ public final class LaesDecoder {
         out.kind = c.kind; out.master = c.m; out.level = c.level; out.rate = c.rate; out.bits = c.bits; out.frames = c.frames; out.name = c.name; out.what = c.what; return 0; }
     // port of laes_api.cpp:laes_get_tag
     public static int laes_get_tag(LaesFileH h, int i, String[] key, String[] value) {
-        if (h == null || i < 0 || i >= h.f.tags.size()) return -1; if (key != null) key[0] = h.f.tags.get(i).key; if (value != null) value[0] = h.f.tags.get(i).value; return 0; }
+        if (h == null || i < 0 || i >= h.f.tags.size()) return -1; setErrS(key, h.f.tags.get(i).key); setErrS(value, h.f.tags.get(i).value); return 0; }   // FU25-7: an empty array is skipped like null
     /** port of lae_api.h:LAES_MASTER_NO_DERIVE (API 7) */
     public static final int LAES_MASTER_NO_DERIVE = LaesFile.NO_DERIVE;
     // port of laes_api.cpp:laes_master_name  (API 7; m = the file index of choice_info.master; "" = no name; null = no such master)

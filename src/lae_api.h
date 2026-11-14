@@ -63,7 +63,9 @@ LAE_API lae_track* LAE_CALL lae_open_file(const char* path, char* err, int errle
 LAE_API lae_track* LAE_CALL lae_open_memory(const void* wav, size_t len, char* err, int errlen);
 /* a v5 WAV file of `size` bytes read through the host: read(ctx, offset, buf, len) fills buf with the len bytes at offset and returns 0,
    or returns -1 (read error, or the host aborts: the open fails). Only the CD layer and the LAE chunk are kept, so the memory needed is
-   about the file size (lae_open_file works the same way). Large bodies are read in blocks of at most 4 MiB. */
+   about the file size (lae_open_file works the same way). The FLAC form (also opened here) needs more while it opens: its compressed
+   audio frames and the decoded CD layer are held at the same time, about the file size plus the CD layer as PCM. Large bodies are read
+   in blocks of at most 4 MiB. */
 typedef int (LAE_CALL* lae_read_fn)(void* ctx, uint64_t offset, void* buf, size_t len);
 LAE_API lae_track* LAE_CALL lae_open_reader(lae_read_fn read, void* ctx, uint64_t size, char* err, int errlen);
 LAE_API lae_track* LAE_CALL lae_open_pair(const int16_t* pcm, uint64_t frames, int rate, const void* lax, size_t laxlen, char* err, int errlen);
@@ -76,7 +78,9 @@ LAE_API int LAE_CALL lae_get_info(const lae_track* t, lae_info* out);
    name (pack 0: the name of its optional "LNAM" record, else ""). lae_select_pack: the pack the next lae_start decodes; the track is unstarted afterwards and lae_get_info
    describes that pack (master_rate, stages, cutoff_hz, master_frames). The first selection of a further pack checks its entropy
    streams to their end (as the open does for pack 0). A pack is chosen by the user only, by number: never automatically, never by a
-   name or a rate, and the choice is not written into the file. All return -1 for a bad track or pack number. */
+   name or a rate, and the choice is not written into the file. All return -1 for a bad track or pack number; lae_select_pack also
+   returns -1 (without a message) when the pack fails its check. Either way the track is unstarted afterwards: after a failure the
+   pack selected before stays selected, and lae_start must be called again before lae_read. */
 LAE_API int LAE_CALL lae_pack_count(const lae_track* t);
 LAE_API int LAE_CALL lae_pack_info(const lae_track* t, int k, int* rate, int* stages, char* name, size_t name_size);
 LAE_API int LAE_CALL lae_select_pack(lae_track* t, int k);
@@ -216,6 +220,8 @@ LAE_API const char* LAE_CALL lae_format_name(int format);   /* "LAEY", "LAES" or
           at the end of a choice: no stream value outside its range.
      LAES at open:  CRC-32 and structure of the LAE2 payload; the core master's SHA-256 against the payload; FLAC form: the core
                     master's MD5 and sample count against STREAMINFO. A payload that fails still opens: only the core master is offered.
+                    A FLAC core master whose MD5 is missing or wrong, whose sample count differs, or a damaged container does not open
+                    (spec/lossless/SPEC.md, Section 1.3: the tools refuse it; a player may still play the plain FLAC audio).
           at the end of a choice: the SHA-256 of every master the choice needs (with LAE_ANY_VERIFY_ALL: of every master of the file).
    A check's result: 1 passed, 0 failed, -1 not made yet (it is made by reading a choice to its last frame). */
 #define LAE_ANY_VERIFY_ALL 1     /* lae_any_start: check every master of an LAES file in the same run (LAEY: no effect) */
@@ -226,7 +232,8 @@ typedef struct lae_any_info {
     int base_rate, base_bits;     /* of choice 0 */
     int choices, default_choice;  /* default: LAEY the route FULL at the master rate; LAES the entry the file names as its default (a master; not set, or the payload failed: the core master) */
     int checks;
-    int usable;                   /* 1: every check made at open passed; 0: only choice 0 is offered (reason in the failed check) */
+    int usable;                   /* 1: the open checks passed (LAEY: those of the main body; a further pack that fails its check is only
+                                     marked 0 in the check list and its choices are left out); 0: only choice 0 is offered (reason in the failed check) */
     const char* identity;         /* what names this content: LAEY "CD layer MD5 <hex>", LAES "file SHA-256 <hex>"; lives as long as the handle */
 } lae_any_info;
 typedef struct lae_any_choice {
@@ -237,8 +244,9 @@ typedef struct lae_any_choice {
     const char* what;             /* one line for a list */
 } lae_any_choice;
 typedef struct lae_any_check { const char* method; const char* object; int result; const char* detail; } lae_any_check;
-/* paths are UTF-8. NULL with err when the file is neither format ("no LAE extension: ..."), cannot be read, or is an LAEY file that
-   fails a check. format (may be NULL) receives what the content was recognised as even then, so that a host can say
+/* paths are UTF-8. NULL with err when the file is neither format ("no LAE extension: ..."), cannot be read, is an LAEY file that
+   fails a check, or is an LAES file whose container or FLAC core master fails (see above). format (may be NULL) receives what the
+   content was recognised as even then, so that a host can say
    "LAEY file, extension unusable" and play the plain audio. The reader given to lae_any_open_reader must stay valid until lae_any_close. */
 LAE_API lae_any* LAE_CALL lae_any_open_file(const char* path, lae_probe_info* format, char* err, int errlen);
 LAE_API lae_any* LAE_CALL lae_any_open_reader(lae_read_fn read, void* ctx, uint64_t size, lae_probe_info* format, char* err, int errlen);

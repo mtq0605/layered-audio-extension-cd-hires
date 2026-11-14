@@ -1141,7 +1141,7 @@ static int laesMain(int argc, char** argv) {
             // own group - the master, its rate levels (lossless), its derived 16-bit versions (unless the file turns them off for it)
             struct Choice { std::string name, what; Src s; bool derived = false; int from = -1; int kind = 0; int no = 0; };   // no: the master's number in the menu order
             std::vector<MasterInfo> infos; std::vector<bool> offered; for (size_t i = 0; i < dec.size(); i++) { infos.push_back(dec[i].I); offered.push_back(dec[i].shaOk);
-                if (!dec[i].shaOk) printf("master %zu: SHA-256 mismatch: not offered (nor its rate levels or derived versions)\n", i + 1); }
+                if (!dec[i].shaOk) { std::vector<MasterInfo> dm; for (auto& D : dec) dm.push_back(D.I); printf("master %d: SHA-256 mismatch: not offered (nor its rate levels or derived versions)\n", laesc::displayNo(dm, i)); } }   // DEC 24: the menu number
             const std::vector<laesc::Spec> specs = laesc::build(core.rate, core.bits, core.frames(), infos, &offered, &head); const int defJ = laesc::defaultIndex(specs, head);
             std::vector<Choice> ch; for (const laesc::Spec& sp : specs) { Choice c; c.name = sp.name; c.what = sp.what; c.kind = sp.kind;
                 c.no = sp.no; c.s.kind = sp.kind == 3 ? 0 : sp.kind; c.s.rate = sp.rate; c.s.bits = sp.bits; c.s.n = sp.frames; if (sp.m >= 0) c.s.m = (size_t)sp.m; c.s.k = sp.level;
@@ -1210,18 +1210,18 @@ static int laesMain(int argc, char** argv) {
                     okw = false; std::error_code ec; fs::remove((d / (C.name + ".wav")).string(), ec); printf("%s.wav: FAILED, the file was removed: %s\n", C.name.c_str(), x.what()); }
                 all &= okw; wroteAll &= okw; if (okw) printf("%s.wav: %d Hz %d-bit, %s\n", C.name.c_str(), C.s.rate, C.s.bits, C.what.c_str()); }
             if (wroteAll) printf("written to %s\n", argv[3]); else printf("not every file was written: see above (%s)\n", argv[3]); }
-        else { std::vector<bool> used(dec.size(), false);   // each given file must equal one decoded master (the file order may differ from the command line)
+        else { std::vector<bool> used(dec.size(), false); std::vector<MasterInfo> dm; for (auto& D : dec) dm.push_back(D.I);   // DEC 24: masters named by their menu numbers   // each given file must equal one decoded master (the file order may differ from the command line)
             for (int i = 3; i < argc; i++) { if (argv[i][0] == '-') continue; laess::WavInfo wi; std::string re; try { re = laess::probeWav(argv[i], wi); } catch (const std::exception& x) { re = x.what(); } int hit = -1;   // U14-a: a file that cannot be opened is reported, the other files are still compared
                 for (size_t k = 0; k < dec.size() && hit < 0 && re.empty(); k++) { if (used[k] || wi.rate != dec[k].I.rate || wi.bits != dec[k].I.bits || wi.frames != dec[k].I.frames) continue;
                     Src s; s.kind = 1; s.m = k; laess::In in(argv[i]); bool same = true; std::vector<int32_t> r; V x0, x1; const long long P = 1 << 20;
                     for (long long a = 0; a < wi.frames && same; a += P) { const long long e = std::min<long long>(wi.frames, a + P); laess::wavFrames(in, wi, a, e, r); readSrc(s, 0, a, e, x0); readSrc(s, 1, a, e, x1);
                         for (long long q = 0; q < e - a && same; q++) same = r[(size_t)q * 2] == x0[(size_t)q] && r[(size_t)q * 2 + 1] == x1[(size_t)q]; }
                     if (same) hit = (int)k; }
-                if (hit >= 0) { used[(size_t)hit] = true; printf("master %d vs %s: IDENTICAL\n", hit + 1, argv[i]); }
+                if (hit >= 0) { used[(size_t)hit] = true; printf("master %d vs %s: IDENTICAL\n", laesc::displayNo(dm, (size_t)hit), argv[i]); }
                 else if (!re.empty()) {   // U14-a (2026-11-14): a file the reader refused is named with the reason (as the Java tool, U14-c)
                     const std::string pre = std::string(argv[i]) + ": "; printf("%s: DIFFERENT (not compared: %s)\n", argv[i], (re.rfind(pre, 0) == 0 ? re.substr(pre.size()) : re).c_str()); all = false; }
                 else { printf("%s: DIFFERENT (no decoded master equals it)\n", argv[i]); all = false; } }
-            for (size_t k = 0; k < dec.size(); k++) if (!used[k] && argc > 3) printf("master %zu: not compared\n", k + 1); }
+            for (size_t k = 0; k < dec.size(); k++) if (!used[k] && argc > 3) printf("master %d: not compared\n", laesc::displayNo(dm, k)); }
         return all ? 0 : 2; }
     catch (const std::exception& x) { printf("stopped: %s\n", x.what()); return 2; }
     printf("bad arguments\n"); return 1; }

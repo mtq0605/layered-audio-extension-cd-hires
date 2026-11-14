@@ -36,37 +36,43 @@ static std::string hex(const uint8_t* p, int n) { static const char* d = "012345
 
 // one FLAC file of `frames` frames read from p, written in blocks of 4096; STREAMINFO (sizes, total, MD5) is filled in at the end.
 // FU14-3 (2026-11-14): written as <out>.part with every write checked (a failure removes it); the caller renames it with finishPart
-static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {
+static int closeF(FILE*& f) { const int r = f ? fclose(f) : 0; f = nullptr; return r; }
+struct CloseGuard { FILE*& f; ~CloseGuard() { closeF(f); } };
+static bool writeFlacFrom0(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {
     const std::string out = outName + ".part";
     FILE* fo = fopen(out.c_str(), "wb"); if (!fo) { err = "cannot write " + out; return false; }
+    CloseGuard guard{fo};   // FU14-7: closed also when an exception leaves this function
     std::vector<uint8_t> h = {'f', 'L', 'a', 'C'}; laesflac::putBlockHeader(h, false, 0, 34); const size_t siAt = h.size(); h.resize(h.size() + 34, 0);
     { std::vector<uint8_t> vc; auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) vc.push_back((uint8_t)(v >> (8 * i))); };   // VORBIS_COMMENT (little-endian lengths)
       const std::string vendor = "laes_export"; u32((uint32_t)vendor.size()); vc.insert(vc.end(), vendor.begin(), vendor.end()); u32((uint32_t)tags.size());
       for (const std::string& t : tags) { u32((uint32_t)t.size()); vc.insert(vc.end(), t.begin(), t.end()); }
       laesflac::putBlockHeader(h, true, 4, (uint32_t)vc.size()); h.insert(h.end(), vc.begin(), vc.end()); }
-    if (fwrite(h.data(), 1, h.size(), fo) != h.size()) { err = "cannot write " + out + " (disk full?)"; fclose(fo); fs::remove(out); return false; }
+    if (fwrite(h.data(), 1, h.size(), fo) != h.size()) { err = "cannot write " + out + " (disk full?)"; closeF(fo); fs::remove(out); return false; }
     // the frames are independent: a batch of blocks is encoded on all cores and written in order (the same bytes as one after another)
     const int64_t B = 4096; const int64_t G = 128; const unsigned T = std::max(1u, std::thread::hardware_concurrency());
     laes::V ch[2]; std::vector<int32_t> buf; alignhash::Md5 md5; const int by = bps / 8; std::vector<uint8_t> mb;
     uint32_t fmin = 0xFFFFFF, fmax = 0; int64_t done = 0; uint64_t frameNo = 0; const int64_t lim = 1LL << (bps - 1);
     while (done < frames) { const int64_t n = std::min<int64_t>(B * G, frames - done); buf.resize((size_t)n * 2); int64_t got = 0;
-        while (got < n) { const int64_t k = p.read(buf.data() + got * 2, n - got); if (k <= 0) { err = p.err.empty() ? "the choice ended early" : p.err; fclose(fo); fs::remove(out); return false; } got += k; }
+        while (got < n) { const int64_t k = p.read(buf.data() + got * 2, n - got); if (k <= 0) { err = p.err.empty() ? "the choice ended early" : p.err; closeF(fo); fs::remove(out); return false; } got += k; }
         for (int c = 0; c < 2; c++) { ch[c].resize((size_t)n); for (int64_t i = 0; i < n; i++) ch[c][(size_t)i] = buf[(size_t)i * 2 + c]; }
-        mb.clear(); for (int64_t i = 0; i < n; i++) for (int c = 0; c < 2; c++) { const int64_t v = ch[c][(size_t)i]; if (v < -lim || v >= lim) { err = "a sample does not fit the word length"; fclose(fo); fs::remove(out); return false; }
+        mb.clear(); for (int64_t i = 0; i < n; i++) for (int c = 0; c < 2; c++) { const int64_t v = ch[c][(size_t)i]; if (v < -lim || v >= lim) { err = "a sample does not fit the word length"; closeF(fo); fs::remove(out); return false; }
             for (int q = 0; q < by; q++) mb.push_back((uint8_t)((uint64_t)v >> (8 * q))); }
         md5.update(mb.data(), mb.size());
         const size_t nb = (size_t)((n + B - 1) / B); std::vector<std::vector<uint8_t>> fr(nb); std::atomic<size_t> next{0};
         auto work = [&] { for (size_t b; (b = next++) < nb;) fr[b] = laesflac::encodeFrame(ch, (int64_t)b * B, (int64_t)std::min<int64_t>(B, n - (int64_t)b * B), frameNo + b, rate, bps); };
         std::vector<std::thread> ts; for (unsigned t = 1; t < std::min<unsigned>(T, (unsigned)nb); t++) ts.emplace_back(work); work(); for (auto& t : ts) t.join();
         for (auto& x : fr) { fmin = std::min<uint32_t>(fmin, (uint32_t)x.size()); fmax = std::max<uint32_t>(fmax, (uint32_t)x.size());
-            if (fwrite(x.data(), 1, x.size(), fo) != x.size()) { err = "cannot write " + out + " (disk full?)"; fclose(fo); fs::remove(out); return false; } }
+            if (fwrite(x.data(), 1, x.size(), fo) != x.size()) { err = "cannot write " + out + " (disk full?)"; closeF(fo); fs::remove(out); return false; } }
         frameNo += nb; done += n; }
     if (!frames) fmin = 0;
     laes::BitW si; const uint32_t bs = frames >= B ? (uint32_t)B : (uint32_t)std::max<int64_t>(16, frames);
     si.put(bs, 16); si.put(bs, 16); si.put(fmin, 24); si.put(fmax, 24); si.put((uint64_t)rate, 20); si.put(1, 3); si.put((uint64_t)(bps - 1), 5); si.put((uint64_t)frames, 36);
     const std::string mh = md5.hex(); for (int i = 0; i < 16; i++) si.b.push_back((uint8_t)std::stoul(mh.substr((size_t)i * 2, 2), nullptr, 16));
-    const bool ok = fseek(fo, (long)siAt, SEEK_SET) == 0 && fwrite(si.b.data(), 1, si.b.size(), fo) == 34; if (fclose(fo) != 0 || !ok) { err = "cannot write " + out + " (disk full?)"; fs::remove(out); return false; }
+    const bool ok = fseek(fo, (long)siAt, SEEK_SET) == 0 && fwrite(si.b.data(), 1, si.b.size(), fo) == 34; if (closeF(fo) != 0 || !ok) { err = "cannot write " + out + " (disk full?)"; fs::remove(out); return false; }
     return true; }
+static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {   // FU14-7: an exception (memory) removes the .part, as a failed write does
+    try { return writeFlacFrom0(p, frames, rate, bps, tags, outName, err); }
+    catch (const std::exception& x) { err = std::string(x.what()) + ": nothing written"; std::error_code ec; fs::remove(outName + ".part", ec); return false; } }
 // <out>.part (written and checked) becomes <out>; a failure removes the .part
 static bool finishPart(const std::string& out, std::string& err) {
     std::error_code ec; fs::rename(out + ".part", out, ec); if (!ec) return true;
@@ -83,8 +89,7 @@ static bool writeVerified(const std::string& path, const std::string& fileHex, c
     std::string e2; if (fclose(fo) != 0 || !okW) { std::error_code ec; fs::remove(path + ".part", ec); return false; }
     return finishPart(path, e2); }
 
-int main(int argc, char** argv) {
-    lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
+static int run(int argc, char** argv) {
     if (argc < 3) { printf("usage: laes_export <in> --list | <in> <choice> <out.flac> [--from=s] [--len=s] [--index=rec] [--unverified] | <in> <choice> --seg=s --dir=folder [--index=rec] [--unverified]\n"); return 1; }
     FILE* fp = fopen(argv[1], "rb"); if (!fp) { printf("cannot open %s\n", argv[1]); return 2; }
     const long long sz = laess::sizeOf(fp); if (sz < 0) { printf("cannot read %s\n", argv[1]); return 2; } const uint64_t size = (uint64_t)sz;   // 64-bit, Windows and POSIX (laes_stream.h)
@@ -97,9 +102,13 @@ int main(int argc, char** argv) {
     if (j < 0 || j >= (int)f.choices.size()) { printf("no choice %s (see --list)\n", argv[2]); return 1; }
     const laesp::Choice C = f.choices[(size_t)j]; if (!f.why.empty() && C.kind != 0) { printf("the payload failed a check: only the core master\n"); return 2; }
     std::string out, dir, index; double from = 0, len = -1, seg = 0; bool unverified = false;
+    // FU14-7 (2026-11-14): a time is a number of seconds from 0 up to the length a 64-bit frame count holds; an unknown --option is refused
+    auto secs = [&](const std::string& a, size_t at, double& v) { const char* s = a.c_str() + at; char* e = nullptr; v = strtod(s, &e);
+        if (e == s || *e || !(v >= 0) || v > 1e12) { printf("%s: a number of seconds (0 or more) is expected\n", a.c_str()); return false; } return true; };
     for (int i = 3; i < argc; i++) { const std::string a = argv[i];
-        if (!a.rfind("--from=", 0)) from = atof(a.c_str() + 7); else if (!a.rfind("--len=", 0)) len = atof(a.c_str() + 6); else if (!a.rfind("--seg=", 0)) seg = atof(a.c_str() + 6);
-        else if (!a.rfind("--dir=", 0)) dir = a.substr(6); else if (!a.rfind("--index=", 0)) index = a.substr(8); else if (a == "--unverified") unverified = true; else out = a; }
+        if (!a.rfind("--from=", 0)) { if (!secs(a, 7, from)) return 1; } else if (!a.rfind("--len=", 0)) { if (!secs(a, 6, len)) return 1; } else if (!a.rfind("--seg=", 0)) { if (!secs(a, 6, seg)) return 1; }
+        else if (!a.rfind("--dir=", 0)) dir = a.substr(6); else if (!a.rfind("--index=", 0)) index = a.substr(8); else if (a == "--unverified") unverified = true;
+        else if (!a.rfind("--", 0)) { printf("unknown option %s: nothing written\n", a.c_str()); return 1; } else out = a; }
     const int64_t first = std::min<int64_t>(C.frames, (int64_t)(from * C.rate + 0.5)), count = len < 0 ? C.frames - first : std::min<int64_t>(C.frames - first, (int64_t)(len * C.rate + 0.5));
     const bool whole = seg <= 0 && first == 0 && count == C.frames;
     // FU14-2: the master this choice is made from, and whether it was checked for this file content before (the note next to the record)
@@ -153,3 +162,9 @@ int main(int argc, char** argv) {
     if (!finishPart(out, e)) { printf("%s\n", e.c_str()); return 2; }
     if (whole && ofMaster) noteVerified(p);
     printf("%s: %s, %lld frames from %lld%s\n", out.c_str(), C.name.c_str(), (long long)count, (long long)first, whole && C.kind != 0 ? ", SHA-256 ok" : ""); return 0; }
+// FU14-7 (2026-11-14): an error thrown anywhere (memory, a folder that cannot be made) ends with a message and exit code 2, not a crash;
+// writeFlacFrom removes its .part itself
+int main(int argc, char** argv) {
+    lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
+    try { return run(argc, argv); }
+    catch (const std::exception& x) { printf("error: %s: nothing more written\n", x.what()); return 2; } }

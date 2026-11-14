@@ -64,6 +64,7 @@ public final class LaeEncoder {
         // noise=<marks.laenoise>, g (2026-11-04): the marking file, the master length it was checked against, the whole offset the master was placed at
         public String noisePath; public boolean gOpt; public char gLevel = 'd'; NoiseMarks.Marks noiseMk = new NoiseMarks.Marks(); long LmIn; public long placeT = 0;
         boolean resume, partLeft = false; Set<String> doneSteps = new HashSet<String>(); String manifest;
+        String resumeHead = "", oldAlign = "", alignKey = "";   // resume with cd= (lae_enc.cpp 2026-11-14): the key line, the earlier run's "align ..." line, this run's alignment result
         // extension packs (2026-11-10; port of lae_enc.cpp: PackOpt pk[8], nPacks, alignOut, rawRate, cdAddLead / cdAddTail, packRecs, packReport)
         final PackOpt[] pk = new PackOpt[8]; int nPacks = 0; String alignOut; int rawRate = 0; public long cdAddLead = 0, cdAddTail = 0;
         final List<byte[]> packRecs = new ArrayList<byte[]>(); String packReport = ""; String mainName = "";   // mainName: master1name=<text>, the main body's name ("" = none stored)
@@ -370,6 +371,9 @@ public final class LaeEncoder {
         // resume (block-wise, without cd=): every finished step is noted in resume.txt in the work folder, together with a key made of this
         // encoder build, the options and the master's MD5. A run with the same key continues after the last finished step; any other key
         // starts from the beginning. The notes are read only by this encoder and never go into the LAE file.
+        // With cd= the CD's MD5 belongs to the key, and so does the alignment's result (2026-11-14): once the alignment has ended, the placed
+        // master's length, its position and the pad / cut choice are compared with the line "align ..." the earlier run noted; if they differ,
+        // no finished step is reused (see below, after the alignment).
         x.manifest = x.T("resume.txt");
         if (x.resume) { StringBuilder key = new StringBuilder("lae_enc java-port " + LaeyEncoder.VERSION + " | options");
             for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i])) key.append(" ").append(argv[i]);
@@ -377,10 +381,12 @@ public final class LaeEncoder {
             if (x.noisePath != null) { final byte[] t = EncIo.readAll(x.noisePath); long h = 0xcbf29ce484222325L;   // FNV-1a of the marking file's bytes (1469598103934665603)
                 for (int i = 0; i < t.length; i++) { h ^= (t[i] & 0xFF); h *= 1099511628211L; }
                 key.append(" | noise ").append(String.format("%016x", h)); }
+            if (x.cdPath != null) { WavIo.Wav cw = new WavIo.Wav(); key.append(" | CD ").append(WavIo.readCD(x.cdPath, cw) ? AlignHash.cdMd5(cw.pcm16, cw.pcm16.length / 2) : "unreadable"); }   // cd=: the alignment runs again every time; the steps after it continue
             String old = ""; if (exists(x.manifest)) old = EncIo.readText(x.manifest);
-            final String head = "key " + key + "\n";
+            final String head = "key " + key + "\n"; x.resumeHead = head;
             if (!old.isEmpty() && old.startsWith(head)) { int p = head.length();
-                while (p < old.length()) { int e = old.indexOf('\n', p); if (e < 0) break; if (old.startsWith("done ", p)) x.doneSteps.add(old.substring(p + 5, e)); p = e + 1; }
+                while (p < old.length()) { int e = old.indexOf('\n', p); if (e < 0) break; if (old.startsWith("done ", p)) x.doneSteps.add(old.substring(p + 5, e));
+                    else if (old.startsWith("align ", p)) x.oldAlign = old.substring(p + 6, e); p = e + 1; }
                 env.printf("resume: continuing the earlier run (%zu step(s) already done)\n", (long) x.doneSteps.size()); }
             else { if (!old.isEmpty()) env.printf("resume: the work folder belongs to another run (other master, options or encoder build): starting from the beginning\n");
                 EncIo.writeText(env, x.manifest, head); } }
@@ -395,6 +401,14 @@ public final class LaeEncoder {
         if (x.cdPath != null) {   // independent CD: lae_enc.cpp lines 308-492 (part 2 of the port)
             CdHook h = cdHook; if (h == null) { env.printf("cd= (independent CD) is not part of this build of the Java encoder: nothing encoded\n"); x.oldNote(); return 1; }
             int r = h.run(x); if (r >= 0) return r; }
+        if (x.resume && x.cdPath != null) {   // the alignment's result is part of the resume key: steps finished for another placed master are not reused (lae_enc.cpp 2026-11-14)
+            final String line = "align " + x.alignKey + "\n";
+            if (x.oldAlign.isEmpty() && x.doneSteps.isEmpty()) { boolean okw = false; FileOutputStream f = null;
+                try { f = new FileOutputStream(x.manifest, true); f.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8)); okw = true; } catch (IOException e) { okw = false; } finally { if (f != null) try { f.close(); } catch (IOException e) { okw = false; } }
+                if (!okw) throw EncIo.fail("cannot write " + x.manifest); }
+            else if (!x.oldAlign.equals(x.alignKey)) {
+                if (!x.doneSteps.isEmpty()) env.printf("resume: the alignment ended with another result than in the earlier run (the placed master's length, its position, or the pad / cut choice): starting from the beginning\n");
+                x.doneSteps.clear(); EncIo.writeText(env, x.manifest, x.resumeHead + line); } }
         if (x.alignOut != null) {   // internal step of the extension packs: this master now lies on the given core's time line; hand it to the calling run
             if (!rename(x.T("m0.raw"), x.alignOut)) throw EncIo.fail("cannot write " + x.alignOut + ": rename failed");
             EncIo.writeText(env, x.alignOut + ".report.txt", x.alignReport.isEmpty() ? "\n" : x.alignReport);

@@ -90,6 +90,7 @@ final class LaeCd implements LaeEncoder.CdHook {
             {   // the movement report (a separate text file; plain text for the user's records, read by no program)
                 final double off = (double) rpT - rpMv, us = 1e6 / (double) rate;
                 x.placeT = rpT;   // noise= needs 0: the marking was made on the aligned master
+                x.alignKey = CdAlign.fmt("lm=%lld t=%lld move=%+.7f edge=%s cd=%ld lead=%ld tail=%ld", x.Lm, rpT, rpMv, !edgeAsk ? "none" : (x.cdEdge == CdAlign.EDGE_CUT ? "cut" : "pad"), have, x.cdAddLead, x.cdAddTail);   // resume: what the alignment ended with
                 x.alignReport = CdAlign.fmt("LAE alignment report (independent CD)\nmaster: %s\nCD: %s\noutput: %s\n", x.argv[1], x.cdPath, x.outPath)
                     + CdAlign.fmt("whole offset: %+lld master samples\n", rpT)
                     + (rpMv != 0 ? CdAlign.fmt("fraction moved: %+.7f master samples (%+.4f microseconds): the master's waveform taken that much later\n", rpMv, rpMv * us) : "fraction moved: none\n")

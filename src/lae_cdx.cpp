@@ -757,6 +757,14 @@ static int runTests(const string& dirArg) {
 static int realMain(int argc, char** argv) {
     if (argc < 2) { printf("usage: see the header of lae_cdx.cpp\n"); return 1; }
     string cmd = argv[1]; vector<string> pos = positional(argc, argv, 2);
+    {   // an argument with '=' that is no existing file must be an option of this command: a mistyped option or a missing file name
+        // with '=' in it stops the tool instead of being ignored (2026-11-14)
+        static const map<string, set<string>> known = {{"pack", {"track"}}, {"split", {"track"}}, {"repack", {}}, {"selftest", {}}, {"test", {}},
+            {"image", {"noext", "label", "date", "capacity", "verbose", "layout", "album", "performer", "cdtitle", "cdperformer", "cdtext"}},
+            {"data", {"label", "date"}}, {"read", {"W"}}, {"sim", {"offset", "pregap", "overread", "change", "slip"}}};
+        auto kn = known.find(cmd); std::error_code ec;
+        for (int i = 2; kn != known.end() && i < argc; i++) { const char* q = strchr(argv[i], '='); if (!q || fs::exists(argv[i], ec)) continue;
+            if (!kn->second.count(string(argv[i], (size_t)(q - argv[i])))) { printf("%s: not an option of %s, and no such file; nothing written\n", argv[i], cmd.c_str()); return 1; } } }
     if (cmd == "selftest") return selftest();
     if (cmd == "test" && pos.size() == 1) return runTests(pos[0]);
     if ((cmd == "pack" && pos.size() == 2) || (cmd == "split" && pos.size() == 3)) {   // pack: extension file; split: base-layer WAV + extension file (F2)

@@ -16,6 +16,8 @@
 //     whole master sample against the piece's one fractional best fit near it, pooled over the blocks). Nothing is searched inside a
 //     block: the check never gives a block an offset, it only judges at the piece's one offset.
 // Every value is printed only. Nothing is stored in the file, transmitted, or used to change the CD, T or F.
+// Memory (FU09-4): the search holds the CD and the derived base as doubles (32 bytes per CD frame for both channels of both) and its
+// pyramid about as much again: about 0.85 GB for 5 minutes of CD, 13 GB for 80 minutes. A run that does not get it stops ("out of memory").
 // Design rules: no energy / power envelopes; no search repeated because of
 // what it found (the second level-0 scan always runs); one pooled peak per level; one offset per piece, never interpolated, smoothed or
 // replaced; no default offset for silence; from a correlation only the peak position is used; the check works on waveform differences.
@@ -100,7 +102,9 @@ template <class M> inline Report run(const std::vector<int16_t>& cd, long ncd, c
         // level 0 at 1/2^L0 of the CD rate: 1/16, lower only as far as one level-0 FFT must stay within 2^21 points, and at most 1/256 (172 Hz;
         // below about 1/400 the whitening band, 50 Hz to 0.45 of the rate, would be empty). Longer pieces use FFTs of up to 2^22 points at
         // 1/256; a piece that needs more is not searched (review 2026-10-22: before, it found "no sound" in a CD that has sound)
-        auto fftAt = [&](int l) { return pow2((size_t)((((s1 - s0) + 2 * (R0 + 2)) >> l) + ((s1 - s0) >> (l + 1)) + 2)); };
+        // in 64 bits (long is 32 bits on Windows: a CD of about 4.5 hours overflowed and pow2 did not end); above 2^23 points the size
+        // itself does not matter, only that it is beyond both limits below
+        auto fftAt = [&](int l) { const long long v = ((((long long)s1 - s0) + 2LL * ((long long)R0 + 2)) >> l) + (((long long)s1 - s0) >> (l + 1)) + 2; return v > (1LL << 23) ? ((size_t)1 << 23) * 2 : pow2((size_t)v); };
         int L0 = 4; while (L0 < 8 && fftAt(L0) > ((size_t)1 << 21)) L0++;
         long o = 0;
         if (fftAt(L0) > ((size_t)1 << 22)) stopWith("toolong", fmt("the CD's sound (%.0f min) and the search range are too long for this version's search", (s1 - s0) / (60.0 * base)),

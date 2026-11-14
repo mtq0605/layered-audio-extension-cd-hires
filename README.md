@@ -83,7 +83,7 @@ The extension size was measured during development (2026-10-16) on the v5 releas
 
 The encoder can combine a master with an independently produced CD. It locates the CD against the master by waveform comparison, checks the waveform residual at three fixed places, and shifts the master, never the CD, to the CD's position with sub-sample precision: the whole-sample part by placement, the part below one sample by band-limited interpolation. In the measurements of Table 4.3, the alignment error in the 0–20 kHz band is −140 dBFS; at hard-cut edges (sound at the first or last master sample) it is larger: −66 dBFS with the added digital silence, and up to −38.5 dBFS without it. Every position is confirmed by the user before anything is encoded. A whole-disc planner applies the same procedure to a publisher's complete disc. The result is an ordinary container-version-5 file, which every v5 decoder decodes unchanged.
 
-The reading side of `lae_cdx` restores the original LAE files from rips made with any drive offset. Each track is located individually, and it is accepted only when the MD5 over all of its CD samples matches. A decoder library with the C interface `liblae` offers bit-exact fast seeking, and a foobar2000 component built on it plays LAE files at up to the master rate.
+The reading side of `lae_cdx` restores the original LAE files from rips made with a drive offset: each track is searched for within ±5880 samples of its expected position by default (`W=` sets a larger radius; Section 10.8). Each track is located individually, and it is accepted only when the MD5 over all of its CD samples matches. A decoder library with the C interface `liblae` offers bit-exact fast seeking, and a foobar2000 component built on it plays LAE files at up to the master rate.
 
 The author has not filed, and will not file, any patent application on LAE, and makes a patent non-assertion pledge for implementations of the specification (Section 15).
 
@@ -1073,7 +1073,7 @@ The 48 kHz family may be used for all forms described in this section.
 
 ### 10.8 Reading rips and files
 
-The reader of `lae_cdx` (reader code: `src/lae_cdx_read.h`) treats every input in the same way: whole-disc rips (BIN, WAV or FLAC, with or without a CUE sheet), per-track rips (with or without a CUE sheet), a single file and LAE streams. Rips may come from any ripping program and may be made with any offset setting. The input must be 16-bit stereo PCM, stored as WAV, as FLAC (16-bit, 44.1 kHz, 2 channels) or, for whole-disc rips with a CUE sheet, as BIN. A FLAC file is recognised by its content; the reader checks the CRC of every frame, the sample count and the audio MD5 of the STREAMINFO block (when it is set). A FLAC file that fails a check or has another format stops the reader, and nothing is written.
+The reader of `lae_cdx` (reader code: `src/lae_cdx_read.h`) treats every input in the same way: whole-disc rips (BIN, WAV or FLAC, with or without a CUE sheet), per-track rips (with or without a CUE sheet), a single file and LAE streams. Rips may come from any ripping program and may be made with any offset setting; each track is then searched for within the radius W described below. The input must be 16-bit stereo PCM, stored as WAV, as FLAC (16-bit, 44.1 kHz, 2 channels) or, for whole-disc rips with a CUE sheet, as BIN. A FLAC file is recognised by its content; the reader checks the CRC of every frame, the sample count and the audio MD5 of the STREAMINFO block (when it is set). A FLAC file that fails a check or has another format stops the reader, and nothing is written.
 
 **Disc stream and TOC.** The reader assembles its input into a disc stream. The TOC is taken, in order of priority, from:
 
@@ -1086,7 +1086,7 @@ Each file is placed at the position given to it by the CUE sheet or TOC. Positio
 **Per-track location.** Every track is located independently; the reader neither assumes nor needs a common offset for the disc. For each extension file, the reader proceeds as follows:
 
 1. **Coarse location.** A coarse position is taken from the TOC and from the information range, that is, the positions of the first and last non-zero samples in the stream, corrected by lead0 and tail0.
-2. **Fine location.** Every window start within a radius $W \ge 5880$ samples of the coarse positions is tested, or every window start in the whole file when there is no TOC. Only windows whose sliding sums equal S1 and S2 are candidates.
+2. **Fine location.** Every window start within a radius $W \ge 5880$ samples of the coarse positions is tested, or every window start in the whole file when there is no TOC. Only windows whose sliding sums equal S1 and S2 are candidates. W is 5880 by default; `lae_cdx read … W=<n>` sets a larger radius, up to 441000 (a smaller value is raised to 5880). A track whose offset exceeds W is still found when it begins or ends with digital silence, since its coarse position then comes from the information range; otherwise it is played as CD with the reason "no match".
 3. **Acceptance.** A candidate is accepted only if its whole-track MD5 equals the MD5 in the trailer.
 
 A slip within a track, such as a lost or duplicated sample, changes only that track's MD5. That track is played as CD, and the other tracks are unaffected.
@@ -1757,10 +1757,10 @@ Each input v5 file must first pass all checks of the decoder. The image is deliv
 **Reading.**
 
 ```
-lae_cdx read <output dir> <disc>\LAE <rip>\RIP.CUE
+lae_cdx read <output dir> <disc>\LAE <rip>\RIP.CUE [W=<n>]
 ```
 
-The second argument is the folder containing the extension files, for example the `LAE` folder of the disc's data session or a copy of it. The last argument is the rip: a whole-disc or per-track rip, with or without a CUE sheet, made with any offset. The output is described in Section 10.8.
+The second argument is the folder containing the extension files, for example the `LAE` folder of the disc's data session or a copy of it. The last argument is the rip: a whole-disc or per-track rip, with or without a CUE sheet, made with any offset setting. `W=` sets the search radius in samples (default 5880, at most 441000). The output is described in Section 10.8.
 
 **Other commands.** The commands `pack`, `split` and `repack` convert between v5 WAV files, base-layer files and extension files (Section 10.7). `sim`, `selftest` and `test` are used for testing. Their arguments are:
 

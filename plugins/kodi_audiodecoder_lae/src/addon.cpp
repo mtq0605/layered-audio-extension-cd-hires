@@ -149,9 +149,12 @@ public:
         actualsize = (size_t)k * 2 * (size_t)by; return AUDIODECODER_READ_SUCCESS; }
 
     int64_t Seek(int64_t time) override {
+        if (time < 0) time = 0;   // a negative time is the start (as an unsigned frame number it was the end)
         FpPin pin; const uint64_t frame = std::min<uint64_t>(m_frames, (uint64_t)(time * (int64_t)m_rate / 1000)); char err[256];
         if (m_laes) {   // every choice starts at the frame, a derived 16-bit version too (its dither state is moved there, bit-exact; 2026-11-12)
-            if (m_play) laes_stop(m_play); m_play = laes_start_at(m_laes, m_choice, frame, 0, err, sizeof err); return m_play ? time : -1; }
+            // the new decoder first: when it cannot start there, the playing one goes on where it was and the seek fails
+            laes_play* np = laes_start_at(m_laes, m_choice, frame, 0, err, sizeof err); if (!np) return -1;
+            if (m_play) laes_stop(m_play); m_play = np; return time; }
         if (m_track) return lae_seek(m_track, frame) == 0 ? time : -1;
         return -1; }
 

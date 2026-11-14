@@ -261,7 +261,7 @@ inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& cor
             if (fl & ~(uint64_t)kNoDerive) return "invalid master record"; if (!validMasterName((const uint8_t*)nm2.data(), nm2.size())) return "invalid master name"; I.name = nm2; I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)
-            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40)) return "invalid master record";
+            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !laes::tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
         if (F64 > (uint64_t)INT64_MAX) return "master too long for this decoder"; I.frames = (int64_t)F64;   // frame counts are int64_t on every platform (32 and 64 bit)
         memcpy(I.sha, sha, 32); const int j = I.storage == 2 ? std::min(I.stages, out[(size_t)I.refTier - 1].I.stages) : 0; const int64_t nj = levLen(I.frames, I.stages - j);
         const std::string stem = wd + "/d" + std::to_string(mi);

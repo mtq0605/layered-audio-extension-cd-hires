@@ -424,7 +424,7 @@ inline std::string File::parsePayload() {
             if (fl & ~(uint64_t)laes::kNoDerive) return "invalid master record"; if (!laes::validMasterName((const uint8_t*)nm2.data(), nm2.size())) return "invalid master name"; I.name = nm2; I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)
-            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40)) return "invalid master record";
+            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !laes::tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
         if (F64 > (uint64_t)INT64_MAX) return "master too long for this decoder"; I.frames = (int64_t)F64;   // frame counts are int64_t on every platform (32 and 64 bit)
         M.j = I.storage == 2 ? std::min(I.stages, ms[(size_t)I.refTier - 1].I.stages) : 0;
         for (int c = 0; c < 2; c++) for (int k = M.j; k <= I.stages; k++) { const uint64_t l = u(4); if (trunc || pos + l > end) return "LAES block truncated"; M.layOff[c][k - M.j] = pos; M.layLen[c][k - M.j] = l; pos += l; }

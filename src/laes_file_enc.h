@@ -32,6 +32,7 @@ inline std::vector<uint8_t> encodeLaes(const Pcm& core, int baseRate, const std:
         if ((uint64_t)levLen(m.frames(), st) > (uint64_t)core.frames() + (1ull << 24)) { err = mn + " is too long: its base level may exceed the core master by at most 2^24 samples"; return {}; }
         { const int64_t lim = 1LL << (m.bits - 1); for (int c = 0; c < 2; c++) for (int64_t v : m.c[c]) if (v < -lim || v >= lim) { err = mn + ": a sample does not fit its word length"; return {}; } }
         if (ms[mi].storage >= 0 && (ms[mi].whole <= -(1LL << 40) || ms[mi].whole >= (1LL << 40))) { err = mn + ": T must lie within +-2^40 base samples"; return {}; }
+        if (!tWithinTrack(ms[mi].whole, ms[mi].frac, (uint64_t)core.frames())) { err = mn + ": T must not exceed the length of the core master (" + std::to_string((long long)core.frames()) + " base samples) either way"; return {}; }   // DEC 11
         I.bits = m.bits; I.stages = st; I.w = unusedBits(m); I.rate = m.rate; I.frames = m.frames(); hashPcm(m, I.sha);
         std::vector<std::vector<uint8_t>> d[2]; std::vector<std::vector<size_t>> dbits(2, std::vector<size_t>(st + 1, 0)); lev[mi].assign(2, std::vector<V>(st + 1));
         for (int c = 0; c < 2; c++) { V x(I.frames); for (int64_t i = 0; i < I.frames; i++) x[i] = m.c[c][i] >> I.w; std::vector<V>& s = lev[mi][c]; std::vector<V> dd(st + 1); s[st] = x;
@@ -45,7 +46,7 @@ inline std::vector<uint8_t> encodeLaes(const Pcm& core, int baseRate, const std:
             if (!autoSel) { wh = ms[mi].whole; fr = ms[mi].frac; return true; }
             const int64_t lim = 1LL << 30; auto X = [&](size_t k) { return ms[k].whole * 4294967296LL + (int64_t)ms[k].frac; };
             if (ms[mi].whole <= -lim || ms[mi].whole >= lim || (tier && (ms[tier - 1].whole <= -lim || ms[tier - 1].whole >= lim))) return false;
-            const int64_t x = X(mi) - (tier ? X(tier - 1) : 0); wh = x >> 32; fr = (uint32_t)(x & 0xFFFFFFFFLL); return true; };
+            const int64_t x = X(mi) - (tier ? X(tier - 1) : 0); wh = x >> 32; fr = (uint32_t)(x & 0xFFFFFFFFLL); return tWithinTrack(wh, fr, (uint64_t)core.frames()); };   // DEC 11
         if (autoSel || ms[mi].storage == 1) cs.push_back({1, 0, 0, 0, 0, 0});
         for (int t = 0; t <= (int)mi; t++) {
             if (!autoSel && t != ms[mi].refTier) continue; if (t > (int)mi) break;

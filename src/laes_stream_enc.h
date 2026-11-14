@@ -342,6 +342,7 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
         if (m.frames < 1) return mn + " has no samples";
         if ((uint64_t)levLen(m.frames, st) > (uint64_t)core.frames() + (1ull << 24)) return mn + " is too long: its base level may exceed the core master by at most 2^24 samples";
         if (sel[mi].storage >= 0 && (sel[mi].whole <= -(1LL << 40) || sel[mi].whole >= (1LL << 40))) return mn + ": T must lie within +-2^40 base samples";
+        if (!tWithinTrack(sel[mi].whole, sel[mi].frac, (uint64_t)core.frames())) return mn + ": T must not exceed the length of the core master (" + std::to_string((long long)core.frames()) + " base samples) either way";   // DEC 11
         I.bits = m.bits; I.stages = st; I.w = m.w; I.rate = m.rate; I.frames = m.frames; memcpy(I.sha, m.sha, 32);
         auto above = [&](int j) { double b = 0; for (int c = 0; c < 2; c++) for (int k = j + 1; k <= st; k++) b += (double)m.dbits[c][(size_t)k]; return b; };
         struct Cand { int storage, tier, j; int64_t whole; uint32_t frac; double bits; std::string e[2]; bool coded; };
@@ -350,7 +351,7 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
             if (!autoSel) { wh = sel[mi].whole; fr = sel[mi].frac; return true; }
             const int64_t lim = 1LL << 30; auto X = [&](size_t k) { return sel[k].whole * 4294967296LL + (int64_t)sel[k].frac; };
             if (sel[mi].whole <= -lim || sel[mi].whole >= lim || (tier && (sel[(size_t)tier - 1].whole <= -lim || sel[(size_t)tier - 1].whole >= lim))) return false;
-            const int64_t x = X(mi) - (tier ? X((size_t)tier - 1) : 0); wh = x >> 32; fr = (uint32_t)(x & 0xFFFFFFFFLL); return true; };
+            const int64_t x = X(mi) - (tier ? X((size_t)tier - 1) : 0); wh = x >> 32; fr = (uint32_t)(x & 0xFFFFFFFFLL); return tWithinTrack(wh, fr, (uint64_t)core.frames()); };   // DEC 11: T relative to the tier within the track too
         if (autoSel || sel[mi].storage == 1) cs.push_back({1, 0, 0, 0, 0, 0, {}, false});
         for (int t = 0; t <= (int)mi; t++) {
             if (!autoSel && t != sel[mi].refTier) continue; if (t > (int)mi) break;

@@ -116,6 +116,11 @@ inline void hashCore(const Pcm& p, uint8_t out[32]) { Sha256 s; std::vector<uint
 struct MasterInfo { int bits = 0, stages = 0, w = 0, storage = 0, refTier = 0, rate = 0; int64_t frames = 0; int64_t whole = 0; uint32_t frac = 0; uint8_t sha[32]; double layerBits = 0;
                     std::string name; int flags = 0; int menu = 0; };   // menu: the position in menus and selection, 1 ... M (version 2), 0 = the file order
 const int kNoDerive = 1;   // master record flag bit 0
+// DEC 11 (2026-11-15): T (whole + frac / 2^32 base samples) of a master lies within the length of the track: -N <= T <= N, N = the core
+// master frames (an offset beyond the track is meaningless). Decoders refuse a record with a larger T; the encoder writes none.
+inline bool tWithinTrack(int64_t whole, uint32_t frac, uint64_t n) {
+    if (whole >= 0) return (uint64_t)whole < n || ((uint64_t)whole == n && frac == 0);
+    return (uint64_t)(-(whole + 1)) + 1 <= n; }
 // payload versions (2026-11-11): 1 = up to 16 masters, record bytes 5..7 reserved; 2 = up to 255 masters, record byte 5 = name length N,
 // byte 6 = flags (bit 0: no derived versions; bits 1..7 are 0), byte 7 = menu position (1..M, or 0 for every master = the file order), the N name bytes right after the 72-byte record
 inline bool headerCountOk(uint64_t ver, uint64_t nm) { return nm >= 1 && ((ver == 1 && nm <= 16) || (ver == 2 && nm <= 255)); }
@@ -188,7 +193,7 @@ inline std::string decodeLaes(const std::vector<uint8_t>& body, const Pcm& core,
             if (!validMasterName(np, (size_t)nl)) return "invalid master name"; I.name.assign((const char*)np, (size_t)nl); I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)   // all in uint64
-            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40)) return "invalid master record";
+            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
         if (I.storage != 1 && I.refTier == 0 && core.frames() < 1) return "invalid master record: it refers to a core master of no samples";   // the reference needs core samples (refLen, mir)
         if (F64 > (uint64_t)PTRDIFF_MAX / sizeof(int64_t)) return "master too long for this decoder"; I.frames = (int64_t)F64;   // whole master in memory: int64_t counts, but a V of F64 samples must be addressable (32-bit: 2^28)
         memcpy(I.sha, sha, 32); const int j = I.storage == 2 ? std::min(I.stages, info[I.refTier - 1].stages) : 0; const int64_t nj = levLen(I.frames, I.stages - j);

@@ -45,7 +45,8 @@ int main(int argc, char** argv) {
         printf("extension packs: %zu (decoding pack %d)\n  pack 0: the main body%s%s%s\n", D.packs.size() + 1, D.pack, D.mainName.empty() ? "" : ", \"", D.mainName.c_str(), D.mainName.empty() ? "" : "\"");
         for (size_t k = 0; k < D.packs.size(); k++) printf("  pack %zu: %d Hz%s%s%s\n", k + 1, D.packs[k].rate, D.packs[k].name.empty() ? "" : ", \"", D.packs[k].name.c_str(), D.packs[k].name.empty() ? "" : "\""); }
     if (hookPath("LEAKOUT") && D.haveF) {   // leak compensation (encoder only): the decoded frequency layer brought down to the base rate (int32, 1/16 LSB24, L/R interleaved)
-        FILE* fl = fopen(hookPath("LEAKOUT"), "wb"); if (!fl) return 1; long nlk = D.writeLeak(fl);
+        FILE* fl = fopen(hookPath("LEAKOUT"), "wb"); if (!fl) { printf("cannot write %s\n", hookPath("LEAKOUT")); return 1; }   // FU21-3: the reason is said (as the Java LaeDec)
+        long nlk = D.writeLeak(fl);
         fclose(fl); printf("leak written: %ld base-rate samples/ch\n", nlk); return 0; }
     if (!wavio::fits32((unsigned long long)D.Lo * 6, 0)) { printf("output would exceed the 4 GB limit of WAV: choose a lower output rate\n"); return 1; }
     FILE* fo = fopen(argv[2], "wb"); if (!fo) { printf("cannot write %s\n", argv[2]); return 1; }
@@ -60,8 +61,8 @@ int main(int argc, char** argv) {
     if (wok && ((D.Lo * 6) & 1)) wok = fputc(0, fo) != EOF;
     if (fclose(fo) != 0) wok = false;
     if (!wok) { remove(argv[2]); printf("cannot write %s (disk full?): the output was removed\n", argv[2]); return 1; }
+    if (g_streamErr) { remove(argv[2]); printf("corrupt stream (values out of range): refusing to decode\n"); return 3; }   // FU21-3: before the clip map, so no map is left beside a removed output (as the Java LaeDec)
     if (wantMap) { FILE* fm = fopen(hookPath("CLIPMAP"), "wb"); if (fm) { for (int c = 0; c < 2; c++) fwrite(clipPos[c].data(), 4, clipPos[c].size(), fm); fclose(fm); } }   // channel 0 first, as before
-    if (g_streamErr) { remove(argv[2]); printf("corrupt stream (values out of range): refusing to decode\n"); return 3; }
     printf("LAE decode OK: %s -> %s | %s, %d Hz %s, %ld samples/ch | mode %s (share by %s) %s, CD / core layer cut-off %d Hz | frequency segments used %d of %d | hard-limited samples %ld | format LAEY (extension LAE1)\n",
            argv[1], argv[2], mode == "16" ? "16-bit route" : (mode == "cd24" ? "CD / core layer + depth" : "24-bit route"), D.wrate, mode == "16" ? "16 bit (in 24-bit words)" : "24 bit", D.Lo, part::MODES[D.mi].name, D.wm == 2 ? "cells+energy" : (D.wm ? "energy" : "cells"), D.eq ? "equal" : "unequal", D.fc, D.nused, D.nseg, D.clip);
     return 0; }

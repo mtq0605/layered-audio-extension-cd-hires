@@ -10,7 +10,7 @@
 //        numeric input: each range snaps inward to whole cells (frames whose hop [mN - N/2, mN + N/2) lies inside [t0, t1),
 //        columns whose 8 bins lie inside [f0, f1)); the snapped range is printed and written
 //   lae_noise show <master.wav> <marks.laenoise>         checks the file against the master, lists the positions
-//   lae_noise preview <master.wav> <marks.laenoise> <outdir> [context s, default and at most 1] [longest preview per position s, default and at most 10]
+//   lae_noise preview <master.wav> <marks.laenoise> <outdir> [context s, default and at most 1] [longest preview per position s, default 10, at most 30]
 //        position by position: pos_NNN_marked.wav (the sound of exactly the marked cells), pos_NNN_silenced.wav (the master
 //        with those cells silenced) and pos_NNN_original.wav (the same span unchanged, for a blind A/B), each over the position plus
 //        the context; preview_check.txt: the difference master - silenced,
@@ -19,9 +19,9 @@
 //        preview_list.txt (2026-11-14): whose previews these are, for the panel: the master's SHA-256, length and rate, and per
 //        pos_NNN its rectangle in cells as in the marking file (geometry only), with the end frame of the previewed part
 //   lae_noise preview-all <master.wav> <marks.laenoise> <outdir> <t0 s> <t1 s>
-//        every position silenced together over one excerpt of at most 10 s: all_original.wav, all_silenced.wav, all_marked.wav, with the same check
+//        every position silenced together over one excerpt of at most 30 s: all_original.wav, all_silenced.wav, all_marked.wav, with the same check
 //   Decision 6 (2026-11-15, "we do not support export"): every preview is limited in the program, so no command writes a cleaned
-//   master: preview covers at most the first 10 s of a position with at most 1 s of context on each side, preview-all at most 10 s;
+//   master: preview covers at most the first 30 s of a position (10 s by default) with at most 1 s of context on each side, preview-all at most 30 s (30 s: user decision 2026-11-15);
 //   a longer request is cut to the limit and the program says so (as a long position was already cut to its first part)
 //   lae_noise level <file.wav> <marks.laenoise>   level of the marked cells in any file of that length (master, copy, decode)
 //   lae_noise spectro <master.wav> <out.json>   display data for the panel (tools/noise_panel.html): cell levels and waveform
@@ -52,7 +52,7 @@ using namespace nmk;
 // previews are 32-bit PCM: the master's 24 bits x 256, so rounding stays 256 times below a 24-bit step and the check sees the deletion
 // itself (a sub-LSB removal rounded to 24 bit would spread its own distortion into other cells)
 static const double CHECKMAX = 0.05;   // outside the marked cells, in 24-bit units: rounding to 32 bit alone stays near 0.005
-static const double MAXPREV = 10.0, MAXCTX = 1.0;   // decision 6: the longest preview (s) of a position or of preview-all, and its context (s) on each side
+static const double MAXPREV = 30.0, MAXCTX = 1.0;   // decision 6: the longest preview (s) of a position or of preview-all, and its context (s) on each side
 static int32_t clip32(long long v) { return (int32_t)max((long long)INT32_MIN, min((long long)INT32_MAX, v)); }
 static bool write32(const char* path, int rate, const vector<int32_t>& s) {
     FILE* f = fopen(path, "wb"); if (!f) return false; const uint32_t db = (uint32_t)(s.size() * 4);
@@ -113,7 +113,7 @@ static int doShow(int argc, char** argv) {
     return 0; }
 
 static int doPreview(int argc, char** argv) {
-    if (argc < 5) { printf("usage: lae_noise preview <master.wav> <marks.laenoise> <outdir> [context s, at most 1] [longest preview per position s, at most 10]\n"); return 2; }
+    if (argc < 5) { printf("usage: lae_noise preview <master.wav> <marks.laenoise> <outdir> [context s, at most 1] [longest preview per position s, default 10, at most 30]\n"); return 2; }
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (!checkMarks(ws, mk)) return 1;
@@ -173,14 +173,14 @@ static int doPreview(int argc, char** argv) {
 
 // every position of the file silenced together, over one excerpt [t0, t1): original / silenced / marked, and the same check
 static int doPreviewAll(int argc, char** argv) {
-    if (argc < 7) { printf("usage: lae_noise preview-all <master.wav> <marks.laenoise> <outdir> <t0 s> <t1 s>   (an excerpt of at most 10 s)\n"); return 2; }
+    if (argc < 7) { printf("usage: lae_noise preview-all <master.wav> <marks.laenoise> <outdir> <t0 s> <t1 s>   (an excerpt of at most 30 s)\n"); return 2; }
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (!checkMarks(ws, mk)) return 1;
     const string dir = argv[4]; std::error_code ec; std::filesystem::create_directories(dir, ec);
     const long long L = ws.frames; const long K = mdct::frames((long)L);
     const long long a = max(0LL, (long long)llround(atof(argv[5]) * ws.rate)); long long b = min(L, (long long)llround(atof(argv[6]) * ws.rate)); if (b <= a) { printf("empty excerpt\n"); return 2; }
-    const long long maxLen = llround(MAXPREV * ws.rate);   // decision 6: one excerpt of at most 10 s
+    const long long maxLen = llround(MAXPREV * ws.rate);   // decision 6: one excerpt of at most 30 s
     if (b - a > maxLen) { b = a + maxLen; printf("excerpt %s-%s s is longer than %.0f s: cut to %.3f-%.3f s (previews are limited; lae_noise does not export)\n", argv[5], argv[6], MAXPREV, a / ws.rate, b / ws.rate); }
     if (!mayWriteAll(argv[2], { dir + "/all_original.wav", dir + "/all_silenced.wav", dir + "/all_marked.wav" })) return 1;   // DEC 21
     const long fA = max(0L, (long)(a / NM)), fB = min(K, (long)(b / NM) + 2);   // frames that touch the excerpt

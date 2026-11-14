@@ -4,7 +4,7 @@
 
 LAE Noise Marker 检测母带中的平稳噪声和固定窄线，并由用户标定需要去除的部分。其结果写入标定文件（`.laenoise`，见 [SPEC_LAENOISE.zh.md](SPEC_LAENOISE.zh.md)）。LAE Lossy（LAEY）编码器读取该文件，并将其频率层中被标定的格子编码为静音（一个格子为该层网格中的一个 MDCT 帧 × 8 个频点，见 [SPEC_LAENOISE.zh.md](SPEC_LAENOISE.zh.md) 第 3 节）。CD 频带内的标定仅被列出。噪声标定仅适用于 LAEY。
 
-**LAE Noise Marker 仅进行识别和标定。** 它从不去除声音，也不具备导出功能：没有任何命令或按钮会写出经过清理的母带副本。也没有命令会覆盖母带：自 2026-11-14 起，`scan`、`mark`、`spectro`、`preview` 和 `preview-all` 遇到输出就是母带文件本身时拒绝写出，母带保持不变。每个试听片段的长度都由程序限定：`preview` 每个位置最多取前 10 秒，两侧上下文各最多 1 秒；`preview-all` 最多 10 秒；要求更长时，程序截到这个长度并说明。已有的输出文件不会被悄悄替换（自 2026-11-15 起）：在控制台上程序问两次，两次都回答 yes 才替换；不在控制台时拒绝，除非给了 `--overwrite`。如用户将标定文件接入确实会去除声音的其他软件，则属用户本人的选择和责任。
+**LAE Noise Marker 仅进行识别和标定。** 它从不去除声音，也不具备导出功能：没有任何命令或按钮会写出经过清理的母带副本。也没有命令会覆盖母带：自 2026-11-14 起，`scan`、`mark`、`spectro`、`preview` 和 `preview-all` 遇到输出就是母带文件本身时拒绝写出，母带保持不变。每个试听片段的长度都由程序限定：`preview` 每个位置默认取前 10 秒、最多取前 30 秒，两侧上下文各最多 1 秒；`preview-all` 最多 30 秒；要求更长时，程序截到这个长度并说明。已有的输出文件不会被悄悄替换（自 2026-11-15 起）：在控制台上程序问两次，两次都回答 yes 才替换；不在控制台时拒绝，除非给了 `--overwrite`。如用户将标定文件接入确实会去除声音的其他软件，则属用户本人的选择和责任。
 
 ## 软件包内容
 
@@ -39,7 +39,7 @@ lae_noise spectro master.wav spectro.json
 lae_noise preview master.wav candidates.laenoise previews
 ```
 
-对于每个候选，向 `previews` 写入三个文件：`pos_NNN_original.wav`（该时段原样）、`pos_NNN_silenced.wav`（该时段中属于该候选的格子已静音）和 `pos_NNN_marked.wav`（仅包含将被静音的内容）。每个试听片段最多覆盖该时段的前 10 s，两侧各附 1 s 上下文。写入同一文件夹的 `preview_check.txt` 确认这些格子以外的内容均未改变。自 2026-11-14 起，`lae_noise preview` 还写出 `preview_list.txt`：其中有母带的 SHA-256、长度和采样率，以及每个 `pos_NNN` 按标定文件写法给出的格子矩形（只有几何信息；编码器不读它）。`lae_noise preview-all master.wav <file.laenoise> <folder> <t0 s> <t1 s>` 写出一个所有位置同时静音、最长 10 秒的片段（`all_original.wav`、`all_silenced.wav`、`all_marked.wav`），并进行相同的核对。
+对于每个候选，向 `previews` 写入三个文件：`pos_NNN_original.wav`（该时段原样）、`pos_NNN_silenced.wav`（该时段中属于该候选的格子已静音）和 `pos_NNN_marked.wav`（仅包含将被静音的内容）。每个试听片段默认覆盖该时段的前 10 s（最多 30 s），两侧各附 1 s 上下文。写入同一文件夹的 `preview_check.txt` 确认这些格子以外的内容均未改变。自 2026-11-14 起，`lae_noise preview` 还写出 `preview_list.txt`：其中有母带的 SHA-256、长度和采样率，以及每个 `pos_NNN` 按标定文件写法给出的格子矩形（只有几何信息；编码器不读它）。`lae_noise preview-all master.wav <file.laenoise> <folder> <t0 s> <t1 s>` 写出一个所有位置同时静音、最长 30 秒的片段（`all_original.wav`、`all_silenced.wav`、`all_marked.wav`），并进行相同的核对。
 
 **3. 在面板中选择。** 打开 `noise_panel.html`，载入 `spectro.json`、`candidates.laenoise` 和 `previews` 文件夹。
 - 所有候选初始均为未勾选状态；勾选需要去除的候选。

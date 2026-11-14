@@ -16,6 +16,8 @@
 //        the context; preview_check.txt: the difference master - silenced,
 //        analysed again with the same MDCT, must sit in the marked cells only. Previews are 32-bit PCM (the master x 256), so the
 //        rounding stays far below a 24-bit step and cannot hide or fake a change
+//        preview_list.txt (2026-11-14): whose previews these are, for the panel: the master's SHA-256, length and rate, and per
+//        pos_NNN its rectangle in cells as in the marking file (geometry only), with the end frame of the previewed part
 //   lae_noise preview-all <master.wav> <marks.laenoise> <outdir> <t0 s> <t1 s>
 //        every position silenced together over one excerpt: all_original.wav, all_silenced.wav, all_marked.wav, with the same check
 //   lae_noise level <file.wav> <marks.laenoise>   level of the marked cells in any file of that length (master, copy, decode)
@@ -101,6 +103,10 @@ static int doPreview(int argc, char** argv) {
     const double maxSec = argc > 6 ? atof(argv[6]) : 10.0; const long maxFr = max(1L, (long)llround(maxSec * ws.rate / NM));   // a long position is previewed from its start
     FILE* rep = fopen((dir + "/preview_check.txt").c_str(), "w"); if (!rep) { printf("cannot write in %s\n", dir.c_str()); return 1; }
     fprintf(rep, "master %s\nmarking file %s\nposition | time s | Hz | marked level dBFS | outside the marked cells: max |coefficient| and rms (24-bit units; previews are 32-bit, rounding alone gives about 0.001 rms; fails above %.2f)\n", argv[2], argv[3], CHECKMAX);
+    // FU17-8: the list the panel matches by (the master by SHA-256, each preview by its rectangle); "wb": LF line ends everywhere
+    FILE* lst = fopen((dir + "/preview_list.txt").c_str(), "wb"); if (!lst) { fclose(rep); printf("cannot write in %s\n", dir.c_str()); return 1; }
+    fprintf(lst, "LAEPREVIEW 1\nmaster sha256 %s frames %lld rate %.0f\ngrid mdct %d cell %d\n", mk.sha.c_str(), mk.frames, mk.rate, NM, CW);
+    fprintf(lst, "# pos_NNN <m0> <m1> <c0> <c1> <e>: the files pos_NNN_*.wav are the preview of the position pos <m0> <m1> <c0> <c1> of the marking file; frames [m0, e) are previewed (e < m1: the first part of a long position)\n");
     const double fsPow = 0.5 * 70368744177664.0; int bad = 0;
     for (size_t pi = 0; pi < mk.pos.size(); pi++) { Pos p = mk.pos[pi]; const bool cut = p.m1 - p.m0 > maxFr; if (cut) p.m1 = p.m0 + maxFr;
         const long long sup0 = p.m0 * (long long)NM - NM, sup1 = p.m1 * (long long)NM;   // the samples the marked frames touch
@@ -130,10 +136,12 @@ static int doPreview(int argc, char** argv) {
         char nm[64]; snprintf(nm, sizeof nm, "/pos_%03zu_marked.wav", pi + 1); write32((dir + nm).c_str(), (int)ws.rate, outMark);
         snprintf(nm, sizeof nm, "/pos_%03zu_silenced.wav", pi + 1); write32((dir + nm).c_str(), (int)ws.rate, outSil);
         snprintf(nm, sizeof nm, "/pos_%03zu_original.wav", pi + 1); write32((dir + nm).c_str(), (int)ws.rate, outOrig);   // the same span unchanged, for a blind A/B
+        fprintf(lst, "pos_%03zu %ld %ld %d %d %ld\n", pi + 1, p.m0, mk.pos[pi].m1, p.c0, p.c1, p.m1);
         double lv = 10 * lmath::log10(max(eMarked / (double)(sup1 - sup0) / fsPow, 1e-30));
         fprintf(rep, "%4zu  %9.3f-%9.3f  %9.1f-%9.1f  %8.1f   max %.4f  rms %.5f%s\n", pi + 1, frameT0(p.m0, mk.rate), frameT0(p.m1, mk.rate), colHz(p.c0, mk.rate), colHz(p.c1, mk.rate), lv, mx, rms, mx > CHECKMAX ? "  CHECK FAILED" : "");
         printf("position %zu: preview written (%.2f s with context%s), outside the marked cells max %.4f rms %.5f\n", pi + 1, (b - a) / ws.rate, cut ? ", first part of a longer position" : "", mx, rms); }
     fprintf(rep, "%s\n", bad ? "RESULT: some positions changed cells outside the marking" : "RESULT: every position changed only its marked cells (outside: rounding to 32 bit only)"); fclose(rep);
+    if (fclose(lst) != 0) { printf("cannot write %s/preview_list.txt\n", dir.c_str()); return 1; }
     return bad ? 3 : 0; }
 
 // every position of the file silenced together, over one excerpt [t0, t1): original / silenced / marked, and the same check

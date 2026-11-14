@@ -4,8 +4,10 @@
 # (IMAPI2). A data disc, not BD-Video / BDMV / DVD-Audio (those are licensed formats): any player that reads FLAC (or WAV) files from a
 # disc plays the core master (it can be CD-compatible); an LAES player plays the masters. Nothing is converted or changed: the files are copied as they are.
 #
-#   powershell -ExecutionPolicy Bypass -File tools\laes_disc.ps1 -Album <folder> -Out <image.iso> -Disc BD25 [-Label <name>] [-Export <laes_export.exe>]
+#   powershell -ExecutionPolicy Bypass -File tools\laes_disc.ps1 -Album <folder> -Out <image.iso> -Disc BD25 [-Label <name>] [-Export <laes_export.exe>] [--overwrite]
 #
+# --overwrite (also -Overwrite): decision 21 (2026-11-15): an existing -Out is replaced only after two "yes" answers at a console, or
+# with --overwrite; without a console it is refused. The image is still written to <out>.part first and replaces -Out only when complete.
 # -Disc: DVD5, DVD9, BD25, BD50 or BD100 (sets the capacity that is checked). BD: UDF 2.50. DVD: UDF 1.02 + ISO 9660 + Joliet; when a
 # file is larger than 2 GiB, UDF 1.02 only (the Windows disc-image service puts no file above 2 GiB into ISO 9660 / Joliet).
 # Decision 46 (2026-11-15): files of any size are taken; only the total size is checked against the capacity of the disc type.
@@ -15,16 +17,28 @@
 #   <Label>\playlist.m3u8  the files in that order (relative paths, UTF-8)
 #   <Label>\SHA256SUMS.txt the SHA-256 of every file (sha256sum format), for checking a copy
 #   README.txt             what the disc is and how to play it
+[CmdletBinding(PositionalBinding = $false)]
 param([Parameter(Mandatory = $true)][string]$Album, [Parameter(Mandatory = $true)][string]$Out, [Parameter(Mandatory = $true)][ValidateSet('DVD5', 'DVD9', 'BD25', 'BD50', 'BD100')][string]$Disc,
-      [string]$Label = '', [string]$Export = '')
+      [string]$Label = '', [string]$Export = '', [switch]$Overwrite, [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
 $ErrorActionPreference = 'Stop'
+foreach ($restArg in @($Rest)) { if ($restArg -eq '--overwrite') { $Overwrite = $true } elseif ($restArg) { throw "unknown argument $restArg" } }
 $blocksOf = @{ DVD5 = 2295104; DVD9 = 4173824; BD25 = 12219392; BD50 = 24438784; BD100 = 48878592 }   # 2048-byte sectors (single / dual layer)
 if (-not (Test-Path -LiteralPath $Album -PathType Container)) { throw "no folder $Album" }
 if ($Label -eq '') { $Label = Split-Path -Leaf (Resolve-Path -LiteralPath $Album)
     if ($Label -match '[:\\/]') { throw "$Album is the root of a drive: give the disc's name with -Label <name>" } }   # FU20-6: 'C:\' is no folder name
 if ($Export -eq '') { $Export = Join-Path $PSScriptRoot '..\build\laes_export.exe' }
 if (-not (Test-Path -LiteralPath $Export)) { throw "laes_export.exe not found ($Export); give -Export" }
-if (Test-Path -LiteralPath $Out) { throw "$Out exists; nothing is overwritten" }
+if (Test-Path -LiteralPath $Out) {   # DEC 21: the same questions and refusal as every LAE tool (English, then Chinese)
+    $zhAsk1 = [regex]::Unescape('\u5df2\u7ecf\u5b58\u5728\u3002\u8981\u66ff\u6362\u5417\uff1f\u8f93\u5165 yes \u7ee7\u7eed\uff1a')
+    $zhAsk2a = [regex]::Unescape('\u786e\u5b9a\u8981\u66ff\u6362 '); $zhAsk2b = [regex]::Unescape(' \u5417\uff1f\u66ff\u6362\u540e\u65e0\u6cd5\u6062\u590d\u3002\u518d\u8f93\u5165\u4e00\u6b21 yes\uff1a')
+    $zhRefuse = [regex]::Unescape('\u5df2\u7ecf\u5b58\u5728\uff0c\u6ca1\u6709\u66ff\u6362\uff08\u52a0 --overwrite \u624d\u66ff\u6362\uff09\u3002')
+    $agreed = [bool]$Overwrite
+    if (-not $agreed -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) {
+        Write-Host "`"$Out`" already exists. Replace it? Type yes to continue: "; Write-Host -NoNewline "`"$Out`" $zhAsk1"
+        if ("$([Console]::ReadLine())".Trim() -eq 'yes') {
+            Write-Host "Really replace `"$Out`"? It cannot be undone. Type yes again: "; Write-Host -NoNewline "$zhAsk2a`"$Out`"$zhAsk2b"
+            $agreed = "$([Console]::ReadLine())".Trim() -eq 'yes' } }
+    if (-not $agreed) { Write-Host "`"$Out`" already exists; it was not replaced (give --overwrite to replace it)."; Write-Host "`"$Out`" $zhRefuse"; exit 1 } }
 $partOut = [IO.Path]::GetFullPath($Out) + '.part'   # the image is written here and renamed to -Out only when it is complete
 if (Test-Path -LiteralPath $partOut) { throw "$partOut exists (left by an interrupted run?); nothing is overwritten" }
 
@@ -92,7 +106,8 @@ public static class LaesIsoWriter {
     [LaesIsoWriter]::Save($img.ImageStream, $partOut)
     $wantLen = [int64]$img.TotalBlocks * $img.BlockSize; $gotLen = (Get-Item -LiteralPath $partOut).Length
     if ($gotLen -ne $wantLen) { throw "the image is incomplete ($gotLen of $wantLen bytes); nothing written" }
-    [IO.File]::Move($partOut, [IO.Path]::GetFullPath($Out)); $partMine = $false
+    if (Test-Path -LiteralPath $Out) { [IO.File]::Replace($partOut, [IO.Path]::GetFullPath($Out), [NullString]::Value) } else { [IO.File]::Move($partOut, [IO.Path]::GetFullPath($Out)) }   # DEC 21: replaced only when agreed above
+    $partMine = $false
     Write-Host ("{0}: {1:N0} MB, {2}, volume {3}" -f $Out, ((Get-Item -LiteralPath $Out).Length / 1MB), $(if ($Disc -like 'BD*') { 'UDF 2.50' } elseif ($udfOnly) { 'UDF 1.02' } else { 'UDF 1.02 + ISO 9660 + Joliet' }), $volName)
 }
 finally {   # only the three small files this run made, by name, and this run's unfinished image

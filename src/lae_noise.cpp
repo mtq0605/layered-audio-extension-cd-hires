@@ -27,6 +27,8 @@
 //   lae_noise spectro <master.wav> <out.json>   display data for the panel (tools/noise_panel.html): cell levels and waveform
 //   lae_noise scan <master.wav> <report.txt> [candidates.laenoise]   the scanner (src/noise_scan0c.cpp): stationary noise and fixed
 //        narrow lines of 10 s or more, as a list and as a marking file of candidates; nothing is marked until the user keeps one
+//   --overwrite (with any command, anywhere): decision 21 (2026-11-15): an output file that exists is replaced only after two "yes"
+//        answers at a console, or with --overwrite; without a console it is refused (src/noise_replace.h)
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
@@ -42,6 +44,7 @@
 #include "mdct_tb.h"
 #include "noise_marks.h"   // the marking format (Pos, Marks, masterSha, read / write / check)
 #include "wavio.h"
+#include "noise_replace.h"   // decision 21: an existing output is not replaced silently (--overwrite)
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 #include "lae_math.h"   // levels in dB the same on every platform (2026-11-06)
 using namespace std;
@@ -63,6 +66,9 @@ static bool writePreview(const string& path, const char* master, int rate, const
     if ((unsigned long long)s.size() * 4 > 0xFFFFFFFFull - 36) { printf("cannot write %s: longer than a WAV file can hold (4 GB); give a shorter preview\n", path.c_str()); return false; }
     if (!write32(path.c_str(), rate, s)) { printf("cannot write %s\n", path.c_str()); return false; }
     return true; }
+// DEC 21 (2026-11-15): every output a command will write is checked before anything is written: an existing file is replaced only
+// after two "yes" at a console, or with --overwrite (a name that is the master itself is refused later, as before)
+static bool mayWriteAll(const char* master, const vector<string>& outs) { for (const string& o : outs) if (!sameFile(master, o.c_str()) && !nrep::mayReplace(o)) return false; return true; }
 
 // plane samples (24-bit units, as the encoder: M = r + ((l - r) >> 1), S = l - r) as doubles, for original samples [a, a + n)
 static void planes(WavStream& ws, long long a, long long n, vector<double>& M, vector<double>& S, vector<long long>& li, vector<long long>& ri) {
@@ -83,6 +89,7 @@ static void invFrame(const double* c, long m, long long a, vector<double>& y) {
 
 static int doMark(int argc, char** argv) {
     if (argc < 8 || (argc - 4) % 4) { printf("usage: lae_noise mark <master.wav> <out.laenoise> <t0 s> <t1 s> <f0 Hz> <f1 Hz> [...]\n"); return 2; }
+    if (!mayWriteAll(argv[2], { argv[3] })) return 1;   // DEC 21
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; mk.sha = masterSha(ws); mk.frames = ws.frames; mk.rate = ws.rate; long K = mdct::frames((long)ws.frames);
     for (int i = 4; i + 3 < argc; i += 4) { double t0 = atof(argv[i]), t1 = atof(argv[i + 1]), f0 = atof(argv[i + 2]), f1 = atof(argv[i + 3]);
@@ -116,6 +123,9 @@ static int doPreview(int argc, char** argv) {
     if (ctx > MAXCTX) { printf("context %s s: cut to %.0f s (previews are limited; lae_noise does not export)\n", argv[5], MAXCTX); ctx = MAXCTX; }   // decision 6
     if (maxSec > MAXPREV) { printf("longest preview per position %s s: cut to %.0f s (previews are limited; lae_noise does not export)\n", argv[6], MAXPREV); maxSec = MAXPREV; }
     const long maxFr = max(1L, (long)llround(maxSec * ws.rate / NM));   // a long position is previewed from its start
+    { vector<string> outs{ dir + "/preview_check.txt", dir + "/preview_list.txt" }; char pn[64];   // DEC 21
+      for (size_t pi = 0; pi < mk.pos.size(); pi++) for (const char* kind : { "marked", "silenced", "original" }) { snprintf(pn, sizeof pn, "/pos_%03zu_%s.wav", pi + 1, kind); outs.push_back(dir + pn); }
+      if (!mayWriteAll(argv[2], outs)) return 1; }
     FILE* rep = fopen((dir + "/preview_check.txt").c_str(), "w"); if (!rep) { printf("cannot write in %s\n", dir.c_str()); return 1; }
     fprintf(rep, "master %s\nmarking file %s\nposition | time s | Hz | marked level dBFS | outside the marked cells: max |coefficient| and rms (24-bit units; previews are 32-bit, rounding alone gives about 0.001 rms; fails above %.2f)\n", argv[2], argv[3], CHECKMAX);
     // FU17-8: the list the panel matches by (the master by SHA-256, each preview by its rectangle); "wb": LF line ends everywhere
@@ -172,6 +182,7 @@ static int doPreviewAll(int argc, char** argv) {
     const long long a = max(0LL, (long long)llround(atof(argv[5]) * ws.rate)); long long b = min(L, (long long)llround(atof(argv[6]) * ws.rate)); if (b <= a) { printf("empty excerpt\n"); return 2; }
     const long long maxLen = llround(MAXPREV * ws.rate);   // decision 6: one excerpt of at most 10 s
     if (b - a > maxLen) { b = a + maxLen; printf("excerpt %s-%s s is longer than %.0f s: cut to %.3f-%.3f s (previews are limited; lae_noise does not export)\n", argv[5], argv[6], MAXPREV, a / ws.rate, b / ws.rate); }
+    if (!mayWriteAll(argv[2], { dir + "/all_original.wav", dir + "/all_silenced.wav", dir + "/all_marked.wav" })) return 1;   // DEC 21
     const long fA = max(0L, (long)(a / NM)), fB = min(K, (long)(b / NM) + 2);   // frames that touch the excerpt
     const long long r0 = (long long)fA * NM - 2 * NM, r1 = (long long)fB * NM + 2 * NM;
     vector<double> M, S; vector<long long> li, ri; planes(ws, r0, r1 - r0, M, S, li, ri);
@@ -224,6 +235,7 @@ static int doSpectro(int argc, char** argv) {
     const long long L = ws.frames; const long K = mdct::frames((long)L); const int G = max(1, (int)llround(0.02 * ws.rate / NM));
     const long nst = (K - 1) / G; const double fsPow = 0.5 * 70368744177664.0, perKHz = 10 * lmath::log10(CW * ws.rate / (2.0 * NM) / 1000.0);
     if (sameFile(argv[2], argv[3])) { printf("%s is the master itself: nothing written\n", argv[3]); return 2; }   // FU17-6
+    if (!nrep::mayReplace(argv[3])) return 1;   // DEC 21
     FILE* f = fopen(argv[3], "w"); if (!f) { printf("cannot write %s\n", argv[3]); return 1; }
     std::string name; for (unsigned char c : std::filesystem::path(argv[2]).filename().string()) {   // UTF-8 (win_utf8.h), JSON-escaped
         if (c == '"' || c == '\\') { name += '\\'; name += (char)c; } else if (c < 0x20) { char u[8]; snprintf(u, sizeof u, "\\u%04x", c); name += u; } else name += (char)c; }
@@ -252,7 +264,10 @@ static int doSpectro(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
-    if (argc < 2) { printf("usage: lae_noise scan | mark | show | preview | preview-all | level | spectro ... (see the head of src/lae_noise.cpp)\n"); return 2; }
+    nrep::takeOverwrite(argc, argv);   // DEC 21: --overwrite anywhere
+    if (argc < 2) { printf("usage: lae_noise scan | mark | show | preview | preview-all | level | spectro ... [--overwrite] (see the head of src/lae_noise.cpp)\n"
+                           "  --overwrite: replace existing output files without asking (on a console it is asked twice; otherwise it is refused)\n"
+                           "  %s\n", u8"--overwrite：不问就替换已有的输出文件（在控制台上会问两次；不在控制台上就拒绝）"); return 2; }
     if (!strcmp(argv[1], "scan")) return noiseScanMain(argc - 1, argv + 1);
     if (!strcmp(argv[1], "spectro")) return doSpectro(argc, argv);
     if (!strcmp(argv[1], "level")) return doLevel(argc, argv);

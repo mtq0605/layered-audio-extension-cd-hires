@@ -16,7 +16,7 @@
 // summary gives the test rate of every pair.
 // The ABX method itself goes back to Munson & Gardner (1950) and Clark (JAES 30(5), 1982).
 //
-// Command line (for checks, no window):  lae_abx --prepare <pair number, 1-based> <48000|44100> <out folder>
+// Command line (for checks, no window):  lae_abx --prepare <pair number, 1-based> <48000|44100> <out folder> [--overwrite]
 //   prepares the pair as the window would and writes A.wav and B.wav (32-bit float, the test rate) plus prepare.txt.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -493,9 +493,16 @@ static HWND mk(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int 
     HWND h = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, s(x), s(y), s(cw), s(chh), gWnd, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr); SendMessageW(h, WM_SETFONT, (WPARAM)gFont, TRUE); return h; }
 
 // ---------------------------------------------------------------- command-line preparation (checks)
-static int cliPrepare(int idx, int rate, const std::wstring& outDir) {
+// DEC 21 (2026-11-15): an existing A.wav, B.wav or prepare.txt is replaced only with --overwrite. This program is a window program:
+// its command line has no console input to answer a question, so without --overwrite it refuses (the decided text), as every LAE
+// tool does without a console.
+static bool cliMayWrite(const std::wstring& path, bool overwrite) {
+    if (overwrite || !PathFileExistsW(path.c_str())) return true; const std::string f = narrow(path);
+    printf("\"%s\" already exists; it was not replaced (give --overwrite to replace it).\n\"%s\" %s\n", f.c_str(), f.c_str(), u8"已经存在，没有替换（加 --overwrite 才替换）。"); return false; }
+static int cliPrepare(int idx, int rate, const std::wstring& outDir, bool overwrite) {
     if (rate != 48000 && rate != 44100) { printf("the test rate must be 48000 or 44100\n"); return 1; }
     gSet = readSet(exeDir()); if (idx < 1 || idx > (int)gSet.size()) { printf("pair %d not in abx_set.txt (%zu pairs)\n", idx, gSet.size()); return 1; }
+    for (const wchar_t* nm : { L"\\A.wav", L"\\B.wav", L"\\prepare.txt" }) if (!cliMayWrite(outDir + nm, overwrite)) return 1;
     CoInitializeEx(nullptr, COINIT_MULTITHREADED); MFStartup(MF_VERSION); Source s[2]; long long lag = 0; std::string err;
     const bool ok = preparePairSafe(gSet[(size_t)idx - 1], rate, s, lag, err, [](const std::string& m, double f) { static int last = -1; const int pct = f >= 0 ? (int)(f * 100) : last; if (pct != last) { last = pct; printf("  %3d %%  %s\n", pct, m.c_str()); } });
     MFShutdown(); removeWorkDir(); if (!ok) { printf("failed: %s\n", err.c_str()); return 1; }
@@ -509,7 +516,7 @@ static int cliPrepare(int idx, int rate, const std::wstring& outDir) {
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     int argc = 0; wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (argc >= 5 && !wcscmp(argv[1], L"--prepare")) { if (AttachConsole(ATTACH_PARENT_PROCESS)) { freopen("CONOUT$", "w", stdout); } return cliPrepare(_wtoi(argv[2]), _wtoi(argv[3]), argv[4]); }
+    if (argc >= 5 && !wcscmp(argv[1], L"--prepare")) { if (AttachConsole(ATTACH_PARENT_PROCESS)) { freopen("CONOUT$", "w", stdout); } return cliPrepare(_wtoi(argv[2]), _wtoi(argv[3]), argv[4], argc >= 6 && !wcscmp(argv[5], L"--overwrite")); }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     INITCOMMONCONTROLSEX ic{ sizeof ic, ICC_BAR_CLASSES | ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS }; InitCommonControlsEx(&ic);
     WNDCLASSW wc{}; wc.lpfnWndProc = WndProc; wc.hInstance = inst; wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1); wc.lpszClassName = L"lae_abx"; RegisterClassW(&wc);

@@ -9,7 +9,7 @@ marked cells of its frequency layer as silence (a cell is one MDCT frame × 8 bi
 
 **LAE Noise Marker only identifies and marks.** It never removes sound and has no export function: no command or button writes a
 cleaned copy of the master. No command writes over the master: since 2026-11-14, `scan`, `mark`, `spectro`, `preview` and `preview-all` refuse an output
-that is the master file itself, and the master stays unchanged. The program limits every listening preview: `preview` covers at most the first 10 seconds of each position, with at most 1 second of context on each side, and `preview-all` at most 10 seconds; a longer request is cut to these limits, and the program says so. If the user connects the marking file to
+that is the master file itself, and the master stays unchanged. The program limits every listening preview: `preview` covers at most the first 10 seconds of each position, with at most 1 second of context on each side, and `preview-all` at most 10 seconds; a longer request is cut to these limits, and the program says so. An output file that already exists is not replaced silently (since 2026-11-15): on a console the program asks twice and replaces it only after two yes answers; otherwise it is refused unless `--overwrite` is given. If the user connects the marking file to
 other software that does remove sound, that is the user's own choice and responsibility.
 
 ## What is in the package

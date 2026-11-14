@@ -32,6 +32,7 @@
 #include "noise_io.h"
 #include "noise_marks.h"   // candidate file in the marking format (cell coordinates, geometry only)
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
+#include "noise_replace.h"   // decision 21 (2026-11-15): an existing report or candidate file is not replaced silently (--overwrite)
 #include "lae_math.h"   // the same results on every platform (2026-11-06): no C-library log / exp / sin / cos / pow below
 #include <map>
 #include <thread>
@@ -255,6 +256,7 @@ static int noiseScanMain(int argc, char** argv) {
     WavStream ws; if (!ws.open(argv[1])) { fprintf(stderr, "cannot read %s (%s)\n", argv[1], ws.why.c_str()); return 1; }
     const double rate = ws.rate; const long long len = ws.frames;
     for (int i = 2; i < argc && i < 4; i++) if (nmk::sameFile(argv[1], argv[i])) { fprintf(stderr, "%s is the input file itself: nothing written\n", argv[i]); return 2; }   // FU17-2
+    for (int i = 2; i < argc && i < 4; i++) if (!nrep::mayReplace(argv[i])) return 1;   // DEC 21: asked (console) or refused before anything is written
     FILE* out = fopen(argv[2], "wb");   /* LF on every platform */ if (!out) { fprintf(stderr, "cannot write %s\n", argv[2]); return 1; }
     fprintf(out, "file %s\nrate %.0f  length %.2f s\n\n", argv[1], rate, len / rate);
     int fam = (fmod(rate, 44100.0) == 0) ? 44100 : 48000; int mult = max(1, (int)llround(rate / fam));
@@ -341,5 +343,5 @@ static int noiseScanMain(int argc, char** argv) {
     return 0;
 }
 #ifndef NOISE_SCAN_NO_MAIN
-int main(int argc, char** argv) { lae_u8::init(argc, argv); return noiseScanMain(argc, argv); }   // UTF-8 arguments and file names on Windows (win_utf8.h)
+int main(int argc, char** argv) { lae_u8::init(argc, argv); nrep::takeOverwrite(argc, argv); return noiseScanMain(argc, argv); }   // UTF-8 arguments and file names on Windows (win_utf8.h)
 #endif

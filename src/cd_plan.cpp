@@ -78,7 +78,6 @@ static std::string readPublisher(const std::string& cue, Pub& P) {
     for (auto& kv : P.d.p) P.p.push_back(kv.second);
     P.end = P.lay.end; if (P.end % cdxr::SECTOR) return "the program does not end on a sector boundary (not a CD layout)";
     for (long long a = P.d.base; a < 0; a++) if (P.d.L(a) || P.d.R(a)) {   // track 1 INDEX 00 inside the file
-        long long z = a; while (z < 0 && (P.d.L(z) || P.d.R(z) || z == a)) z++;
         return fmt("track 1 INDEX 00 (the pregap) has sound %.3f s before INDEX 01: not supported (L4, P10; hidden track)", -a / 44100.0); }
     for (long long a = 0; a < P.end; a++) if (!P.d.has(a)) return fmt("the program has an unknown sample at %.3f s", a / 44100.0);
     for (size_t k = 0; k < P.p.size(); k++) { const long long n = (k + 1 < P.p.size() ? P.p[k + 1] : P.end) - P.p[k];
@@ -95,7 +94,7 @@ static int planMain(int argc, char** argv) {
     catch (const std::bad_alloc&) { printf("plan: stopped: out of memory (if the output folder already holds slices, the set is not complete: do not use it). Memory: %s. "
                                             "The planner needs the whole master at once: use the 64-bit program on a computer with that much memory.\n", planMemNote); return 2; } }
 static int planRun(int argc, char** argv) {
-    // lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdaccept]
+    // lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdalign=<one position per piece>] [cdaccept] [laes]
     clearModuleEnv();   // e.g. an inherited DITHERFLAGS would make the base module write a file outside outdir
     std::vector<std::string> args; bool accept = false, laes = false; std::string alignArg;
     for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "cdaccept")) accept = true; else if (!strcmp(argv[i], "laes")) laes = true; else if (!strncmp(argv[i], "cdalign=", 8)) alignArg = argv[i] + 8; else args.push_back(argv[i]); }
@@ -118,7 +117,7 @@ static int planRun(int argc, char** argv) {
     // on w.s as on the all-bits copy, which is no longer made; with laes (32-bit masters: w.s lacks the low byte) it is tested on `full`
     const std::vector<int32_t>& allBits = laes ? full : w.s;
     w.ch = 2; w.bits = 24;
-    int stages = 0; while ((44100 << stages) < w.rate) stages++;
+    int stages = 0; while (stages < 4 && (44100 << stages) < w.rate) stages++;   // bounded: a damaged header's huge rate must not overflow the shift
     if ((44100 << stages) != w.rate || stages < 1 || stages > 3) { printf("master at %d Hz: a CD-Extra needs 88.2, 176.4 or 352.8 kHz (44.1 kHz family)\n", w.rate); return 1; }
     const long long up = 1LL << stages, Lm = (long long)w.s.size() / 2; const int P = 4096; const long pb = P >> stages;
     Pub pub; { std::string e = readPublisher(cueArg, pub); if (!e.empty()) { printf("publisher disc: %s; nothing written\n", e.c_str()); return 1; } }
@@ -357,19 +356,27 @@ static int planRun(int argc, char** argv) {
                 else printf("plan: NOTE: the master is re-split at the CD's positions: the split between %s and %s (%.6f s of the joined master) is not used; the nearest CD position, the start of piece %02zu, lies %+lld master samples (%s) from it\n",
                             mfiles[f - 1].c_str(), mfiles[f].c_str(), sec(fb), bk + 1, best, m_align::detail::dur(sec(best)).c_str()); } }
         if (!moved) printf("plan: the master files' own split points are the CD's positions\n"); }
-    // 5. the slices on disk
+    // 5. the slices on disk. Every slice must fit a WAV file (4 GB) before the first is written; a slice that cannot be written removes
+    // again, by name, the slices this run wrote (the folder was new or empty), so a corrected run can use the same folder
+    std::vector<fsp::path> written;
+    auto unwrite = [&]() { std::error_code e3; for (auto& p : written) fsp::remove(p, e3); printf("plan: the slices this run wrote to %s are removed again; nothing written\n", outArg.c_str()); };
+    auto claim = [&](const fsp::path& p) { std::error_code e4; if (fsp::exists(p, e4) || e4) { printf("plan: %s appeared during this run (made by another program?): it is not touched\n", p.u8string().c_str()); return false; }
+        written.push_back(p); return true; };   // only what this run creates is ever removed
+    auto fitsWav = [&](const std::vector<Slice>& v, int bytesPer) { for (size_t k = 0; k < n; k++) if (!wavio::fits32((unsigned long long)v[k].m.size() * (unsigned long long)bytesPer, 0)) {
+            printf("plan: piece %02zu: its master slice would be %.2f GB, beyond the 4 GB limit of a WAV file; nothing written\n", k + 1, (double)v[k].m.size() * bytesPer / 1e9); return false; }
+        return true; };
     if (laes) {   // the same cuts from the master as it is, every bit; T = where CD frame 0 lies relative to the slice, in base samples:
         // slice sample i = master(A + i - lead*up), CD frame j (lead frame included) = master time x + (j - lead)*up, so base(u) = core(u + T) with T = (A - x) / up
         std::vector<Slice>().swap(sl);   // FU09-3: the slices of the checks are not used from here on: freed before the all-bits slices are cut
-        std::vector<Slice> sf; src = &full; if (build(sf, false)) return 1;
+        std::vector<Slice> sf; src = &full; if (build(sf, false)) return 1; if (!fitsWav(sf, fullBits / 8)) return 1;
         std::string t = "LAE plan alignment report (LAES: the master is not moved)\npublisher disc: " + cueArg + "\nmaster:"; for (auto& f : mfiles) t += " " + f; t += "\n";
         std::string cmds;
         for (size_t k = 0; k < n; k++) { const Slice& s = sf[k]; const double Tk = silentCd[k] ? 0.0 : fr[k] / (double)up;
             char nm[64]; snprintf(nm, sizeof nm, "TRACK%02zu.master.wav", k + 1); const fsp::path pm = out / nm; snprintf(nm, sizeof nm, "TRACK%02zu.cd.wav", k + 1); const fsp::path pc = out / nm;
             const int bps = fullBits / 8; const size_t db = s.m.size() * bps; std::vector<uint8_t> o; wavio::hdr(o, w.rate, 2, fullBits, db, 0);
             for (int32_t v : s.m) for (int b = 0; b < bps; b++) o.push_back((uint8_t)((uint32_t)v >> (8 * b))); if (db & 1) o.push_back(0);
-            FILE* f = fopen(pm.string().c_str(), "wb"); const bool ok = f && fwrite(o.data(), 1, o.size(), f) == o.size(); if (f && fclose(f)) { printf("cannot write %s\n", pm.u8string().c_str()); return 2; }
-            if (!ok || !wavio::writeCD(pc.string().c_str(), 44100, s.c, {})) { printf("cannot write the slices of piece %02zu\n", k + 1); return 2; }
+            if (!claim(pm) || !claim(pc)) { unwrite(); return 2; } FILE* f = fopen(pm.string().c_str(), "wb"); const bool ok = f && fwrite(o.data(), 1, o.size(), f) == o.size(); if (f && fclose(f)) { printf("cannot write %s\n", pm.u8string().c_str()); unwrite(); return 2; }
+            if (!ok || !wavio::writeCD(pc.string().c_str(), 44100, s.c, {})) { printf("cannot write the slices of piece %02zu\n", k + 1); unwrite(); return 2; }
             char tx[64]; snprintf(tx, sizeof tx, "%.10f", Tk);
             printf("plan: piece %02zu: master %s, %lld samples (%d bit, not moved), CD %lld frames%s; T = %s base samples%s\n", k + 1, silentCd[k] ? "digital silence" : fmt("%.6f-%.6f s", sec(s.S), sec(s.S + s.len)).c_str(), s.len, fullBits, nk[k] + s.lead,
                    s.lead ? " (one digital-silence frame in front, in the pregap)" : "", tx, needsAccept[k] ? " (confirmed by you)" : "");
@@ -380,10 +387,12 @@ static int planRun(int argc, char** argv) {
         printf("plan OK (laes): %zu pieces written to %s, the master not moved. Encode each (other masters of the piece: plan them the same way and add them with their own @T):\n%s"
                "then lae_cdx image <dir> TRACK*.laes.wav layout=%s\n", n, outArg.c_str(), cmds.c_str(), cueArg.c_str());
         return 0; }
+    if (!fitsWav(sl, 3)) return 1;
     for (size_t k = 0; k < n; k++) { const Slice& s = sl[k]; std::vector<int32_t> m24(s.m.size()); long long nz = 0;
         for (size_t i = 0; i < s.m.size(); i++) m24[i] = s.m[i] >> 8; for (long long i = 0; i < s.len; i++) if (s.m[(size_t)i * 2] || s.m[(size_t)i * 2 + 1]) nz++;
         char nm[64]; snprintf(nm, sizeof nm, "TRACK%02zu.master.wav", k + 1); const fsp::path pm = out / nm; snprintf(nm, sizeof nm, "TRACK%02zu.cd.wav", k + 1); const fsp::path pc = out / nm;
-        if (!wavio::write24(pm.string().c_str(), w.rate, m24) || !wavio::writeCD(pc.string().c_str(), 44100, s.c, {})) { printf("cannot write the slices of piece %02zu\n", k + 1); return 2; }
+        if (!claim(pm) || !claim(pc)) { unwrite(); return 2; }
+        if (!wavio::write24(pm.string().c_str(), w.rate, m24) || !wavio::writeCD(pc.string().c_str(), 44100, s.c, {})) { printf("cannot write the slices of piece %02zu\n", k + 1); unwrite(); return 2; }
         printf("plan: piece %02zu: master %s, %lld samples (%lld silent), CD %lld frames%s; encode it with cdalign=0%s\n", k + 1, silentCd[k] ? (nz ? "digital silence but its last samples" : "digital silence") : fmt("%.6f-%.6f s", sec(s.S), sec(s.S + s.len)).c_str(), s.len, s.len - nz, nk[k] + s.lead,
                s.lead ? " (one digital-silence frame in front, in the pregap)" : "", needsAccept[k] ? " cdaccept" : ""); }
     {   // the movement report (a separate text file for the user's records; plain text, read by no program)

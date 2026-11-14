@@ -52,12 +52,29 @@ public final class LaeyEncoder {
         public char gLevel = 'd';
         /** tags and pictures (2026-11-06, a85dd40): one set for the whole file, as lae_enc --tag / --cover / --picture; null or empty = none */
         public com.lae.laes.LaesTags.Tags tags;
+        /** decision 37 (2026-11-15): the form of the output file, as --form=: "flac" or "wav"; null = by the name of out (.flac = FLAC form, .lae and
+         *  any other name = WAV form) */
+        public String form;
+        /** decision 37: master1name=&lt;text&gt;, the name of the main body (the first master) shown where a pack is chosen; null = none stored */
+        public String mainName;
+        /** decision 37: one further master of an extension pack (master2= .. master9=, in this order): its file and, as the command line,
+         *  master&lt;k&gt;align= (null = searched), master&lt;k&gt;name=, master&lt;k&gt;edge= (pad | cut, null = not given) and master&lt;k&gt;accept */
+        public static final class Pack { public String master, align, name, edge; public boolean accept = false; }
+        /** decision 37: the extension packs (at most 8: master2= .. master9=); empty = none */
+        public final List<Pack> packs = new ArrayList<Pack>();
+        /** decision 21: --overwrite, an existing out is replaced (without it an existing out is refused: an app has no console) */
+        public boolean overwrite = false;
         // the command line of lae_enc for these options
         public String[] toArgs() { List<String> a = new ArrayList<String>(); a.add("lae_enc"); a.add(master); a.add(out); a.add(mode); a.add(scheme == 2 ? "s2" : "s1");
             if (zs) a.add("zs"); if (energy) a.add("energy"); if (equal) a.add("equal"); if (bits24) a.add("bits=24"); if (resume) a.add("resume");
             if (memGB > 0) a.add("mem=" + memGB);
             if (cd != null) a.add("cd=" + cd); if (cdCheck) a.add("cdcheck"); if (cdAlign != null) a.add("cdalign=" + cdAlign); if (cdAccept) a.add("cdaccept"); if (cdEdge != null) a.add("cdedge=" + cdEdge);
             if (noise != null) a.add("noise=" + noise); if (g) a.add(gLevel == 'd' ? "g" : "g=" + gLevel);
+            if (form != null) a.add("--form=" + form); if (mainName != null) a.add("master1name=" + mainName);
+            for (int k = 0; k < packs.size(); k++) { final Pack p = packs.get(k); final String m = "master" + (k + 2);   // more than 8: master10=..., refused by the encoder as an unknown option
+                a.add(m + "=" + (p.master != null ? p.master : "")); if (p.align != null) a.add(m + "align=" + p.align); if (p.name != null) a.add(m + "name=" + p.name);
+                if (p.edge != null) a.add(m + "edge=" + p.edge); if (p.accept) a.add(m + "accept"); }
+            if (overwrite) a.add("--overwrite");
             return a.toArray(new String[0]); } }
 
     /** progress: the encoder's printed text (the C++ stdout) and the name of each finished step; called from the encoding thread */

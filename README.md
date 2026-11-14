@@ -999,7 +999,7 @@ Session 1 is subject to the following rules:
 The two modes of the CD layer lead to different layouts:
 
 - **Derived CD.** The track boundaries are those given by the publisher. In a continuous master, every track start must lie on the sector grid; otherwise the tool stops, lists the starts and writes nothing. No master sample is added or removed.
-- **Independent CD** (option `layout=<publisher.cue>`). The publisher's INDEX entries (including INDEX 00 from track 2 onwards, and INDEX 02 and above), ISRC, FLAGS and CATALOG are kept at their positions. Session 1 must equal the publisher's programme sample for sample, and the tool checks this. The tool accepts only files that are already aligned (Sections 4.3 and 4.5); it performs no alignment itself.
+- **Independent CD** (option `layout=<publisher.cue>`). The publisher's INDEX entries (including INDEX 00 from track 2 onwards, and INDEX 02 and above), ISRC, FLAGS and CATALOG are kept at their positions. They are checked first (since 2026-11-14): a CATALOG must have 13 digits, an ISRC the form CCOOOYYNNNNN, FLAGS only DCP and SCMS (4CH is refused), and the INDEX entries of a track must be numbered without gaps, in order and inside the programme; otherwise the tool stops and writes nothing. Session 1 must equal the publisher's programme sample for sample, and the tool checks this. The tool accepts only files that are already aligned (Sections 4.3 and 4.5); it performs no alignment itself.
 
 **Session 2 (data).** Session 2 holds exactly one data track in CD-ROM XA Mode 2 Form 1, with 2048 bytes of user data per sector. No Mode 1 sector occurs anywhere on the disc. The file system and its contents are as follows:
 
@@ -1540,7 +1540,7 @@ The command-line tool `lae_udec` (`src/lae_udec.cpp`) is built on the `lae_any_*
   - it decodes every entropy stream from its start to its end, with one thread per stream. A stream that does not end exactly at its last byte causes the open to fail, as a damaged chunk does; the CD audio still plays. Such a file is not a conforming file ([SPEC.md](spec/lossy/SPEC.md), Section 6.7); `lae_dec` does not check this and decodes it.
   - During this check, a checkpoint is kept every 30 s in the player's own folder, under that SHA-256: `%APPDATA%\LAE\lae_index\<sha256>.idx` on Windows, and `$XDG_CACHE_HOME/lae/lae_index` or `~/.cache/lae/lae_index` elsewhere. The environment variable `LAE_INDEX_DIR` names a different folder; the value `off` selects no folder. An app on Android sets this variable.
   - Subsequent opens read this record and skip the check. A missing, damaged or foreign record only causes the next open to check the file again; the output never depends on the record.
-  - The folder holds at most 256 MB; the least recently used records are deleted first (only `*.idx` files in that folder are deleted).
+  - The folder holds at most 256 MB; the least recently used records are deleted first. Only the library's own records are counted and deleted (`<sha256>.idx` files that begin with `LAEYIDX1`), and its own unfinished `.idx.tmp…` files once they are more than an hour old; other files in the folder are left alone (since 2026-11-14).
   - Nothing is written into, appended to or sent with the media file.
 - Measured on a 13:22 file at 352.8 kHz (x64, 8 cores): the first check took 2.9 s (2.2 s per 10 minutes; with 4 cores, 3.2 s per 10 minutes), and subsequent opens took 0.7 s. A seek to 99 % of the track, never decoded before, took 0.25 s including the first 2 s of reading, compared with 7.8 s previously. Records are about 0.3 MB for 13 minutes. Twelve positions on each of the routes full, 16 and cd24, and at 176.4 kHz, were bit-identical to sequential decoding.
 - In development tests on 10–15 s excerpts, 540 random seeks over all routes and output rates, including seeks to positions never decoded before, were all bit-identical; the slowest seek, including the subsequent read, took 0.2 s.
@@ -1651,7 +1651,7 @@ Notes on the encoder:
   - `laes enc`: the work folder `<output>.laes.tmp` reached 38.6 GB for the same 10 minutes with four masters (about 3.8 GB per minute), and the same with `--mem=20` and `--mem=2`.
   - `lae_enc` checks the free space before it starts; if the disk becomes full during a run, both tools stop cleanly and leave no output file.
 - **Length.** The limit is that of the v5 container: about 94 minutes at 352.8 kHz and 173 minutes at 192 kHz, with or without `cd=`.
-- **Failure handling.** Every file operation is checked. On a full disk, an internal error, lack of memory or an interruption, the encoder stops with the reason, writes no output file and deletes its temporary files; with `resume`, it keeps the work folder `<output>.tmp`, so that the next run with `resume` can continue from it (delete the folder by hand if you do not continue). The output is first written as `<output>.part` and renamed only after it has been read back and verified; an existing file of the same name is left unchanged if the run fails. The free disk space is checked before the run starts.
+- **Failure handling.** Every file operation is checked. On a full disk, an internal error, lack of memory or an interruption, the encoder stops with the reason, writes no output file and deletes its temporary files; with `resume`, it keeps the work folder `<output>.tmp`, so that the next run with `resume` can continue from it (delete the folder by hand if you do not continue). The output is first written as `<output>.part` and renamed only after it has been read back and verified; an existing file of the same name is left unchanged if the run fails. The free disk space is checked before the run starts. If the header of an input WAV, RF64 or W64 file (the master, the CD of `cd=` or a file of the planner's CUE sheet) gives a data length beyond the end of the file, the encoder prints a `NOTE` that the file may be cut off, reads it to its end and continues (since 2026-11-14); a data length of 2^63 bytes or more is refused.
 
 Encoder performance, measured during development:
 
@@ -1775,6 +1775,8 @@ lae_cdx sim <imagedir> <outdir> <form> [offset=N] [pregap=1] [overread=N] [chang
 lae_cdx selftest                                       # known answers
 lae_cdx test <fixturedir>                              # the test cases on the test discs
 ```
+
+An argument with `=` that is neither an existing file nor an option of the command stops `lae_cdx` (since 2026-11-14), so that a mistyped option is not ignored. `pack`, `split` and `repack` refuse an output that is one of their inputs (or, for `split`, one name for both outputs). After `read`, a note names the files in the output folder that this reading did not write; they are not part of the result and are not removed.
 
 ### 14.7 Decoder library (liblae)
 

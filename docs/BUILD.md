@@ -89,7 +89,7 @@ The repository also contains the following programs. The header comment of each 
 - `tools/lae_math_check.cpp` checks the encoder's functions in `src/lae_math.h` against the C library and prints their platform checksum.
 - `src/gen_suite.cpp` generates the synthetic test signals (optionally a single category).
 - `src/cd_variant.cpp` derives exactly defined test variants of a CD or master (shift, padding, cut, gain, polarity, channel swap, fade, and others) for the alignment and extension-pack tests (`tests/check_packs.sh`).
-- `tools/lae_abx/lae_abx.cpp` is the stand-alone ABX listening test (Windows x64). It needs `lae_udec.exe` next to it. Build (x64): `cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`.
+- `tools/lae_abx/lae_abx.cpp` is the stand-alone ABX listening test (Windows x64, Windows 10 version 1703 or later: it uses the per-monitor DPI functions of that version). It needs `lae_udec.exe` next to it. Build (x64): `cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`.
 - `src/cut_wav.cpp` and `src/cmp_wav.cpp` are WAV utilities. `src/cmp_wav.cpp` computes the error measures defined in README Section 12.1.
 
 ## 2. Start-up self-test

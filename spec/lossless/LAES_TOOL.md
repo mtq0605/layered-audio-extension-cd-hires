@@ -73,6 +73,7 @@ laes enc <out.flac | out.wav | out.lae> (--derive-core | --core=<core.wav>) <mas
 ### Masters
 
 - A master is a 16-, 24- or 32-bit stereo WAV file (RIFF, or RF64 beyond 4 GiB) or a FLAC file, at 1, 2, 4 or 8 times 44.1 or 48 kHz. A file can contain up to 255 masters. Every rate and every word length can hold an independent master, and several masters may have the same rate and word length.
+- If the header of a master WAV / RF64 or of the `--core` WAV gives a data length beyond the end of the file, `laes enc` and `laes add` print a `NOTE` that the file may be cut off, read it to its end and continue (since 2026-11-14). A data length of 2^63 bytes or more in the header (RF64 `ds64`) is refused with the reason; `laes parts`, `tag`, `add`, `extract` and `names` refuse such a chunk length in an LAES file in the same way.
 - The order on the command line does not change the file size: the tool chooses the order in the file and the way each master is stored, selecting whichever is smallest. The order on the command line is the menu order (see [Menu order](#menu-order---menu-order)).
 - `--name=<k>:<text>`: names the k-th master on the command line (counting from 1; repeat the option for other masters). The name is free text from the publisher: UTF-8, at most 255 bytes (about 255 Latin letters or 85 Chinese characters; emoji are allowed), without control characters (line breaks, tabs). Players show it as it is; a name never chooses anything. The tool never fills in a file name, path or date as a name. At the end, it prints "given k -> master n -> name".
 - `--no-derive`: no derived 16-bit version at all, neither for the masters nor for the core master. `--no-derive=<k>`: only the k-th master on the command line offers none. `--no-derive=core`: only the core master offers none.
@@ -93,6 +94,7 @@ laes enc <out.flac | out.wav | out.lae> (--derive-core | --core=<core.wav>) <mas
 - The LAE plug-ins identify LAES files by their content, not by their name; the name only routes the file to a decoder.
 - With `.flac` and `.wav`, any player plays the core master.
 - `.lae` files are opened only by players that recognise the name (with an LAE plug-in) or that inspect the content.
+- An output name that is one of the inputs (a master or the `--core` file) is refused before anything is written (since 2026-11-14). An existing `<out>` is replaced only when the new file is complete.
 
 ### Examples
 
@@ -113,7 +115,7 @@ None of these options changes the file: the same masters and options produce the
 
 | Option | Effect |
 |---|---|
-| `--mem=<GB>` | Memory budget; default 2 GB (less on machines with little memory). It sets only the length of the segments processed at a time. |
+| `--mem=<GB>` | Memory budget; default 2 GB (less on machines with little memory). It sets only the length of the segments processed at a time. It must be a number above 0 and at most 1048576. |
 | `--small-disk` | Requires much less disk space: the largest rate level of each master and the decoded FLAC masters are not kept but are regenerated when read. Slower. |
 | `--force-disk` | Starts even if the estimated disk requirement exceeds the free space. |
 | `--disk-stop` | When free space falls below 2 GB, stops instead of waiting (the work folder is kept). |
@@ -184,7 +186,7 @@ laes dec <in> --list
 laes dec <in> <out dir> --pick=<n>[,<n> ...] | <a>-<b> | <rate>:<bits> | master:<k> | name:<text>
 ```
 
-- Without options, it writes the core master (`core.wav`) and every master (`master_<k>_<rate>_<bits>.wav`).
+- Without options, it writes the core master (`core.wav`) and every master (`master_<k>_<rate>_<bits>.wav`). An output folder name that begins with `-` is refused (since 2026-11-14), so that a forgotten folder does not become a folder named after an option.
 - `--levels` additionally writes every rate level of every master (`master_<k>_level_<rate>_<bits>.wav`). A rate level is the master at half, a quarter or an eighth of its rate, and is lossless.
 - `--list` shows every choice with a number, in the order of [SPEC.md](SPEC.md), Section 10.3: the core master first, then one group per master (the master itself, then its rate levels and derived versions, marked with "-"). If a master has a name, the name is shown with the master, its levels and its derived versions.
 - `--pick` writes only the selected choices:
@@ -269,7 +271,7 @@ laes extract <in> <out> --pick=<p>[,<p> ...]      p = master:<k> | name:<text> |
 laes verify <in> <master.wav> [<master.wav> ...]
 ```
 
-Decodes every master in the file and compares it bit for bit with the given files, which may be given in any order. For each file, it prints `IDENTICAL` or `DIFFERENT`; for masters without a corresponding file, it prints `not compared`.
+Decodes every master in the file and compares it bit for bit with the given files, which may be given in any order. For each file, it prints `IDENTICAL` or `DIFFERENT`; for masters without a corresponding file, it prints `not compared`. A given file that cannot be opened or that the WAV reader refuses is reported as `<file>: DIFFERENT (not compared: <reason>)`, and the files after it are still compared (since 2026-11-14).
 
 ## Time position: `laes align`
 

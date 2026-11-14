@@ -8,7 +8,8 @@ marked cells of its frequency layer as silence (a cell is one MDCT frame × 8 bi
 [SPEC_LAENOISE.md](SPEC_LAENOISE.md), Section 3). Marks in the CD band are only listed. Noise marking applies to LAEY only.
 
 **LAE Noise Marker only identifies and marks.** It never removes sound and has no export function: no command or button writes a
-cleaned copy of the master. Listening previews are at most 10 seconds per position. If the user connects the marking file to
+cleaned copy of the master. No command writes over the master: since 2026-11-14, `scan`, `mark`, `spectro`, `preview` and `preview-all` refuse an output
+that is the master file itself, and the master stays unchanged. Listening previews are at most 10 seconds per position. If the user connects the marking file to
 other software that does remove sound, that is the user's own choice and responsibility.
 
 ## What is in the package

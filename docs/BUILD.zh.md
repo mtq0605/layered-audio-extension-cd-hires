@@ -89,7 +89,7 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 - `tools/lae_math_check.cpp` 将编码器在 `src/lae_math.h` 中的函数与 C 库进行对比检查，并输出其平台校验和。
 - `src/gen_suite.cpp` 生成合成测试信号（可以只生成一个类别）。
 - `src/cd_variant.cpp` 生成定义精确的 CD 或母带测试变体（平移、补静音、截去开头、增益、极性、左右互换、淡出等），用于对齐和扩展包测试（`tests/check_packs.sh`）。
-- `tools/lae_abx/lae_abx.cpp` 是独立运行的 ABX 听音测试（Windows x64），需要旁边有 `lae_udec.exe`。编译（x64）：`cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`。
+- `tools/lae_abx/lae_abx.cpp` 是独立运行的 ABX 听音测试（Windows x64，需要 Windows 10 1703 版或更新版本：它使用该版本的按显示器 DPI 函数），需要旁边有 `lae_udec.exe`。编译（x64）：`cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`。
 - `src/cut_wav.cpp` 和 `src/cmp_wav.cpp` 是 WAV 实用程序。`src/cmp_wav.cpp` 计算 README 第 12.1 节所定义的误差度量。
 
 ## 2. 启动自检

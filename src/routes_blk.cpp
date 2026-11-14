@@ -121,15 +121,22 @@ int main(int argc, char** argv) {
         return T; };
     blkio::Writer Tf(argv[5]); std::unique_ptr<blkio::Writer> Ff; if (strcmp(argv[6], "-")) Ff.reset(new blkio::Writer(argv[6]));   // "-": the frequency layer signal is not written (the second split after leak compensation needs only T)
     vector<int32_t> Tout, Fout, m;
+    // T and F are stored as 24-bit values. A value outside is limited below as before, and counted (2026-11-14): the decoder would
+    // then not give back the master, so the split stops after the last block. It cannot happen with the CD layer derived from the
+    // master; it happens with an independent CD that differs from the master by more than full scale (inverted polarity, loud passages).
+    long long overT[2] = {0, 0}, overF[2] = {0, 0};
     for (long A = 0; A < L; A += BM) { const long B = min(L, A + BM); const long ta = A >> stages, tb = B == L ? Lb : (B >> stages);
         Tout.assign((size_t)(max(0L, tb - ta)) * 2, 0); Fout.assign((size_t)(B - A) * 2, 0); mr.read(A, B, m);
         auto chanTF = [&](int c) { WinD Tw; bool haveT = false;   // the T window the up-conversion asked for (it covers this block's T samples)
             auto p0 = [&](long a, long b) { WinD T = tWin(a, b, c); WinD u = vWin(a, b, c); for (long i = a; i < b; i++) u.d[(size_t)(i - a)] += T.d[(size_t)(i - a)]; Tw = std::move(T); haveT = true; return u; };
             const long e = min(B, Lu); WinD u; if (e > A) u = upEval(stages, A, e, Lb, p0);
             if (tb > ta) { if (!haveT || Tw.base > ta || Tw.base + (long)Tw.d.size() < tb) Tw = tWin(ta, tb, c);
-                for (long i = ta; i < tb; i++) Tout[(size_t)(i - ta) * 2 + c] = (int32_t)max(-8388608.0, min(8388607.0, Tw.at(i))) * 256; }
-            for (long i = A; i < B; i++) { const double ui = i < e ? u.at(i) : 0.0; long long d = (long long)(m[(size_t)(i - A) * 2 + c] >> 8) - llround(ui); d = max(-8388608LL, min(8388607LL, d)); Fout[(size_t)(i - A) * 2 + c] = (int32_t)(d * 256); } };
+                for (long i = ta; i < tb; i++) { const double tv = Tw.at(i); if (tv < -8388608.0 || tv > 8388607.0) overT[c]++; Tout[(size_t)(i - ta) * 2 + c] = (int32_t)max(-8388608.0, min(8388607.0, tv)) * 256; } }
+            for (long i = A; i < B; i++) { const double ui = i < e ? u.at(i) : 0.0; long long d = (long long)(m[(size_t)(i - A) * 2 + c] >> 8) - llround(ui); if (d < -8388608LL || d > 8388607LL) overF[c]++; d = max(-8388608LL, min(8388607LL, d)); Fout[(size_t)(i - A) * 2 + c] = (int32_t)(d * 256); } };
         twoWay(chanTF);
         Tf.put(Tout); if (Ff) Ff->put(Fout); }
+    if (overT[0] + overT[1] + overF[0] + overF[1] > 0) { char t[512];   // stops before finish(): the writers remove their unfinished files
+        snprintf(t, sizeof t, "the difference between the master and the CD / core layer does not fit into 24 bits at %lld sample(s) of the depth layer signal and %lld sample(s) of the frequency layer signal, so the file would not decode to the master. This happens when an independent CD differs from the master by more than full scale, for example with inverted polarity and passages above -6 dBFS. Correct the polarity or the level of the CD and encode again",
+                 overT[0] + overT[1], overF[0] + overF[1]); encio::fail(t); }
     Tf.finish(); if (Ff) Ff->finish();
     return 0; }

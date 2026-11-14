@@ -100,8 +100,10 @@ inline bool mayReplace(const std::string& path, bool overwrite) {
     FILE* t = fopen(path.c_str(), "rb"); if (!t) return true; fclose(t); if (overwrite) return true;
     auto refuse = [&]() { printf("\"%s\" already exists; it was not replaced (give --overwrite to replace it).\n", path.c_str()); printf(u8"\"%s\" 已经存在，没有替换（加 --overwrite 才替换）。\n", path.c_str()); return false; };
     if (!interactive()) return refuse();
-    auto yes = []() { char a[64] = {0}; if (!fgets(a, sizeof a, stdin)) return false; std::string s(a); size_t p = 0; while (p < s.size() && !isalpha((unsigned char)s[p])) p++;   // skips a byte-order mark or spaces
-        s = s.substr(p); while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back(); return s == "yes"; };
+    auto yes = []() { char a[64] = {0}; if (!fgets(a, sizeof a, stdin)) return false; std::string s(a); size_t p = s.compare(0, 3, "\xEF\xBB\xBF") ? 0 : 3;   // a byte-order mark,
+        while (p < s.size() && (s[p] == ' ' || s[p] == '\t')) p++;   // spaces and tabs around the answer are not counted; only the word yes, in any letter case
+        s = s.substr(p); while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
+        for (char& ch : s) if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32); return s == "yes"; };
     printf("\"%s\" already exists. Replace it? Type yes to continue: \n", path.c_str()); printf(u8"\"%s\" 已经存在。要替换吗？输入 yes 继续：", path.c_str()); fflush(stdout);
     if (!yes()) return refuse();
     printf("Really replace \"%s\"? It cannot be undone. Type yes again: \n", path.c_str()); printf(u8"确定要替换 \"%s\" 吗？替换后无法恢复。再输入一次 yes：", path.c_str()); fflush(stdout);

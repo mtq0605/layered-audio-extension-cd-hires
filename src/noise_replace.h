@@ -25,7 +25,8 @@ inline bool onConsole() {   // a person at a console on both ends (not a pipe, a
 }
 inline bool answeredYes() { char b[256]; if (!fgets(b, sizeof b, stdin)) return false; std::string s(b);
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
-    size_t k = 0; while (k < s.size() && (s[k] == ' ' || s[k] == '\t')) k++; return s.substr(k) == "yes"; }
+    size_t k = 0; while (k < s.size() && (s[k] == ' ' || s[k] == '\t')) k++; s = s.substr(k);
+    for (char& ch : s) if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32); return s == "yes"; }   // only the word yes, in any letter case
 // an output that can be opened is there (as in laes_pick.h; no <filesystem>, so that the C++14 tools build); file names are UTF-8
 // in lae_noise (win_utf8.h sets the UTF-8 locale) and ASCII in the generators
 inline bool exists(const std::string& path) { FILE* t = fopen(path.c_str(), "rb"); if (!t) return false; fclose(t); return true; }
@@ -35,7 +36,7 @@ inline bool mayReplace(const std::string& path, bool overwrite) {
     const char* f = path.c_str();
     if (onConsole()) {
         printf("\"%s\" already exists. Replace it? Type yes to continue: \n\"%s\" %s", f, f, u8"已经存在。要替换吗？输入 yes 继续："); fflush(stdout);
-        if (answeredYes()) { printf("Really replace \"%s\"? It cannot be undone. Type yes again: \n%s\"%s\" %s", f, u8"确定要替换 ", f, u8"吗？替换后无法恢复。再输入一次 yes："); fflush(stdout);
+        if (answeredYes()) { printf("Really replace \"%s\"? It cannot be undone. Type yes again: \n%s\"%s\" %s", f, u8"确定要替换 ", f, u8" 吗？替换后无法恢复。再输入一次 yes："); fflush(stdout);
             if (answeredYes()) return true; } }
     printf("\"%s\" already exists; it was not replaced (give --overwrite to replace it).\n\"%s\" %s\n", f, f, u8"已经存在，没有替换（加 --overwrite 才替换）。");
     return false; }

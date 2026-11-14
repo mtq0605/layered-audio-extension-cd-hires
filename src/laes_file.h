@@ -123,8 +123,8 @@ const int kNoDerive = 1;   // master record flag bit 0
 // and acts without it. testModeLine prints, once per program run, the active test switches.
 inline const char* testEnv(const char* name) { const char* m = getenv("LAE_TEST_MODE"); return m && !strcmp(m, "1") ? getenv(name) : nullptr; }
 inline void testModeLine() { static bool done = false; if (done) return; done = true; const char* m = getenv("LAE_TEST_MODE"); if (!m || strcmp(m, "1")) return;
-    std::string on; for (const char* n : {"LAES_TEST_KEYS", "LAES_NO_SHORTLIST", "LAES_FORCE_RF64", "LAES_PIECE", "LAES_SELFCHECK_FLIP", "LAES_DISK_RESERVE"}) if (getenv(n)) on += std::string(" ") + n;
-    printf("LAE_TEST_MODE=1: test switches active:%s (unset LAE_TEST_MODE for normal behaviour)\n", on.empty() ? " none" : on.c_str()); }
+    std::string on; for (const char* n : {"LAES_TEST_KEYS", "LAES_NO_SHORTLIST", "LAES_FORCE_RF64", "LAES_PIECE", "LAES_SELFCHECK_FLIP", "LAES_DISK_RESERVE"}) if (const char* v = getenv(n)) on += std::string(on.empty() ? "" : ", ") + n + "=" + v;
+    printf("TEST MODE (LAE_TEST_MODE=1): active test switches: %s. Unset LAE_TEST_MODE to return to normal behaviour.\n", on.empty() ? "none" : on.c_str()); }
 // DEC 11 (2026-11-15): T (whole + frac / 2^32 base samples) of a master lies within the length of the track: -N <= T <= N, N = the core
 // master frames (an offset beyond the track is meaningless). Decoders refuse a record with a larger T; the encoder writes none.
 inline bool tWithinTrack(int64_t whole, uint32_t frac, uint64_t n) {

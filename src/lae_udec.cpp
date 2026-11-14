@@ -56,7 +56,8 @@ bool flagOf(int argc, char** argv, const char* key) { for (int i = 1; i < argc; 
 // list) the person is asked twice and only two answers "yes" replace it; without a console it is refused unless --overwrite was given.
 bool answeredYes() { char b[256]; if (!fgets(b, sizeof b, stdin)) return false; std::string s(b);
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
-    size_t k = 0; while (k < s.size() && (s[k] == ' ' || s[k] == '\t')) k++; return s.substr(k) == "yes"; }
+    size_t k = 0; while (k < s.size() && (s[k] == ' ' || s[k] == '\t')) k++; s = s.substr(k);
+    for (char& ch : s) if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32); return s == "yes"; }   // only the word yes, in any letter case
 bool mayWrite(const std::string& out, bool overwrite) {
     std::error_code ec; if (!fs::exists(fs::u8path(out), ec) || overwrite) return true; const char* o = out.c_str();
     if (laespick::interactive()) {

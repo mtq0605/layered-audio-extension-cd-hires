@@ -54,8 +54,8 @@ public final class LaesFile {
     public static String testEnv(String name) { return "1".equals(System.getenv("LAE_TEST_MODE")) ? System.getenv(name) : null; }
     private static boolean testLineDone = false;
     public static synchronized String testModeLine() { if (testLineDone) return ""; testLineDone = true; if (!"1".equals(System.getenv("LAE_TEST_MODE"))) return "";
-        final StringBuilder on = new StringBuilder(); for (String n : TEST_SWITCHES) if (System.getenv(n) != null) on.append(' ').append(n);
-        return "LAE_TEST_MODE=1: test switches active:" + (on.length() == 0 ? " none" : on.toString()) + " (unset LAE_TEST_MODE for normal behaviour)"; }
+        final StringBuilder on = new StringBuilder(); for (String n : TEST_SWITCHES) { final String v = System.getenv(n); if (v != null) on.append(on.length() == 0 ? "" : ", ").append(n).append('=').append(v); }
+        return "TEST MODE (LAE_TEST_MODE=1): active test switches: " + (on.length() == 0 ? "none" : on.toString()) + ". Unset LAE_TEST_MODE to return to normal behaviour."; }
 
     /** the whole-in-memory decoder's limit as laes_file.h has it since 635019a: PTRDIFF_MAX / sizeof(int64_t) on x64 */
     public static final long WHOLE_MAX_FRAMES = Long.MAX_VALUE / 8;

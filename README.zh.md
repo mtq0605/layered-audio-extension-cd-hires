@@ -1873,7 +1873,7 @@ laes verify Grand_LAES.flac Grand_352k8_32bit.wav Grand_352k8_24bit.wav Grand_17
 
 **已有的输出文件（自 2026-11-15 起）。**任何工具都不会悄悄替换已有的输出文件。适用于 `lae_enc`（编码和 `tag`）、`lae_dec`、`lae_udec dec`、`lae_cdx`（`pack`、`split`、`repack`、`data`、`sim`）、`laes`（`enc`、`dec`、`tag`、`add`、`extract`、`names`）、`laes_export`、`lae_noise`（`mark`、`spectro`、`scan`、`preview`、`preview-all`）、表生成器 `gen_halfband`、`gen_mdct_tables` 和 `gen_noise_test`、`lae_abx --prepare`、`tools/laes_disc.ps1`，以及各 Java 工具（java/README.zh.md）。
 
-- 在控制台上（输入和输出都是终端），工具问两次，两次都回答 `yes` 才替换：
+- 在控制台上（输入和输出都是终端），工具问两次，两次都回答 `yes` 才替换。每个工具对回答用同一条规则：只认 `yes` 这个词，大小写不限（`yes`、`Yes`、`YES` 都算），前后的空格不计。
 
   ```
   "<file>" already exists. Replace it? Type yes to continue:
@@ -1894,11 +1894,17 @@ laes verify Grand_LAES.flac Grand_352k8_32bit.wav Grand_352k8_24bit.wav Grand_17
 
 **测试开关（自 2026-11-15 起）。**只有测试才用的环境变量，只在设了总开关 `LAE_TEST_MODE=1` 时起作用；不设时不起任何作用。设了时，每次运行打印一行，列出起作用的测试开关，并说明取消 `LAE_TEST_MODE` 就回到正常行为。测试脚本设置这个总开关。
 
-| 工具 | 测试开关 | 设了 `LAE_TEST_MODE=1` 时打印的一行 |
-|---|---|---|
-| `lae_enc`、Java 的 `LaeEncTool` | `LAEY_TEST_PIECE`、`LAE_TESTMAXFRAMES`、`LAE_TESTFAIL`、`LAE_BLOCKUNITS`、`LAE_TESTSEQUENTIAL`、`PARTTHREADS` | `TEST MODE (LAE_TEST_MODE=1): active test switches: <switches or none>. Unset LAE_TEST_MODE to return to normal behaviour.` |
-| `laes`、`laes_export`、Java 的 `LaesTool` | `LAES_TEST_KEYS`、`LAES_NO_SHORTLIST`、`LAES_FORCE_RF64`、`LAES_PIECE`、`LAES_SELFCHECK_FLIP`、`LAES_DISK_RESERVE` | `LAE_TEST_MODE=1: test switches active: <switches or none> (unset LAE_TEST_MODE for normal behaviour)` |
-| `lae_cdx` | `LAE_CDX_LAES_STREAM=1`（每个 LAES 检查都用流式解码器） | `test mode (LAE_TEST_MODE=1): active test switches: <switch or none>; unset LAE_TEST_MODE to return to normal behaviour` |
+| 工具 | 测试开关 |
+|---|---|
+| `lae_enc`、Java 的 `LaeEncTool` | `LAEY_TEST_PIECE`、`LAE_TESTMAXFRAMES`、`LAE_TESTFAIL`、`LAE_BLOCKUNITS`、`LAE_TESTSEQUENTIAL`、`PARTTHREADS` |
+| `laes`、`laes_export`、Java 的 `LaesTool` | `LAES_TEST_KEYS`、`LAES_NO_SHORTLIST`、`LAES_FORCE_RF64`、`LAES_PIECE`、`LAES_SELFCHECK_FLIP`、`LAES_DISK_RESERVE` |
+| `lae_cdx` | `LAE_CDX_LAES_STREAM=1`（每个 LAES 检查都用流式解码器） |
+
+每个工具打印的是同一行，只有英文。`<list>` 列出每个起作用的开关和它的值（`NAME=value`，用逗号隔开）；只设了总开关时是 `none`：
+
+```
+TEST MODE (LAE_TEST_MODE=1): active test switches: <list>. Unset LAE_TEST_MODE to return to normal behaviour.
+```
 
 不改变输出任何字节的诊断开关不受总开关管：`lae_enc` 的 `TIMING`、`KEEPTMP` 和 `TIERSTAT`，`laes` 的 `KEEPTMP`，以及 Java 选择文件夹用的 `LAE_WORKDIR`。`lae_cdx` 没有这样的诊断开关。
 

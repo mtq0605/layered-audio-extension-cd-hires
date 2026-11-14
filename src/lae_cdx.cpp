@@ -1039,8 +1039,8 @@ static int realMain(int argc, char** argv) {
     printf("unknown command or wrong arguments (see the header of lae_cdx.cpp)\n"); return 1; }
 int main(int argc, char** argv) {
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names; the console shows UTF-8 while the tool runs (win_utf8.h)
-    { const char* m = getenv("LAE_TEST_MODE"); if (m && !strcmp(m, "1")) printf("test mode (LAE_TEST_MODE=1): active test switches: %s; unset LAE_TEST_MODE to return to normal behaviour\n",
-                                                                           laesStreamForced() ? "LAE_CDX_LAES_STREAM=1 (every LAES check by the stream decoder)" : "none"); }
+    { const char* m = getenv("LAE_TEST_MODE"); if (m && !strcmp(m, "1")) printf("TEST MODE (LAE_TEST_MODE=1): active test switches: %s. Unset LAE_TEST_MODE to return to normal behaviour.\n",
+                                                                           laesStreamForced() ? "LAE_CDX_LAES_STREAM=1" : "none"); }
     try { return realMain(argc, argv); }
     catch (const std::bad_alloc&) { printf("out of memory; nothing more written\n"); return 2; }
     catch (const std::exception& ex) { printf("internal error: %s; nothing more written\n", ex.what()); return 2; } }

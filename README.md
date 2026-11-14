@@ -1873,7 +1873,7 @@ The audio is not covered by the code or documentation licences: it may be downlo
 
 **Existing output files (since 2026-11-15).** No tool replaces an existing output file silently. This holds for `lae_enc` (encode and `tag`), `lae_dec`, `lae_udec dec`, `lae_cdx` (`pack`, `split`, `repack`, `data`, `sim`), `laes` (`enc`, `dec`, `tag`, `add`, `extract`, `names`), `laes_export`, `lae_noise` (`mark`, `spectro`, `scan`, `preview`, `preview-all`), the table generators `gen_halfband`, `gen_mdct_tables` and `gen_noise_test`, `lae_abx --prepare`, `tools/laes_disc.ps1` and the Java tools (java/README.md).
 
-- At a console (input and output both a terminal), the tool asks twice, and only two answers `yes` replace the file:
+- At a console (input and output both a terminal), the tool asks twice, and only two answers `yes` replace the file. Every tool applies the same rule to an answer: only the word `yes` counts, in any letter case (`yes`, `Yes`, `YES`), and spaces around it are ignored.
 
   ```
   "<file>" already exists. Replace it? Type yes to continue:
@@ -1894,11 +1894,17 @@ The audio is not covered by the code or documentation licences: it may be downlo
 
 **Test switches (since 2026-11-15).** Environment variables that only tests use act only when the master switch `LAE_TEST_MODE=1` is set; without it, they have no effect. With it, every run prints one line that names the active test switches and says that unsetting `LAE_TEST_MODE` returns to normal behaviour. Test scripts set the master switch.
 
-| Tool | Test switches | Line printed with `LAE_TEST_MODE=1` |
-|---|---|---|
-| `lae_enc`, Java `LaeEncTool` | `LAEY_TEST_PIECE`, `LAE_TESTMAXFRAMES`, `LAE_TESTFAIL`, `LAE_BLOCKUNITS`, `LAE_TESTSEQUENTIAL`, `PARTTHREADS` | `TEST MODE (LAE_TEST_MODE=1): active test switches: <switches or none>. Unset LAE_TEST_MODE to return to normal behaviour.` |
-| `laes`, `laes_export`, Java `LaesTool` | `LAES_TEST_KEYS`, `LAES_NO_SHORTLIST`, `LAES_FORCE_RF64`, `LAES_PIECE`, `LAES_SELFCHECK_FLIP`, `LAES_DISK_RESERVE` | `LAE_TEST_MODE=1: test switches active: <switches or none> (unset LAE_TEST_MODE for normal behaviour)` |
-| `lae_cdx` | `LAE_CDX_LAES_STREAM=1` (every LAES check by the stream decoder) | `test mode (LAE_TEST_MODE=1): active test switches: <switch or none>; unset LAE_TEST_MODE to return to normal behaviour` |
+| Tool | Test switches |
+|---|---|
+| `lae_enc`, Java `LaeEncTool` | `LAEY_TEST_PIECE`, `LAE_TESTMAXFRAMES`, `LAE_TESTFAIL`, `LAE_BLOCKUNITS`, `LAE_TESTSEQUENTIAL`, `PARTTHREADS` |
+| `laes`, `laes_export`, Java `LaesTool` | `LAES_TEST_KEYS`, `LAES_NO_SHORTLIST`, `LAES_FORCE_RF64`, `LAES_PIECE`, `LAES_SELFCHECK_FLIP`, `LAES_DISK_RESERVE` |
+| `lae_cdx` | `LAE_CDX_LAES_STREAM=1` (every LAES check by the stream decoder) |
+
+Every tool prints the same line, in English only. `<list>` names each active switch with its value (`NAME=value`, separated by commas), or is `none` when only the master switch is set:
+
+```
+TEST MODE (LAE_TEST_MODE=1): active test switches: <list>. Unset LAE_TEST_MODE to return to normal behaviour.
+```
 
 Diagnostics that change no output byte act without the master switch: `TIMING`, `KEEPTMP` and `TIERSTAT` of `lae_enc`, `KEEPTMP` of `laes`, and the Java folder choice `LAE_WORKDIR`. `lae_cdx` has no such diagnostic.
 

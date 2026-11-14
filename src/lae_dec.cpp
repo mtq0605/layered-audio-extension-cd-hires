@@ -40,7 +40,8 @@ static bool onConsole() {
 }
 static bool answeredYes() { char b[256]; if (!fgets(b, sizeof b, stdin)) return false; std::string s(b);
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
-    size_t k = 0; while (k < s.size() && (s[k] == ' ' || s[k] == '\t')) k++; return s.substr(k) == "yes"; }
+    size_t k = 0; while (k < s.size() && (s[k] == ' ' || s[k] == '\t')) k++; s = s.substr(k);
+    for (char& ch : s) if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32); return s == "yes"; }   // only the word yes, in any letter case
 static bool mayWrite(const char* out, bool overwrite) {
     std::error_code ec; if (!std::filesystem::exists(std::filesystem::u8path(out), ec) || overwrite) return true;
     if (onConsole()) {

@@ -24,7 +24,8 @@ public final class Replace {
     static boolean yes(Console c) { final String a = c.readLine(); if (a == null) return false; int b = 0, e = a.length();
         while (b < e && (a.charAt(b) == ' ' || a.charAt(b) == '\t' || a.charAt(b) == '﻿')) b++;
         while (e > b && (a.charAt(e - 1) == ' ' || a.charAt(e - 1) == '\t' || a.charAt(e - 1) == '\r' || a.charAt(e - 1) == '\n')) e--;
-        return a.substring(b, e).equals("yes"); }
+        if (e - b != 3) return false;   // only the word yes, in any letter case (ASCII letters only, as the C++ tools)
+        return (a.charAt(b) | 0x20) == 'y' && (a.charAt(b + 1) | 0x20) == 'e' && (a.charAt(b + 2) | 0x20) == 's'; }
 
     /** true: the file may be written (it does not exist, --overwrite was given, or replacing it was confirmed twice at a console) */
     public static boolean mayReplace(String path, boolean overwrite, Out o) {

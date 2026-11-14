@@ -194,7 +194,8 @@ static long long fileSize(const std::string& p) { std::error_code ec; auto n = s
 static bool isOverwriteOpt(const char* a) { return !strcmp(a, "--overwrite") || !strcmp(a, "overwrite"); }
 static bool askYes() { char line[64] = {0}; if (!fgets(line, sizeof line, stdin)) return false; std::string s(line);
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
-    size_t b = 0; while (b < s.size() && (s[b] == ' ' || s[b] == '\t')) b++; return s.substr(b) == "yes"; }
+    size_t b = 0; while (b < s.size() && (s[b] == ' ' || s[b] == '\t')) b++; s = s.substr(b);
+    for (char& ch : s) if (ch >= 'A' && ch <= 'Z') ch = (char)(ch + 32); return s == "yes"; }   // only the word yes, in any letter case
 static bool mayReplace(const std::string& out, bool overwrite) {   // true: the output does not exist, or replacing it was confirmed
     std::error_code ec; if (!std::filesystem::exists(std::filesystem::u8path(out), ec) || overwrite) return true;
     const char* f = out.c_str();

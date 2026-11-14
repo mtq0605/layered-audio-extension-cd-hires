@@ -613,14 +613,15 @@ void retirePrefetcher(std::unique_ptr<LaesPrefetcher> p) { if (!p) return; LaesP
 class LaesVerifier {
 public:
     static LaesVerifier& get() { static LaesVerifier v; return v; }
-    void add(const char* path, bool manual) { std::lock_guard<std::mutex> g(mx); for (auto& q : queue) if (q.first == path) { q.second |= manual; return; }
-        queue.push_back({path, manual}); cv.notify_one(); if (!thread.joinable()) thread = std::thread([this] { loop(); }); }
-    void quit() { { std::lock_guard<std::mutex> g(mx); stop = true; queue.clear(); } abort.abort(); cv.notify_one(); if (thread.joinable()) thread.join(); }
+    void add(const char* path, bool manual) { std::lock_guard<std::mutex> g(mx); auto it = queued.find(path); if (it != queued.end()) { *it->second |= manual; return; }
+        queue.push_back({path, manual}); queued[path] = &queue.back().second; cv.notify_one(); if (!thread.joinable()) thread = std::thread([this] { loop(); }); }
+    void quit() { { std::lock_guard<std::mutex> g(mx); stop = true; queued.clear(); queue.clear(); } abort.abort(); cv.notify_one(); if (thread.joinable()) thread.join(); }
 private:
     std::mutex mx; std::condition_variable cv; std::deque<std::pair<std::string, bool>> queue; std::thread thread; bool stop = false; abort_callback_impl abort;
+    std::map<std::string, bool*> queued;   // the paths in the queue and their "manual" flag (a deque keeps its elements in place at both ends)
     void loop() {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
-        for (;;) { std::pair<std::string, bool> p; { std::unique_lock<std::mutex> g(mx); cv.wait(g, [this] { return stop || !queue.empty(); }); if (stop) return; p = queue.front(); queue.pop_front(); }
+        for (;;) { std::pair<std::string, bool> p; { std::unique_lock<std::mutex> g(mx); cv.wait(g, [this] { return stop || !queue.empty(); }); if (stop) return; p = queue.front(); queued.erase(p.first); queue.pop_front(); }
             try { one(p.first, p.second); } catch (...) {} } }
     static void say(const std::string& s) { const std::string m = s; fb2k::inMainThread([m] { console::print(m.c_str()); }); }
     bool stopping() { std::lock_guard<std::mutex> g(mx); return stop; }
@@ -632,7 +633,8 @@ private:
         std::shared_ptr<LaesProgress> pr = std::make_shared<LaesProgress>(); pr->name = name; pr->phase = LaesProgress::kReading; pr->t0 = nowMs();
         if (manual) showProgress(pr, false);
         // the bar follows the time: the file read (timed by OwnReader) and the check after it (the machine's measured check speed)
-        double secs = 0; { laes_file* q = laes_open_reader(&OwnReader::read, &rd, size, 1, mg, err, sizeof err); if (q) { laes_file_info qi; laes_get_info(q, &qi); if (qi.base_rate > 0) secs = (double)qi.core_frames / qi.base_rate; laes_close(q); } }
+        double secs = 0; { laes_file* q = laes_open_reader(&OwnReader::read, &rd, size, 1, mg, err, sizeof err); if (q) { laes_file_info qi; laes_get_info(q, &qi); if (qi.base_rate > 0) secs = (double)qi.core_frames / qi.base_rate; laes_close(q); }
+            else { closeProgress(pr); return; } }   // not LAES (a plain .wav / .flac, LAEY) or unreadable: the full open below would refuse it the same way
         rd.locateCore(size); const double ckRtf = g_speed.get(kMachine, "check_rtf"); const double ckAll = ckRtf > 0 && secs > 0 ? secs / ckRtf : -1;
         auto bar = [&](double left, double share) { int p; if (left >= 0) { const double el = (nowMs() - pr->t0.load()) / 1000.0; p = (int)(1000.0 * (el + left > 0 ? el / (el + left) : 0)); } else p = (int)(1000.0 * share);
             p = (std::min)(990, p); if (p > pr->permille.load()) pr->permille = p; };

@@ -30,10 +30,11 @@ public final class PartStream {
     /** port of part_stream.h:Dec (uint32_t width and code are held as long values in [0, 2^32)) */
     static final class Dec {
         byte[] p; int off; long n, i = 0; long width = 0xFFFFFFFFL, code = 0;   // code = value - low; p[off ..] = the C++ pointer p
+        long over = 0;   // bytes asked for beyond the end (a correct stream ends exactly at its last byte: over stays 0, i reaches n)
         // the C++ default copy (Mark keeps a copy of the decoder state)
-        Dec copy() { Dec d = new Dec(); d.p = p; d.off = off; d.n = n; d.i = i; d.width = width; d.code = code; return d; }
+        Dec copy() { Dec d = new Dec(); d.p = p; d.off = off; d.n = n; d.i = i; d.width = width; d.code = code; d.over = over; return d; }
         // port of part_stream.h:Dec::next
-        int next() { return i < n ? p[off + (int) (i++)] & 0xFF : 0; }
+        int next() { if (i < n) return p[off + (int) (i++)] & 0xFF; over++; return 0; }
         // port of part_stream.h:Dec::init
         void init() { for (int k = 0; k < 5; k++) code = ((code << 8) | next()) & 0xFFFFFFFFL; }
         // port of part_stream.h:Dec::normalise

@@ -21,11 +21,12 @@ import java.io.RandomAccessFile;
  * Java API mapping: functions that return NULL / -1 with a message in {@code err} (open, start) throw {@link LaeException} with the
  * same message; functions whose C version returns -1 without a message (read, seek, output_format, stats, stream_bytes) return -1.
  * <p>
- * Difference to the C++ library (FU21-4): lae_open_* checks the header, the lengths and the CRC of the "LAE " chunk, but does not decode
- * every entropy stream once at open (the C++ does, and keeps a checkpoint record). A stream with values out of range (spec Appendix C:
- * found in the parts the route decodes; the CRC already catches accidental damage) is therefore found only when lae_read reaches it:
- * the sound before it has played, lae_read returns -1 and keeps refusing until the next lae_start. A player then plays the CD layer
- * (route CD), as for any failed start.
+ * As the C++ library (decision 10, 2026-11-15, spec/lossy 6.7): lae_open_* checks the header, the lengths and the CRC of the "LAE "
+ * chunk and decodes every entropy stream of the main body once to its end; a file whose streams do not end exactly at their last byte
+ * is refused. A further extension pack is checked in the same way the first time lae_select_pack chooses it. Difference to the C++
+ * (FU21-4): the C++ keeps a checkpoint record of this check in the player's folder; the Java port keeps none, so every open checks again.
+ * A stream with values out of range that the check does not reach is found when lae_read reaches it: lae_read returns -1 and keeps
+ * refusing until the next lae_start. A player then plays the CD layer (route CD), as for any failed start.
  */
 public final class LaeyDecoder {
     /**
@@ -79,6 +80,8 @@ public final class LaeyDecoder {
     private static LaeyDecoder finish(CdPcm cd, byte[] lae, int pair) {
         LaeyDecoder t = new LaeyDecoder(); t.cd = cd; t.lae = lae;
         { LaeDecoder.Decoder D = new LaeDecoder.Decoder(); int[] code = {0}; String e = D.openCd(t.cd, t.lae, "full", 0, code); if (!e.isEmpty()) throw new LaeException(e);
+          e = D.checkAll(D.seekThreads); if (!e.isEmpty()) throw new LaeException(e);   // decision 10: every stream of the main body ends exactly at its last byte
+          t.checkedPacks.add(0);
           Info i = t.info; i.master_rate = D.rate; i.base_rate = D.base; i.stages = D.stages; i.cutoff_hz = D.fc; i.cd_frames = D.ncd; i.master_frames = D.Lm;
           { PackInfo p0 = new PackInfo(); p0.rate = D.rate; p0.stages = D.stages; p0.name = D.mainName; t.packList.add(p0); }
           for (LaeDecoder.Decoder.PackInfo q : D.packs) { PackInfo p = new PackInfo(); p.rate = q.rate; p.stages = q.stages; p.name = q.name; t.packList.add(p); } }
@@ -90,6 +93,8 @@ public final class LaeyDecoder {
     // here chooses one by itself, and the choice is never written into the file. The C interface (lae_api.h) gets the same three calls.
     public static final class PackInfo { public int rate, stages; public String name = ""; }
     private final java.util.ArrayList<PackInfo> packList = new java.util.ArrayList<PackInfo>(); private int pack = 0, decPack = 0;
+    // decision 10: the packs whose streams passed the check at open or at lae_select_pack (shared by lae_dup copies: the same chunk)
+    private java.util.Set<Integer> checkedPacks = java.util.Collections.synchronizedSet(new java.util.HashSet<Integer>());
     /** the number of extension packs in the file, the main body included (1 = an ordinary file) */
     public int lae_pack_count() { return packList.size(); }
     /** pack k's master rate, octave count and name (k = 0: the main body; its name is that of the optional "LNAM" record, else ""); null if there is no such pack */
@@ -100,6 +105,7 @@ public final class LaeyDecoder {
         if (cd == null) throw new LaeException("the track is closed");   // FU21-6: as lae_dup (was a NullPointerException)
         if (k < 0 || k >= packList.size()) throw new LaeException("this file has no extension pack of that number");
         try { LaeDecoder.Decoder D = new LaeDecoder.Decoder(); D.pack = k; D.crcChecked = crcOk; int[] code = {0}; String e = D.openCd(cd, lae, "full", 0, code); if (!e.isEmpty()) throw new LaeException(e);
+            if (!checkedPacks.contains(k)) { e = D.checkAll(D.seekThreads); if (!e.isEmpty()) throw new LaeException(e); checkedPacks.add(k); }   // decision 10: the pack's streams, the first time it is chosen
             info.master_rate = D.rate; info.stages = D.stages; info.cutoff_hz = D.fc; info.master_frames = D.Lm; }
         catch (OutOfMemoryError e) { throw new LaeException("out of memory or internal error", e); }
         pack = k; dec = null; route = -1; err = false; pos = 0; }
@@ -296,7 +302,7 @@ public final class LaeyDecoder {
         try { LaeyDecoder t = new LaeyDecoder(); t.cd = cd.share(); t.lae = lae; t.crcOk = crcOk;
             Info s = info, i = t.info; i.master_rate = s.master_rate; i.base_rate = s.base_rate; i.stages = s.stages; i.cutoff_hz = s.cutoff_hz;
             i.cd_frames = s.cd_frames; i.master_frames = s.master_frames; i.cd_md5 = s.cd_md5; i.from_pair = s.from_pair;
-            t.packList.addAll(packList); t.pack = pack;   // PackInfo entries are never changed after open (lae_pack_info returns copies)
+            t.packList.addAll(packList); t.pack = pack; t.checkedPacks = checkedPacks;   // PackInfo entries are never changed after open (lae_pack_info returns copies)
             if (dec != null) { t.seed = dec.snapMarks(); t.seedPack = decPack; } else if (seed != null) { t.seed = seed; t.seedPack = seedPack; }
             if (file != null) { file.retain(); t.file = file; }
             return t; }

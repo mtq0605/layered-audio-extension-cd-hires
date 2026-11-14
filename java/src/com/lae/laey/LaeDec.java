@@ -52,6 +52,15 @@ final class LaeDec {
         String e = D.openCd(cdp, lae, mode, orate, code); if (!e.isEmpty()) { env.printf("%s\n", e); return code[0]; }
         if (flacRate != 0 && flacRate != D.base) { env.printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // FU11-9: spec/lossy 3.4
         final String leakOut = env.get("LEAKOUT"), clipMap = env.get("CLIPMAP");
+        if (leakOut == null && clipMap == null) {
+            // decision 10 (FU34-9 / FU30-2, spec/lossy 6.7, as lae_dec.cpp): every entropy stream of the decoded pack must end exactly at its
+            // last byte, as the player's one-time check requires; the same check (every stream decoded from start to end, route full at the
+            // master rate, in parallel) before any output is written. The encoder's own decode runs (LEAKOUT, CLIPMAP) skip it.
+            LaeDecoder.Decoder chk = new LaeDecoder.Decoder(); chk.pack = D.pack; chk.crcChecked = true; int[] c2 = {0};   // D's open checked the CRC of this array
+            String e2 = chk.openCd(cdp, lae, "full", 0, c2);
+            if (!e2.isEmpty()) { env.printf("%s\n", e2); return c2[0] != 0 ? c2[0] : 3; }
+            e2 = chk.checkAll(chk.seekThreads);
+            if (!e2.isEmpty()) { env.printf("%s\n", e2); return 3; } }
         if (!D.packs.isEmpty() && leakOut == null && clipMap == null) {   // the file's extension packs; only the caller chooses one (pack=<n>)
             env.printf("extension packs: %d (decoding pack %d)\n  pack 0: the main body%s%s%s\n", D.packs.size() + 1, D.pack, D.mainName.isEmpty() ? "" : ", \"", D.mainName, D.mainName.isEmpty() ? "" : "\"");
             for (int k = 0; k < D.packs.size(); k++) { final LaeDecoder.Decoder.PackInfo q = D.packs.get(k);

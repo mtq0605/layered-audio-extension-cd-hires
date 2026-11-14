@@ -64,12 +64,13 @@ public final class LaeDecoder {
         // the master rate for the frequency layer): the checkpoint spacing is counted with it. lim = min(K, frames of the layer): rows from
         // frame lim on are never requested (spec 5.3) and are not decoded. The decoded samples of every file are the same as before.
         int srate = 0; long lim = 0;
+        PartStream.Dec dc0;   // the state at the start of the stream (decision 10: the check decodes every stream from here)
         public PlaneStream(PartStream.Err e) { err = e; }
         // port of lae_decoder.h:PlaneStream::open (p[off ..] = the stream's bytes)
         public boolean open(byte[] p, int off, int nbytes, int layerRate, long layerFrames) { if (nbytes < 40) return false; Rd s = new Rd(p, off, nbytes); int[] f = new int[10]; for (int i = 0; i < 10; i++) f[i] = s.i32v();
             h = new PartStream.Hdr(); h.K = f[0]; h.N = f[1]; h.k0 = f[2]; h.k1 = f[3]; h.rate = f[4]; h.L = f[5]; h.cw = f[6]; h.lv = f[7]; h.eq = f[8];
             if (h.N != N || f[9] != nbytes - 40 || h.K <= 0 || h.k0 < 0 || h.k1 > N || h.k0 >= h.k1) return false;
-            dc.p = p; dc.off = off + 40; dc.n = f[9]; dc.init(); w = new PartStream.Walker(h, err); rowBuf = new int[PartitionFormat.ROOTT * N];
+            dc.p = p; dc.off = off + 40; dc.n = f[9]; dc.init(); dc0 = dc.copy(); w = new PartStream.Walker(h, err); rowBuf = new int[PartitionFormat.ROOTT * N];
             srate = layerRate; lim = Math.min(h.K, layerFrames);
             every = srate > 0 ? Math.max(1L, (long) Cv.d2i(4.0 * srate / ((double) PartitionFormat.ROOTT * N))) : 64; return true; }   // (long)double: 32-bit long on MSVC
         // port of lae_decoder.h:PlaneStream::frame (returns the offset of frame m in rowBuf, or -1 for the C++ nullptr)
@@ -86,6 +87,16 @@ public final class LaeDecoder {
             final long cur = row0 >= 0 ? row0 : w.M0; final boolean forward = cur <= m; Mark best = null;
             for (Mark k : marks) { if (k.M0 > m) break; best = k; }
             if (best != null && (!forward || best.M0 > cur)) { dc = best.dc.copy(); w = new PartStream.Walker(h, err, best.w); row0 = -1; rows = 0; } } }   // Java: bound to this stream's header and error flag (the mark may come from another decoder)
+
+    // port of lae_decoder.h:scanStream (decision 10, spec/lossy 6.7), without the saved checkpoints (the Java port keeps no player record):
+    // decodes the whole stream from its start with its own walker and error flag; true when the stream ends exactly at its last byte with
+    // no symbol out of range. The walk stops at the first byte asked for beyond the end, and a K within one row of 2^31 is refused before it.
+    static boolean scanStream(PlaneStream ps) {
+        if (ps.h.K > 2147483647L - PartitionFormat.ROOTT) return false;
+        final PartStream.Err e = new PartStream.Err(); final PartStream.Dec d = ps.dc0.copy(); final PartStream.Walker w = new PartStream.Walker(ps.h, e);
+        final int[] buf = new int[PartitionFormat.ROOTT * N];
+        while (!w.done() && d.over == 0) w.row(d, buf, w.M0);
+        return !e.v && d.i == d.n && d.over == 0; }
 
     /** port of lae_decoder.h:ImdctStream: IMDCT of a sum of planes (octave segments are disjoint), sample by sample: out(i) = llround(y[N + i]) as mdct::inverse */
     public static final class ImdctStream {
@@ -322,6 +333,29 @@ public final class LaeDecoder {
             for (int k = 0; k < fS.length && k < o.fS.size(); k++) copyMarks(fS[k], o.fS.get(k)); }
         // port of lae_decoder.h:Decoder::adoptMarks lambda copy (Java: the Mark objects are shared, not copied; seekTo copies the state it restores)
         private static void copyMarks(PlaneStream to, List<PlaneStream.Mark> from) { if (to.w == null || from == null || !to.marks.isEmpty()) return; to.marks.addAll(from); }
+        // port of lae_decoder.h:Decoder::allStreams: every entropy stream of the chunk in a fixed order (depth L, depth R, then the
+        // frequency segments); unopened ones have no walker
+        List<PlaneStream> allStreams() { List<PlaneStream> v = new ArrayList<PlaneStream>(); v.add(dS[0]); v.add(dS[1]); for (PlaneStream f : fS) v.add(f); return v; }
+        /** port of lae_decoder.h:Decoder::seekThreads */
+        public int seekThreads = Math.max(1, Math.min(16, Runtime.getRuntime().availableProcessors()));
+        // port of lae_decoder.h:Decoder::checkAll (decision 10, 2026-11-15): every stream decoded from start to end in parallel (route full at
+        // the master rate opens all of them); returns "" or the reason the file fails the check. Java: no checkpoints are saved.
+        public String checkAll(int threads) {
+            final List<PlaneStream> ps = allStreams(); final boolean[] ok = new boolean[ps.size()];
+            for (PlaneStream p : ps) if (p.w == null) return "the check needs every stream (route full at the master rate)";
+            runParallel(ps.size(), threads, new Job() { @Override public void run(int i) { ok[i] = scanStream(ps.get(i)); } });
+            for (int i = 0; i < ps.size(); i++) if (!ok[i]) return "LAE chunk damaged (entropy stream " + i + " does not end at its last byte): refusing to decode; the CD audio itself still plays";
+            return ""; }
+        // port of lae_decoder.h:runParallel: job(i) for i < n, one thread each, at most `threads` at once (a thread's failure goes to the caller
+        // after the others are joined: an OutOfMemoryError stays one, anything else becomes a RuntimeException)
+        interface Job { void run(int i); }
+        static void runParallel(int n, int threads, final Job job) {
+            if (n <= 1 || threads <= 1) { for (int i = 0; i < n; i++) job.run(i); return; }
+            final Throwable[] thrown = new Throwable[n];
+            for (int i0 = 0; i0 < n; i0 += threads) { final int i1 = Math.min(n, i0 + threads); final Thread[] th = new Thread[i1 - i0];
+                for (int i = i0; i < i1; i++) { final int k = i; th[i - i0] = new Thread(new Runnable() { @Override public void run() { try { job.run(k); } catch (Throwable x) { thrown[k] = x; } } }); th[i - i0].start(); }
+                for (Thread t : th) { boolean done = false; while (!done) { try { t.join(); done = true; } catch (InterruptedException x) { /* the job ends on its own */ } } } }
+            for (Throwable x : thrown) if (x != null) { if (x instanceof OutOfMemoryError) throw (OutOfMemoryError) x; if (x instanceof RuntimeException) throw (RuntimeException) x; throw new RuntimeException(x); } }
         // port of lae_decoder.h:Decoder::streamBytes
         // the read position summed over the streams this route decodes (bytes; it moves back when a seek restores a checkpoint, and two
         // calls with only reads in between differ by the bytes those reads consumed: the extension layers' share of the bitrate)

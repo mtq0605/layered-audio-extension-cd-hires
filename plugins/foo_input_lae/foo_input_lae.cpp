@@ -501,10 +501,12 @@ private:
         // the file as opened earlier in this session (same size and modification time), or read now in full
         t_filestats st{}; try { bool wr = false; filesystem::g_get_stats(m_path.c_str(), st, wr, m_statAbort); } catch (...) { st.m_size = m_size; st.m_timestamp = 0; }
         m_sh = st.m_timestamp ? LaesFileCache::get().find(m_path, st.m_size, st.m_timestamp) : nullptr;
-        if (!m_sh) { auto e = std::make_shared<SharedLaes>(); e->path = m_path; e->rd.path = m_path; e->size = st.m_size; e->ts = st.m_timestamp; m_opening = e.get();
-            try { filesystem::g_open(e->rd.f, m_path.c_str(), filesystem::open_mode_read, e->rd.abort); e->rd.locateCore(m_size); } catch (const std::exception& x) { m_opening = nullptr; fail(std::string("cannot open the file: ") + x.what()); return; }
+        // m_openHold keeps the entry alive until this worker is destroyed: the destructor (abort) and ready() (progress) may still use the
+        // m_opening pointer they read just before it was cleared
+        if (!m_sh) { auto e = std::make_shared<SharedLaes>(); e->path = m_path; e->rd.path = m_path; e->size = st.m_size; e->ts = st.m_timestamp; m_openHold = e; m_opening = e.get();
+            try { filesystem::g_open(e->rd.f, m_path.c_str(), filesystem::open_mode_read, e->rd.abort); e->rd.locateCore(m_size); } catch (const std::exception& x) { m_opening = nullptr; e->rd.park(); fail(std::string("cannot open the file: ") + x.what()); return; }
             e->f = laes_open_reader(&OwnReader::read, &e->rd, m_size, 0, mg, err, sizeof err); m_opening = nullptr; if (e->f) e->rd.remember();
-            if (!e->f) { fail(err); return; }
+            if (!e->f) { e->rd.park(); fail(err); return; }   // the file handle is closed; the entry itself stays until the destructor
             m_sh = e; e->startIndex(); if (st.m_timestamp) LaesFileCache::get().keep(e); }
         m_f = m_sh->f; { laes_choice_info ci; if (laes_get_choice(m_f, m_choice, &ci) == 0) m_name = ci.name; }
         laes_file_info fi; laes_get_info(m_f, &fi); memcpy(m_sha, fi.file_sha256, 32); m_knownRtf = (std::max)(g_speed.get(m_sha, m_name), g_speed.get(m_sha, "all"));
@@ -538,7 +540,7 @@ private:
         m_done = true; }
     void fail(const std::string& why) { dbg("worker fail: %s", why.c_str()); m_why = why; m_failed = true; m_done = true; }
     std::string m_path; uint64_t m_size; int m_choice, m_master; uint64_t m_frames; int m_rate; std::atomic<uint64_t> m_base; std::atomic<uint64_t> m_written; std::atomic<uint64_t> m_t1{0}, m_w1{0};
-    std::shared_ptr<SharedLaes> m_sh; std::atomic<SharedLaes*> m_opening{nullptr}; abort_callback_impl m_statAbort; std::thread m_thread; std::atomic<bool> m_stop{false}, m_done{false}, m_failed{false}, m_opened{false}, m_checkAll{false}; bool m_guessCheck = false;
+    std::shared_ptr<SharedLaes> m_sh, m_openHold; std::atomic<SharedLaes*> m_opening{nullptr}; abort_callback_impl m_statAbort; std::thread m_thread; std::atomic<bool> m_stop{false}, m_done{false}, m_failed{false}, m_opened{false}, m_checkAll{false}; bool m_guessCheck = false;
     std::string m_why, m_name; unsigned char m_sha[32] = {0}; std::unique_ptr<Prefetched> m_adopt; std::atomic<double> m_knownRtf{0};
     laes_file* m_f = nullptr; laes_play* m_play = nullptr; PcmCache m_cache; std::shared_ptr<LaesProgress> m_prog;
 };

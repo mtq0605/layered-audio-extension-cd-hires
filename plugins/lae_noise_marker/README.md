@@ -9,7 +9,7 @@ marked cells of its frequency layer as silence (a cell is one MDCT frame × 8 bi
 
 **LAE Noise Marker only identifies and marks.** It never removes sound and has no export function: no command or button writes a
 cleaned copy of the master. No command writes over the master: since 2026-11-14, `scan`, `mark`, `spectro`, `preview` and `preview-all` refuse an output
-that is the master file itself, and the master stays unchanged. Listening previews are at most 10 seconds per position. If the user connects the marking file to
+that is the master file itself, and the master stays unchanged. The program limits every listening preview: `preview` covers at most the first 10 seconds of each position, with at most 1 second of context on each side, and `preview-all` at most 10 seconds; a longer request is cut to these limits, and the program says so. If the user connects the marking file to
 other software that does remove sound, that is the user's own choice and responsibility.
 
 ## What is in the package
@@ -57,7 +57,7 @@ covers at most the first 10 s of the span, with 1 s of context on each side. `pr
 confirms that nothing outside those cells is changed. Since 2026-11-14, `lae_noise preview` also writes `preview_list.txt`: the
 master's SHA-256, length and sample rate, and for each `pos_NNN` its rectangle in cells as in the marking file (geometry only; the
 encoder does not read it). `lae_noise preview-all master.wav <file.laenoise> <folder> <t0 s> <t1 s>` writes
-one excerpt with every position silenced together (`all_original.wav`, `all_silenced.wav`, `all_marked.wav`), with the same check.
+one excerpt of at most 10 s with every position silenced together (`all_original.wav`, `all_silenced.wav`, `all_marked.wav`), with the same check.
 
 **3. Select in the panel.** Open `noise_panel.html` and load `spectro.json`, `candidates.laenoise` and the `previews` folder.
 - Every candidate is initially unchecked; check those to be removed.

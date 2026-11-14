@@ -49,7 +49,8 @@ std::string md5hex(const std::vector<int16_t>& cd) {   // the whole-track MD5 ov
 // ---- the player's seek checkpoints: made only by this library's own check of a file, kept only in the player's folder under
 // the SHA-256 of the whole file, never written into or sent with the media file. Folder: %APPDATA%\LAE\lae_index (Windows) or
 // $XDG_CACHE_HOME/lae/lae_index, ~/.cache/lae/lae_index; the environment variable LAE_INDEX_DIR overrides it ("off": no folder).
-// At most 256 MB of .idx files: the least recently used ones are deleted (only *.idx in that folder). A missing or damaged record only
+// At most 256 MB of records: the least recently used ones are deleted (only this cache's own records, <sha256>.idx beginning with
+// "LAEYIDX1"; F06-2). A missing or damaged record only
 // means the check runs again; the output never depends on it (a seek from a checkpoint gives the samples of a decode from the start).
 typedef std::array<uint8_t, 32> Sha;
 const uint64_t INDEX_CAP = (uint64_t)256 << 20;
@@ -104,7 +105,21 @@ bool readPath(const std::filesystem::path& p, std::vector<uint8_t>& b) {
     FILE* f = fopen(p.c_str(), "rb");
 #endif
     if (!f) return false; b.resize((size_t)n); const bool ok = n == 0 || fread(b.data(), 1, b.size(), f) == b.size(); fclose(f); return ok; }
-// writes the record (a temporary file renamed over the old one), then keeps the folder under INDEX_CAP (oldest *.idx deleted first)
+// 1 = the name of a record of this cache (<64 lowercase hex digits>.idx), 2 = one of its temporary files (... .idx.tmp<digits>), 0 = other
+template <class S> int ownFile(const S& n) {
+    if (n.size() < 68) return 0; for (size_t i = 0; i < 64; i++) { const auto c = n[i]; if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return 0; }
+    static const char* x = ".idx.tmp"; for (size_t i = 0; i < 4; i++) if (n[64 + i] != (typename S::value_type)x[i]) return 0;
+    if (n.size() == 68) return 1; if (n.size() < 73) return 0; for (size_t i = 4; i < 8; i++) if (n[64 + i] != (typename S::value_type)x[i]) return 0;
+    for (size_t i = 72; i < n.size(); i++) if (n[i] < '0' || n[i] > '9') return 0; return 2; }
+bool isRecord(const std::filesystem::path& p) {   // the file begins with "LAEYIDX1"
+#ifdef _WIN32
+    FILE* f = _wfopen(p.c_str(), L"rb");
+#else
+    FILE* f = fopen(p.c_str(), "rb");
+#endif
+    if (!f) return false; char m[8]; const bool ok = fread(m, 1, 8, f) == 8 && !memcmp(m, "LAEYIDX1", 8); fclose(f); return ok; }
+// writes the record (a temporary file renamed over the old one), then keeps the folder under INDEX_CAP (the least recently used of
+// this cache's own records deleted first)
 void saveIndex(const std::filesystem::path& dir, const Sha& key, const std::vector<uint8_t>& rec) {
     std::lock_guard<std::mutex> g(g_indexMu); std::error_code ec; std::filesystem::create_directories(dir, ec);
     const std::filesystem::path target = dir / (hexOf(key) + ".idx"), tmp = dir / (hexOf(key) + ".idx.tmp" + std::to_string((unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -115,10 +130,17 @@ void saveIndex(const std::filesystem::path& dir, const Sha& key, const std::vect
 #endif
     if (!f) return; const bool ok = fwrite(rec.data(), 1, rec.size(), f) == rec.size(); if (fclose(f) != 0 || !ok) { std::filesystem::remove(tmp, ec); return; }
     std::filesystem::rename(tmp, target, ec); if (ec) { std::filesystem::remove(tmp, ec); return; }
-    struct Item { std::filesystem::path p; std::filesystem::file_time_type t; uint64_t n; }; std::vector<Item> items; uint64_t total = 0;
+    // F06-2 (2026-11-14): only this cache's own files are counted and deleted: a record is named <64 hex digits>.idx and begins with
+    // "LAEYIDX1"; any other file (also another program's *.idx in a folder LAE_INDEX_DIR names) is left alone. A temporary file of ours
+    // (<64 hex digits>.idx.tmp<digits>) that a crash left behind is removed once it is more than an hour old.
+    const auto oldTmp = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    struct Item { std::filesystem::path p; std::filesystem::file_time_type t; uint64_t n; }; std::vector<Item> items, stale; uint64_t total = 0;
     for (auto it = std::filesystem::directory_iterator(dir, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
-        std::error_code e2; if (!it->is_regular_file(e2) || it->path().extension() != ".idx") continue;
-        Item x{it->path(), it->last_write_time(e2), (uint64_t)it->file_size(e2)}; if (e2) continue; total += x.n; items.push_back(std::move(x)); }
+        std::error_code e2; if (!it->is_regular_file(e2)) continue; const int kind = ownFile(it->path().filename().native()); if (!kind) continue;
+        Item x{it->path(), it->last_write_time(e2), (uint64_t)it->file_size(e2)}; if (e2) continue;
+        if (kind == 2) { if (x.t < oldTmp) stale.push_back(std::move(x)); continue; }
+        if (!isRecord(x.p)) continue; total += x.n; items.push_back(std::move(x)); }
+    for (const Item& x : stale) { std::error_code e3; std::filesystem::remove(x.p, e3); }
     std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.t < b.t; });
     for (const Item& x : items) { if (total <= INDEX_CAP) break; if (x.p == target) continue; std::error_code e3; if (std::filesystem::remove(x.p, e3)) total -= x.n; } }
 // the record of this file, if one is there and fits; a record that is used becomes the most recently used one

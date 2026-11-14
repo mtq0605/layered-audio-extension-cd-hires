@@ -91,7 +91,7 @@ struct HalfSig : Sig { Sig* x; int odd; HalfSig(Sig& s, int o) : x(&s), odd(o) {
     void get(int64_t a, int64_t b, int64_t* out) override { if (b <= a) return; const int64_t xa = 2 * a + odd, xb = 2 * (b - 1) + odd + 1; V t((size_t)(xb - xa)); x->get(xa, xb, t.data());
         for (int64_t i = a; i < b; i++) out[i - a] = t[(size_t)(2 * (i - a))]; } };
 // ---- filter taps on a window (already extended): sum_t h[t] (w[ia - t] + w[ib + t]), rounded by 2^sh (add 2^(sh-1), arithmetic shift)
-inline int64_t maxAbsOf(const V& x) { int64_t m = 0; for (int64_t v : x) { const int64_t a = v < 0 ? -v : v; if (a > m) m = a; } return m; }
+inline int64_t maxAbsOf(const V& x) { int64_t m = 0; for (int64_t v : x) { const int64_t a = v < 0 ? (v == INT64_MIN ? INT64_MAX : -v) : v;   /* FU13-3: INT64_MIN counts as the largest (wide path) */ if (a > m) m = a; } return m; }
 template <int NT, class H> inline bool fits(const H* h, int64_t mx, int sh) { return laesfast::fits64<NT, H>(h, mx, sh); }
 template <int NT, bool WIDE, class H> inline int64_t wtap(const H* h, const int64_t* w, int64_t ia, int64_t ib, int sh) {
     if (!WIDE) { int64_t acc = 0; for (int t = 0; t < NT; t++) acc += (int64_t)h[t] * (w[ia - t] + w[ib + t]); return (acc + (1LL << (sh - 1))) >> sh; }

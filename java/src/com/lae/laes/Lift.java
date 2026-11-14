@@ -36,7 +36,7 @@ public final class Lift {
     // port of laes_lift.h:mir
     public static long mir(long i, long n) { if (n == 1) return 0; long p = 2 * (n - 1); i %= p; if (i < 0) i += p; return i < n ? i : p - i; }
     // port of laes_lift.h:maxAbs
-    public static long maxAbs(long[] x, int len) { long m = 0; for (int k = 0; k < len; k++) { long v = x[k]; long a = v < 0 ? -v : v; if (a > m) m = a; } return m; }
+    public static long maxAbs(long[] x, int len) { long m = 0; for (int k = 0; k < len; k++) { long v = x[k]; long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v;   /* FU13-3: MIN_VALUE counts as the largest (wide path) */ if (a > m) m = a; } return m; }
     public static long maxAbs(long[] x) { return maxAbs(x, x.length); }
     // port of laes_lift.h:sumAbs
     static long sumAbs(long[] h, int NT) { long s = 0; for (int t = 0; t < NT; t++) s += h[t] < 0 ? -h[t] : h[t]; return s; }

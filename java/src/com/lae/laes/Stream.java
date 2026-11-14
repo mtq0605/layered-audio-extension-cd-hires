@@ -105,7 +105,7 @@ public final class Stream {
             for (long i = a; i < b; i++) out[outOff + (int) (i - a)] = t[(int) (2 * (i - a))]; } }
     // ---- filter taps on a window (already extended): sum_t h[t] (w[ia - t] + w[ib + t]), rounded by 2^sh (add 2^(sh-1), arithmetic shift)
     // port of laes_stream.h:maxAbsOf
-    public static long maxAbsOf(long[] x) { long m = 0; for (long v : x) { final long a = v < 0 ? -v : v; if (a > m) m = a; } return m; }
+    public static long maxAbsOf(long[] x) { long m = 0; for (long v : x) { final long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v;   /* FU13-3 */ if (a > m) m = a; } return m; }
     // port of laes_stream.h:fits
     static boolean fits(long[] h, int NT, long mx, int sh) { return Lift.fits64(h, NT, mx, sh); }
     // port of laes_stream.h:wtap
@@ -132,7 +132,7 @@ public final class Stream {
     // the largest magnitude of x[0, len), with -2^63 counted as 2^63 - 1 (Java only: for the choice of the split forms)
     static long maxAbsAll(long[] x, int len) { long m = 0; for (int i = 0; i < len; i++) { final long v = x[i]; final long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v; if (a > m) m = a; } return m; }
     // maxAbsOf over x[0, len)
-    static long maxAbsOf(long[] x, int len) { long m = 0; for (int i = 0; i < len; i++) { final long v = x[i]; final long a = v < 0 ? -v : v; if (a > m) m = a; } return m; }
+    static long maxAbsOf(long[] x, int len) { long m = 0; for (int i = 0; i < len; i++) { final long v = x[i]; final long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v;   /* FU13-3 */ if (a > m) m = a; } return m; }
     /** Java (2026-11-04): reusable arrays of one caller (a player node), so that a piece does not allocate its temporaries anew; not shared between threads */
     public static final class Work { private final long[][] a = new long[10][];
         long[] get(int slot, int len) { long[] x = a[slot]; if (x == null || x.length < len) { x = new long[Math.max(len, x == null ? 0 : x.length + x.length / 4)]; a[slot] = x; } return x; } }

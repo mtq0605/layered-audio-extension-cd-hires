@@ -51,6 +51,7 @@ final class LaeDec {
         D.pack = packArg;   // extension pack: 0 = the main body, as always
         String e = D.openCd(cdp, lae, mode, orate, code); if (!e.isEmpty()) { env.printf("%s\n", e); return code[0]; }
         if (flacRate != 0 && flacRate != D.base) { env.printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // FU11-9: spec/lossy 3.4
+        D.noSeekMarks();   // decision 34 (F05-4, as lae_dec.cpp): this tool never seeks, so no checkpoints are kept (memory no longer grows with the track)
         final String leakOut = env.get("LEAKOUT"), clipMap = env.get("CLIPMAP");
         if (leakOut == null && clipMap == null) {
             // decision 10 (FU34-9 / FU30-2, spec/lossy 6.7, as lae_dec.cpp): every entropy stream of the decoded pack must end exactly at its

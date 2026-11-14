@@ -59,6 +59,8 @@ public final class LaeDecoder {
         // Java: a Mark is never changed after it is made (seekTo copies its state), so decoders of the same stream share Mark objects.
         static final class Mark { final long M0; final PartStream.Dec dc; final PartStream.Walker w; Mark(long m, PartStream.Dec d, PartStream.Walker ww) { M0 = m; dc = d; w = ww; } }
         final List<Mark> marks = new ArrayList<Mark>(); long every = 1;
+        // decision 34 (2026-11-15, F05-4): false = no checkpoints are kept (LaeDec converts the whole file and never seeks; the library keeps them)
+        boolean keepMarks = true;
         // F05-2 (2026-11-14): the stream header's rate and K are the file's own statement and have no upper limit, so nothing that costs
         // memory or time follows them alone. srate = the sample rate of this stream's layer from the main header (base for the depth layer,
         // the master rate for the frequency layer): the checkpoint spacing is counted with it. lim = min(K, frames of the layer): rows from
@@ -76,7 +78,7 @@ public final class LaeDecoder {
         // port of lae_decoder.h:PlaneStream::frame (returns the offset of frame m in rowBuf, or -1 for the C++ nullptr)
         public int frame(long m) {   // frames are requested in increasing order (seekTo excepted)
             while (!(m >= row0 && m < row0 + rows)) { if (w.M0 >= lim) return -1;
-                if ((w.M0 / PartitionFormat.ROOTT) % every == 0 && (marks.isEmpty() || marks.get(marks.size() - 1).M0 < w.M0)) marks.add(new Mark(w.M0, dc.copy(), new PartStream.Walker(w)));
+                if (keepMarks && (w.M0 / PartitionFormat.ROOTT) % every == 0 && (marks.isEmpty() || marks.get(marks.size() - 1).M0 < w.M0)) marks.add(new Mark(w.M0, dc.copy(), new PartStream.Walker(w)));
                 row0 = w.M0; rows = w.rowFrames(); Arrays.fill(rowBuf, 0); w.row(dc, rowBuf, row0); }
             return (int) ((m - row0) * N); }
         /** Java only (tests): the stream header fields K, k0, k1, cw, rate and the read position dc.i */
@@ -336,6 +338,8 @@ public final class LaeDecoder {
         // port of lae_decoder.h:Decoder::allStreams: every entropy stream of the chunk in a fixed order (depth L, depth R, then the
         // frequency segments); unopened ones have no walker
         List<PlaneStream> allStreams() { List<PlaneStream> v = new ArrayList<PlaneStream>(); v.add(dS[0]); v.add(dS[1]); for (PlaneStream f : fS) v.add(f); return v; }
+        // port of lae_decoder.h:Decoder::noSeekMarks (decision 34): no checkpoints are kept while decoding (a whole-file conversion that never seeks: LaeDec)
+        public void noSeekMarks() { for (PlaneStream p : allStreams()) p.keepMarks = false; }
         /** port of lae_decoder.h:Decoder::seekThreads */
         public int seekThreads = Math.max(1, Math.min(16, Runtime.getRuntime().availableProcessors()));
         // port of lae_decoder.h:Decoder::checkAll (decision 10, 2026-11-15): every stream decoded from start to end in parallel (route full at

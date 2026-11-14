@@ -77,7 +77,38 @@ public final class LaesTags {
     /** the size checks of parseArgs for one picture ("" or the reason) */
     public static String checkPicture(String name, Picture p) { if (32L + utf8(p.mime).length + p.data.length >= (1L << 24)) return name + ": too large for a FLAC metadata block (16 MB)"; return ""; }
     /** the size check of parseArgs over all pictures ("" or the reason) */
-    public static String checkAll(Tags t) { long all = 0; for (Picture p : t.pics) all += p.data.length + 64; if (all >= (1L << 28) - 4096) return "the pictures together are too large for an ID3v2 tag (256 MB)"; return ""; }
+    public static String checkAll(Tags t) { long all = 0; for (Picture p : t.pics) all += p.data.length + 64; if (all >= (1L << 28) - 4096) return "the pictures together are too large for an ID3v2 tag (256 MB)";
+        return checkSizes(t, 64, true, true); }   // DEC 26: the text counts too (room for a vendor string of 64 bytes)
+    // port of laes_tags.h:checkSizes (DEC 26, FU28-3 (1)(2)): the final lengths of what flacBlocks / wavChunks write, for a vendor string of
+    // encLen bytes; "" or the reason. FLAC: VORBIS_COMMENT and every PICTURE below 2^24 (24-bit block length); WAV: every ID3 frame and the
+    // whole ID3 tag below 2^28 (syncsafe), the LIST/INFO and "id3 " chunks below 2^32. flac / wav: which form to check.
+    public static String checkSizes(Tags t, long encLen, boolean flac, boolean wav) {
+        final long kFlac = 1L << 24, kId3 = 1L << 28, kRiff = 1L << 32;
+        if (flac && !t.kv.isEmpty()) { long vc = 8 + encLen; for (KV kv : t.kv) vc += 4 + utf8(kv.key).length + 1 + utf8(kv.value).length;
+            if (vc >= kFlac) return "the tags together are too large for a FLAC VORBIS_COMMENT block (16 MB)"; }
+        if (flac) for (Picture p : t.pics) if (32L + utf8(p.mime).length + p.data.length >= kFlac) return "a picture is too large for a FLAC metadata block (16 MB)";
+        if (!wav || t.empty()) return "";
+        long fr = 0, info = 4 + 8 + encLen + 1 + 1;   // "INFO" + ISFT
+        final List<String> mk = new ArrayList<String>(); final List<List<String>> mv = new ArrayList<List<String>>(); merged(t, mk, mv);
+        for (int m = 0; m < mk.size(); m++) { long v = 0, iv = 0; final List<String> vals = mv.get(m);
+            for (int i = 0; i < vals.size(); i++) { final long n = utf8(vals.get(i)).length; v += (i != 0 ? 1 : 0) + n; iv += (i != 0 ? 2 : 0) + n; }
+            info += 8 + iv + 1 + 1;   // upper bound (an INFO entry only for the known names)
+            final String k = mk.get(m); final long body = k.equals("COMMENT") ? 1 + 3 + 1 + v : !id3Frame(k).isEmpty() ? 1 + v : 1 + utf8(k).length + 1 + v;
+            fr += 10 + body; if (body >= kId3) return "a tag is too large for an ID3v2 frame (256 MB)"; }
+        fr += 10 + 1 + encLen;   // TSSE
+        for (Picture p : t.pics) { final long body = 1 + utf8(p.mime).length + 1 + 1 + 1 + p.data.length; fr += 10 + body; if (body >= kId3) return "a picture is too large for an ID3v2 frame (256 MB)"; }
+        if (fr >= kId3) return "the tags and pictures together are too large for an ID3v2 tag (256 MB)";
+        if (info >= kRiff || 10 + fr >= kRiff) return "the tags together are too large for a RIFF chunk (4 GB)";
+        return ""; }
+    // port of laes_tags.h:merged: a repeated key gives one INFO entry / text frame, in the order of the first appearance (keys into mk, values into mv)
+    static void merged(Tags t, List<String> mk, List<List<String>> mv) {
+        for (KV kv : t.kv) { boolean found = false; for (int i = 0; i < mk.size(); i++) if (mk.get(i).equals(kv.key)) { mv.get(i).add(kv.value); found = true; }
+            if (!found) { mk.add(kv.key); List<String> l = new ArrayList<String>(); l.add(kv.value); mv.add(l); } } }
+    // port of laes_tags.h:sizesOk: the final check inside flacBlocks / wavChunks: with err the reason goes to err[0] and false is returned,
+    // else a LaeException is thrown (the C++ std::length_error)
+    static boolean sizesOk(Tags t, String enc, String[] err, boolean flac) {
+        final String e = checkSizes(t, utf8(enc).length, flac, !flac); if (e.isEmpty()) return true;
+        if (err != null) { err[0] = e; return false; } throw new com.lae.core.LaeException(e); }
 
     // port of laes_tags.h:parseArgs: --tag / --cover / --picture from the command line; "" or the reason. Checked before any work is done.
     // args: the C++ argv without argv[0] (the C++ loop starts at argv[1], so every argument is looked at)
@@ -108,7 +139,10 @@ public final class LaesTags {
     // "last" flag. Empty for no tags.
     public static byte[] flacBlocks(Tags t, boolean lastBlock) { return flacBlocks(t, lastBlock, kEncoder); }
     // enc: the vendor string (lae_enc names itself)
-    public static byte[] flacBlocks(Tags t, boolean lastBlock, String enc) {
+    public static byte[] flacBlocks(Tags t, boolean lastBlock, String enc) { return flacBlocks(t, lastBlock, enc, null); }
+    // err (DEC 26): null, or err[0] receives the reason when the blocks would be too long (then null is returned); without err a LaeException
+    public static byte[] flacBlocks(Tags t, boolean lastBlock, String enc, String[] err) {
+        if (!sizesOk(t, enc, err, true)) return null;   // DEC 26
         final List<byte[]> bl = new ArrayList<byte[]>(); final List<Integer> types = new ArrayList<Integer>();
         if (!t.kv.isEmpty()) { ByteArrayOutputStream b = new ByteArrayOutputStream(); final byte[] ven = utf8(enc); le32(b, ven.length); add(b, ven); le32(b, t.kv.size());
             for (KV kv : t.kv) { final byte[] s = utf8(kv.key + "=" + kv.value); le32(b, s.length); add(b, s); }
@@ -140,12 +174,13 @@ public final class LaesTags {
     // port of laes_tags.h:wavChunks: a LIST/INFO chunk (UTF-8 text, NUL-terminated, even sizes) and an "id3 " chunk (ID3v2.4, UTF-8). Empty for no tags.
     public static byte[] wavChunks(Tags t) { return wavChunks(t, kEncoder); }
     // enc: the encoder named in ISFT / TSSE (lae_enc names itself; 2026-11-06, a85dd40)
-    public static byte[] wavChunks(Tags t, String enc) {
+    public static byte[] wavChunks(Tags t, String enc) { return wavChunks(t, enc, null); }
+    // err (DEC 26): as flacBlocks
+    public static byte[] wavChunks(Tags t, String enc, String[] err) {
         ByteArrayOutputStream o = new ByteArrayOutputStream(); if (t.empty()) return o.toByteArray();
+        if (!sizesOk(t, enc, err, false)) return null;   // DEC 26
         // a repeated key: one INFO entry / text frame (INFO "; ", ID3v2.4 NUL-separated values), in the order of the first appearance
-        final List<String> mk = new ArrayList<String>(); final List<List<String>> mv = new ArrayList<List<String>>();
-        for (KV kv : t.kv) { boolean found = false; for (int i = 0; i < mk.size(); i++) if (mk.get(i).equals(kv.key)) { mv.get(i).add(kv.value); found = true; }
-            if (!found) { mk.add(kv.key); List<String> l = new ArrayList<String>(); l.add(kv.value); mv.add(l); } }
+        final List<String> mk = new ArrayList<String>(); final List<List<String>> mv = new ArrayList<List<String>>(); merged(t, mk, mv);
         {   ByteArrayOutputStream info = new ByteArrayOutputStream(); add(info, utf8("INFO"));
             for (int i = 0; i < mk.size(); i++) if (!infoId(mk.get(i)).isEmpty()) putInfo(info, infoId(mk.get(i)), join(mv.get(i), "; "));
             putInfo(info, "ISFT", enc);

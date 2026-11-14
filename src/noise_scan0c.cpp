@@ -252,7 +252,7 @@ struct Line { double f, lv, Qmin, cv, binHz; int w0, w1, nwin; string plane; };
 // argv[1] = input, argv[2] = report, argv[3] = candidate file (lae_noise passes its arguments after "scan")
 static int noiseScanMain(int argc, char** argv) {
     if (argc < 3) { fprintf(stderr, "usage: lae_noise scan <in.wav> <out.txt> [candidates.laenoise]\n"); return 2; }
-    WavStream ws; if (!ws.open(argv[1])) { fprintf(stderr, "cannot read %s (needs stereo PCM 16/24/32 or float32 WAV)\n", argv[1]); return 1; }
+    WavStream ws; if (!ws.open(argv[1])) { fprintf(stderr, "cannot read %s (%s)\n", argv[1], ws.why.c_str()); return 1; }
     const double rate = ws.rate; const long long len = ws.frames;
     for (int i = 2; i < argc && i < 4; i++) if (nmk::sameFile(argv[1], argv[i])) { fprintf(stderr, "%s is the input file itself: nothing written\n", argv[i]); return 2; }   // FU17-2
     FILE* out = fopen(argv[2], "wb");   /* LF on every platform */ if (!out) { fprintf(stderr, "cannot write %s\n", argv[2]); return 1; }

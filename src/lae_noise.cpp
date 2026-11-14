@@ -79,7 +79,7 @@ static void invFrame(const double* c, long m, long long a, vector<double>& y) {
 
 static int doMark(int argc, char** argv) {
     if (argc < 8 || (argc - 4) % 4) { printf("usage: lae_noise mark <master.wav> <out.laenoise> <t0 s> <t1 s> <f0 Hz> <f1 Hz> [...]\n"); return 2; }
-    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
+    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; mk.sha = masterSha(ws); mk.frames = ws.frames; mk.rate = ws.rate; long K = mdct::frames((long)ws.frames);
     for (int i = 4; i + 3 < argc; i += 4) { double t0 = atof(argv[i]), t1 = atof(argv[i + 1]), f0 = atof(argv[i + 2]), f1 = atof(argv[i + 3]);
         long m0, m1; int c0, c1; snapTime(t0, t1, ws.rate, K, m0, m1); snapFreq(f0, f1, ws.rate, c0, c1);
@@ -93,7 +93,7 @@ static int doMark(int argc, char** argv) {
 
 static int doShow(int argc, char** argv) {
     if (argc < 4) { printf("usage: lae_noise show <master.wav> <marks.laenoise>\n"); return 2; }
-    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
+    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (!checkMarks(ws, mk)) return 1;
     printf("master OK (SHA-256, %lld frames, %.0f Hz); %zu positions\n", mk.frames, mk.rate, mk.pos.size());
@@ -103,7 +103,7 @@ static int doShow(int argc, char** argv) {
 
 static int doPreview(int argc, char** argv) {
     if (argc < 5) { printf("usage: lae_noise preview <master.wav> <marks.laenoise> <outdir> [context s] [longest preview per position s]\n"); return 2; }
-    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
+    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (!checkMarks(ws, mk)) return 1;
     const string dir = argv[4]; std::error_code ec; std::filesystem::create_directories(dir, ec);
@@ -157,7 +157,7 @@ static int doPreview(int argc, char** argv) {
 // every position of the file silenced together, over one excerpt [t0, t1): original / silenced / marked, and the same check
 static int doPreviewAll(int argc, char** argv) {
     if (argc < 7) { printf("usage: lae_noise preview-all <master.wav> <marks.laenoise> <outdir> <t0 s> <t1 s>\n"); return 2; }
-    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
+    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (!checkMarks(ws, mk)) return 1;
     const string dir = argv[4]; std::error_code ec; std::filesystem::create_directories(dir, ec);
@@ -190,7 +190,7 @@ static int doPreviewAll(int argc, char** argv) {
 // file's own SHA-256 is not compared, only length and rate (a decode is not bit-identical to the master).
 static int doLevel(int argc, char** argv) {
     if (argc < 4) { printf("usage: lae_noise level <file.wav> <marks.laenoise> [reference.wav: measure file - reference]\n"); return 2; }
-    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
+    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (mk.frames != ws.frames || fabs(mk.rate - ws.rate) > 0.5) { printf("length or rate differ from the marking file\n"); return 1; }
     if (!checkGrid(ws.frames, mk)) return 1;   // FU17-4: a position outside the grid was read past the 512 bins (or looped for ever)
@@ -211,7 +211,7 @@ static int doLevel(int argc, char** argv) {
 // dBFS per kHz, integer tenths), and the waveform's min / max per step. Only for display: nothing here decides anything.
 static int doSpectro(int argc, char** argv) {
     if (argc < 4) { printf("usage: lae_noise spectro <master.wav> <out.json>\n"); return 2; }
-    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
+    WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     const long long L = ws.frames; const long K = mdct::frames((long)L); const int G = max(1, (int)llround(0.02 * ws.rate / NM));
     const long nst = (K - 1) / G; const double fsPow = 0.5 * 70368744177664.0, perKHz = 10 * lmath::log10(CW * ws.rate / (2.0 * NM) / 1000.0);
     if (sameFile(argv[2], argv[3])) { printf("%s is the master itself: nothing written\n", argv[3]); return 2; }   // FU17-6

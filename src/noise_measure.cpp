@@ -36,7 +36,8 @@ static bool readWav(const char* path, vector<double>& L, vector<double>& R, doub
     for (;;) {
         uint8_t c[8]; if (fread(c, 1, 8, f) != 8) break;
         uint32_t n = c[4] | c[5] << 8 | c[6] << 16 | (uint32_t)c[7] << 24;
-        if (!memcmp(c, "fmt ", 4)) { vector<uint8_t> b(n); if (fread(b.data(), 1, n, f) != n) break;
+        if (!memcmp(c, "fmt ", 4)) { if (n < 16) break; vector<uint8_t> b(n);   // FU17-5: a fmt chunk shorter than 16 bytes was read past its end
+            if (fread(b.data(), 1, n, f) != n) break;
             fmt = b[0] | b[1] << 8; ch = b[2] | b[3] << 8; rate = b[4] | b[5] << 8 | b[6] << 16 | (uint32_t)b[7] << 24; bits = b[14] | b[15] << 8;
             if (fmt == 0xFFFE && n >= 26) fmt = b[24] | b[25] << 8; if (n & 1) fseek(f, 1, SEEK_CUR); continue; }
         if (!memcmp(c, "data", 4)) {

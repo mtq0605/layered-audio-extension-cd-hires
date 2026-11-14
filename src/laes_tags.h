@@ -45,6 +45,14 @@ inline std::string readImage(const std::string& path, Picture& p) {
         return path + ": no JPEG frame header (SOF) found"; }
     return path + ": not a JPEG or PNG image"; }
 
+// well-formed UTF-8: shortest forms, no surrogates, at most U+10FFFF (any character, control characters included)
+inline bool validUtf8(const std::string& s) {
+    for (size_t i = 0; i < s.size();) { const uint8_t c = (uint8_t)s[i]; uint32_t cp; size_t k;
+        if (c < 0x80) { cp = c; k = 1; } else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; k = 2; } else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; k = 3; } else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; k = 4; } else return false;
+        if (i + k > s.size()) return false; for (size_t q = 1; q < k; q++) { if (((uint8_t)s[i + q] & 0xC0) != 0x80) return false; cp = cp << 6 | ((uint8_t)s[i + q] & 0x3F); }
+        if ((k == 2 && cp < 0x80) || (k == 3 && cp < 0x800) || (k == 4 && cp < 0x10000) || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) return false;
+        i += k; }
+    return true; }
 inline std::string upperKey(const std::string& k) { std::string u = k; for (char& c : u) if (c >= 'a' && c <= 'z') c = (char)(c - 32); return u; }
 // --tag / --cover / --picture from the command line; "" or the reason. Checked before any work is done.
 inline std::string parseArgs(int argc, char** argv, Tags& t) {
@@ -52,6 +60,7 @@ inline std::string parseArgs(int argc, char** argv, Tags& t) {
         if (!a.compare(0, 6, "--tag=")) { const std::string kv = a.substr(6); const size_t eq = kv.find('=');
             if (eq == std::string::npos || eq == 0) return "--tag needs KEY=VALUE: " + a;
             const std::string key = upperKey(kv.substr(0, eq)); for (char c : key) if (c < 0x20 || c > 0x7D || c == '=') return "--tag: a key is ASCII 0x20..0x7D without '=': " + a;
+            if (!validUtf8(kv.substr(eq + 1))) return "--tag: the value is not valid UTF-8: " + a;   // FU12-8: Vorbis comments and ID3 (encoding 3) are UTF-8
             t.kv.push_back({key, kv.substr(eq + 1)}); }
         else if (!a.compare(0, 8, "--cover=") || !a.compare(0, 10, "--picture=")) { Picture p; std::string path;
             if (a[2] == 'c') { p.type = 3; path = a.substr(8); }

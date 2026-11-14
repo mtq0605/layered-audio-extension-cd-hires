@@ -168,7 +168,8 @@ static Pcm derive16(const Pcm& sc) { Pcm dv; dv.rate = sc.rate; dv.bits = 16; co
         dv.c[c].resize(sc.c[c].size()); for (size_t i = 0; i < sc.c[c].size(); i++) { const int64_t r1 = (int64_t)nx(), r2 = (int64_t)nx();
             dv.c[c][i] = std::max<int64_t>(-32768, std::min<int64_t>(32767, (sc.c[c][i] + r1 - r2 + (1LL << (s - 1))) >> s)); } }
     return dv; }
-static std::string laeEncPath(int argc, char** argv) { std::string e = arg(argc, argv, "--lae-enc"); return e.empty() ? (fs::absolute(fs::path(argv[0])).parent_path() / kLaeEnc).string() : e; }
+static std::string selfPath(const char* argv0);   // FU15-9: this program's own file (below, after win_utf8.h)
+static std::string laeEncPath(int argc, char** argv) { std::string e = arg(argc, argv, "--lae-enc"); return e.empty() ? (fs::absolute(fs::path(selfPath(argv[0]))).parent_path() / kLaeEnc).string() : e; }
 // ---- automatic alignment: LAEY's search (lae_enc cdcheck, design D). LAEY moves the master by its offset (master samples); LAES never
 // moves the master and stores T = offset / 2^stages (base samples, same sign) exactly as measured, fraction included.
 // err = LAEY's pooled residual after the fraction (its phase line), the alignment error the -60 / -54 dB bands apply to.
@@ -234,6 +235,17 @@ static unsigned long long physMemory() { FILE* f = fopen("/proc/meminfo", "r"); 
 #endif
 #include "laes_selftest.h"
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
+// FU15-9 (2026-11-14): lae_enc is looked for next to this program's own file; argv[0] is only "laes" when the program is started through
+// PATH (then the current folder was searched). The system's name of the running program; argv[0] when it cannot be had.
+#if defined(_WIN32) && defined(_MSC_VER)
+extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameW(void*, wchar_t*, unsigned long);
+static std::string selfPath(const char* argv0) { std::vector<wchar_t> b(32768); const unsigned long n = GetModuleFileNameW(nullptr, b.data(), (unsigned long)b.size());
+    if (n == 0 || n >= b.size()) return argv0; b[n] = 0; const std::string s = lae_u8::fromWide(b.data()); return s.empty() ? std::string(argv0) : s; }
+#elif defined(__linux__)
+static std::string selfPath(const char* argv0) { std::error_code ec; const fs::path p = fs::read_symlink("/proc/self/exe", ec); return ec || p.empty() ? std::string(argv0) : p.string(); }
+#else
+static std::string selfPath(const char* argv0) { return argv0; }
+#endif
 // the self-check of a written LAES file, read exactly as a player reads it (laes_play.h): open (file SHA-256, payload CRC-32, core), then
 // every master decoded in time order and compared sample by sample with its input (pm: in file order).
 // "" when everything matches, else the reason.

@@ -167,8 +167,9 @@ static void publisherText(const fs::path& p, map<int, string>& title, map<int, s
 #else
     FILE* f = fopen(p.c_str(), "rb");
 #endif
-    if (!f) return; char line[1024]; int trk = 0;
-    while (fgets(line, sizeof line, f)) { string l = line; while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back(); size_t a = l.find_first_not_of(" \t"); if (a == string::npos) continue; l = l.substr(a);
+    if (!f) return; char line[1024]; int trk = 0; bool first = true;
+    while (fgets(line, sizeof line, f)) { string l = line; if (first && l.size() >= 3 && !l.compare(0, 3, "\xEF\xBB\xBF")) l = l.substr(3); first = false;   // a UTF-8 BOM (as the CUE reader allows)
+        while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back(); size_t a = l.find_first_not_of(" \t"); if (a == string::npos) continue; l = l.substr(a);
         if (!l.compare(0, 6, "TRACK ")) { trk = atoi(l.c_str() + 6); continue; }
         for (int w = 0; w < 2; w++) { const string kw = w ? "PERFORMER " : "TITLE "; if (l.compare(0, kw.size(), kw)) continue; string v = l.substr(kw.size());
             if (v.size() >= 2 && v.front() == '"' && v.back() == '"') v = v.substr(1, v.size() - 2); (w ? perf : title)[trk] = v; } }

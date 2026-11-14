@@ -39,7 +39,7 @@
 //   laes extract <in> <out> --pick=master:<k> | name:<text> | <rate>:<bits>[,...]   a NEW file with the chosen masters, decoded and encoded
 //       again in full (same core master, tags kept); the order of --pick is the new menu order
 //   laes tag <in> <out> [--tag=... --cover=... --picture=...]   a NEW file with exactly these tags (none: no tags); audio bytes and
-//       payload copied byte for byte, then every master checked against its SHA-256; the old file is kept. Refuses an existing <out>.
+//       payload copied byte for byte, then every master checked against its SHA-256; the old file is kept. An existing <out> (DEC 21, every command that writes a file): asked twice in a console, else replaced only with --overwrite.
 //   laes parts <file>                                  blocks / chunks, SHA-256 of the audio bytes and of the payload, the tags as read
 //   laes dec <in.wav | in.flac> <out dir> [--levels]   writes core.wav and master_<k>_<rate>_<bits>.wav (and every rate level with --levels)
 //   laes dec <in> --list                              every choice: core, masters, rate levels (lossless) and derived 16-bit versions
@@ -385,12 +385,14 @@ static void diskNotice(const std::string& cmd, const std::string& dir, double ne
     std::error_code ec; const fs::space_info sp = fs::space(fs::absolute(fs::path(dir), ec), ec); if (ec || need <= (double)sp.available) return;
     printf("note: laes %s needs about %.1f GB of disk (temporary files and the new file) in %s, %.1f GB free on that disk: it goes on, and stops if the disk is full\n", cmd.c_str(), need / 1073741824.0, dir.c_str(), sp.available / 1073741824.0);
     printf("%s%s%s%.1f%s%s%s%.1f%s\n", u8"  注意：laes ", cmd.c_str(), u8" 大约需要 ", need / 1073741824.0, u8" GB 磁盘空间（临时文件和新文件），放在 ", dir.c_str(), u8"，这块磁盘剩 ", sp.available / 1073741824.0, u8" GB；照样开始，磁盘满时会停下"); }
+static bool gOverwrite = false;   // DEC 21: --overwrite given
 static int laesMain(int argc, char** argv);
 int main(int argc, char** argv) { lae_u8::init(argc, argv); return laesMain(argc, argv); }   // UTF-8 arguments and file names on Windows (win_utf8.h)
 // laes add / extract (2026-11-11) run the dec and enc commands of this same program through laesMain
 static int laesMain(int argc, char** argv) {
     if (argc < 2) { printf("laes enc | add | extract | names | tag | parts | dec | verify | align | selftest | excerpt | mkcd | reduce  (see the source header)\n"); return 1; }
     const std::string cmd = argv[1];
+    if (flag(argc, argv, "--overwrite")) gOverwrite = true;   // DEC 21: an existing output is replaced without asking (inner runs keep the outer value)
     bool madePart = false;   // FU16-3 (2026-11-14): tag / add / extract / names remove <out>.part and <out>.body.part on an error only when this run made them
     if (cmd == "selftest") return selftest::run() ? 2 : 0;
     if (cmd == "reduce" && argc >= 5) {   // laes reduce <in.wav> <out.wav> <bits>: a shorter word length with TPDF dither (+-1 LSB of the result), fixed seed
@@ -484,7 +486,7 @@ static int laesMain(int argc, char** argv) {
     if (cmd == "tag" && argc >= 4) try {
         const std::string src = argv[2], out = argv[3]; std::error_code ec;
         if (out.empty() || out[0] == '-') { printf("give the new file's name: laes tag <in> <out> ...\n"); return 1; }
-        if (fs::exists(out, ec)) { printf("%s exists: choose another name (the old file is kept, a new one is written)\n", out.c_str()); return 1; }
+        if (!laespick::mayReplace(out, gOverwrite)) return 1;   // DEC 21: asked twice in a console, else --overwrite
         laestag::Tags tags; { const std::string e = laestag::parseArgs(argc, argv, tags); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; } }
         laess::In in(src); Layout L; { const std::string e = readLayout(in, L); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
         if (L.payload.empty()) { printf("%s: no LAE extension found (not an LAES / LAE file)\n", src.c_str()); return 2; }
@@ -536,7 +538,7 @@ static int laesMain(int argc, char** argv) {
         // references); every master of the new file is then checked against its SHA-256.
         const std::string src = argv[2], out = argv[3]; std::error_code ec;
         if (out.empty() || out[0] == '-') { printf("laes add <in> <out> <master> ...\n"); return 1; }
-        if (fs::exists(out, ec)) { printf("%s exists: choose another name (the old file is kept, a new one is written)\n", out.c_str()); return 1; }
+        if (!laespick::mayReplace(out, gOverwrite)) return 1;   // DEC 21: asked twice in a console, else --overwrite
         laess::In in(src); Layout L; { const std::string e = readLayout(in, L); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
         if (L.payload.empty()) { printf("%s: no LAE extension found\n", src.c_str()); return 2; }
         long long ptot = 0; for (auto& r : L.payload) ptot += r.second;
@@ -577,7 +579,7 @@ static int laesMain(int argc, char** argv) {
                     if (*e || k < 1 || k > (long)nAll || seen[(size_t)k]) { printf("--menu-order=<k1>,<k2>,...: every master (1 ... %zu; the new ones from %d on) once\n", nAll, nOld + 1); return 1; } seen[(size_t)k] = true; menuList.push_back((size_t)k);
                     if (b0 == std::string::npos) break; a0 = b0 + 1; }
                 if (menuList.size() != nAll) { printf("--menu-order=<k1>,<k2>,...: every master (1 ... %zu) once\n", nAll); return 1; } }
-            else if (a == "--timing" || a.rfind("--threads", 0) == 0) continue;
+            else if (a == "--timing" || a.rfind("--threads", 0) == 0 || a == "--overwrite") continue;
             else { printf("unknown option %s\n", a.c_str()); return 1; } }
         // the new masters in the encoder's order among themselves (more bits first, then higher rate); "num" = their number in menus (after the old ones)
         std::vector<size_t> ordN(paths.size()); for (size_t i = 0; i < ordN.size(); i++) ordN[i] = i;
@@ -650,7 +652,7 @@ static int laesMain(int argc, char** argv) {
         // names and "no derived versions" go with their masters; the tags, pictures and the core master's audio bytes are kept as they are.
         const std::string src = argv[2], out = argv[3]; std::error_code ec;
         if (out.empty() || out[0] == '-') { printf("laes extract <in> <out> --pick=master:<k>,...\n"); return 1; }
-        if (fs::exists(out, ec)) { printf("%s exists: choose another name (the old file is kept, a new one is written)\n", out.c_str()); return 1; }
+        if (!laespick::mayReplace(out, gOverwrite)) return 1;   // DEC 21: asked twice in a console, else --overwrite
         const std::string pk = arg(argc, argv, "--pick"); if (pk.empty()) { printf("give --pick=master:<k>,name:<text>,<rate>:<bits>,...\n"); return 1; }
         laess::In in(src); Layout L; { const std::string e = readLayout(in, L); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
         if (L.payload.empty()) { printf("%s: no LAE extension found\n", src.c_str()); return 2; }
@@ -715,7 +717,7 @@ static int laesMain(int argc, char** argv) {
         // every master is checked afterwards, and on any failure the old bytes are written back
         const bool inPlace = out == "--in-place";
         if (!inPlace && (out.empty() || out[0] == '-')) { printf("give the new file's name: laes names <in> <out> --name=<k>:<text> ... (or laes names <in> --in-place --default=<k>|core)\n"); return 1; }
-        if (!inPlace && fs::exists(out, ec)) { printf("%s exists: choose another name (the old file is kept, a new one is written)\n", out.c_str()); return 1; }
+        if (!inPlace && !laespick::mayReplace(out, gOverwrite)) return 1;   // DEC 21
         if (inPlace) for (int i = 4; i < argc; i++) { const std::string a = argv[i];
             if (a.rfind("--default=", 0) != 0 && a != "--no-derive=core" && a != "--derive=core") { printf("--in-place takes only --default=<k>|core, --no-derive=core, --derive=core (%s changes the size: write a new file)\n", a.c_str()); return 1; } }
         laess::In in(src); Layout L; { const std::string e = readLayout(in, L); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
@@ -744,7 +746,7 @@ static int laesMain(int argc, char** argv) {
         std::vector<size_t> mord; { std::vector<MasterInfo> m0(rs.size()); for (size_t i = 0; i < rs.size(); i++) m0[i].menu = rs[i].menu; mord = laesc::menuOrder(m0); }   // mord[k - 1] = the file index of master k
         bool changed = false;
         laes::Head H; if (!laes::headFrom((uint64_t)ver0, hd + 56, (uint64_t)nm, H)) { printf("%s: invalid LAES header\n", src.c_str()); return 2; }   // the default and the core master's flags (2026-11-12)
-        for (int i = 4; i < argc; i++) { const std::string a = argv[i];
+        for (int i = 4; i < argc; i++) { const std::string a = argv[i]; if (a == "--overwrite") continue;   // DEC 21
             auto num = [&](const char* s, long& k) { char* e = nullptr; k = strtol(s, &e, 10); return !*e && k >= 1 && k <= nm; };
             if (a.rfind("--default=", 0) == 0) { long k = 0; if (a.substr(10) == "core") H.def = 0; else if (num(a.c_str() + 10, k)) H.def = (int)mord[(size_t)k - 1] + 1;
                 else { printf("--default=<k> (k = 1 ... %d, as menus number them) or --default=core\n", nm); return 1; } changed = true; continue; }
@@ -882,7 +884,8 @@ static int laesMain(int argc, char** argv) {
         bool anyAuto = false; for (bool au : autoT) anyAuto |= au;
         for (const std::string& p : {corePath, anyAuto ? std::string(laeEncPath(argc, argv)) : std::string()}) if (!p.empty()) { std::error_code ec; const auto sz = fs::file_size(p, ec); if (ec) continue;   // the core and LAEY's encoder (@auto) too
             job += p + "\t" + std::to_string((unsigned long long)sz) + "\t" + std::to_string((long long)fs::last_write_time(p, ec).time_since_epoch().count()) + "\n"; }
-        uint64_t oldWork = 0; { std::string old; if (laess::getState(out + ".laes.tmp/job.txt", old) && old == job) oldWork = laess::folderBytes(out + ".laes.tmp"); }   // counts as free   // D6 (2026-11-05): no FLAC copy, the largest level not kept; made again when read
+        uint64_t oldWork = 0; bool sameJob = false; { std::string old; if (laess::getState(out + ".laes.tmp/job.txt", old) && old == job) { oldWork = laess::folderBytes(out + ".laes.tmp"); sameJob = true; } }
+        if (!sameJob && !laespick::mayReplace(out, gOverwrite)) return 1;   // DEC 21: a resume of an unfinished run is not a replacement   // counts as free   // D6 (2026-11-05): no FLAC copy, the largest level not kept; made again when read
         std::vector<int> stOf(wis.size()); for (size_t i = 0; i < wis.size(); i++) { int st = 0; while ((base << st) < wis[i].rate && st < 4) st++; stOf[i] = st; }
         auto othersOf = [&](size_t i) { std::vector<int> o; for (size_t k = 0; k < stOf.size(); k++) if (k != i) o.push_back(stOf[k]); return o; };
         {   // disk needed by the work folder, estimated before it is made (2026-11-05): a FLAC master's decoded copy and the kept rate levels
@@ -1174,6 +1177,7 @@ static int laesMain(int argc, char** argv) {
                         const std::vector<long> got = laespick::tick(tl, it, "e.g. " + std::to_string(it.front().no) + "," + std::to_string(it.back().no) + " or " + std::to_string(it.front().no) + "-" + std::to_string(it.back().no));
                         if (got.empty()) return 1; hit.clear(); for (long x : got) hit.push_back((size_t)x - 1); }
                     for (size_t j : hit) if (std::find(pick.begin(), pick.end(), j) == pick.end()) pick.push_back(j); if (b == std::string::npos) break; a = b + 1; } }
+            for (size_t j : pick) if (!laespick::mayReplace((fs::path(argv[3]) / (ch[j].name + ".wav")).string(), gOverwrite)) return 1;   // DEC 21: before anything is written
             fs::create_directories(argv[3]); const fs::path d = fs::path(argv[3]);   // FU16-6: joined with /, a "\\" was part of the name on Linux
             {   // FU16-5 (2026-11-14): the WAVs' size against the free space, before anything is written (as enc does for its work folder)
                 uint64_t need = 0; for (size_t j : pick) { const uint64_t db = (uint64_t)ch[j].s.n * 2 * (uint64_t)(ch[j].s.bits / 8); need += 128 + db + (db & 1); }

@@ -10,6 +10,7 @@
 #pragma once
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <string>
 #include <vector>
 #ifdef _WIN32
@@ -90,6 +91,21 @@ inline bool interactive() {
     return isatty(0) && isatty(1);
 #endif
 }
+
+// DEC 21 (2026-11-15): an output file that exists is not replaced silently. In a console the user is asked twice and only two "yes"
+// answers replace it; not in a console it is refused unless --overwrite was given (overwrite = true). The texts are the same in every
+// LAE tool (an operating explanation: English, then Chinese). true: the file may be written (it does not exist, or replacing it is agreed).
+inline bool mayReplace(const std::string& path, bool overwrite) {
+    FILE* t = fopen(path.c_str(), "rb"); if (!t) return true; fclose(t); if (overwrite) return true;
+    auto refuse = [&]() { printf("\"%s\" already exists; it was not replaced (give --overwrite to replace it).\n", path.c_str()); printf(u8"\"%s\" 已经存在，没有替换（加 --overwrite 才替换）。\n", path.c_str()); return false; };
+    if (!interactive()) return refuse();
+    auto yes = []() { char a[64] = {0}; if (!fgets(a, sizeof a, stdin)) return false; std::string s(a); size_t p = 0; while (p < s.size() && !isalpha((unsigned char)s[p])) p++;   // skips a byte-order mark or spaces
+        s = s.substr(p); while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back(); return s == "yes"; };
+    printf("\"%s\" already exists. Replace it? Type yes to continue: \n", path.c_str()); printf(u8"\"%s\" 已经存在。要替换吗？输入 yes 继续：", path.c_str()); fflush(stdout);
+    if (!yes()) return refuse();
+    printf("Really replace \"%s\"? It cannot be undone. Type yes again: \n", path.c_str()); printf(u8"确定要替换 \"%s\" 吗？替换后无法恢复。再输入一次 yes：", path.c_str()); fflush(stdout);
+    if (!yes()) return refuse();
+    return true; }
 
 // returns the ticked items' numbers in list order; empty: cancelled
 inline std::vector<long> tick(const std::string& title, const std::vector<Item>& items, const std::string& numberHint) {

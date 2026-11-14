@@ -29,6 +29,7 @@
 #include <filesystem>
 #include "laes_play.h"
 #include "laes_flac_enc.h"
+#include "laes_pick.h"   // DEC 21: mayReplace (an existing output is not replaced silently)
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 namespace fs = std::filesystem;
 
@@ -101,13 +102,13 @@ static int run(int argc, char** argv) {
     int j = -1; { const std::string c = argv[2]; for (size_t i = 0; i < f.choices.size(); i++) if (f.choices[i].name == c) j = (int)i; if (j < 0 && !c.empty() && c.find_first_not_of("0123456789") == std::string::npos) j = atoi(c.c_str()) - 1; }
     if (j < 0 || j >= (int)f.choices.size()) { printf("no choice %s (see --list)\n", argv[2]); return 1; }
     const laesp::Choice C = f.choices[(size_t)j]; if (!f.why.empty() && C.kind != 0) { printf("the payload failed a check: only the core master\n"); return 2; }
-    std::string out, dir, index; double from = 0, len = -1, seg = 0; bool unverified = false;
+    std::string out, dir, index; double from = 0, len = -1, seg = 0; bool unverified = false, overwrite = false;
     // FU14-7 (2026-11-14): a time is a number of seconds from 0 up to the length a 64-bit frame count holds; an unknown --option is refused
     auto secs = [&](const std::string& a, size_t at, double& v) { const char* s = a.c_str() + at; char* e = nullptr; v = strtod(s, &e);
         if (e == s || *e || !(v >= 0) || v > 1e12) { printf("%s: a number of seconds (0 or more) is expected\n", a.c_str()); return false; } return true; };
     for (int i = 3; i < argc; i++) { const std::string a = argv[i];
         if (!a.rfind("--from=", 0)) { if (!secs(a, 7, from)) return 1; } else if (!a.rfind("--len=", 0)) { if (!secs(a, 6, len)) return 1; } else if (!a.rfind("--seg=", 0)) { if (!secs(a, 6, seg)) return 1; }
-        else if (!a.rfind("--dir=", 0)) dir = a.substr(6); else if (!a.rfind("--index=", 0)) index = a.substr(8); else if (a == "--unverified") unverified = true;
+        else if (!a.rfind("--dir=", 0)) dir = a.substr(6); else if (!a.rfind("--index=", 0)) index = a.substr(8); else if (a == "--unverified") unverified = true; else if (a == "--overwrite") overwrite = true;
         else if (!a.rfind("--", 0)) { printf("unknown option %s: nothing written\n", a.c_str()); return 1; } else out = a; }
     const int64_t first = std::min<int64_t>(C.frames, (int64_t)(from * C.rate + 0.5)), count = len < 0 ? C.frames - first : std::min<int64_t>(C.frames - first, (int64_t)(len * C.rate + 0.5));
     const bool whole = seg <= 0 && first == 0 && count == C.frames;
@@ -141,8 +142,10 @@ static int run(int argc, char** argv) {
     for (auto& t : f.tags) tags.push_back(t.first + "=" + t.second);
     const int thr = (int)std::max(1u, std::thread::hardware_concurrency());
     if (seg > 0) {   // consecutive pieces of seg seconds from --from on
-        if (dir.empty()) { printf("--seg needs --dir\n"); return 1; } fs::create_directories(dir);
-        const int64_t step = std::max<int64_t>(1, (int64_t)(seg * C.rate + 0.5)); laesp::Player p; e = p.start(f, j, thr, false, first); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+        if (dir.empty()) { printf("--seg needs --dir\n"); return 1; }
+        const int64_t step = std::max<int64_t>(1, (int64_t)(seg * C.rate + 0.5));
+        { int kq = 0; for (int64_t a = first; a < first + count; a += step, kq++) { char nm[64]; snprintf(nm, sizeof nm, "seg_%05d.flac", kq); if (!laespick::mayReplace((fs::path(dir) / nm).string(), overwrite)) return 1; } }   // DEC 21
+        fs::create_directories(dir); laesp::Player p; e = p.start(f, j, thr, false, first); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         // FU14-2: a master not checked before (this run is over the whole track): the pieces keep the name .part until its SHA-256 matched
         std::vector<std::string> held; auto dropHeld = [&](size_t h0) { std::error_code ec2; for (size_t h = h0; h < held.size(); h++) fs::remove(held[h] + ".part", ec2); };
         int k = 0; for (int64_t a = first; a < first + count; a += step, k++) { char nm[64]; snprintf(nm, sizeof nm, "seg_%05d.flac", k); std::vector<std::string> t = tags; t.push_back("LAES_FIRST_FRAME=" + std::to_string(a));
@@ -155,6 +158,7 @@ static int run(int argc, char** argv) {
         if (fullRun && ofMaster) noteVerified(p);
         printf("%d pieces of %.3f s, %s, frames %lld..%lld\n", k, seg, C.name.c_str(), (long long)first, (long long)(first + count)); return 0; }
     if (out.empty()) { printf("no output file\n"); return 1; }
+    if (!laespick::mayReplace(out, overwrite)) return 1;   // DEC 21: asked twice in a console, else --overwrite
     laesp::Player p; e = whole ? p.start(f, j, thr) : p.start(f, j, thr, false, first); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
     std::vector<std::string> t = tags; t.push_back("LAES_FIRST_FRAME=" + std::to_string(first));
     if (!writeFlacFrom(p, count, C.rate, C.bits, t, out, e)) { printf("%s\n", e.c_str()); return 2; }

@@ -138,6 +138,17 @@ static void setT(MasterIn& m, double T) { m.whole = (int64_t)std::floor(T); m.fr
 // FU15-3 (2026-11-14): "<master>[@T]" of enc / add. The text after the last @ is T only when all of it is a finite decimal number
 // below 2^40 base samples (or "auto" for enc); otherwise the whole argument is the file name when that file exists (a name with
 // an @), else it is refused with the reason. Before, atof took any text: "m.wav@0,37" or "m.wav@abc" gave T = 0 without a word.
+// FU15-5 / FU16-1 (3) (2026-11-14): T of each master relative to the core master in 2^-32 base samples, through its chain (a master
+// stored in full has none: 0). |whole| below 2^30 and each sum below 2^62, so that nothing overflows (the spec allows up to 2^40:
+// such a file is refused by add / extract with the reason, never computed wrongly); a reference to a later master is refused too.
+static std::string absTimes(const std::vector<MasterInfo>& ms, std::vector<int64_t>& absT) {
+    absT.assign(ms.size(), 0); const int64_t lim = 1LL << 62;
+    for (size_t i = 0; i < ms.size(); i++) { const MasterInfo& I = ms[i]; if (I.storage == 1) continue;
+        if ((size_t)I.refTier > i) return "master " + std::to_string(i + 1) + " refers to a later master";
+        const int64_t ref = I.refTier ? absT[(size_t)I.refTier - 1] : 0;
+        if (I.whole >= (1LL << 30) || I.whole <= -(1LL << 30) || ref >= lim || ref <= -lim) return "master " + std::to_string(i + 1) + ": a time offset of 2^30 base samples or more is not supported by this command";
+        absT[i] = I.whole * 4294967296LL + (int64_t)I.frac + ref; }
+    return ""; }
 static std::string masterArg(const std::string& a, bool allowAuto, std::string& path, double& T, bool& au) {
     path = a; T = 0; au = false; const size_t at = a.rfind('@'); if (at == std::string::npos || at <= 2) return "";
     const std::string t = a.substr(at + 1); if (allowAuto && t == "auto") { au = true; path = a.substr(0, at); return ""; }
@@ -533,7 +544,7 @@ static int laesMain(int argc, char** argv) {
             std::string e = laess::prepRead(p, stem, pm[i]); if (e.empty()) e = laess::prepLevels(pm[i], base, stem, piece, threads, othersOf(i)); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
             if (i < (size_t)nOld && memcmp(pm[i].sha, rs[i].I.sha, 32)) { printf("master %zu decoded differs from its record; nothing written\n", i + 1); return 2; } }
         // T relative to the core master for every master: old ones from their chain (a master stored in full has none: 0), new ones as given
-        std::vector<int64_t> absT(nAll, 0); for (size_t i = 0; i < (size_t)nOld; i++) { const MasterInfo& I = rs[i].I; if (I.storage != 1) absT[i] = I.whole * 4294967296LL + (int64_t)I.frac + (I.refTier ? absT[(size_t)I.refTier - 1] : 0); }
+        std::vector<int64_t> absT; { const std::string te = absTimes(oldInfo, absT); if (!te.empty()) { printf("%s: %s; nothing written\n", src.c_str(), te.c_str()); return 2; } } absT.resize(nAll, 0);   // FU15-5
         std::vector<laess::MasterSel> sel(nAll); std::vector<MasterInfo> fixedInfo(oldInfo);
         for (size_t i = 0; i < nAll; i++) { laess::MasterSel& s = sel[i];
             if (i < (size_t)nOld) { s.whole = absT[i] >> 32; s.frac = (uint32_t)(absT[i] & 0xFFFFFFFFLL); s.name = rs[i].I.name; s.flags = rs[i].I.flags; fixedInfo[i].menu = menus[i]; }
@@ -601,7 +612,7 @@ static int laesMain(int argc, char** argv) {
         { std::vector<std::string> av = {"laes", "dec", src, dd}; std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr);   // every master, checked
           if (laesMain((int)av.size(), ap.data()) != 0) { printf("%s: the masters could not be decoded and checked; nothing written\n", src.c_str()); return 2; } }
         // T relative to the core master (from each chain; a master stored in full has none: 0) in base samples
-        std::vector<int64_t> absT(mi.size(), 0); for (size_t i = 0; i < mi.size(); i++) { const MasterInfo& I = mi[i]; if (I.storage != 1) absT[i] = I.whole * 4294967296LL + (int64_t)I.frac + (I.refTier ? absT[(size_t)I.refTier - 1] : 0); }
+        std::vector<int64_t> absT; { const std::string te = absTimes(mi, absT); if (!te.empty()) { printf("%s: %s; nothing written\n", src.c_str(), te.c_str()); return 2; } }   // FU16-1 (3)
         const std::string tmpOut = g.p + (L.flac ? "/new.flac" : "/new.wav");
         std::vector<std::string> av = {"laes", "enc", tmpOut, "--core=" + dd + "/core.wav"};
         for (size_t q = 0; q < chosen.size(); q++) { const size_t i = chosen[q]; char tb[64]; snprintf(tb, sizeof tb, "@%.17g", (double)absT[i] / 4294967296.0);

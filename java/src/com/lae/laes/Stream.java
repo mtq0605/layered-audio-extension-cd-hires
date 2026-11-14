@@ -295,16 +295,17 @@ public final class Stream {
     public static final class DecMaster { public LaesFile.MasterInfo I = new LaesFile.MasterInfo(); public String[] top = new String[2]; public String[][] lev = new String[2][]; public boolean shaOk = false; }
     // port of laes_stream.h:levelOf
     public static FileSig levelOf(DecMaster m, int c, int k) { return new FileSig(k >= m.I.stages ? m.top[c] : m.lev[c][k]); }
-    // SHA-256 of a master given as two channel files of samples >> w (as laes::hashPcm of the samples)
+    // SHA-256 of a master given as two channel files of samples >> w (as laes::hashPcm of the samples); returns false when a sample lies
+    // outside the master's word length (bits), which fails the master whatever the hash says (FU12-7 / FU13-4)
     // port of laes_stream.h:hashFiles
-    public static void hashFiles(String c0, String c1, int w, byte[] out) {
-        FileSig a = new FileSig(c0), b = new FileSig(c1); LaesFile.Sha256 s = new LaesFile.Sha256(); final long P = 1 << 20; long[] x = new long[(int) P], y = new long[(int) P]; byte[] buf = new byte[(int) P * 8];
+    public static boolean hashFiles(String c0, String c1, int w, int bits, byte[] out) {
+        FileSig a = new FileSig(c0), b = new FileSig(c1); LaesFile.Sha256 s = new LaesFile.Sha256(); final long P = 1 << 20; long[] x = new long[(int) P], y = new long[(int) P]; byte[] buf = new byte[(int) P * 8]; boolean inw = true;
         try { for (long i = 0; i < a.n; i += P) { final long e = Math.min(a.n, i + P); final int k = (int) (e - i); a.get(i, e, x, 0); b.get(i, e, y, 0); int f = 0;
-                for (int q = 0; q < k; q++) { int v = (int) (x[q] << w); buf[f++] = (byte) v; buf[f++] = (byte) (v >>> 8); buf[f++] = (byte) (v >>> 16); buf[f++] = (byte) (v >>> 24);
+                for (int q = 0; q < k; q++) { inw = inw && LaesFile.inWord(x[q] << w, bits) && LaesFile.inWord(y[q] << w, bits); int v = (int) (x[q] << w); buf[f++] = (byte) v; buf[f++] = (byte) (v >>> 8); buf[f++] = (byte) (v >>> 16); buf[f++] = (byte) (v >>> 24);
                     v = (int) (y[q] << w); buf[f++] = (byte) v; buf[f++] = (byte) (v >>> 8); buf[f++] = (byte) (v >>> 16); buf[f++] = (byte) (v >>> 24); }
                 s.update(buf, 0, f); } }
         finally { a.close(); b.close(); }
-        s.finish(out); }
+        s.finish(out); return inw; }
     // the levels below the top of one channel: lev[k] for k = stages - 1 .. 0, each from the level above by the forward stage
     // port of laes_stream.h:levelsDown
     public static String[] levelsDown(String top, int stages, String stem, long piece, int threads) {
@@ -372,7 +373,7 @@ public final class Stream {
                       finally { s.close(); d.close(); } }
                     removeFile(dk); removeFile(cur); cur = nx; }
                 D.top[c] = cur; }
-            byte[] h = new byte[32]; hashFiles(D.top[0], D.top[1], I.w, h); D.shaOk = LaesFile.eq32(h, 0, I.sha, 0);
+            byte[] h = new byte[32]; final boolean inw = hashFiles(D.top[0], D.top[1], I.w, I.bits, h); D.shaOk = inw && LaesFile.eq32(h, 0, I.sha, 0);
             for (int c = 0; c < 2; c++) D.lev[c] = levelsDown(D.top[c], I.stages, stem + "_c" + c + "_lv", piece, threads);
             out.add(D); }
         { List<LaesFile.MasterInfo> mi = new ArrayList<LaesFile.MasterInfo>(); for (DecMaster D : out) mi.add(D.I); if (!LaesFile.menuOk(mi)) return "invalid menu positions"; }

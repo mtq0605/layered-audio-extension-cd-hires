@@ -615,7 +615,7 @@ public final class Play {
         public String err = "";
         // the nodes: per decoded master, per channel; tiers' lower levels are shared
         /** port of laes_play.h:Player::MD */
-        static final class MD { int idx = -1; List<Node> own = new ArrayList<Node>(); Node[] top = new Node[2]; Node[][] lev = new Node[2][]; Hasher sha = new Hasher(); long hashed = 0; boolean shaOk = false; }
+        static final class MD { int idx = -1; List<Node> own = new ArrayList<Node>(); Node[] top = new Node[2]; Node[][] lev = new Node[2][]; Hasher sha = new Hasher(); long hashed = 0; boolean shaOk = false; boolean wide = false; }   // wide: a sample outside the word length (FU12-7)
         List<MD> chain = new ArrayList<MD>(); CoreNode[] coreSig = {new CoreNode(), new CoreNode()};
         long[] rng = {20261029L + 0x9E3779B97F4A7C15L * 1, 20261029L + 0x9E3779B97F4A7C15L * 2};
         // port of laes_play.h:Player::xs64Apply / xs64Jump (2026-11-12): the derived 16-bit dither's xorshift64 state after `steps` steps
@@ -697,7 +697,7 @@ public final class Play {
                     out[outOff + i * 2 + c] = (int) v; }
                 pos += k; if (noHash) { if (pos >= C.frames) done = true; return k; }
                 advanceHashes(false);
-                if (pos >= C.frames) { advanceHashes(true); ok = true; for (MD d : chain) { byte[] h = new byte[32]; d.sha.finish(h); d.shaOk = java.util.Arrays.equals(h, f.ms.get(d.idx).I.sha); ok &= d.shaOk; } done = true; }
+                if (pos >= C.frames) { advanceHashes(true); ok = true; for (MD d : chain) { byte[] h = new byte[32]; d.sha.finish(h); d.shaOk = !d.wide && java.util.Arrays.equals(h, f.ms.get(d.idx).I.sha); ok &= d.shaOk; } done = true; }
                 return k; }
             catch (RuntimeException e) { err = String.valueOf(e.getMessage()); return 0; }
             catch (OutOfMemoryError e) { err = "bad allocation"; return 0; } }
@@ -785,6 +785,7 @@ public final class Play {
         private void hashTo(final MD d, long want) { final LaesFile.MasterInfo I = f.ms.get(d.idx).I;
             while (d.hashed < want) { final long h0 = d.hashed, e = Math.min(want, d.hashed + unit); final int na = (int) (e - h0); if (ha.length < na) { ha = new long[na]; hb = new long[na]; } final long[] a = ha, b = hb;   // Java: reused arrays
                 bothChannels(new Chan() { public void run(int c) { d.top[c].get(h0, e, c != 0 ? b : a, 0); } });
+                for (int i = 0; i < na; i++) if (!LaesFile.inWord(a[i] << I.w, I.bits) || !LaesFile.inWord(b[i] << I.w, I.bits)) d.wide = true;   // FU12-7 / FU13-4
                 final byte[] buf = d.sha.take(na * 8); for (int i = 0; i < na; i++) { final int l = (int) (a[i] << I.w), r = (int) (b[i] << I.w);
                     for (int q = 0; q < 4; q++) { buf[i * 8 + q] = (byte) (l >>> (8 * q)); buf[i * 8 + 4 + q] = (byte) (r >>> (8 * q)); } }
                 d.sha.push(buf, na * 8, true); d.hashed = e; } }

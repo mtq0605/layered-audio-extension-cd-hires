@@ -224,13 +224,14 @@ inline bool decodeLayerToFile(In& in, long long off, long long len, int64_t n, i
 // of 4096; level k uses piece << k).
 struct DecMaster { laes::MasterInfo I; std::string top[2]; std::vector<std::string> lev[2]; bool shaOk = false; };
 inline std::unique_ptr<Sig> levelOf(const DecMaster& m, int c, int k) { return std::unique_ptr<Sig>(new FileSig(k >= m.I.stages ? m.top[c] : m.lev[c][(size_t)k])); }
-// SHA-256 of a master given as two channel files of samples >> w (as laes::hashPcm of the samples)
-inline void hashFiles(const std::string& c0, const std::string& c1, int w, uint8_t out[32]) {
-    FileSig a(c0), b(c1); laes::Sha256 s; V x, y; std::vector<uint8_t> buf; const int64_t P = 1 << 20;
+// SHA-256 of a master given as two channel files of samples >> w (as laes::hashPcm of the samples); returns false when a sample lies
+// outside the master's word length (bits), which fails the master whatever the hash says (FU12-7 / FU13-4)
+inline bool hashFiles(const std::string& c0, const std::string& c1, int w, int bits, uint8_t out[32]) {
+    FileSig a(c0), b(c1); laes::Sha256 s; V x, y; std::vector<uint8_t> buf; const int64_t P = 1 << 20; bool inw = true;
     for (int64_t i = 0; i < a.n; i += P) { const int64_t e = std::min(a.n, i + P); x.resize((size_t)(e - i)); y.resize((size_t)(e - i)); a.get(i, e, x.data()); b.get(i, e, y.data()); buf.clear();
-        for (int64_t k = 0; k < e - i; k++) for (const int64_t v0 : {x[(size_t)k], y[(size_t)k]}) { const uint32_t v = (uint32_t)(int32_t)(v0 << w); for (int q = 0; q < 4; q++) buf.push_back((uint8_t)(v >> (8 * q))); }
+        for (int64_t k = 0; k < e - i; k++) for (const int64_t v0 : {x[(size_t)k], y[(size_t)k]}) { inw = inw && laes::inWord(v0 << w, bits); const uint32_t v = (uint32_t)(int32_t)(v0 << w); for (int q = 0; q < 4; q++) buf.push_back((uint8_t)(v >> (8 * q))); }
         s.update(buf.data(), buf.size()); }
-    s.final(out); }
+    s.final(out); return inw; }
 // the levels below the top of one channel: lev[k] for k = stages - 1 .. 0, each from the level above by the forward stage
 inline void levelsDown(const std::string& top, int stages, std::vector<std::string>& lev, const std::string& stem, int64_t piece, int threads) {
     lev.assign((size_t)stages, std::string());
@@ -284,7 +285,7 @@ inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& cor
                   for (int64_t a = 0; a < s.n; a += P) { invPiece(s, d, nh, a, std::min(s.n, a + P), x, threads); o.put(x.data(), x.size()); } o.close(); }
                 remove(dk.c_str()); remove(cur.c_str()); cur = nx; }
             D.top[c] = cur; }
-        uint8_t h[32]; hashFiles(D.top[0], D.top[1], I.w, h); D.shaOk = memcmp(h, I.sha, 32) == 0;
+        uint8_t h[32]; const bool inw = hashFiles(D.top[0], D.top[1], I.w, I.bits, h); D.shaOk = inw && memcmp(h, I.sha, 32) == 0;
         for (int c = 0; c < 2; c++) levelsDown(D.top[c], I.stages, D.lev[c], stem + "_c" + std::to_string(c) + "_lv", piece, threads);
         out.push_back(D); }
     { std::vector<laes::MasterInfo> mi; for (const auto& D : out) mi.push_back(D.I); if (!laes::menuOk(mi)) return "invalid menu positions"; }

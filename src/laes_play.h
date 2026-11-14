@@ -222,7 +222,7 @@ struct Player {
     int64_t pos = 0; bool done = false, ok = false, noHash = false;
     std::string err;
     // the nodes: per decoded master, per channel; tiers' lower levels are shared
-    struct MD { int idx = -1; std::vector<std::unique_ptr<Node>> own; Node* top[2] = {nullptr, nullptr}; std::vector<Node*> lev[2]; Hasher sha; int64_t hashed = 0; bool shaOk = false; };
+    struct MD { int idx = -1; std::vector<std::unique_ptr<Node>> own; Node* top[2] = {nullptr, nullptr}; std::vector<Node*> lev[2]; Hasher sha; int64_t hashed = 0; bool shaOk = false; bool wide = false; };   // wide: a sample outside the word length (FU12-7)
     std::vector<std::unique_ptr<MD>> chain; CoreNode coreSig[2];
     uint64_t rng[2] = {20261029ull + 0x9E3779B97F4A7C15ull * 1, 20261029ull + 0x9E3779B97F4A7C15ull * 2};
     // the derived 16-bit dither's xorshift64 state after `steps` steps (2 per sample, SPEC 10.1), in O(log steps): the step is linear over
@@ -541,6 +541,7 @@ inline void Player::advanceHashes(double frac) {   // every master of the chain 
         V a, b; std::vector<uint8_t> buf;
         while (d->hashed < want) { const int64_t e = std::min(want, d->hashed + (int64_t)(1 << 16)); a.resize((size_t)(e - d->hashed)); b.resize(a.size());
             bothChannels([&](int c) { d->top[c]->get(d->hashed, e, (c ? b : a).data()); });
+            for (size_t i = 0; i < a.size(); i++) if (!laes::inWord(a[i] << I.w, I.bits) || !laes::inWord(b[i] << I.w, I.bits)) d->wide = true;   // FU12-7 / FU13-4
             LAESP_PROF(4); buf.resize(a.size() * 8); for (size_t i = 0; i < a.size(); i++) { const uint32_t l = (uint32_t)(int32_t)(a[i] << I.w), r = (uint32_t)(int32_t)(b[i] << I.w); for (int q = 0; q < 4; q++) { buf[i * 8 + q] = (uint8_t)(l >> (8 * q)); buf[i * 8 + 4 + q] = (uint8_t)(r >> (8 * q)); } }
             d->sha.push(std::move(buf)); buf = std::vector<uint8_t>(); d->hashed = e; } } }
 inline int64_t Player::read(int32_t* out, int64_t frames) {
@@ -559,7 +560,7 @@ inline int64_t Player::read(int32_t* out, int64_t frames) {
             out[(size_t)(i * 2 + c)] = (int32_t)v; } }
         pos += k; if (noHash) { if (pos >= C.frames) done = true; return k; }
         advanceHashes((double)pos / (double)C.frames);
-        if (pos >= C.frames) { advanceHashes(1.0); ok = true; for (auto& d : chain) { uint8_t h[32]; d->sha.final(h); d->shaOk = !memcmp(h, f->ms[(size_t)d->idx].I.sha, 32); ok &= d->shaOk; } done = true; }
+        if (pos >= C.frames) { advanceHashes(1.0); ok = true; for (auto& d : chain) { uint8_t h[32]; d->sha.final(h); d->shaOk = !d->wide && !memcmp(h, f->ms[(size_t)d->idx].I.sha, 32); ok &= d->shaOk; } done = true; }
         return k; }
     catch (const std::exception& e) { err = e.what(); return 0; } }
 }  // namespace laesp

@@ -104,6 +104,10 @@ struct Pcm { int rate = 0, bits = 0; V c[2]; int64_t frames() const { return (in
 inline void hashPcm(const Pcm& p, uint8_t out[32]) { Sha256 s; std::vector<uint8_t> b; b.reserve(1 << 16);
     for (int64_t i = 0; i < p.frames(); i++) for (int c = 0; c < 2; c++) { uint32_t v = (uint32_t)(int32_t)p.c[c][i]; for (int k = 0; k < 4; k++) b.push_back((uint8_t)(v >> (8 * k))); if (b.size() >= (1 << 16)) { s.update(b.data(), b.size()); b.clear(); } }
     s.update(b.data(), b.size()); s.final(out); }
+// FU12-7 / FU13-4: a decoded sample outside the master's word length (bits) fails the master's check, whatever its SHA-256 says (the
+// hash covers only the low 32 bits of each value)
+inline bool inWord(int64_t v, int bits) { return v >= -(1LL << (bits - 1)) && v < (1LL << (bits - 1)); }
+inline bool pcmInWord(const Pcm& p) { for (int c = 0; c < 2; c++) for (const int64_t v : p.c[c]) if (!inWord(v, p.bits)) return false; return true; }
 inline void hashCore(const Pcm& p, uint8_t out[32]) { Sha256 s; std::vector<uint8_t> b; b.reserve(1 << 16);   // int16 LE, as in the "data" chunk
     for (int64_t i = 0; i < p.frames(); i++) for (int c = 0; c < 2; c++) { uint16_t v = (uint16_t)(int16_t)p.c[c][i]; b.push_back((uint8_t)v); b.push_back((uint8_t)(v >> 8)); if (b.size() >= (1 << 16)) { s.update(b.data(), b.size()); b.clear(); } }
     s.update(b.data(), b.size()); s.final(out); }
@@ -200,7 +204,7 @@ inline std::string decodeLaes(const std::vector<uint8_t>& body, const Pcm& core,
             top[c] = x; m.c[c].resize(I.frames); for (int64_t i = 0; i < I.frames; i++) m.c[c][i] = x[i] << I.w; }
         std::vector<std::vector<V>> lv(2, std::vector<V>(I.stages + 1));   // every level of this master, for later masters that refer to it
         for (int c = 0; c < 2; c++) { lv[c][I.stages] = top[c]; for (int k = I.stages; k > 0; k--) { V d; laesfast::fwd(lv[c][k], lv[c][k - 1], d); } }
-        uint8_t h[32]; hashPcm(m, h); shaOk.push_back(memcmp(h, I.sha, 32) == 0); levs.push_back(lv); info.push_back(I); out.push_back(m); }
+        uint8_t h[32]; hashPcm(m, h); shaOk.push_back(memcmp(h, I.sha, 32) == 0 && pcmInWord(m)); levs.push_back(lv); info.push_back(I); out.push_back(m); }
     if (!menuOk(info)) return "invalid menu positions";
     if (r.pos != r.n) return "unexpected bytes after the last master";
     return ""; }

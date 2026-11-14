@@ -60,6 +60,10 @@ public final class LaesFile {
     public static void hashPcm(Pcm p, byte[] out) { Sha256 s = new Sha256(); byte[] b = new byte[1 << 16]; int fill = 0;
         for (int i = 0; i < p.frames(); i++) for (int c = 0; c < 2; c++) { final int v = (int) p.c[c][i]; b[fill++] = (byte) v; b[fill++] = (byte) (v >>> 8); b[fill++] = (byte) (v >>> 16); b[fill++] = (byte) (v >>> 24); if (fill >= (1 << 16)) { s.update(b, 0, fill); fill = 0; } }
         s.update(b, 0, fill); s.finish(out); }
+    // port of laes_file.h:inWord / pcmInWord (FU12-7 / FU13-4): a decoded sample outside the master's word length fails the master's check,
+    // whatever its SHA-256 says (the hash covers only the low 32 bits of each value)
+    public static boolean inWord(long v, int bits) { return v >= -(1L << (bits - 1)) && v < (1L << (bits - 1)); }
+    public static boolean pcmInWord(Pcm p) { for (int c = 0; c < 2; c++) for (long v : p.c[c]) if (!inWord(v, p.bits)) return false; return true; }
     // port of laes_file.h:hashCore  (int16 LE, as in the "data" chunk)
     public static void hashCore(Pcm p, byte[] out) { Sha256 s = new Sha256(); byte[] b = new byte[1 << 16]; int fill = 0;
         for (int i = 0; i < p.frames(); i++) for (int c = 0; c < 2; c++) { final int v = (int) p.c[c][i]; b[fill++] = (byte) v; b[fill++] = (byte) (v >>> 8); if (fill >= (1 << 16)) { s.update(b, 0, fill); fill = 0; } }
@@ -172,7 +176,7 @@ public final class LaesFile {
                 top[c] = x; m.c[c] = new long[(int) I.frames]; for (int i = 0; i < I.frames; i++) m.c[c][i] = x[i] << I.w; }
             long[][][] lv = new long[2][I.stages + 1][];   // every level of this master, for later masters that refer to it
             for (int c = 0; c < 2; c++) { lv[c][I.stages] = top[c]; for (int k = I.stages; k > 0; k--) { lv[c][k - 1] = Lift.fwd(lv[c][k])[0]; } }
-            byte[] h = new byte[32]; hashPcm(m, h); shaOk.add(eq32(h, 0, I.sha, 0)); levs.add(lv); info.add(I); out.add(m); }
+            byte[] h = new byte[32]; hashPcm(m, h); shaOk.add(eq32(h, 0, I.sha, 0) && pcmInWord(m)); levs.add(lv); info.add(I); out.add(m); }
         if (!menuOk(info)) return "invalid menu positions";
         if (r.pos != r.n) return "unexpected bytes after the last master";
         return "";

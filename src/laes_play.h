@@ -465,15 +465,19 @@ inline bool File::importIndex(const uint8_t* d, size_t n) {
     return true; }
 inline void File::indexLayers(const std::atomic<bool>* cancel, int threads) {
     const std::vector<LayerRef> ls = layerList(); typedef LayerRef L;
-    std::atomic<size_t> next{0};
-    auto work = [&] { for (;;) { const size_t i = next++; if (i >= ls.size()) return; const L& l = ls[i]; std::shared_ptr<LayerIdx> ix = layerIndex(l.off);
+    // a failure in any of the threads (a read of the file fails, no memory, no thread) stops the others and comes back as this call's
+    // exception once every thread has ended; before 2026-11-14 it ended the whole process (an exception leaving a thread: std::terminate)
+    std::atomic<size_t> next{0}; std::atomic<bool> failed{false}; std::mutex em; std::exception_ptr err;
+    auto fault = [&] { std::lock_guard<std::mutex> g(em); if (!err) err = std::current_exception(); failed = true; };
+    auto work = [&] { try { for (;;) { const size_t i = next++; if (i >= ls.size() || failed) return; const L& l = ls[i]; std::shared_ptr<LayerIdx> ix = layerIndex(l.off);
             if ((int64_t)ix->known() * l.B >= l.n) continue;   // noted already
             BitRS rd; rd.src = &payload; rd.off = l.off; rd.len = l.len; V blk;
-            for (int64_t s = 0, kb = 0; s < l.n; s += l.B, kb++) { if (cancel && cancel->load()) return;
+            for (int64_t s = 0, kb = 0; s < l.n; s += l.B, kb++) { if (failed || (cancel && cancel->load())) return;
                 ix->note((size_t)kb, rd.pos); const int64_t k = (int64_t)std::min<int64_t>(l.B, l.n - s); blk.resize((size_t)k);
-                if (!laes::decodeBlock(rd, blk.data(), k)) break; } } };
+                if (!laes::decodeBlock(rd, blk.data(), k)) break; } } } catch (...) { fault(); } };
     std::vector<std::thread> ts; const int nt = std::max(1, std::min<int>(threads, (int)ls.size()));
-    for (int t = 1; t < nt; t++) ts.emplace_back(work); work(); for (auto& t : ts) t.join(); }
+    try { for (int t = 1; t < nt; t++) ts.emplace_back(work); } catch (...) { fault(); }
+    work(); for (auto& t : ts) t.join(); if (err) std::rethrow_exception(err); }
 
 // ---- player
 inline Player::MD* Player::need(int m) {   // the nodes of master m (and of its tiers, first)

@@ -77,7 +77,8 @@ LAE_API int LAE_CALL lae_get_info(const lae_track* t, lae_info* out);
    lae_pack_count: the number of packs, pack 0 included (1 = an ordinary file). lae_pack_info: pack k's master rate, octave count and
    name (pack 0: the name of its optional "LNAM" record, else ""). lae_select_pack: the pack the next lae_start decodes; the track is unstarted afterwards and lae_get_info
    describes that pack (master_rate, stages, cutoff_hz, master_frames). The first selection of a further pack checks its entropy
-   streams to their end (as the open does for pack 0). A pack is chosen by the user only, by number: never automatically, never by a
+   streams to their end (as the open does for pack 0), unless the player's record of the file (see lae_seek) already holds that pack's
+   result; the result (passed with its checkpoints, or failed) is then added to the record. A pack is chosen by the user only, by number: never automatically, never by a
    name or a rate, and the choice is not written into the file. All return -1 for a bad track or pack number; lae_select_pack also
    returns -1 (without a message) when the pack fails its check. Either way the track is unstarted afterwards: after a failure the
    pack selected before stays selected, and lae_start must be called again before lae_read. */
@@ -97,7 +98,8 @@ LAE_API int64_t LAE_CALL lae_read(lae_track* t, int32_t* out, int64_t frames);
    last byte fails the open, as a damaged chunk does), a checkpoint every 30 s. These are kept in the player's own folder under that SHA-256
    (%APPDATA%\LAE\lae_index\<sha256>.idx on Windows, $XDG_CACHE_HOME/lae/lae_index or ~/.cache/lae/lae_index elsewhere; the environment
    variable LAE_INDEX_DIR names another folder, "off" none), at most 256 MB (least recently used records deleted first), never in the
-   media file. A missing or damaged record only makes the next open check again. Returns 0 or -1. */
+   media file. The record holds the result of every extension pack checked so far (record version 2, 2026-11-15; a version 1 record is
+   checked again and replaced). A missing or damaged record only makes the next open check again. Returns 0 or -1. */
 LAE_API int LAE_CALL lae_seek(lae_track* t, uint64_t frame);
 /* since lae_start: samples held by the decoder's hard limiter, and whether a stream error occurred (both may be NULL) */
 LAE_API int LAE_CALL lae_stats(const lae_track* t, uint64_t* limited, int* stream_error);

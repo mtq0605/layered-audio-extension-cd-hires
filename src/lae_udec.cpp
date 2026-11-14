@@ -8,7 +8,9 @@
 //   lae_udec info <file>                the format, every choice the file offers, and the checks of that format
 //   lae_udec dec <file> <out.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>] [--verify-all] [--threads=<n>]
 //                                       decodes one choice (default: LAEY the route full at the master rate, LAES the default entry the file names, else the core master)
-//   lae_udec verify <file> [--pick=..]  every check of the format, nothing written (LAES: every master's SHA-256 in one run)
+//   lae_udec verify <file> [--pick=..]  every check of the format, nothing written (LAES: every master's SHA-256 in one run; LAEY:
+//                                       every extension pack decoded to its end on the route full at its master rate, one line per pack)
+// An existing output is replaced only after two answers "yes" on a console, or with --overwrite (decision 21, 2026-11-15).
 // A choice: LAEY cd | cd24 (core | core24 in a 48 kHz file) | 16_<rate> | full_<rate> (also 16, full = at the master rate); LAES core | master_<k>_<rate>_<bits> |
 // master_<k>_level_<rate>_<bits> | derived16_<rate>_from_<name>. <rate>:<bits> picks LAEY the fullest route at that rate and bit depth (16 = route 16, which has no depth layer); LAES (SPEC 10.3): <rate>:<bits>,
 // master:<k> (k = the number shown) and name:<text> (the publisher's name, exactly) fit masters themselves only; when several masters fit,
@@ -29,6 +31,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <algorithm>
 #include "lae_api.h"
 #include "laes_pick.h"   // the tick list for several masters that fit one --pick
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8
@@ -49,6 +52,19 @@ bool stderrIsTty() {
 }
 std::string optOf(int argc, char** argv, const char* key) { const std::string k = std::string(key) + "="; for (int i = 1; i < argc; i++) if (!strncmp(argv[i], k.c_str(), k.size())) return argv[i] + k.size(); return ""; }
 bool flagOf(int argc, char** argv, const char* key) { for (int i = 1; i < argc; i++) if (!strcmp(argv[i], key)) return true; return false; }
+// Decision 21 (2026-11-15): an existing output is not replaced silently. On a console (input and output both a console, as the tick
+// list) the person is asked twice and only two answers "yes" replace it; without a console it is refused unless --overwrite was given.
+bool answeredYes() { char b[256]; if (!fgets(b, sizeof b, stdin)) return false; std::string s(b);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    size_t k = 0; while (k < s.size() && (s[k] == ' ' || s[k] == '\t')) k++; return s.substr(k) == "yes"; }
+bool mayWrite(const std::string& out, bool overwrite) {
+    std::error_code ec; if (!fs::exists(fs::u8path(out), ec) || overwrite) return true; const char* o = out.c_str();
+    if (laespick::interactive()) {
+        printf("\"%s\" already exists. Replace it? Type yes to continue: \n\"%s\" %s", o, o, u8"已经存在。要替换吗？输入 yes 继续："); fflush(stdout);
+        if (answeredYes()) { printf("Really replace \"%s\"? It cannot be undone. Type yes again: \n%s\"%s\" %s", o, u8"确定要替换 ", o, u8" 吗？替换后无法恢复。再输入一次 yes："); fflush(stdout);
+            if (answeredYes()) return true; } }
+    printf("\"%s\" already exists; it was not replaced (give --overwrite to replace it).\n\"%s\" %s\n", o, o, u8"已经存在，没有替换（加 --overwrite 才替换）。");
+    return false; }
 const char* resultText(int r) { return r == 1 ? "passed" : r == 0 ? "FAILED" : "  --  "; }
 
 void printFormat(const lae_probe_info& pi, const char* path, bool damaged) {
@@ -118,8 +134,10 @@ std::vector<uint8_t> wavHeader(int rate, int bits, uint64_t frames) {
 void usage() {
     printf("lae_udec: one decoder for LAEY (extension LAE1) and LAES (extension LAE2); the format is recognised by content\n"
            "  lae_udec info <file>\n"
-           "  lae_udec dec <file> <out.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>] [--verify-all] [--threads=<n>]\n"
-           "  lae_udec verify <file> [--pick=..]\n"); }
+           "  lae_udec dec <file> <out.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>] [--verify-all] [--threads=<n>] [--overwrite]\n"
+           "  lae_udec verify <file> [--pick=..]\n"
+           "  --overwrite: replace an existing output without asking (on a console it is asked twice; otherwise it is refused)\n"
+           "  %s\n", u8"--overwrite：不问就替换已有的输出文件（在控制台上会问两次；不在控制台上就拒绝）"); }
 }
 
 int main(int argc, char** argv) {
@@ -165,13 +183,27 @@ int main(int argc, char** argv) {
         for (long n : got) for (int i : several) if ((long)i + 1 == n) todo.push_back(i);
         if (todo.empty()) { printf("nothing ticked: nothing written\n"); lae_any_close(a); return 1; } }
     const bool all = cmd == "verify" || flagOf(argc, argv, "--verify-all"); const int threads = atoi(optOf(argc, argv, "--threads").c_str());
-    int worst = 0;
+    const bool overwrite = flagOf(argc, argv, "--overwrite");
+    // decision 3 (2026-11-15, F06-5 (2)): LAEY verify decodes every extension pack completely (the main body and each further pack, route
+    // full at its master rate, to its last frame), one result line per pack; a pack that failed its check at open is a failed line.
+    // The pack's checks at open are the list entries "every entropy stream of the extension" (pack 0) and "... of pack <k> ..." (pack k).
+    const bool packLines = cmd == "verify" && info.format == LAE_FORMAT_LAEY && info.usable; std::vector<std::string> packLabel{"pack 0 (the main body)"};
+    int worst = 0, packsFailed = 0;
+    if (packLines) {
+        for (int i = 0; i < info.checks; i++) { lae_any_check c; if (lae_any_get_check(a, i, &c)) break; const std::string ob = c.object, lead = "every entropy stream of ";
+            if (ob.rfind(lead + "pack ", 0) != 0) continue; packLabel.push_back(ob.substr(lead.size()));
+            if (c.result == 0) { printf("%s: FAILED (not decoded: its entropy streams failed the check at open)\n", packLabel.back().c_str()); packsFailed++; worst = 2; } }
+        for (int k = 0; k < (int)packLabel.size(); k++) { int hit = -1;   // the pack's route full at its master rate: its last full choice
+            for (int i = 0; i < info.choices; i++) { lae_any_choice c; lae_any_get_choice(a, i, &c); if (lae_any_choice_pack(a, i) == k && c.route == LAE_ROUTE_FULL) hit = i; }
+            if (hit >= 0 && std::find(todo.begin(), todo.end(), hit) == todo.end()) todo.push_back(hit); } }
     for (const int one : todo) {
-    if (lae_any_start(a, one, all ? LAE_ANY_VERIFY_ALL : 0, threads, err, (int)sizeof err)) { printf("cannot start the choice: %s\n", err); lae_any_close(a); return 3; }
-    lae_any_choice C; lae_any_get_choice(a, one, &C); printChoices(a, info, one);
-
+    lae_any_choice C; lae_any_get_choice(a, one, &C);
     std::string out = cmd == "dec" ? pos[1] : "";
     if (cmd == "dec" && todo.size() > 1) { const fs::path p = fs::u8path(out); out = (p.parent_path() / fs::u8path(p.stem().u8string() + "_" + C.name + p.extension().u8string())).u8string(); }
+    if (cmd == "dec" && !mayWrite(out, overwrite)) { printf("nothing written for %s\n", C.name); if (worst < 1) worst = 1; continue; }   // decision 21
+    if (lae_any_start(a, one, all ? LAE_ANY_VERIFY_ALL : 0, threads, err, (int)sizeof err)) { printf("cannot start the choice: %s\n", err); lae_any_close(a); return 3; }
+    if (!packLines || one == todo.front()) printChoices(a, info, one);
+
     const std::string part = out + ".part"; FILE* fo = nullptr; const int by = C.bits / 8;
     if (cmd == "dec") { std::error_code ec;
         if (fs::exists(fs::u8path(part), ec)) { printf("%s exists and was not made by this run: remove it or choose another name; nothing written\n", part.c_str()); lae_any_close(a); return 3; }
@@ -194,7 +226,11 @@ int main(int argc, char** argv) {
         if (code == 0) { fs::rename(fs::u8path(part), fs::u8path(out), ec); if (ec) { printf("cannot rename %s to %s\n", part.c_str(), out.c_str()); code = 3; } }
         if (code != 0) { fs::remove(fs::u8path(part), ec); printf("nothing written%s\n", failed ? " (a check failed; the file's own audio is still read by any WAV / FLAC tool)" : ""); } }
     if (code == 0) { if (cmd == "dec") printf("%s decode OK: %s -> %s | %s, %d Hz %d-bit%s, %llu frames/ch | every check passed\n", lae_format_name(info.format), in, out.c_str(), C.name, C.rate, shownBits(C), C.route == LAE_ROUTE_16 ? " (in 24-bit words)" : "", (unsigned long long)got);
-        else printf("%s verify OK: %s | %s decoded to its end, every check passed\n", lae_format_name(info.format), in, C.name); }
-    else if (cmd == "verify") printf("%s verify FAILED: %s\n", lae_format_name(info.format), in);
+        else if (!packLines) printf("%s verify OK: %s | %s decoded to its end, every check passed\n", lae_format_name(info.format), in, C.name); }
+    else if (cmd == "verify" && !packLines) printf("%s verify FAILED: %s\n", lae_format_name(info.format), in);
+    if (packLines) { const int k = lae_any_choice_pack(a, one); if (code) packsFailed++;
+        printf("%s: %s decoded to its end, %llu frames: %s\n", k >= 0 && k < (int)packLabel.size() ? packLabel[(size_t)k].c_str() : "pack ?", C.name, (unsigned long long)got, code ? "FAILED" : "passed"); }
     if (code > worst) worst = code; }
+    if (packLines) { if (worst == 0) printf("LAEY verify OK: %s | every extension pack decoded to its end (%zu pack%s), every check passed\n", in, packLabel.size(), packLabel.size() == 1 ? "" : "s");
+        else printf("LAEY verify FAILED: %s | %d result line%s FAILED\n", in, packsFailed, packsFailed == 1 ? "" : "s"); }
     lae_any_close(a); return worst; }

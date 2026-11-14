@@ -26,7 +26,13 @@ using namespace lae;
 typedef int32_t i32; static const int N = mdct::N;
 
 static const int32_t* tab(int s, int& half) { switch (s) { case 0: half = kHalfLen0; return kHalf0; case 1: half = kHalfLen1; return kHalf1; case 2: half = kHalfLen2; return kHalf2; default: half = kHalfLen3; return kHalf3; } }
-static inline int64_t rq31(int64_t a) { return (a + ((int64_t)1 << 30)) >> 31; }
+// Decision 13 (2026-11-15, F05-6 point 5): the sums and products of the signal stages after the IMDCT (half-band up and down, the mix
+// with the frequency layer, the final rounding) are taken modulo 2^64, two's complement (spec Appendix C), in unsigned arithmetic, so
+// that a corrupt stream that is not flagged gives one defined value on every platform. A valid file never comes near 2^63: its samples
+// are the ones the former signed code gave.
+static inline uint64_t w64(int64_t v) { return (uint64_t)v; }
+static inline int64_t s64(uint64_t v) { int64_t r; memcpy(&r, &v, 8); return r; }   // the two's-complement value of v
+static inline int64_t rq31w(uint64_t a) { return s64(a + ((uint64_t)1 << 30)) >> 31; }
 struct Rd { const uint8_t* p; size_t n, i = 0; int32_t i32v() { int32_t v = 0; if (i + 4 <= n) memcpy(&v, p + i, 4); i += 4; return v; } const uint8_t* take(size_t k) { const uint8_t* q = p + i; i += k; return q; } };
 
 // ---- one range-coded stream, decoded one row of roots at a time; frame(m) returns the dequantised coefficients of frame m
@@ -35,6 +41,8 @@ struct PlaneStream {
     // checkpoints for seeking: the decoder state before the row at frame M0, kept every `every` rows (about 4 s of the stream)
     struct Mark { long M0; Dec dc; std::unique_ptr<Walker<Dec>> w; };
     std::vector<Mark> marks; long every = 1;
+    // decision 34 (2026-11-15, F05-4): false = no checkpoints are kept (lae_dec converts the whole file and never seeks; the player keeps them)
+    bool keepMarks = true;
     // F05-2 (2026-11-14): the stream header's rate and K are the file's own statement and have no upper limit, so nothing that costs
     // memory or time follows them alone. srate = the sample rate of this stream's layer from the main header (base for the depth layer,
     // the master rate for the frequency layer): the checkpoint spacing is counted with it. lim = min(K, frames of the layer): rows from
@@ -49,7 +57,7 @@ struct PlaneStream {
         every = srate > 0 ? std::max<long>(1, (long)(4.0 * srate / ((double)part::ROOTT * N))) : 64; return true; }
     const int32_t* frame(long m) {   // frames are requested in increasing order (seekTo excepted)
         while (!(m >= row0 && m < row0 + rows)) { if (w->M0 >= lim) return nullptr;
-            if ((w->M0 / part::ROOTT) % every == 0 && (marks.empty() || marks.back().M0 < w->M0)) marks.push_back(Mark{w->M0, dc, std::unique_ptr<Walker<Dec>>(new Walker<Dec>(*w))});
+            if (keepMarks && (w->M0 / part::ROOTT) % every == 0 && (marks.empty() || marks.back().M0 < w->M0)) marks.push_back(Mark{w->M0, dc, std::unique_ptr<Walker<Dec>>(new Walker<Dec>(*w))});
             row0 = w->M0; rows = w->rowFrames(); std::fill(rowBuf.begin(), rowBuf.end(), 0); tokens.clear(); w->row(dc, tokens, false, rowBuf, row0); }
         return &rowBuf[(size_t)(m - row0) * N]; }
     // the next frame(m') with m' >= m continues from the nearest checkpoint at or before m, or from the current state when that is closer
@@ -150,18 +158,18 @@ struct BaseSrc : Cached {   // 4096 x CD - dither + 16 x depth, base rate, padde
     void ditherAt(long i) { st[0] = xsJump(0x12345678u, 2ULL * (uint64_t)i); st[1] = xsJump(0x12345678u + 0x9E3779B9u, 2ULL * (uint64_t)i); } };   // the state after i samples (2 steps per sample)
 struct UpSrc : Cached { Src* in; const int32_t* h; int half;
     UpSrc(Src* x, int s) : in(x) { h = tab(s, half); n = 2 * x->n; }
-    int64_t compute(long o) override { if ((o & 1) == 0) return in->get(o / 2); int64_t a = 0;
-        for (int j = 1, t = 0; j <= half; j += 2, t++) a += (int64_t)h[t] * (mirror(*in, (o - j) / 2) + mirror(*in, (o + j) / 2));
-        return rq31(2 * a); } };
+    int64_t compute(long o) override { if ((o & 1) == 0) return in->get(o / 2); uint64_t a = 0;   // decision 13: modulo 2^64
+        for (int j = 1, t = 0; j <= half; j += 2, t++) a += w64(h[t]) * (w64(mirror(*in, (o - j) / 2)) + w64(mirror(*in, (o + j) / 2)));
+        return rq31w(2 * a); } };
 struct MixSrc : Cached { Src* up; ImdctStream *mt, *st; int ch;   // up(base) truncated / zero-padded to Lp, + 16 x frequency layer (L/R from M/S)
-    int64_t compute(long i) override { int64_t u = i < up->n ? up->get(i) : 0; if (!mt) return u; int64_t m = mt->get(i), s = st->get(i); int64_t r = m - (s >> 1); return u + 16 * (ch ? r : r + s); } };   // 64-bit: no overflow on any input
+    int64_t compute(long i) override { int64_t u = i < up->n ? up->get(i) : 0; if (!mt) return u; int64_t m = mt->get(i), s = st->get(i); int64_t r = m - (s >> 1); return s64(w64(u) + 16 * w64(ch ? r : r + s)); } };   // decision 13: modulo 2^64
 struct FreqSrc : Cached { ImdctStream *mt, *st; int ch;   // frequency layer alone (L/R), 1/16 LSB24 (leak compensation, LEAKOUT)
     int64_t compute(long i) override { int64_t m = mt->get(i), s = st->get(i), r = m - (s >> 1); return 16 * (ch ? r : r + s); } };
 struct DecSrc : Cached { Src* in; const int32_t* h; int half;
     DecSrc(Src* x, int s) : in(x) { h = tab(s, half); n = x->n / 2; }
-    int64_t compute(long i) override { long c = 2 * i; int64_t a = in->get(c) * ((int64_t)1 << 30);
-        for (int j = 1, t = 0; j <= half; j += 2, t++) a += (int64_t)h[t] * (mirror(*in, c - j) + mirror(*in, c + j));
-        return rq31(a); } };
+    int64_t compute(long i) override { long c = 2 * i; uint64_t a = w64(in->get(c)) << 30;   // decision 13: modulo 2^64 (F05-6 point 5: this product overflowed in signed arithmetic)
+        for (int j = 1, t = 0; j <= half; j += 2, t++) a += w64(h[t]) * (w64(mirror(*in, c - j)) + w64(mirror(*in, c + j)));
+        return rq31w(a); } };
 
 // ---- one track: open (all checks, in the order of the command-line decoder), then read the output frames in order
 struct Decoder {
@@ -279,6 +287,8 @@ struct Decoder {
         for (size_t i = 0; i < ps.size(); i++) if (!ok[i]) { saved.clear(); return "LAE chunk damaged (entropy stream " + std::to_string(i) + " does not end at its last byte): refusing to decode; the CD audio itself still plays"; }
         return ""; }
     // checkpoints saved by checkAll (now or in an earlier session) for the streams this route decodes
+    // decision 34: no checkpoints are kept while decoding (a whole-file conversion that never seeks: lae_dec)
+    void noSeekMarks() { for (PlaneStream* p : allStreams()) p->keepMarks = false; }
     void useSaved(const std::vector<std::vector<SavedMark>>& saved) { std::vector<PlaneStream*> ps = allStreams();
         if (saved.size() != ps.size()) return; for (size_t i = 0; i < ps.size(); i++) restoreMarks(*ps[i], saved[i]); }
     int seekThreads = (int)std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
@@ -290,7 +300,7 @@ struct Decoder {
     // clipPos (optional, encoder's limiter map): positions of limited samples per channel, in master-rate frames of the padded signal.
     long read(int32_t* out, long frames, std::vector<int32_t>* clipPos = nullptr) {
         long n = std::min(frames, Lo - pos);
-        for (long k = 0; k < n; k++, pos++) for (int c = 0; c < 2; c++) { int64_t v = (outSrc[c]->get(Po + pos) + 8) >> 4;
+        for (long k = 0; k < n; k++, pos++) for (int c = 0; c < 2; c++) { int64_t v = s64(w64(outSrc[c]->get(Po + pos)) + 8) >> 4;   // decision 13: modulo 2^64
             if (v > 8388607 || v < -8388608) { if (clipPos) clipPos[c].push_back((int32_t)(pos + P)); clip++; v = v > 0 ? 8388607 : -8388608; }   // hard limiter
             out[k * 2 + c] = (int32_t)v; }
         return n; }

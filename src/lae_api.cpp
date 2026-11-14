@@ -66,27 +66,47 @@ std::filesystem::path indexDir() {
     if (const char* h = getenv("HOME")) return std::filesystem::path(h) / ".cache" / "lae" / "lae_index";
 #endif
     return {}; }
-// record: "LAEYIDX1" | u32 version 1 | 32-byte key | u32 seconds between checkpoints | u32 streams | per stream: i64 K, i32 rate, k0, k1,
-// u32 stream bytes, u32 checkpoints, each: i64 M0, u64 byte position, u32 width, u32 code, u64 symbols, i32 previous tier, i32 previous
-// exponent, u32 values, values as u32 (index << 16 | value) | u32 CRC-32 of everything before
+// record, version 2 (decision 33, 2026-11-15: every extension pack's result is kept, so that a second open decodes no pack again):
+// "LAEYIDX1" | u32 version 2 | 32-byte key | u32 seconds between checkpoints | u32 sections | per section: u32 pack number, u64 bytes of
+// the section body, body | u32 CRC-32 of everything before. Sections in increasing pack number, each pack at most once.
+// Section body: u32 result (1 = every entropy stream of the pack ends exactly at its last byte, 0 = the pack failed that check: nothing
+// follows) | u32 streams | per stream: i64 K, i32 rate, k0, k1, u32 stream bytes, u32 checkpoints, each: i64 M0, u64 byte position,
+// u32 width, u32 code, u64 symbols, i32 previous tier, i32 previous exponent, u32 values, values as u32 (index << 16 | value).
+// A version 1 record (up to 2026-11-15: pack 0 only, the streams right after the seconds field) is recognised by its version field, never
+// read as version 2: it is checked again and replaced by a version 2 record.
 void putU(std::vector<uint8_t>& b, uint64_t v, int n) { for (int k = 0; k < n; k++) b.push_back((uint8_t)(v >> (8 * k))); }
-std::vector<uint8_t> packIndex(const Sha& key, Decoder& D, const std::vector<std::vector<SavedMark>>& saved) {
-    std::vector<uint8_t> b; const char* mg = "LAEYIDX1"; b.insert(b.end(), mg, mg + 8); putU(b, 1, 4); b.insert(b.end(), key.begin(), key.end());
-    putU(b, (uint64_t)FILE_MARK_SECONDS, 4); std::vector<PlaneStream*> ps = D.allStreams(); putU(b, ps.size(), 4);
+const uint32_t INDEX_VERSION = 2;
+std::vector<uint8_t> packSection(Decoder* D, const std::vector<std::vector<SavedMark>>* saved) {   // D == nullptr: the pack failed its check
+    std::vector<uint8_t> b; putU(b, D ? 1 : 0, 4); if (!D) return b;
+    std::vector<PlaneStream*> ps = D->allStreams(); putU(b, ps.size(), 4);
     for (size_t i = 0; i < ps.size(); i++) { const Hdr& h = ps[i]->h; putU(b, (uint64_t)h.K, 8); putU(b, (uint32_t)h.rate, 4); putU(b, (uint32_t)h.k0, 4); putU(b, (uint32_t)h.k1, 4);
-        putU(b, ps[i]->dc0.n, 4); putU(b, saved[i].size(), 4);
-        for (const SavedMark& s : saved[i]) { putU(b, (uint64_t)s.M0, 8); putU(b, s.i, 8); putU(b, s.width, 4); putU(b, s.code, 4); putU(b, s.pos, 8);
+        putU(b, ps[i]->dc0.n, 4); putU(b, (*saved)[i].size(), 4);
+        for (const SavedMark& s : (*saved)[i]) { putU(b, (uint64_t)s.M0, 8); putU(b, s.i, 8); putU(b, s.width, 4); putU(b, s.code, 4); putU(b, s.pos, 8);
             putU(b, (uint32_t)s.prevTier, 4); putU(b, (uint32_t)s.prevE, 4); putU(b, s.diff.size(), 4); for (uint32_t x : s.diff) putU(b, x, 4); } }
+    return b; }
+std::vector<uint8_t> packIndex(const Sha& key, const std::map<int, std::vector<uint8_t>>& sections) {
+    std::vector<uint8_t> b; const char* mg = "LAEYIDX1"; b.insert(b.end(), mg, mg + 8); putU(b, INDEX_VERSION, 4); b.insert(b.end(), key.begin(), key.end());
+    putU(b, (uint64_t)FILE_MARK_SECONDS, 4); putU(b, sections.size(), 4);
+    for (const auto& s : sections) { putU(b, (uint32_t)s.first, 4); putU(b, s.second.size(), 8); b.insert(b.end(), s.second.begin(), s.second.end()); }
     putU(b, crc32(b.data(), b.size()), 4); return b; }
-// fills saved when the record belongs to this file and to these streams; any mismatch or damage: false (nothing used). F06-4: a model value
-// lies in 1 ... 2047 and the range decoder's code below its width, as the decoder itself never leaves them
-bool unpackIndex(const std::vector<uint8_t>& b, const Sha& key, Decoder& D, std::vector<std::vector<SavedMark>>& saved) {
-    if (b.size() < 56 || memcmp(b.data(), "LAEYIDX1", 8)) return false;
+// the sections of a version 2 record of this file; false (nothing used) for any other record, a version 1 record, or any damage
+bool splitIndex(const std::vector<uint8_t>& b, const Sha& key, std::map<int, std::vector<uint8_t>>& out) {
+    out.clear(); if (b.size() < 56 || memcmp(b.data(), "LAEYIDX1", 8)) return false;
     uint32_t stored = 0; memcpy(&stored, b.data() + b.size() - 4, 4); if (crc32(b.data(), b.size() - 4) != stored) return false;
     size_t at = 8; const size_t end = b.size() - 4; bool ok = true;
     auto get = [&](int n) -> uint64_t { if (at + (size_t)n > end) { ok = false; return 0; } uint64_t v = 0; for (int k = 0; k < n; k++) v |= (uint64_t)b[at + k] << (8 * k); at += (size_t)n; return v; };
-    if (get(4) != 1 || memcmp(b.data() + at, key.data(), 32)) return false; at += 32;
+    if (get(4) != INDEX_VERSION || memcmp(b.data() + at, key.data(), 32)) return false; at += 32;
     if (get(4) != (uint64_t)FILE_MARK_SECONDS) return false;
+    const uint64_t ns = get(4); if (!ok || ns > 9) return false; long last = -1;   // the main body and at most 8 further packs (scanPacks)
+    for (uint64_t j = 0; j < ns; j++) { const uint64_t k = get(4), n = get(8); if (!ok || (long)k <= last || k > 8 || n > end - at) { out.clear(); return false; }
+        out[(int)k].assign(b.begin() + (ptrdiff_t)at, b.begin() + (ptrdiff_t)(at + n)); at += (size_t)n; last = (long)k; }
+    if (at != end) { out.clear(); return false; } return true; }
+// fills saved from a section when it belongs to these streams (result 1); pass = the stored result. Any mismatch or damage: false (nothing
+// used). F06-4: a model value lies in 1 ... 2047 and the range decoder's code below its width, as the decoder itself never leaves them
+bool unpackSection(const std::vector<uint8_t>& b, Decoder& D, std::vector<std::vector<SavedMark>>& saved, bool& pass) {
+    size_t at = 0; const size_t end = b.size(); bool ok = true;
+    auto get = [&](int n) -> uint64_t { if (at + (size_t)n > end) { ok = false; return 0; } uint64_t v = 0; for (int k = 0; k < n; k++) v |= (uint64_t)b[at + k] << (8 * k); at += (size_t)n; return v; };
+    const uint64_t res = get(4); if (!ok || res > 1) return false; if (res == 0) { pass = false; return at == end; }
     std::vector<PlaneStream*> ps = D.allStreams(); if (get(4) != ps.size()) return false;
     std::vector<std::vector<SavedMark>> out(ps.size());
     for (size_t i = 0; i < ps.size() && ok; i++) { const Hdr& h = ps[i]->h; const size_t nModel = modelCount(h);
@@ -97,9 +117,9 @@ bool unpackIndex(const std::vector<uint8_t>& b, const Sha& key, Decoder& D, std:
             if (s.M0 <= last || s.M0 >= h.K || s.M0 % part::ROOTT || s.i > ps[i]->dc0.n || s.width < RC_TOP || s.code >= s.width || s.prevTier < 0 || s.prevTier > 3 || s.prevE < 0 || s.prevE > 34) return false;
             for (uint64_t v = 0; v < nv && ok; v++) { const uint32_t x = (uint32_t)get(4); if ((x >> 16) >= nModel || (x & 0xFFFF) < 1 || (x & 0xFFFF) > 2047) return false; s.diff.push_back(x); }
             last = s.M0; out[i].push_back(std::move(s)); } }
-    if (!ok || at != end) return false; saved.swap(out); return true; }
-bool readPath(const std::filesystem::path& p, std::vector<uint8_t>& b) {
-    std::error_code ec; const auto n = std::filesystem::file_size(p, ec); if (ec || n > ((uint64_t)64 << 20)) return false;
+    if (!ok || at != end) return false; saved.swap(out); pass = true; return true; }
+bool readPath(const std::filesystem::path& p, std::vector<uint8_t>& b) {   // decision 33: a record up to INDEX_CAP (was 64 MB)
+    std::error_code ec; const auto n = std::filesystem::file_size(p, ec); if (ec || n > INDEX_CAP) return false;
 #ifdef _WIN32
     FILE* f = _wfopen(p.c_str(), L"rb");
 #else
@@ -121,9 +141,15 @@ bool isRecord(const std::filesystem::path& p) {   // the file begins with "LAEYI
     if (!f) return false; char m[8]; const bool ok = fread(m, 1, 8, f) == 8 && !memcmp(m, "LAEYIDX1", 8); fclose(f); return ok; }
 // writes the record (a temporary file renamed over the old one), then keeps the folder under INDEX_CAP (the least recently used of
 // this cache's own records deleted first)
-void saveIndex(const std::filesystem::path& dir, const Sha& key, const std::vector<uint8_t>& rec) {
+// decision 33: the given sections are merged into the sections of this file's version 2 record already there (another pack's result
+// stays); a record beyond INDEX_CAP is not written (it could not be read back)
+void saveIndex(const std::filesystem::path& dir, const Sha& key, const std::map<int, std::vector<uint8_t>>& fresh) {
     std::lock_guard<std::mutex> g(g_indexMu); std::error_code ec; std::filesystem::create_directories(dir, ec);
-    const std::filesystem::path target = dir / (hexOf(key) + ".idx"), tmp = dir / (hexOf(key) + ".idx.tmp" + std::to_string((unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count()));
+    const std::filesystem::path target = dir / (hexOf(key) + ".idx");
+    std::map<int, std::vector<uint8_t>> sections; { std::vector<uint8_t> old; if (!readPath(target, old) || !splitIndex(old, key, sections)) sections.clear(); }
+    for (const auto& s : fresh) sections[s.first] = s.second;
+    const std::vector<uint8_t> rec = packIndex(key, sections); if (rec.size() > INDEX_CAP) return;
+    const std::filesystem::path tmp = dir / (hexOf(key) + ".idx.tmp" + std::to_string((unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count()));
 #ifdef _WIN32
     FILE* f = _wfopen(tmp.c_str(), L"wb");
 #else
@@ -145,10 +171,13 @@ void saveIndex(const std::filesystem::path& dir, const Sha& key, const std::vect
     std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.t < b.t; });
     for (const Item& x : items) { if (total <= INDEX_CAP) break; if (x.p == target) continue; std::error_code e3; if (std::filesystem::remove(x.p, e3)) total -= x.n; } }
 // the record of this file, if one is there and fits; a record that is used becomes the most recently used one
-bool loadIndex(const std::filesystem::path& dir, const Sha& key, Decoder& D, std::vector<std::vector<SavedMark>>& saved) {
-    std::lock_guard<std::mutex> g(g_indexMu); const std::filesystem::path p = dir / (hexOf(key) + ".idx"); std::vector<uint8_t> b;
-    if (!readPath(p, b) || !unpackIndex(b, key, D, saved)) return false;
-    std::error_code ec; std::filesystem::last_write_time(p, std::filesystem::file_time_type::clock::now(), ec); return true; }
+// decision 33: the stored result of pack `pack` (D opened on that pack, route full): 1 = passed (saved filled), 0 = failed its check,
+// -1 = no usable entry (no record, a version 1 record, damage, or this pack not in it)
+int loadIndex(const std::filesystem::path& dir, const Sha& key, int pack, Decoder& D, std::vector<std::vector<SavedMark>>& saved) {
+    std::lock_guard<std::mutex> g(g_indexMu); const std::filesystem::path p = dir / (hexOf(key) + ".idx"); std::vector<uint8_t> b; std::map<int, std::vector<uint8_t>> sections;
+    if (!readPath(p, b) || !splitIndex(b, key, sections)) return -1;
+    const auto it = sections.find(pack); bool pass = false; if (it == sections.end() || !unpackSection(it->second, D, saved, pass)) return -1;
+    std::error_code ec; std::filesystem::last_write_time(p, std::filesystem::file_time_type::clock::now(), ec); return pass ? 1 : 0; }
 }
 
 struct lae_track {
@@ -156,9 +185,10 @@ struct lae_track {
     std::unique_ptr<Decoder> dec; int route = -1, outRate = 0, wrate = 0, bits = 0; uint64_t pos = 0, outFrames = 0; bool err = false;
     std::vector<std::vector<SavedMark>> saved;   // seek checkpoints of every stream (from the check at open or the player's record)
     // extension packs (API 8, spec/lossy/SPEC.md, Section 5.6): the pack the next lae_start decodes (0 = the main body), the further packs found at
-    // open, pack 0's information, and the checkpoints of each further pack once it was selected (its streams are checked then; the
-    // player's record on disk holds pack 0 only)
+    // open, pack 0's information, and the checkpoints of each further pack once it was selected (its streams are checked then, or its
+    // result is taken from the player's record on disk, which holds every pack checked so far: decision 33)
     int pack = 0; std::vector<Decoder::PackInfo> packs; std::string mainName; lae_info info0{}; std::map<int, std::vector<std::vector<SavedMark>>> savedOf;
+    Sha key{}; std::filesystem::path indexDir;   // decision 33: the player's record of this file holds every pack's result (version 2)
 };
 // checks the v5 pair (all decoder checks) and fills the information; takes cd and lae. key: SHA-256 of the whole file (the player's
 // checkpoint record is looked up by it); the first time a file is met, every entropy stream is checked to its end and the record is made
@@ -167,10 +197,10 @@ static lae_track* finish(std::vector<int16_t>&& cd, std::vector<uint8_t>&& lae, 
     { Decoder D; int code = 0; std::string e = D.openRef(t->cd, t->lae, "full", 0, &code); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
       t->packs = D.packs; t->mainName = D.mainName;   // the main body's name (optional "LNAM" record), for display only
       lae_info& i = t->info; i.master_rate = D.rate; i.base_rate = D.base; i.stages = D.stages; i.cutoff_hz = D.fc; i.cd_frames = (uint64_t)D.ncd; i.master_frames = (uint64_t)D.Lm;
-      const std::filesystem::path dir = indexDir();
-      if (dir.empty() || !loadIndex(dir, key, D, t->saved)) {
+      const std::filesystem::path dir = indexDir(); t->key = key; t->indexDir = dir;
+      if (dir.empty() || loadIndex(dir, key, 0, D, t->saved) != 1) {   // pack 0's entry: a stored failure is not kept (a failed main body is not stored)
           e = D.checkAll(t->saved, D.seekThreads); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
-          if (!dir.empty()) saveIndex(dir, key, packIndex(key, D, t->saved)); } }
+          if (!dir.empty()) saveIndex(dir, key, {{0, packSection(&D, &t->saved)}}); } }
     std::string h = md5hex(t->cd); memcpy(t->info.cd_md5, h.c_str(), 33); t->info.from_pair = pair; t->info0 = t->info; return t.release(); }
 static Sha shaOf(laes::Sha256& s) { Sha k{}; s.final(k.data()); return k; }
 // FLAC form (2026-11-10, laey_flac.h): the CD layer in the FLAC audio frames, the extension in "LAE1" APPLICATION blocks. The whole file is
@@ -280,7 +310,7 @@ LAE_API lae_track* LAE_CALL lae_open_pair_files(const char* base_wav, const char
 LAE_API int LAE_CALL lae_get_info(const lae_track* t, lae_info* out) { if (!t || !out) return -1; *out = t->info; return 0; }
 // Extension packs (API 8). The pack is chosen by the caller only, by its number; the name is for display and selects nothing.
 // Selecting a pack leaves the track unstarted; a further pack's entropy streams are checked to their end the first time it
-// is selected (as pack 0's are at open), in memory only.
+// is selected (as pack 0's are at open), or its result is taken from the player's record of the file (decision 33).
 LAE_API int LAE_CALL lae_pack_count(const lae_track* t) { return t ? 1 + (int)t->packs.size() : -1; }
 LAE_API int LAE_CALL lae_pack_info(const lae_track* t, int k, int* rate, int* stages, char* name, size_t name_size) {
     if (!t || k < 0 || (size_t)k > t->packs.size()) return -1;
@@ -293,7 +323,14 @@ LAE_API int LAE_CALL lae_select_pack(lae_track* t, int k) {
         t->dec.reset(); t->route = -1; t->pos = 0; t->err = false;
         if (k == 0) { t->info = t->info0; t->pack = 0; return 0; }
         Decoder D; D.pack = k; int code = 0; std::string e = D.openRef(t->cd, t->lae, "full", 0, &code); if (!e.empty()) return -1;
-        if (!t->savedOf.count(k)) { std::vector<std::vector<SavedMark>> s; e = D.checkAll(s, D.seekThreads); if (!e.empty()) return -1; t->savedOf[k] = std::move(s); }
+        if (!t->savedOf.count(k)) { std::vector<std::vector<SavedMark>> s;
+            // decision 33: the pack's result from the player's record of this file (version 2); otherwise it is checked now and stored
+            const int stored = t->indexDir.empty() ? -1 : loadIndex(t->indexDir, t->key, k, D, s);
+            if (stored == 0) return -1;
+            if (stored != 1) { e = D.checkAll(s, D.seekThreads);
+                if (!t->indexDir.empty()) saveIndex(t->indexDir, t->key, {{k, e.empty() ? packSection(&D, &s) : packSection(nullptr, nullptr)}});
+                if (!e.empty()) return -1; }
+            t->savedOf[k] = std::move(s); }
         lae_info i = t->info0; i.master_rate = D.rate; i.stages = D.stages; i.cutoff_hz = D.fc; i.master_frames = (uint64_t)D.Lm; t->info = i; t->pack = k; return 0; }
     catch (...) { return -1; } }
 LAE_API int LAE_CALL lae_start(lae_track* t, int route, int out_rate, char* err, int errlen) {

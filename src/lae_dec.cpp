@@ -22,6 +22,34 @@ static const char* hookPath(const char* name) { return getenv(name); }
 #else
 static const char* hookPath(const char*) { return nullptr; }
 #endif
+#ifndef LAE_ENCODER_HOOKS   // the encoder's own decode check writes into its work folder: no question there
+#include <filesystem>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+// Decision 21 (2026-11-15): an existing output is not replaced silently. On a console (input and output both a console) the person
+// is asked twice and only two answers "yes" replace it; without a console it is refused unless --overwrite was given.
+static bool onConsole() {
+#ifdef _WIN32
+    return _isatty(_fileno(stdin)) && _isatty(_fileno(stdout));
+#else
+    return isatty(fileno(stdin)) && isatty(fileno(stdout));
+#endif
+}
+static bool answeredYes() { char b[256]; if (!fgets(b, sizeof b, stdin)) return false; std::string s(b);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    size_t k = 0; while (k < s.size() && (s[k] == ' ' || s[k] == '\t')) k++; return s.substr(k) == "yes"; }
+static bool mayWrite(const char* out, bool overwrite) {
+    std::error_code ec; if (!std::filesystem::exists(std::filesystem::u8path(out), ec) || overwrite) return true;
+    if (onConsole()) {
+        printf("\"%s\" already exists. Replace it? Type yes to continue: \n\"%s\" %s", out, out, u8"已经存在。要替换吗？输入 yes 继续："); fflush(stdout);
+        if (answeredYes()) { printf("Really replace \"%s\"? It cannot be undone. Type yes again: \n%s\"%s\" %s", out, u8"确定要替换 ", out, u8" 吗？替换后无法恢复。再输入一次 yes："); fflush(stdout);
+            if (answeredYes()) return true; } }
+    printf("\"%s\" already exists; it was not replaced (give --overwrite to replace it).\n\"%s\" %s\n", out, out, u8"已经存在，没有替换（加 --overwrite 才替换）。");
+    return false; }
+#endif
 
 int main(int argc, char** argv) {
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
@@ -29,7 +57,16 @@ int main(int argc, char** argv) {
     for (int i = 3; i < argc; i++) if (!strncmp(argv[i], "pack=", 5)) { const char* v = argv[i] + 5; char* end = nullptr; const long k = strtol(v, &end, 10);
         if (!*v || *end || k < 0 || k > 8) { printf("pack=%s: give the pack's number (0 = the main body)\n", v); return 1; }
         packArg = (int)k; for (int j = i; j + 1 < argc; j++) argv[j] = argv[j + 1]; argc--; i--; }
-    if (argc < 3) { printf("usage: lae_dec <in.wav | in.flac | in.lae> <out.wav> [full|16|cd24] [output rate] [pack=<n>]\n"); return 1; }
+    bool overwrite = false;   // --overwrite (anywhere): an existing output is replaced without a question (decision 21)
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--overwrite")) { overwrite = true; for (int j = i; j + 1 < argc; j++) argv[j] = argv[j + 1]; argc--; i--; }
+    if (argc < 3) { printf("usage: lae_dec <in.wav | in.flac | in.lae> <out.wav> [full|16|cd24] [output rate] [pack=<n>] [--overwrite]\n"
+                           "  --overwrite: replace an existing <out.wav> without asking (on a console it is asked twice; otherwise it is refused)\n"
+                           "  %s\n", u8"--overwrite：不问就替换已有的 <out.wav>（在控制台上会问两次；不在控制台上就拒绝）"); return 1; }
+#ifndef LAE_ENCODER_HOOKS
+    if (!mayWrite(argv[2], overwrite)) return 1;
+#else
+    (void)overwrite;
+#endif
     std::string mode = argc > 3 ? argv[3] : "full";
     if (!mdct::selftestOK()) { printf("decoder self-test FAILED: this build does not follow the IEEE-754 order the format requires (see docs/BUILD.md); refusing to decode\n"); return 4; }
     wavio::Wav w; int flacRate = 0;   // FU11-9: the STREAMINFO rate of the FLAC form
@@ -41,6 +78,15 @@ int main(int argc, char** argv) {
     D.pack = packArg;   // extension pack (2026-11-10): 0 = the main body, as always
     std::string e = D.open(std::move(w.pcm16), std::move(w.lae), mode, orate, &code); if (!e.empty()) { printf("%s\n", e.c_str()); return code; }
     if (flacRate && flacRate != D.base) { printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // FU11-9: spec/lossy 3.4
+    D.noSeekMarks();   // decision 34 (F05-4): this tool never seeks, so no checkpoints are kept (memory no longer grows with the track)
+    if (!hookPath("LEAKOUT") && !hookPath("CLIPMAP")) {
+        // decision 10 (FU34-9 / FU30-2, spec/lossy 6.7): every entropy stream of the decoded pack must end exactly at its last byte, as the
+        // player's one-time check requires; it is the same check (every stream decoded from start to end, route full at the master rate,
+        // in parallel) before any output is written. The encoder's own decode runs (LEAKOUT, CLIPMAP) skip it: they decode its own new streams.
+        Decoder chk; chk.pack = D.pack; int c2 = 0; std::string e2 = chk.openRef(D.cdOwn, D.laeOwn, "full", 0, &c2);
+        if (!e2.empty()) { printf("%s\n", e2.c_str()); return c2 ? c2 : 3; }
+        std::vector<std::vector<SavedMark>> unused; e2 = chk.checkAll(unused, chk.seekThreads);
+        if (!e2.empty()) { printf("%s\n", e2.c_str()); return 3; } }
     if (!D.packs.empty() && !hookPath("LEAKOUT") && !hookPath("CLIPMAP")) {   // the file's extension packs; only the caller chooses one (pack=<n>)
         printf("extension packs: %zu (decoding pack %d)\n  pack 0: the main body%s%s%s\n", D.packs.size() + 1, D.pack, D.mainName.empty() ? "" : ", \"", D.mainName.c_str(), D.mainName.empty() ? "" : "\"");
         for (size_t k = 0; k < D.packs.size(); k++) printf("  pack %zu: %d Hz%s%s%s\n", k + 1, D.packs[k].rate, D.packs[k].name.empty() ? "" : ", \"", D.packs[k].name.c_str(), D.packs[k].name.empty() ? "" : "\""); }

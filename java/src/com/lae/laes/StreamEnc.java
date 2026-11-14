@@ -71,7 +71,9 @@ public final class StreamEnc {
             sayG(g, "  磁盘快满（剩 " + (avail >> 20) + " MB）：请在 " + g.dir + " 所在的磁盘上清理一些空间，编码会自动接着做；也可以关掉程序，之后再运行同一条命令，从工作文件夹接着做");
             long a2;
             do { for (int i = 0; i < 50; i++) { if (g.cancel != null && g.cancel.get()) throw new LaeException("cancelled"); try { Thread.sleep(100); } catch (InterruptedException x) { throw new LaeException("cancelled"); } }
-                 a2 = d.getUsableSpace(); } while (a2 < g.reserve + (256L << 20));
+                 a2 = d.getUsableSpace(); } while (!(a2 == 0 && !d.exists()) && a2 < g.reserve + (256L << 20));
+            if (a2 == 0 && !d.exists()) {   // FU13-8 (as laes_stream_enc.h): the free space cannot be read any more; not "room again" with a meaningless number
+                sayG(g, "cannot read the free space of the disk of " + g.dir + ": continuing"); sayG(g, "  无法读取 " + g.dir + " 所在磁盘的剩余空间：接着做"); g.last = System.nanoTime(); return; }
             sayG(g, "disk has room again (" + (a2 >> 20) + " MB free): continuing");
             sayG(g, "  磁盘有空间了（剩 " + (a2 >> 20) + " MB）：接着做"); g.last = System.nanoTime(); } }
 
@@ -257,7 +259,9 @@ public final class StreamEnc {
         long pos = 12; int tag = 0, ch = 0; if (lae != null) lae[0] = -1;
         long dsData = 0, dsLae = 0;
         if (rf64) { final byte[] d = new byte[48]; if (in.n < 20 + 28) return path + ": RF64 without ds64"; in.read(12, d, 0, 8); if (!eq4(d, 0, "ds64")) return path + ": RF64 without ds64";
-            final long dl = (d[4] & 0xFF) | (d[5] & 0xFF) << 8 | (d[6] & 0xFF) << 16 | (long) (d[7] & 0xFF) << 24; if (dl < 28) return path + ": RF64 ds64 too short"; in.read(20, d, 0, (int) Math.min(dl, 40));
+            final long dl = (d[4] & 0xFF) | (d[5] & 0xFF) << 8 | (d[6] & 0xFF) << 16 | (long) (d[7] & 0xFF) << 24; if (dl < 28) return path + ": RF64 ds64 too short";
+            if (in.n < 20 + Math.min(dl, 40)) return path + ": RF64 ds64 truncated";   // FU13-8 (as laes_stream_enc.h): a reason, not "read failed"
+            in.read(20, d, 0, (int) Math.min(dl, 40));
             dsData = le64(d, 8);
             if (dl >= 40 && ((d[24] & 0xFF) | (d[25] & 0xFF) << 8 | (d[26] & 0xFF) << 16 | (long) (d[27] & 0xFF) << 24) >= 1 && eq4(d, 28, "LAE ")) dsLae = le64(d, 32); }
         final byte[] c = new byte[8];
@@ -285,7 +289,7 @@ public final class StreamEnc {
         try { long p = 4; boolean last = false, haveSi = false; final Flac.Info fi = wi.fi; final byte[] bh = new byte[4];
             while (!last) { if (p + 4 > in.n) return path + ": FLAC metadata truncated"; in.read(p, bh, 0, 4); last = (bh[0] & 0x80) != 0; final int type = bh[0] & 0x7F; final long len = (long) (bh[1] & 0xFF) << 16 | (bh[2] & 0xFF) << 8 | (bh[3] & 0xFF); p += 4;
                 if (p + len > in.n) return path + ": FLAC metadata truncated";
-                if (type == 0) { if (len != 34) return path + ": bad STREAMINFO"; final byte[] s = new byte[34]; in.read(p, s, 0, 34); final Flac.BR r = new Flac.BR(s, 0, 34); fi.minBs = (int) r.get(16); fi.maxBs = (int) r.get(16); r.get(24); r.get(24);
+                if (type == 0) { if (haveSi) return path + ": two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return path + ": bad STREAMINFO"; final byte[] s = new byte[34]; in.read(p, s, 0, 34); final Flac.BR r = new Flac.BR(s, 0, 34); fi.minBs = (int) r.get(16); fi.maxBs = (int) r.get(16); r.get(24); r.get(24);
                     fi.rate = (int) r.get(20); fi.channels = (int) r.get(3) + 1; fi.bps = (int) r.get(5) + 1; fi.total = r.get(36); System.arraycopy(s, 18, fi.md5, 0, 16); haveSi = true; }
                 p += len; }
             if (!haveSi) return path + ": no STREAMINFO";
@@ -311,6 +315,7 @@ public final class StreamEnc {
         final int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return "frame bit depth differs from STREAMINFO";
         if (r.fail || (r.pos & 7) != 0) return "frame header truncated"; final int hb = (int) (r.pos / 8); final int c8 = (int) r.get(8); if (r.fail || c8 != Flac.crc8(buf, fp, hb)) return "frame header CRC-8 mismatch";
         if (strategy == 0 && num != frameNo) return "frame number out of order";
+        if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the header gives the first sample's number (FU13-8)
         final int ni = (int) n;
         for (int c = 0; c < 2; c++) { if (F.ch[c] == null || F.ch[c].length < ni) F.ch[c] = new long[ni];
             final boolean side = (chc == 8 && c == 1) || (chc == 9 && c == 0) || (chc == 10 && c == 1); if (!Flac.readSubframe(r, F.ch[c], 0, ni, bps + (side ? 1 : 0), F)) return "damaged subframe"; }
@@ -318,6 +323,7 @@ public final class StreamEnc {
         if (chc == 8) for (int i = 0; i < ni; i++) b[i] = a[i] - b[i];
         else if (chc == 9) for (int i = 0; i < ni; i++) a[i] = a[i] + b[i];
         else if (chc == 10) for (int i = 0; i < ni; i++) { final long md = (a[i] << 1) | (b[i] & 1); a[i] = (md + b[i]) >> 1; b[i] = (md - b[i]) >> 1; }
+        { final long lim = 1L << (bps - 1); for (int i = 0; i < ni; i++) if (a[i] < -lim || a[i] >= lim || b[i] < -lim || b[i] >= lim) return "a sample does not fit the bit depth of STREAMINFO"; }   // FU13-5 (as laes_stream_enc.h): a stereo decorrelation can leave it
         r.pos = (r.pos + 7) & ~7L; final long fb = r.pos / 8; if (fb + 2 > r.n) return "frame truncated";
         if (Flac.crc16(buf, fp, (int) fb) != (((buf[fp + (int) fb] & 0xFF) << 8) | (buf[fp + (int) fb + 1] & 0xFF))) return "frame CRC-16 mismatch";
         F.n = ni; F.used = (int) (fb + 2); return ""; }
@@ -457,6 +463,11 @@ public final class StreamEnc {
             for (int mi = 0; mi < ms.size(); mi++) { final Prep m = ms.get(mi); final LaesFile.MasterInfo I = info.get(mi);
                 if (m.bits != 16 && m.bits != 24 && m.bits != 32) return "master word length must be 16, 24 or 32";
                 int st = 0; while ((baseRate << st) < m.rate && st < 4) st++; if ((baseRate << st) != m.rate || st > 3) return "master rate must be the base rate times 1, 2, 4 or 8";
+                // FU13-5 (as laes_stream_enc.h): input this format cannot hold is refused here, not first by the check of the written file
+                final String mn = "master " + (mi + 1);
+                if (m.frames < 1) return mn + " has no samples";
+                if (LaesFile.levLen(m.frames, st) > core.frames() + (1L << 24)) return mn + " is too long: its base level may exceed the core master by at most 2^24 samples";
+                if (sel.get(mi).storage >= 0 && (sel.get(mi).whole <= -(1L << 40) || sel.get(mi).whole >= (1L << 40))) return mn + ": T must lie within +-2^40 base samples";
                 I.bits = m.bits; I.stages = st; I.w = m.w; I.rate = m.rate; I.frames = m.frames; System.arraycopy(m.sha, 0, I.sha, 0, 32);
                 final List<Cand> cs = new ArrayList<Cand>(); final boolean autoSel = sel.get(mi).storage < 0;
                 if (autoSel || sel.get(mi).storage == 1) cs.add(new Cand(1, 0, 0));
@@ -495,6 +506,8 @@ public final class StreamEnc {
                 I.name = sel.get(mi).name; I.flags = sel.get(mi).flags; I.menu = sel.get(mi).menu; final byte[] nb = LaesFile.nameBytes(I.name);
                 o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? nb.length : 0, 1); o.u(ver == 2 ? I.flags : 0, 1); o.u(ver == 2 ? I.menu : 0, 1); o.u(I.rate, 4); o.u(0, 4); o.u(I.frames, 8);
                 o.u(I.whole, 8); o.u(I.frac & 0xFFFFFFFFL, 4); o.u(0, 4); o.put(I.sha, 0, 32); if (ver == 2) o.put(nb, 0, nb.length);
+                for (int c = 0; c < 2; c++) { if (new File(B.e[c]).length() > 0xFFFFFFFFL) return mn + ": a layer is larger than 4 GiB, more than an LAES layer can hold";   // the u32 layer length (FU13-5)
+                    for (int k = B.j + 1; k <= st; k++) if (new File(m.dfile[c][k]).length() > 0xFFFFFFFFL) return mn + ": a layer is larger than 4 GiB, more than an LAES layer can hold"; }
                 for (int c = 0; c < 2; c++) { { Stream.In e = new Stream.In(B.e[c]); final long en = e.n; e.close(); o.u(en, 4); } o.file(B.e[c]); if (kept != null) kept.add(B.e[c]); else removeFile(B.e[c]);
                     for (int k = B.j + 1; k <= st; k++) { { Stream.In d = new Stream.In(m.dfile[c][k]); final long dn = d.n; d.close(); o.u(dn, 4); } o.file(m.dfile[c][k]); } } }
             final long crc = o.crc.getValue(); final byte[] t = {(byte) crc, (byte) (crc >> 8), (byte) (crc >> 16), (byte) (crc >> 24)}; bo.put(t, 0, 4); bo.close(); okClose = true;

@@ -49,7 +49,7 @@
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
-static const char* kVersion = "lae_abx 1.0 (2026-11-12)";
+static const char* kVersion = "lae_abx 1.1 (2026-11-15)";
 
 typedef std::function<void(const std::string&, double)> Say;   // stage text, overall fraction 0..1 (negative: unchanged)
 // FU20-12: set when the window closes; the preparation stops at its next check and keeps nothing (gPrepRunning: it still runs)
@@ -220,18 +220,24 @@ static void pruneCache() {   // prepared sources (and unfinished copies) older t
     const std::wstring c = cacheDir(); FILETIME now; GetSystemTimeAsFileTime(&now); const unsigned long long n = ((unsigned long long)now.dwHighDateTime << 32) | now.dwLowDateTime, limit = 14ULL * 24 * 3600 * 10000000ULL;
     for (const wchar_t* pat : { L"\\src_*.f32", L"\\src_*.f32.part" }) { WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((c + pat).c_str(), &fd); if (h == INVALID_HANDLE_VALUE) continue;
         do { const unsigned long long t = ((unsigned long long)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime; if (n > t && n - t > limit) DeleteFileW((c + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(h, &fd)); FindClose(h); } }
-// A kept copy (FU20-9, 2026-11-14): the 8 bytes "LAEABXC1", the frame count (uint64), then all left samples and all right samples
-// (float). It is written to <name>.part and renamed when complete; a file whose head or length does not match is prepared again.
+// A kept copy (FU20-9, 2026-11-14; DEC 43, 2026-11-15): the 8 bytes "LAEABXC2", the frame count (uint64), the identity of the programs
+// that made it (64 hex characters: the SHA-256 of this program's version text and of the lae_udec.exe next to it), then all left samples
+// and all right samples (float). It is written to <name>.part and renamed when complete; a file whose head, identity or length does not
+// match (another lae_abx or lae_udec, or a copy of the old head LAEABXC1) is prepared again. "Clear kept copies" removes them all.
 // Characters a file name cannot hold are written as '_' in the pick part of the name.
-static const char kCacheMagic[8] = { 'L', 'A', 'E', 'A', 'B', 'X', 'C', '1' };
+static const char kCacheMagic[8] = { 'L', 'A', 'E', 'A', 'B', 'X', 'C', '2' };
+static const size_t kCacheHead = 16 + 64;
+static const std::string& progIdentity() {   // computed once (thread-safe static), when the first copy is looked up
+    static const std::string id = []() { Sha256 h; h.add(kVersion, strlen(kVersion)); const std::string u = fileSha256(exeDir() + L"\\lae_udec.exe", nullptr); h.add(u.data(), u.size()); return h.hex(); }();
+    return id; }
 static std::wstring cachePath(const Source& x, int rate, const std::string& sha) {
     std::string pk = x.pick == "-" ? "plain" : x.pick; for (auto& c : pk) if (strchr("\\/:*?\"<>|", c) || (unsigned char)c < 32) c = '_';
     return cacheDir() + L"\\src_" + widen(sha.substr(0, 16)) + L"_" + widen(pk) + L"_" + std::to_wstring(rate) + L".f32"; }
 static HANDLE cacheOpen(const std::wstring& path, unsigned long long& frames) {   // the open file after a matching head, or INVALID_HANDLE_VALUE
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr); if (f == INVALID_HANDLE_VALUE) return f;
-    char hd[16]; DWORD got = 0; LARGE_INTEGER sz; frames = 0;
-    if (GetFileSizeEx(f, &sz) && ReadFile(f, hd, 16, &got, nullptr) && got == 16 && !memcmp(hd, kCacheMagic, 8)) { memcpy(&frames, hd + 8, 8);
-        if (frames > 0 && frames < (1ULL << 40) && (unsigned long long)sz.QuadPart == 16 + frames * 8) return f; }
+    char hd[kCacheHead]; DWORD got = 0; LARGE_INTEGER sz; frames = 0;
+    if (GetFileSizeEx(f, &sz) && ReadFile(f, hd, (DWORD)kCacheHead, &got, nullptr) && got == kCacheHead && !memcmp(hd, kCacheMagic, 8) && !memcmp(hd + 16, progIdentity().data(), 64)) { memcpy(&frames, hd + 8, 8);
+        if (frames > 0 && frames < (1ULL << 40) && (unsigned long long)sz.QuadPart == kCacheHead + frames * 8) return f; }
     CloseHandle(f); return INVALID_HANDLE_VALUE; }
 static bool cacheValid(const std::wstring& path) { unsigned long long fr; HANDLE f = cacheOpen(path, fr); if (f == INVALID_HANDLE_VALUE) return false; CloseHandle(f); return true; }
 static bool cacheLoad(const std::wstring& path, Source& x) {
@@ -241,10 +247,17 @@ static bool cacheLoad(const std::wstring& path, Source& x) {
     CloseHandle(f); return ok && n > 0; }
 static void cacheSave(const std::wstring& path, const Source& x) {   // nothing is kept when a write fails (the source is prepared again next time)
     const std::wstring part = path + L".part"; HANDLE f = CreateFileW(part.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr); if (f == INVALID_HANDLE_VALUE) return; DWORD put = 0;
-    char hd[16]; memcpy(hd, kCacheMagic, 8); const unsigned long long fr = x.L.size(); memcpy(hd + 8, &fr, 8); bool ok = x.R.size() == x.L.size() && WriteFile(f, hd, 16, &put, nullptr) && put == 16;
+    char hd[kCacheHead]; memcpy(hd, kCacheMagic, 8); const unsigned long long fr = x.L.size(); memcpy(hd + 8, &fr, 8); memcpy(hd + 16, progIdentity().data(), 64);
+    bool ok = x.R.size() == x.L.size() && WriteFile(f, hd, (DWORD)kCacheHead, &put, nullptr) && put == kCacheHead;
     for (int c = 0; c < 2 && ok; c++) { const char* p = (const char*)(c ? x.R.data() : x.L.data()); size_t left = x.L.size() * 4; while (left > 0) { const DWORD n = (DWORD)std::min<size_t>(left, 1u << 30); if (!WriteFile(f, p, n, &put, nullptr) || put != n) { ok = false; break; } p += n; left -= n; } }
     if (!CloseHandle(f)) ok = false;
     if (!ok || !MoveFileExW(part.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(part.c_str()); }
+// DEC 43: the button "Clear kept copies": every kept copy (and unfinished copy) in the cache folder is removed; returns how many
+static int clearCache(unsigned long long& bytes) {
+    const std::wstring c = cacheDir(); int n = 0; bytes = 0;
+    for (const wchar_t* pat : { L"\\src_*.f32", L"\\src_*.f32.part" }) { WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((c + pat).c_str(), &fd); if (h == INVALID_HANDLE_VALUE) continue;
+        do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && DeleteFileW((c + L"\\" + fd.cFileName).c_str())) { n++; bytes += ((unsigned long long)fd.nFileSizeHigh << 32) | fd.nFileSizeLow; } } while (FindNextFileW(h, &fd)); FindClose(h); }
+    return n; }
 static long long fileSize(const std::wstring& path) { WIN32_FILE_ATTRIBUTE_DATA a; return GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a) ? ((long long)a.nFileSizeHigh << 32) | a.nFileSizeLow : 0; }
 
 struct Job;
@@ -353,7 +366,7 @@ struct Test {
     int xSource(int t) const { return xIsA[(size_t)t] ? aIs : 1 - aIs; } };
 
 // ---------------------------------------------------------------- window
-enum { ID_PAIR = 100, ID_ALL, ID_NONE, ID_RATE48, ID_RATE44, ID_TRIALS, ID_PREPARE, ID_STATUS, ID_PA, ID_PB, ID_PX, ID_PY, ID_STOP, ID_XA, ID_XB, ID_POS, ID_SETSTART, ID_SETEND, ID_RESET, ID_RANGE };
+enum { ID_PAIR = 100, ID_ALL, ID_NONE, ID_RATE48, ID_RATE44, ID_TRIALS, ID_PREPARE, ID_STATUS, ID_PA, ID_PB, ID_PX, ID_PY, ID_STOP, ID_XA, ID_XB, ID_POS, ID_SETSTART, ID_SETEND, ID_RESET, ID_RANGE, ID_CLEAR };
 static HWND gProgress; static std::atomic<int> gProg{ 0 };
 static HWND gWnd, gPair, gAll, gNone, gR48, gR44, gTrials, gPrepare, gStatus, gBtn[5], gChoose[2], gPos, gRange, gRangeBtn[3]; static HFONT gFont;
 static Player gPlayer; static Test gTest; static std::vector<Pair> gSet; static std::atomic<bool> gBusy{ false }; static bool gReady = false;
@@ -437,7 +450,9 @@ static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
         case ID_XA: choose(true); return 0; case ID_XB: choose(false); return 0;
         case ID_SETSTART: if (gReady) { gPlayer.from = std::max<long long>(0, std::min<long long>(gPlayer.pos, gPlayer.to - gTest.rate / 2)); updateRange(); } return 0;   // kept inside 0..len (FU20-13: a piece shorter than 0.5 s)
         case ID_SETEND: if (gReady) { gPlayer.to = std::min<long long>(gPlayer.len, std::max<long long>(gPlayer.pos, gPlayer.from + gTest.rate / 2)); updateRange(); } return 0;
-        case ID_RESET: if (gReady) { gPlayer.from = 0; gPlayer.to = gPlayer.len; updateRange(); } return 0; } break;
+        case ID_RESET: if (gReady) { gPlayer.from = 0; gPlayer.to = gPlayer.len; updateRange(); } return 0;
+        case ID_CLEAR: if (gBusy || gPrepRunning) { setStatus("A pair is being prepared: clear the kept copies when it has finished."); return 0; }
+            { unsigned long long bytes = 0; const int n = clearCache(bytes); char cb[600]; snprintf(cb, sizeof cb, "Removed %d kept cop%s (%.1f MB) from %s. Every file is prepared again the next time it is used.", n, n == 1 ? "y" : "ies", bytes / 1048576.0, narrow(cacheDir()).c_str()); setStatus(cb); } return 0; } break;
     case WM_HSCROLL: if ((HWND)lp == gPos && gReady) { const long long v = SendMessageW(gPos, TBM_GETPOS, 0, 0); gPlayer.pos = gPlayer.len * v / 1000; } return 0;
     case WM_TIMER: if (gReady) { SendMessageW(gPos, TBM_SETPOS, TRUE, (LPARAM)(gPlayer.len ? gPlayer.pos * 1000 / gPlayer.len : 0)); } return 0;
     case WM_APP_STATUS: { std::lock_guard<std::mutex> g(gMsgMu); setStatus(gMsg); } SendMessageW(gProgress, PBM_SETPOS, gProg, 0); return 0;
@@ -496,6 +511,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     const wchar_t* rn[3] = { L"Set start", L"Set end", L"Whole piece" }; for (int i = 0; i < 3; i++) gRangeBtn[i] = mk(L"BUTTON", rn[i], BS_PUSHBUTTON, 320 + i * 104, 470, 98, 28, ID_SETSTART + i);
     mk(L"STATIC", L"A and B are assigned at random; the program tells which was which only at the end. X and Y are A and B in a random order in every trial. "
                   L"Switching keeps the position. Results are written to the results folder next to this program.", SS_LEFT, 12, 512, 616, 60, -1);
+    mk(L"BUTTON", L"Clear kept copies", BS_PUSHBUTTON, 488, 576, 140, 26, ID_CLEAR);   // DEC 43: removes the prepared copies kept in TEMP
     enableTest(false); gSet = readSet(exeDir()); pruneCache();
     for (auto& p : gSet) SendMessageW(gPair, LB_ADDSTRING, 0, (LPARAM)widen(p.name).c_str());
     if (gSet.empty()) setStatus("abx_set.txt was not found next to lae_abx.exe, or it lists no pairs.");

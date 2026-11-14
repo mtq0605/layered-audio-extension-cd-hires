@@ -48,6 +48,14 @@ std::wstring dataDir() { wchar_t p[MAX_PATH]; DWORD n = GetEnvironmentVariableW(
 DWORD setting(const wchar_t* name, DWORD def) { DWORD v = def, sz = sizeof v; RegGetValueW(HKEY_CURRENT_USER, L"Software\\LAE\\DirectShow", name, RRF_RT_REG_DWORD, nullptr, &v, &sz); return v; }
 std::string hex(const unsigned char* p, int n) { static const char* d = "0123456789ABCDEF"; std::string s; for (int i = 0; i < n; i++) { s += d[p[i] >> 4]; s += d[p[i] & 15]; } return s; }
 
+// one whole line of the results file, of any length, without its line end; false at the end of the file. A result counts only in exactly
+// the form written ("<64 hex digits> m<number> ok|fail"): a long line of another player read in pieces could hold a piece that looks like one.
+bool recordLine(FILE* f, std::string& s) { s.clear(); char b[512]; bool any = false;
+    while (fgets(b, sizeof b, f)) { any = true; s += b; if (s.back() == '\n') break; }
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back(); return any; }
+bool resultKey(const std::string& k) { if (k.size() < 67 || k.size() > 70 || k.compare(64, 2, " m")) return false;
+    for (size_t i = 0; i < k.size(); i++) { const char c = k[i]; if (i == 64 || i == 65) continue;
+        if (i < 64 ? !isxdigit((unsigned char)c) : !isdigit((unsigned char)c)) return false; } return true; }
 // SHA-256 results per file content and master, shared with the other LAE players: "<file SHA-256> m<k> ok|fail". Lines are only appended
 // (players running at once keep each other's results); a missing result is looked up again (another player may have checked it meanwhile).
 // The 0.1 test builds kept the file in %APPDATA%\LAE\DirectShow: read as well.
@@ -61,9 +69,9 @@ public:
 private:
     std::mutex mx; bool loaded = false; std::map<std::string, bool> map;
     void load() { if (loaded) return; loaded = true;
-        for (const std::wstring& pth : {dataDir() + L"\\DirectShow\\laes_verified.txt", dataDir() + L"\\laes_verified.txt"}) { FILE* f = _wfopen(pth.c_str(), L"rb"); if (!f) continue; char line[512];
-            while (fgets(line, sizeof line, f)) { std::string s(line); while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back(); const size_t a = s.rfind(' ');
-                if (a != std::string::npos) map[s.substr(0, a)] = s.substr(a + 1) == "ok"; } fclose(f); } }
+        for (const std::wstring& pth : {dataDir() + L"\\DirectShow\\laes_verified.txt", dataDir() + L"\\laes_verified.txt"}) { FILE* f = _wfopen(pth.c_str(), L"rb"); if (!f) continue; std::string s;
+            while (recordLine(f, s)) { const size_t a = s.rfind(' '); if (a == std::string::npos) continue; const std::string k = s.substr(0, a), v = s.substr(a + 1);
+                if (resultKey(k) && (v == "ok" || v == "fail")) map[k] = v == "ok"; } fclose(f); } }
 };
 Verified g_verified;
 

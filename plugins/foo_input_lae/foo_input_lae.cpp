@@ -154,11 +154,20 @@ std::wstring laeSharedDir() { wchar_t p[MAX_PATH]; const DWORD n = GetEnvironmen
 // content (not its path or date: a changed byte means a new check). A choice plays as its master (or a rate level / derived version of
 // it) only when that master is recorded as ok. File: laes_verified.txt in the profile folder, one line per result:
 // <file SHA-256 hex> m<master index from 1> ok|fail
+// one whole line of a record file, of any length, without its line end; false at the end of the file
+bool recordLine(FILE* f, std::string& s) { s.clear(); char b[512]; bool any = false;
+    while (fgets(b, sizeof b, f)) { any = true; s += b; if (s.back() == '\n') break; }
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back(); return any; }
+// a result key exactly as written: 64 hex digits, " m", the master number
+bool resultKey(const std::string& k) { if (k.size() < 67 || k.size() > 70 || k.compare(64, 2, " m")) return false;
+    for (size_t i = 0; i < k.size(); i++) { const char c = k[i]; if (i == 64 || i == 65) continue;
+        if (i < 64 ? !isxdigit((unsigned char)c) : !isdigit((unsigned char)c)) return false; } return true; }
 class VerifiedStore {
 public:
     // a hint by path and size that the file was checked before (only for the scale of the progress bar; the check itself goes by content)
-    bool hint(const std::string& path, uint64_t size) { std::lock_guard<std::mutex> g(mx); load(); return map.count("file " + std::to_string(size) + " " + path) != 0; }
-    void putHint(const std::string& path, uint64_t size) { if (hint(path, size)) return; std::lock_guard<std::mutex> g(mx); const std::string k = "file " + std::to_string(size) + " " + path; map[k] = 1;
+    bool hint(const std::string& path, uint64_t size) { std::lock_guard<std::mutex> g(mx); load(); return hints.count("file " + std::to_string(size) + " " + path) != 0; }
+    void putHint(const std::string& path, uint64_t size) { if (path.find_first_of("\r\n") != std::string::npos || hint(path, size)) return;   // a line end in the path would start a line of its own
+        std::lock_guard<std::mutex> g(mx); const std::string k = "file " + std::to_string(size) + " " + path; hints.insert(k);
         FILE* f = _wfopen(this->path().c_str(), L"ab"); if (!f) return; fprintf(f, "%s ok\n", k.c_str()); fclose(f); }
     int get(const unsigned char sha[32], int m) { std::lock_guard<std::mutex> g(mx); load(); auto it = map.find(key(sha, m));
         if (it == map.end()) { loaded = false; load(); it = map.find(key(sha, m)); }   // another player may have checked it meanwhile
@@ -167,7 +176,7 @@ public:
         if (it != map.end() && it->second == (ok ? 1 : -1)) return; map[k] = ok ? 1 : -1;
         FILE* f = _wfopen(path().c_str(), L"ab"); if (!f) return; fprintf(f, "%s %s\n", k.c_str(), ok ? "ok" : "fail"); fclose(f); }
 private:
-    std::mutex mx; bool loaded = false; std::map<std::string, int> map;
+    std::mutex mx; bool loaded = false; std::map<std::string, int> map; std::set<std::string> hints;   // results by content; hints by path (kept apart)
     static std::string key(const unsigned char sha[32], int m) { static const char* d = "0123456789ABCDEF"; std::string s; for (int i = 0; i < 32; i++) { s += d[sha[i] >> 4]; s += d[sha[i] & 15]; } return s + " m" + std::to_string(m + 1); }
     // the file shared by every LAE player of this user (%APPDATA%\LAE); lines are only appended, so players running at once keep each
     // other's results. Up to 0.14 the file was in the foobar2000 profile folder: it is read as well.
@@ -175,9 +184,11 @@ private:
     static std::wstring oldPath() { pfc::string8 p = core_api::get_profile_path(); const char* s = p.get_ptr(); if (!strncmp(s, "file://", 7)) s += 7;
         return std::wstring(pfc::stringcvt::string_wide_from_utf8(s)) + L"\\laes_verified.txt"; }
     void load() { if (loaded) return; loaded = true;
-        for (const std::wstring& pth : {oldPath(), path()}) { FILE* f = _wfopen(pth.c_str(), L"rb"); if (!f) continue; char line[512];
-            while (fgets(line, sizeof line, f)) { std::string s(line); while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
-                const size_t a = s.rfind(' '); if (a == std::string::npos) continue; map[s.substr(0, a)] = s.substr(a + 1) == "ok" ? 1 : -1; }
+        // whole lines only (a long hint line read in pieces could hold a piece that looks like a result); a result line counts only in
+        // exactly the form written above
+        for (const std::wstring& pth : {oldPath(), path()}) { FILE* f = _wfopen(pth.c_str(), L"rb"); if (!f) continue; std::string s;
+            while (recordLine(f, s)) { const size_t a = s.rfind(' '); if (a == std::string::npos) continue; const std::string k = s.substr(0, a), v = s.substr(a + 1);
+                if (!k.compare(0, 5, "file ")) { if (v == "ok") hints.insert(k); } else if (resultKey(k) && (v == "ok" || v == "fail")) map[k] = v == "ok" ? 1 : -1; }
             fclose(f); } }
 };
 VerifiedStore g_verified;

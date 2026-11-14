@@ -55,6 +55,14 @@ std::string hex(const unsigned char* p, int n) { static const char* d = "0123456
 std::wstring widen(const char* utf8) { const int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0); std::wstring w(n > 0 ? (size_t)n : 1, L'\0');
     if (n > 0) MultiByteToWideChar(CP_UTF8, 0, utf8, -1, &w[0], n); w.resize(wcslen(w.c_str())); return w; }
 
+// one whole line of the results file, of any length, without its line end; false at the end of the file. A result counts only in exactly
+// the form written ("<64 hex digits> m<number> ok|fail"): a long line of another player read in pieces could hold a piece that looks like one.
+bool recordLine(FILE* f, std::string& s) { s.clear(); char b[512]; bool any = false;
+    while (fgets(b, sizeof b, f)) { any = true; s += b; if (s.back() == '\n') break; }
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back(); return any; }
+bool resultKey(const std::string& k) { if (k.size() < 67 || k.size() > 70 || k.compare(64, 2, " m")) return false;
+    for (size_t i = 0; i < k.size(); i++) { const char c = k[i]; if (i == 64 || i == 65) continue;
+        if (i < 64 ? !isxdigit((unsigned char)c) : !isdigit((unsigned char)c)) return false; } return true; }
 // SHA-256 results per file content and master, shared with the other LAE players: "<file SHA-256> m<k> ok|fail". Lines are only appended
 // (players running at once keep each other's results); a missing result is looked up again (another player may have checked it meanwhile).
 class Verified {
@@ -66,9 +74,9 @@ public:
         FILE* f = _wfopen((dataDir() + L"\\laes_verified.txt").c_str(), L"ab"); if (!f) return; fprintf(f, "%s %s\n", k.c_str(), ok ? "ok" : "fail"); fclose(f); }
 private:
     std::mutex mx; bool loaded = false; std::map<std::string, bool> map;
-    void load() { if (loaded) return; loaded = true; FILE* f = _wfopen((dataDir() + L"\\laes_verified.txt").c_str(), L"rb"); if (!f) return; char line[512];
-        while (fgets(line, sizeof line, f)) { std::string s(line); while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back(); const size_t a = s.rfind(' ');
-            if (a != std::string::npos) map[s.substr(0, a)] = s.substr(a + 1) == "ok"; } fclose(f); }
+    void load() { if (loaded) return; loaded = true; FILE* f = _wfopen((dataDir() + L"\\laes_verified.txt").c_str(), L"rb"); if (!f) return; std::string s;
+        while (recordLine(f, s)) { const size_t a = s.rfind(' '); if (a == std::string::npos) continue; const std::string k = s.substr(0, a), v = s.substr(a + 1);
+            if (resultKey(k) && (v == "ok" || v == "fail")) map[k] = v == "ok"; } fclose(f); }
 };
 Verified g_verified;
 

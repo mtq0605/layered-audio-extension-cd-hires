@@ -39,13 +39,13 @@ inline int64_t fixedPred(const int64_t* x, int64_t i, int o) { return laes::fixe
 // ---- reader
 struct BR { const uint8_t* p; size_t n, pos = 0; bool fail = false;   // MSB-first bit reader over a byte range; pos in bits
     // up to 8 bits per step (the same value as bit by bit)
-    uint64_t get(int w) { if (fail || w < 0 || w > 64 || pos + (size_t)w > n * 8) { fail = true; return 0; } uint64_t v = 0;
+    uint64_t get(int w) { if (fail || w < 0 || w > 64 || (uint64_t)pos + (uint64_t)w > (uint64_t)n * 8) { fail = true; return 0; } uint64_t v = 0;   // in 64 bits: n * 8 wraps in a 32-bit program for n >= 2^29 (FU12-6)
         while (w > 0) { const int off = (int)(pos & 7), avail = 8 - off, take = w < avail ? w : avail; v = (v << take) | (uint64_t)((p[pos >> 3] >> (avail - take)) & ((1u << take) - 1)); pos += (size_t)take; w -= take; }
         return v; }
     int64_t getS(int w) { if (w == 0) return 0; uint64_t v = get(w); if (w < 64 && (v >> (w - 1) & 1)) v |= ~0ull << w; return (int64_t)v; }
     // zero bits before the next one bit, a byte at a time (as bit by bit: past the end or beyond 2^33 zeros sets fail)
     uint64_t unary() { uint64_t q = 0;
-        while (!fail) { if (pos >= n * 8) { fail = true; break; } const int off = (int)(pos & 7); const unsigned b = (unsigned)(uint8_t)(p[pos >> 3] << off);
+        while (!fail) { if ((uint64_t)pos >= (uint64_t)n * 8) { fail = true; break; } const int off = (int)(pos & 7); const unsigned b = (unsigned)(uint8_t)(p[pos >> 3] << off);
             if (!b) { const int z = 8 - off; if (q + (uint64_t)z > (1ull << 33)) { pos += (size_t)((1ull << 33) - q + 1); q = (1ull << 33) + 1; fail = true; break; } q += (uint64_t)z; pos += (size_t)z; continue; }
             int lz = 0; while (!(b & (0x80u >> lz))) lz++; q += (uint64_t)lz; pos += (size_t)lz + 1;
             if (q > (1ull << 33)) fail = true; break; }
@@ -84,7 +84,7 @@ inline std::string readFlac(const std::vector<uint8_t>& f, Info& in, V ch[2], st
     size_t p = 4; bool last = false, haveSi = false;
     while (!last) { if (p + 4 > f.size()) return "metadata truncated"; last = f[p] & 0x80; const int type = f[p] & 0x7F; const uint32_t len = (uint32_t)f[p + 1] << 16 | f[p + 2] << 8 | f[p + 3]; p += 4;
         if (p + len > f.size()) return "metadata truncated"; if (!haveSi && type != 0) return "STREAMINFO is not the first metadata block";
-        if (type == 0) { if (len != 34) return "bad STREAMINFO"; BR r{f.data() + p, 34}; in.minBs = (int)r.get(16); in.maxBs = (int)r.get(16); r.get(24); r.get(24); in.rate = (int)r.get(20); in.channels = (int)r.get(3) + 1; in.bps = (int)r.get(5) + 1; in.total = r.get(36);
+        if (type == 0) { if (haveSi) return "two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return "bad STREAMINFO"; BR r{f.data() + p, 34}; in.minBs = (int)r.get(16); in.maxBs = (int)r.get(16); r.get(24); r.get(24); in.rate = (int)r.get(20); in.channels = (int)r.get(3) + 1; in.bps = (int)r.get(5) + 1; in.total = r.get(36);
             memcpy(in.md5, f.data() + p + 18, 16); haveSi = true; }
         else if (type == 2 && len >= 4 && !memcmp(&f[p], "LAE2", 4)) app.insert(app.end(), f.begin() + p + 4, f.begin() + p + len);
         p += len; }
@@ -109,6 +109,7 @@ inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, 
         const int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return "frame bit depth differs from STREAMINFO";
         if (r.fail || (r.pos & 7)) return "frame header truncated"; const size_t hb = r.pos / 8; const uint8_t c8 = (uint8_t)r.get(8); if (r.fail || c8 != crc8(fp, hb)) return "frame header CRC-8 mismatch";
         if (strategy == 0 && num != frameNo) return "frame number out of order";
+        if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the first sample's number (FU12-6)
         const size_t base = ch[0].size(); for (int c = 0; c < 2; c++) { ch[c].resize(base + n); if (!readSubframe(r, ch[c].data() + base, n, bps)) return "damaged subframe"; }
         r.pos = (r.pos + 7) & ~(size_t)7; const size_t fb = r.pos / 8; if (fb + 2 > r.n) return "frame truncated";
         if (crc16(fp, fb) != (uint16_t)(fp[fb] << 8 | fp[fb + 1])) return "frame CRC-16 mismatch";

@@ -204,13 +204,14 @@ inline void refPiece(Sig& src, const std::vector<int64_t>& h, int64_t whole, int
             r[(size_t)k] = s > 0 ? (acc + (1LL << (s - 1))) >> s : (int64_t)((uint64_t)acc << (-s)); }
         else { laes::Acc A; for (int t = 0; t < 256; t++) A.mac(h[t], c[t]); r[(size_t)k] = s > 0 ? A.shr(s) : (int64_t)((uint64_t)A.lo << (-s)); } } }); }
 // ---- the bit reader of laes_codec.h over a byte range of a file, read through a window
-struct BitRF { In* in = nullptr; long long off = 0, len = 0; size_t pos = 0; bool fail = false; std::vector<uint8_t> w; long long wb = -1;
-    size_t left() const { return (size_t)len * 8 - pos; }
-    uint8_t byteAt(size_t k) { if ((long long)k < wb || (long long)k >= wb + (long long)w.size()) { wb = (long long)k; const long long e = std::min(len, wb + (1LL << 22)); w.resize((size_t)(e - wb)); in->read(off + wb, w.data(), w.size()); }
-        return w[k - (size_t)wb]; }
-    uint64_t get(int n) { if (fail || n < 0 || n > 64 || (size_t)n > left()) { fail = true; return 0; } uint64_t v = 0;
+struct BitRF { In* in = nullptr; long long off = 0, len = 0; uint64_t pos = 0;   // bit counts in 64 bits: a layer may hold 4 GiB (FU13-1)
+    bool fail = false; std::vector<uint8_t> w; long long wb = -1;
+    uint64_t left() const { return (uint64_t)len * 8 - pos; }
+    uint8_t byteAt(uint64_t k) { if ((long long)k < wb || (long long)k >= wb + (long long)w.size()) { wb = (long long)k; const long long e = std::min(len, wb + (1LL << 22)); w.resize((size_t)(e - wb)); in->read(off + wb, w.data(), w.size()); }
+        return w[(size_t)(k - (uint64_t)wb)]; }
+    uint64_t get(int n) { if (fail || n < 0 || n > 64 || (uint64_t)n > left()) { fail = true; return 0; } uint64_t v = 0;
         while (n > 0) { const int bp = (int)(pos & 7), avail = 8 - bp, take = std::min(n, avail);
-            v = (take == 64 ? 0 : (v << take)) | (uint64_t)((byteAt(pos >> 3) >> (avail - take)) & ((1u << take) - 1)); pos += (size_t)take; n -= take; }
+            v = (take == 64 ? 0 : (v << take)) | (uint64_t)((byteAt(pos >> 3) >> (avail - take)) & ((1u << take) - 1)); pos += (uint64_t)take; n -= take; }
         return v; }
     int64_t getS(int n) { if (n < 1 || n > 63) { fail = true; return 0; } uint64_t v = get(n); if (v >> (n - 1) & 1) v |= ~0ull << n; return (int64_t)v; } };
 // a layer (n values, blocks of B) decoded from a byte range of a file into a signal file

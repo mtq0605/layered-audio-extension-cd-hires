@@ -873,7 +873,10 @@ static int realMain(int argc, char** argv) {
             e = cdxr::loadExtIso(img, (uint32_t)lba, x); }
         else e = cdxr::loadExtDir(fs::path(src), x);
         if (!e.empty()) { printf("%s\n", e.c_str()); return 1; } if (x.empty()) printf("no extension files in %s: everything plays as CD\n", src.c_str());
-        long long W = max(WDEF, atoll(arg(argc, argv, "W", to_string(WDEF)).c_str())); vector<string> in(pos.begin() + 2, pos.end()); Disc d;
+        const string ws = arg(argc, argv, "W", to_string(WDEF)); long long W = 0;   // the search radius: a whole number, at most 441000 (10 s; 2026-11-14)
+        for (char c : ws) { if (c < '0' || c > '9' || W > 441000) { W = -1; break; } W = W * 10 + (c - '0'); }
+        if (ws.empty() || W < 0 || W > 441000) { printf("W=%s: give the search radius in samples as a whole number up to 441000 (at least 5880 is used); nothing written\n", ws.c_str()); return 1; }
+        W = max(WDEF, W); vector<string> in(pos.begin() + 2, pos.end()); Disc d;
         e = openInputs(in, d); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }
         Report r = cdxr::read(d, x, W); decoderCheck(r); printReport(d, r); set<string> names; e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem()), &names); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         {   // files of an earlier reading in the output folder are not part of this result: said, never removed (2026-11-14)

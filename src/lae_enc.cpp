@@ -233,7 +233,7 @@ static bool walk(FILE* f, std::vector<Ck>& cks, std::string& why) {
     if (_fseeki64(f, 0, SEEK_END)) { why = "cannot seek"; return false; } const long long end = _ftelli64(f); long long p = 12;
     while (p + 8 <= end) { uint8_t c[8]; if (_fseeki64(f, p, SEEK_SET) || fread(c, 1, 8, f) != 8) { why = "cannot read a chunk header"; return false; }
         Ck k; memcpy(k.id, c, 4); k.len = (uint32_t)c[4] | (uint32_t)c[5] << 8 | (uint32_t)c[6] << 16 | (uint32_t)c[7] << 24; k.body = p + 8;
-        if (k.body + k.len > end) { why = std::string("chunk '") + std::string(k.id, 4) + "' runs past the end of the file"; return false; }
+        if (k.body + k.len > end) { why = std::string("chunk '") + std::string(k.id, 4) + "' runs past the end of the file (the file is cut off: a decoder plays such a file up to its end, but lae_enc tag copies only complete files)"; return false; }   // stricter than the decoders (spec 3.1) on purpose: a new file is written
         cks.push_back(k); p = k.body + k.len + (k.len & 1); }
     return true; }
 static const Ck* find(const std::vector<Ck>& cks, const char* id) { for (auto& k : cks) if (!memcmp(k.id, id, 4)) return &k; return nullptr; }

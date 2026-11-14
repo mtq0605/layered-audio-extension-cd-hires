@@ -26,6 +26,8 @@
 //        tracks-gapnext[-nocue] / tracks-gapomit[-nocue] (the INDEX 00 gaps of tracks 2... in the next file / left out)
 //   lae_cdx selftest                                    known answers (C19)
 //   lae_cdx test <fixturedir>                           section-7 cases on the test discs X, Y, S, T (in memory)
+// Every input v5 file of pack, split and image is decoded completely before anything is written (P2; the user's decision of
+// 2026-11-15): LAEY every extension pack to its last frame, LAES every master against its SHA-256; a file that does not decode stops the tool.
 // Measured offsets are only printed (R16, P4); no file this tool writes contains a position, offset or shift.
 #include <cstdio>
 #include <cstdlib>
@@ -104,7 +106,7 @@ static string nowUtc() { time_t t = time(nullptr); tm g;
     char b[16]; strftime(b, sizeof b, "%Y%m%d%H%M%S", &g); return b; }
 
 // ---- one track's v5 file (F1): CD layer + LAE chunk body
-struct V5 { string name; int rate = 0; vector<int16_t> cd; vector<uint8_t> block; bool canonical = true; uint16_t type = 1; long long ncd() const { return (long long)cd.size() / 2; } };   // type 1 = LAEY, 2 = LAES
+struct V5 { string name; int rate = 0; vector<int16_t> cd; vector<uint8_t> block; bool canonical = true; uint16_t type = 1; string checked; long long ncd() const { return (long long)cd.size() / 2; } };   // type 1 = LAEY, 2 = LAES; checked: what the decoder check decoded
 static vector<uint8_t> canonV5(int rate, const vector<int16_t>& cd, const vector<uint8_t>& block) {   // = wavio::writeCD byte for byte (F1)
     size_t db = cd.size() * 2, extra = block.empty() ? 0 : 8 + block.size() + (block.size() & 1); vector<uint8_t> o; wavio::hdr(o, rate, 2, 16, db, extra);
     const uint8_t* c = (const uint8_t*)cd.data(); o.insert(o.end(), c, c + db); if (db & 1) o.push_back(0);
@@ -112,6 +114,22 @@ static vector<uint8_t> canonV5(int rate, const vector<int16_t>& cd, const vector
         o.insert(o.end(), block.begin(), block.end()); if (n & 1) o.push_back(0); }
     return o; }
 static vector<uint8_t> canonOf(const V5& v) { return canonV5(v.rate, v.cd, v.block); }
+// an LAEY block decoded completely (the user's decision of 2026-11-15, items 2 and 9): every extension pack (the main body is pack 0)
+// opened on route full at its master rate, so every stream is used; every entropy stream decoded to its end, where it must end exactly at
+// its last byte (the player's one-time check); then every output frame computed, and a value out of range anywhere refuses the block.
+// "" or the reason; summary: what was decoded, for the printed line.
+static string laeyDecodeAll(const vector<int16_t>& cd, const vector<uint8_t>& lae, int rate, string& summary) {
+    size_t total = 1; vector<int32_t> blk(2 * 4096);
+    for (size_t k = 0; k < total; k++) {
+        Decoder D; D.pack = (int)k; int code = 0; string e = D.openRef(cd, lae, "full", 0, &code);
+        auto at = [&](const string& m) { return total > 1 ? "extension pack " + to_string(k) + ": " + m : m; };
+        if (e.empty() && k == 0) total = D.packs.size() + 1;
+        if (!e.empty()) return at(e);
+        if (D.base != rate) return at("the LAE base rate " + to_string(D.base) + " Hz differs from the CD layer's " + to_string(rate) + " Hz");
+        vector<vector<SavedMark>> saved; e = D.checkAll(saved, D.seekThreads); if (!e.empty()) return at(e);
+        const bool before = g_streamErr; g_streamErr = false; while (D.read(blk.data(), 4096) > 0) {}
+        const bool bad = g_streamErr; g_streamErr = before; if (bad) return at("corrupt stream (values out of range)"); }
+    summary = "LAEY, " + (total == 1 ? string("the extension") : "all " + to_string(total) + " extension packs") + " decoded completely"; return ""; }
 // reads and checks a v5 WAV: 16-bit stereo, LAE chunk, CD layer 44100 or 48000 Hz (P1), ncd < 2^28 (P7), every decoder check (P2).
 // Only whole stereo frames are kept; canonical = the file is exactly the canonical layout of F1
 static string loadV5(const fs::path& p, V5& v) {
@@ -125,9 +143,11 @@ static string loadV5(const fs::path& p, V5& v) {
         vector<laes::Pcm> dec; vector<laes::MasterInfo> info; vector<bool> ok; string de = laes::decodeLaes(lae, core, rate, dec, info, ok);
         if (!de.empty()) return "the LAES decoder refuses this file (P2): " + de;
         for (size_t i = 0; i < ok.size(); i++) if (!ok[i]) return "LAES master " + to_string(i + 1) + " does not match its SHA-256 (P2)";
+        v.checked = "LAES, " + (ok.size() == 1 ? string("the master") : "all " + to_string(ok.size()) + " masters") + " decoded, SHA-256 matching";
         v.name = u8(p.filename()); v.rate = rate; v.cd.swap(pcm); v.block.swap(lae); v.type = 2; v.canonical = canonOf(v) == b; return ""; }
     { Decoder D; int code = 0; string de = D.openRef(pcm, lae, "full", 0, &code); if (!de.empty()) return "the decoder refuses this file (P2): " + de;
       if (D.base != rate) return "the LAE base rate " + to_string(D.base) + " Hz differs from the WAV sample rate " + to_string(rate) + " Hz (P2, X2)"; }   // the decoder itself does not compare them
+    { string de = laeyDecodeAll(pcm, lae, rate, v.checked); if (!de.empty()) return "the decoder refuses this file (P2): " + de; }   // every pack decoded completely (2026-11-15)
     v.name = u8(p.filename()); v.rate = rate; v.cd.swap(pcm); v.block.swap(lae); v.canonical = canonOf(v) == b; return ""; }
 // R8 (2026-11-14): every track that passed the whole-track MD5 goes to the unchanged decoder before anything is written, with the
 // checks loadV5 makes on the packaging side (P2). A track the decoder refuses takes the CD route ("extension layer damaged").
@@ -817,6 +837,7 @@ static int realMain(int argc, char** argv) {
     if ((cmd == "pack" && pos.size() == 2) || (cmd == "split" && pos.size() == 3)) {   // pack: extension file; split: base-layer WAV + extension file (F2)
         { const string c = outputClash({pos[0]}, vector<string>(pos.begin() + 1, pos.end())); if (!c.empty()) { printf("%s; nothing written\n", c.c_str()); return 1; } }
         V5 v; string e = loadV5(fs::path(pos[0]), v); if (!e.empty()) { printf("%s: %s; nothing written\n", pos[0].c_str(), e.c_str()); return 1; }
+        printf("%s: decoder check passed: %s\n", pos[0].c_str(), v.checked.c_str());
         int track = atoi(arg(argc, argv, "track", "1").c_str()); if (track < 1 || track > 65535) { printf("track must be 1-65535 (1-98 on a CD); nothing written\n"); return 1; }
         auto lax = laxOf(v, (uint16_t)track); cdx::Trailer t; size_t bl = 0; string pe = cdx::parse(lax, t, bl);
         if (!pe.empty()) { printf("the extension file would not be readable (%s); nothing written\n", pe.c_str()); return 2; }
@@ -842,7 +863,8 @@ static int realMain(int argc, char** argv) {
         const fs::path out(pos[0]); std::error_code ec;
         if (fs::exists(out, ec) && !fs::is_empty(out, ec)) { printf("%s is not empty: an image goes into a new or empty folder (no earlier TRACKnn.LAX may reach the disc); nothing written\n", pos[0].c_str()); return 1; }
         set<int> noext; { string s = arg(argc, argv, "noext", ""); size_t i = 0; while (i < s.size()) { size_t j = s.find(',', i); noext.insert(atoi(s.substr(i, j - i).c_str())); if (j == string::npos) break; i = j + 1; } }
-        vector<V5> t; for (size_t i = 1; i < pos.size(); i++) { V5 v; string e = loadV5(fs::path(pos[i]), v); if (!e.empty()) { printf("%s: %s; nothing written\n", pos[i].c_str(), e.c_str()); return 1; } t.push_back(std::move(v)); }
+        vector<V5> t; for (size_t i = 1; i < pos.size(); i++) { V5 v; string e = loadV5(fs::path(pos[i]), v); if (!e.empty()) { printf("%s: %s; nothing written\n", pos[i].c_str(), e.c_str()); return 1; }
+            printf("%s: decoder check passed: %s\n", pos[i].c_str(), v.checked.c_str()); t.push_back(std::move(v)); }
         Image im; string e; const string lp = arg(argc, argv, "layout", "");
         if (lp.empty()) e = layoutImage(std::move(t), arg(argc, argv, "label", "LAE_EXT"), arg(argc, argv, "date", nowUtc()), atoll(arg(argc, argv, "capacity", to_string(CAPDEF)).c_str()), im, noext);
         else { Disc pd; cdxr::Layout lay; e = cdxr::loadCue(fs::path(lp), pd, cdxr::diskSource(), &lay); if (e.empty() && !pd.notes.empty()) e = pd.notes[0]; if (e.empty() && pd.conflicts) e = "conflicting samples in the publisher's files";

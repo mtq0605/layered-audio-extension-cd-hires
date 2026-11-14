@@ -31,4 +31,7 @@ int main() {
     w = 0; for (long i = 1; i <= 2000000; i++) { const double x = i * 0.37; w = std::fmax(w, ulps(lmath::log10(x), std::log10(x))); h = mix(h, lmath::log10(x)); }
     printf("log10: max %.2f ulp\n", w);
     printf("checksum (must be the same on every platform): %016llx\n", (unsigned long long)h);
+    // FU20-1 (2026-11-14): the reference value (MSVC x64 and x86, /fp:strict, 2026-11-14); another value is a failure, exit code 1
+    const uint64_t REF = 0x22f04c1237795a7dull;
+    if (h != REF) { printf("FAILED: the checksum differs from the reference %016llx: lae_math gives other values on this platform\n", (unsigned long long)REF); return 1; }
     return 0; }

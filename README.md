@@ -1744,12 +1744,13 @@ The mode (here `3`) must be given as the third argument. Pieces that were confir
 **Image.**
 
 ```
-lae_cdx image <image dir> <track1.v5.wav> <track2.v5.wav> … [label=<album>] [noext=<n>,<m>,…] [layout=<publisher.cue>]
+lae_cdx image <image dir> <track1.v5.wav> <track2.v5.wav> … [label=<album>] [date=<YYYYMMDDhhmmss>] [noext=<n>,<m>,…] [layout=<publisher.cue>]
               [album=<text>] [performer=<text>] [cdtitle=<n>:<text>,…] [cdperformer=<n>:<text>,…] [cdtext=off]
 ```
 
 - `<image dir>` must be new or empty.
 - `label=` sets the volume label of the data session.
+- `date=<YYYYMMDDhhmmss>` (UTC) sets the date of the data session's file system. Without it, the time of the run is used, so two runs with the same input write different `DATA.ISO` files (the same holds for `lae_cdx data`).
 - `noext=` publishes the listed tracks as CD only, for example when capacity is insufficient.
 - `layout=` selects the independent-CD layout of a publisher's disc (Section 10.5).
 - **CD-Text** (album title, performer and track titles, shown by CD players) is written as `TITLE` / `PERFORMER` lines in `IMAGE.CUE` and `SESSION1.CUE`, which the burner writes as CD-Text. The text is taken from the files' tags (`TITLE`, `ARTIST`, `ALBUM`), in independent-CD mode from the publisher's CUE, and from the options `album=`, `performer=`, `cdtitle=<n>:<text>` and `cdperformer=<n>:<text>` (several tracks separated by commas). CD-Text accepts only printable ASCII: a text in Chinese or with other characters is never converted; instead, the tool stops, lists each such text together with the option with which it can be typed (for example in pinyin), and writes nothing. `cdtext=off` writes no CD-Text. AUDIO.BIN, DATA.ISO and the extension files do not depend on the text.

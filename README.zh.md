@@ -1744,12 +1744,13 @@ lae_cdx image <image dir> planned/TRACK*.v5.wav layout=publisher.cue            
 **光盘镜像。**
 
 ```
-lae_cdx image <image dir> <track1.v5.wav> <track2.v5.wav> … [label=<album>] [noext=<n>,<m>,…] [layout=<publisher.cue>]
+lae_cdx image <image dir> <track1.v5.wav> <track2.v5.wav> … [label=<album>] [date=<YYYYMMDDhhmmss>] [noext=<n>,<m>,…] [layout=<publisher.cue>]
               [album=<text>] [performer=<text>] [cdtitle=<n>:<text>,…] [cdperformer=<n>:<text>,…] [cdtext=off]
 ```
 
 - `<image dir>` 必须是新目录或空目录。
 - `label=` 设置数据区段的卷标。
+- `date=<YYYYMMDDhhmmss>`（UTC）设置数据区段文件系统的日期。不给出时使用运行时的时间，因此同样的输入运行两次会写出不同的 `DATA.ISO`（`lae_cdx data` 同样如此）。
 - `noext=` 将所列音轨仅作为 CD 发布，例如在容量不足时。
 - `layout=` 选择发行方光盘的独立 CD 布局（第 10.5 节）。
 - **CD-Text**（专辑名、演唱者和曲名，由 CD 播放器显示）写为 `IMAGE.CUE` 和 `SESSION1.CUE` 中的 `TITLE` / `PERFORMER` 行，刻录软件将其写为 CD-Text。文字取自文件的标签（`TITLE`、`ARTIST`、`ALBUM`），在独立 CD 模式下取自发行方的 CUE，也取自选项 `album=`、`performer=`、`cdtitle=<n>:<text>` 和 `cdperformer=<n>:<text>`（多条音轨以逗号分隔）。CD-Text 仅接受可打印 ASCII：含中文或其他字符的文字绝不转换；工具会停止，逐项列出此类文字以及可用于输入它的选项（例如以拼音输入），且不写入任何内容。`cdtext=off` 不写入 CD-Text。AUDIO.BIN、DATA.ISO 和扩展文件不依赖于这些文字。

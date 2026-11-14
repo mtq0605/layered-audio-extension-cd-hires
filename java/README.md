@@ -57,7 +57,7 @@ The LAEY decoder interface (`LaeyDecoder`) has two additions that exist only in 
 
 Two differences in behaviour are specific to the Java port:
 
-- The player front end `Play` offers the masters of LAES files with at most 16 masters (`Play.maxMasters`); a file with more masters plays its core master, and the reason is reported. The limit exists because a long chain of tiers needs more memory than a phone has (measured on a PC: about 1 MB of heap per master in the chain). The format allows 255 masters, and the limit can be raised when devices allow it.
+- The player front end `Play` offers the masters of LAES files with at most 16 masters (`Play.File.maxMasters`, a constant); a file with more masters plays its core master, and the reason is reported. The limit exists because a long chain of tiers needs more memory than a phone has (measured on a PC: about 1 MB of heap per master in the chain). The format allows 255 masters; the Java LAES encoder refuses more than 16 masters before it starts, and files with more masters are made with the PC tool (`laes enc`).
 - When several masters match `--pick=<rate>:<bits>` or `--pick=name:<text>`, `LaesTool` lists the candidates and writes nothing, as the C++ tool does outside a console; it has no tick list.
 
 ## Licence

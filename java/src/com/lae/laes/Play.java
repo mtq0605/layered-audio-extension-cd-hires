@@ -400,9 +400,11 @@ public final class Play {
          * Java only (2026-11-12; phones do not have the memory for 255 masters, so a limit applies until devices allow more): the largest number of masters a file may
          * have for this decoder to offer them; a file with more plays its core master only, with the reason in why (as a payload that failed a
          * check). Measured on a PC (Java, 64 MB budget, 44.1 kHz masters in a reference chain): about 1 MB more heap per master of the chain
-         * (40 deep: 76 MB) and decoding time growing with the chain; 255 masters do not fit a phone. Raise it when phones can do more.
+         * (40 deep: 76 MB) and decoding time growing with the chain; 255 masters do not fit a phone.
+         * A constant (FU26-2, user 2026-11-14: a phone must never open a file with more masters): it cannot be raised from outside, and the
+         * Java LAES encoder refuses more than this many masters before it starts.
          */
-        public static int maxMasters = 16;
+        public static final int maxMasters = 16;
         private void limitMasters() { if (why.isEmpty() && ms.size() > maxMasters) { why = "this file has " + ms.size() + " masters; this player offers files with up to " + maxMasters + " (the core master plays)"; ms.clear(); } }
         // the core's SHA-256 as parsePayload computes it in the C++ (16 bit: int16 LE; 24 / 32 bit: int32 LE), fed sample by sample
         private void shaPut(int v) { if (coreBits == 16) { shb[shf++] = (byte) v; shb[shf++] = (byte) (v >>> 8); } else { shb[shf++] = (byte) v; shb[shf++] = (byte) (v >>> 8); shb[shf++] = (byte) (v >>> 16); shb[shf++] = (byte) (v >>> 24); }

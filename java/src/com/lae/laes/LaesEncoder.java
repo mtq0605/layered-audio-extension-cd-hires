@@ -232,6 +232,14 @@ public final class LaesEncoder {
         // --timing: prints the time of each stage at the end (L5, 2026-11-03); the file written does not change
         final boolean timing = opt.timing; final StringBuilder tlog = new StringBuilder(); final long[] t0 = {System.nanoTime()};
         final List<String> paths = new ArrayList<String>(); final List<Double> Ts = new ArrayList<Double>(); final List<Boolean> autoT = new ArrayList<Boolean>(); final List<StreamEnc.WavInfo> wis = new ArrayList<StreamEnc.WavInfo>();
+        // FU26-2 (user 2026-11-14): the Java / phone player opens files with at most Play.File.maxMasters (16) masters, and a phone must never
+        // open a file with more; so this encoder makes at most that many and refuses more before any work. Up to 255 masters: the PC tool.
+        if (opt.masters.size() > Play.File.maxMasters) {
+            say(L, opt.masters.size() + " masters given: this encoder makes files with at most " + Play.File.maxMasters + " masters, because the Java / phone player opens at most "
+                   + Play.File.maxMasters + " (more need more memory than a phone has); files with up to 255 masters are made with the PC tool (laes enc); nothing written");
+            say(L, "  给了 " + opt.masters.size() + " 个母带：Java / 手机播放器最多打开 " + Play.File.maxMasters + " 个母带的文件（母带更多时手机内存不够），所以这个编码器最多做 "
+                   + Play.File.maxMasters + " 个；最多 255 个母带的文件请用 PC 上的工具（laes enc）制作；没有写任何文件");
+            return 1; }
         for (MasterArg a : opt.masters) { StreamEnc.WavInfo wi = new StreamEnc.WavInfo(); final String e = StreamEnc.probeMaster(a.path, wi); if (!e.isEmpty()) { say(L, e); return 2; } paths.add(a.path); Ts.add(a.T); autoT.add(a.auto); wis.add(wi); }
         if (paths.isEmpty()) { say(L, "no master given"); return 1; }
         if (paths.size() > 255) { say(L, "at most 255 masters"); return 1; }

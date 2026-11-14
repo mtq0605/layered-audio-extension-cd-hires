@@ -40,7 +40,9 @@ static Biquad lp(double fc, double fs) { double w = 2 * fc / fs, c = lmath::cosp
 
 int main(int argc, char** argv) {
     if (argc < 3) { fprintf(stderr, "usage: gen_suite <out dir> <rate> [seconds = 20] [category]\n"); return 1; }
-    string dir = argv[1]; int fs = atoi(argv[2]); double secs = argc > 3 ? atof(argv[3]) : 20; long n = (long)(secs * fs); const double FS = 8388607.0;
+    string dir = argv[1]; int fs = atoi(argv[2]); double secs = argc > 3 ? atof(argv[3]) : 20;
+    if (fs < 4 || !(secs >= 0) || secs * fs > 2147483647.0) { fprintf(stderr, "gen_suite: the rate must be at least 4 Hz and the length not negative (at most 2^31 - 1 frames)\n"); return 1; }
+    long n = (long)(secs * fs); const double FS = 8388607.0;
     // optional category: only that file is generated (the categories are independent: each writes all of L and R from its own state)
     static const char* cats[] = {"levels", "sweep", "imd", "square", "transients", "electronic", "noise", "decay", "stereo", "buried"};
     const char* only = argc > 4 ? argv[4] : nullptr;

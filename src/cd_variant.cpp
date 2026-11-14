@@ -75,9 +75,10 @@ int main(int argc, char** argv) {
     if (op == "shift" && argc > 4) { need16(); long k = atol(argv[4]); std::vector<int16_t> o((size_t)n * 2, 0);
         for (long i = 0; i < n; i++) { long j = i - k; if (j >= 0 && j < n) { o[i * 2] = s[j * 2]; o[i * 2 + 1] = s[j * 2 + 1]; } }
         if (!w16(out, w.rate, o)) return 2; printf("shift %+ld samples -> %s\n", k, out); return 0; }
-    if (op == "pad" && argc > 5) { need16(); long a = lround(atof(argv[4]) * w.rate), b = lround(atof(argv[5]) * w.rate); std::vector<int16_t> o((size_t)(n + a + b) * 2, 0);
+    if (op == "pad" && argc > 5) { need16(); long a = lround(atof(argv[4]) * w.rate), b = lround(atof(argv[5]) * w.rate);
+        if (a < 0 || b < 0) { printf("pad: the lead and the tail must not be negative\n"); return 1; } std::vector<int16_t> o((size_t)(n + a + b) * 2, 0);
         for (long i = 0; i < n * 2; i++) o[(size_t)a * 2 + i] = s[i]; if (!w16(out, w.rate, o)) return 2; printf("pad %ld + %ld frames of digital silence -> %s\n", a, b, out); return 0; }
-    if (op == "cut" && argc > 4) { need16(); long a = lround(atof(argv[4]) * w.rate); if (a >= n) return 1; std::vector<int16_t> o(s.begin() + (size_t)a * 2, s.end());
+    if (op == "cut" && argc > 4) { need16(); long a = lround(atof(argv[4]) * w.rate); if (a >= n) return 1; if (a < 0) { printf("cut: the start must not be negative\n"); return 1; } std::vector<int16_t> o(s.begin() + (size_t)a * 2, s.end());
         if (!w16(out, w.rate, o)) return 2; printf("cut the first %ld frames -> %s\n", a, out); return 0; }
     if (op == "gain" && argc > 4) { need16(); double g = pow(10.0, atof(argv[4]) / 20); long nc = 0; std::vector<int16_t> o(s.size());
         for (size_t i = 0; i < s.size(); i++) { double v = s[i] * g; o[i] = clip16(v); if (fabs(v) > 32767) nc++; }
@@ -90,7 +91,7 @@ int main(int argc, char** argv) {
     if (op == "fade" && argc > 4) { need16(); long f = lround(atof(argv[4]) * w.rate); std::vector<int16_t> o(s);
         for (long i = std::max(0L, n - f); i < n; i++) { double g = (double)(n - i) / f; o[i * 2] = clip16(s[i * 2] * g); o[i * 2 + 1] = clip16(s[i * 2 + 1] * g); }
         if (!w16(out, w.rate, o)) return 2; printf("fade over the last %ld frames -> %s\n", f, out); return 0; }
-    if (op == "splice" && argc > 5) { need16(); long a = lround(atof(argv[4]) * w.rate), k = atol(argv[5]); if (a + k > n) return 1; std::vector<int16_t> o;
+    if (op == "splice" && argc > 5) { need16(); long a = lround(atof(argv[4]) * w.rate), k = atol(argv[5]); if (a + k > n) return 1; if (a < 0 || k < 0) { printf("splice: the position and the count must not be negative\n"); return 1; } std::vector<int16_t> o;
         o.insert(o.end(), s.begin(), s.begin() + (size_t)a * 2); o.insert(o.end(), s.begin() + (size_t)(a + k) * 2, s.end()); o.resize((size_t)n * 2, 0);
         if (!w16(out, w.rate, o)) return 2; printf("splice: %ld frames removed at frame %ld -> %s\n", k, a, out); return 0; }
     if (op == "noise" && argc > 6) { need16(); long a = std::max(0L, lround(atof(argv[4]) * w.rate)), b = std::min(n, lround(atof(argv[5]) * w.rate)); double rms = 32768.0 * pow(10.0, atof(argv[6]) / 20);

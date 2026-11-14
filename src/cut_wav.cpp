@@ -10,7 +10,9 @@
 int main(int argc, char** argv) {
     if (argc < 5) { printf("usage: cut_wav <in.wav> <out.wav> <start s> <length s> [gain dB]\n"); return 1; }
     wavio::Wav w; if (!wavio::read(argv[1], w) || w.ch != 2) { printf("cannot read %s\n", argv[1]); return 1; }
-    long n = (long)w.s.size() / 2, a = (long)(atof(argv[3]) * w.rate), len = (long)(atof(argv[4]) * w.rate);
+    long n = (long)w.s.size() / 2; const double da = atof(argv[3]) * w.rate, dl = atof(argv[4]) * w.rate;
+    if (!(da > -1) || !(dl > -1) || da + dl > (double)n + 2) { printf("excerpt outside the file\n"); return 1; }   // checked before the conversion (no overflow)
+    long a = (long)da, len = (long)dl;
     if (a < 0 || a + len > n) { printf("excerpt outside the file\n"); return 1; }
     double g = argc > 5 ? pow(10.0, atof(argv[5]) / 20) : 1.0; long nclip = 0;
     std::vector<int32_t> o((size_t)len * 2); for (long i = 0; i < len * 2; i++) { double v = (w.s[(size_t)a * 2 + i] >> 8) * g; long long q = llround(v);

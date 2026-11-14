@@ -14,6 +14,7 @@
 using namespace std;
 using fftlib::fft;
 int main(int argc, char** argv) {
+    if (argc < 3) { printf("usage: cmp_wav <reference.wav> <decoded.wav>\n"); return 1; }
     wavio::Wav a, b; if (!wavio::read(argv[1], a) || !wavio::read(argv[2], b)) { printf("cannot read\n"); return 1; }
     if (a.ch != 2 || b.ch != 2) { printf("need stereo\n"); return 1; }
     if (a.rate != b.rate) {   // decoded at a lower octave: bring the reference down with the codec's own half-band tables (highest stage first)

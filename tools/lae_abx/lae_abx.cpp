@@ -320,33 +320,36 @@ static bool preparePairSafe(const Pair& p, int rate, Source s[2], long long& lag
 // ---------------------------------------------------------------- playback (WASAPI shared mode, float stereo at the test rate)
 struct Player {
     const std::vector<float>* src[2][2] = {}; std::atomic<int> cur{ -1 }, want{ -1 }; std::atomic<long long> pos{ 0 }, from{ 0 }, to{ 0 }; std::atomic<bool> run{ false };
-    std::thread th; int rate = 48000; long long len = 0;
+    std::thread th; int rate = 48000; long long len = 0; HWND notify = nullptr;   // notify: gets WM_APP + 3 (wParam = HRESULT) when no sound can be played (FU20-11)
     void set(Source s[2], int r) { stop(); for (int i = 0; i < 2; i++) { src[i][0] = &s[i].L; src[i][1] = &s[i].R; } rate = r; len = (long long)s[0].L.size(); pos = 0; from = 0; to = len; }
-    void play(int which) { want = which; if (!run) { run = true; th = std::thread([this]() { loop(); }); } }
+    void play(int which) { want = which; if (!run) { if (th.joinable()) th.join(); run = true; th = std::thread([this]() { loop(); }); } }   // a loop that gave up is joined first
     void pause() { want = -1; }
     void stop() { run = false; if (th.joinable()) th.join(); cur = -1; want = -1; }
     void loop() {
-        CoInitializeEx(nullptr, COINIT_MULTITHREADED); IMMDeviceEnumerator* en = nullptr; IMMDevice* dev = nullptr; IAudioClient* ac = nullptr; IAudioRenderClient* rc = nullptr;
-        CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&en); if (en) en->GetDefaultAudioEndpoint(eRender, eConsole, &dev); if (dev) dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&ac);
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED); IMMDeviceEnumerator* en = nullptr; IMMDevice* dev = nullptr; IAudioClient* ac = nullptr; IAudioRenderClient* rc = nullptr; HRESULT fail = S_OK;
+        fail = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&en); if (en) fail = en->GetDefaultAudioEndpoint(eRender, eConsole, &dev); if (dev) fail = dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&ac);
         WAVEFORMATEX wf{}; wf.wFormatTag = WAVE_FORMAT_IEEE_FLOAT; wf.nChannels = 2; wf.nSamplesPerSec = rate; wf.wBitsPerSample = 32; wf.nBlockAlign = 8; wf.nAvgBytesPerSec = rate * 8;
         HANDLE ev = CreateEventW(nullptr, FALSE, FALSE, nullptr); UINT32 bufFrames = 0;
-        if (ac && SUCCEEDED(ac->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, 400000, 0, &wf, nullptr))) {
+        if (ac && SUCCEEDED(fail = ac->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, 400000, 0, &wf, nullptr))) {
+            fail = S_OK;
             ac->SetEventHandle(ev); ac->GetBufferSize(&bufFrames); ac->GetService(__uuidof(IAudioRenderClient), (void**)&rc); ac->Start();
             const int ramp = rate / 200; int gainStep = 0; int playing = -1;   // 5 ms fade out / in when the source changes or playback pauses
-            while (run) { WaitForSingleObject(ev, 200); UINT32 pad = 0; ac->GetCurrentPadding(&pad); UINT32 n = bufFrames - pad; if (!n) continue; BYTE* out = nullptr; if (FAILED(rc->GetBuffer(n, &out))) continue; float* o = (float*)out;
+            while (run) { WaitForSingleObject(ev, 200); UINT32 pad = 0; HRESULT bh = ac->GetCurrentPadding(&pad); if (bh == AUDCLNT_E_DEVICE_INVALIDATED) { fail = bh; break; } UINT32 n = bufFrames - pad; if (!n) continue;
+                BYTE* out = nullptr; bh = rc->GetBuffer(n, &out); if (bh == AUDCLNT_E_DEVICE_INVALIDATED) { fail = bh; break; } if (FAILED(bh)) continue; float* o = (float*)out;
                 for (UINT32 i = 0; i < n; i++) { const int w = want;
                     if (playing != w) { if (gainStep > 0) gainStep--; else { playing = w; cur = w; } } else if (playing >= 0 && gainStep < ramp) gainStep++;
                     float l = 0, r = 0; if (playing >= 0) { long long p = pos; if (p >= to || p < from) p = from; const float g = (float)gainStep / ramp; l = (*src[playing][0])[(size_t)p] * g; r = (*src[playing][1])[(size_t)p] * g; pos = p + 1; }
                     o[2 * i] = l; o[2 * i + 1] = r; }
                 rc->ReleaseBuffer(n, 0); }
             ac->Stop(); }
-        if (rc) rc->Release(); if (ac) ac->Release(); if (dev) dev->Release(); if (en) en->Release(); CloseHandle(ev); CoUninitialize(); } };
+        if (rc) rc->Release(); if (ac) ac->Release(); if (dev) dev->Release(); if (en) en->Release(); CloseHandle(ev); CoUninitialize();
+        if (FAILED(fail) || !ac) { if (!FAILED(fail)) fail = E_FAIL; run = false; if (notify) PostMessageW(notify, WM_APP + 3, (WPARAM)(unsigned long)fail, 0); } } };
 
 // ---------------------------------------------------------------- the test
 static double pValue(int k, int n) { double s = 0; for (int i = k; i <= n; i++) { double c = 1; for (int j = 0; j < i; j++) c = c * (n - j) / (j + 1); s += c; } return s / std::pow(2.0, n); }
 struct Test {
     Pair pair; int rate = 48000, trials = 16, done = 0, correct = 0; int aIs = 0;   // aIs: which source (0/1 = line order) is button A
-    std::vector<int> xIsA; std::vector<std::string> lines; Source s[2]; long long lag = 0; std::string startedAt;
+    std::vector<int> xIsA; std::vector<std::string> lines; Source s[2]; long long lag = 0; std::string startedAt; float peak[2] = { 0, 0 };   // peak: largest |sample| per source (FU20-11)
     int xSource(int t) const { return xIsA[(size_t)t] ? aIs : 1 - aIs; } };
 
 // ---------------------------------------------------------------- window
@@ -358,20 +361,24 @@ static std::mutex gMsgMu; static std::string gMsg;
 static std::vector<int> gQueue; static size_t gQueuePos = 0; static std::vector<std::string> gSummary; static std::string gSessionStart;   // the pairs ticked for this session, in list order
 #define WM_APP_STATUS (WM_APP + 1)
 #define WM_APP_READY (WM_APP + 2)
+#define WM_APP_AUDIO (WM_APP + 3)
 
 static void setStatus(const std::string& s) { SetWindowTextW(gStatus, widen(s).c_str()); }
 static std::string fmtTime(long long frames, int rate) { char b[32]; long long s = frames / rate; snprintf(b, sizeof b, "%lld:%02lld.%d", s / 60, s % 60, (int)(frames % rate * 10 / rate)); return b; }
 static void enableTest(bool on) { for (auto h : gBtn) EnableWindow(h, on); for (auto h : gChoose) EnableWindow(h, on); EnableWindow(gPos, on); for (auto h : gRangeBtn) EnableWindow(h, on); }
 static void showTrial() {
     char b[640]; snprintf(b, sizeof b, "Pair %zu of %zu: %s\r\nTrial %d of %d.  Listen to A, B, X and Y, then say whether X is A or X is B.\r\nCorrect so far is not shown until the end.", gQueuePos + 1, gQueue.size(), gTest.pair.name.c_str(), gTest.done + 1, gTest.trials);
-    std::string st = b; if (gTest.lag) { char lg[160]; snprintf(lg, sizeof lg, "\r\nLined up: the second source of the pair is moved by %lld samples (%.1f ms).", gTest.lag, 1000.0 * (double)gTest.lag / gTest.rate); st += lg; }
+    std::string st = b; for (int i = 0; i < 2; i++) if (gTest.peak[i] > 1.0f) { char pk[200]; snprintf(pk, sizeof pk, "\r\nNote: %s peaks %.1f dB above full scale; the system may limit it while playing.", i ? "the second source" : "the first source", 20 * std::log10(gTest.peak[i])); st += pk; }
+    if (gTest.lag) { char lg[160]; snprintf(lg, sizeof lg, "\r\nLined up: the second source of the pair is moved by %lld samples (%.1f ms).", gTest.lag, 1000.0 * (double)gTest.lag / gTest.rate); st += lg; }
     setStatus(st); }
 static void finish() {
     gPlayer.pause(); enableTest(false); const double p = pValue(gTest.correct, gTest.trials);
     const Source& A = gTest.s[gTest.aIs]; const Source& B = gTest.s[1 - gTest.aIs];
     std::string log = std::string(kVersion) + "\r\n" + "test started " + gTest.startedAt + ", finished " + nowText() + "\r\n\r\n" + "pair: " + gTest.pair.name + "\r\n" +
         "button A was: " + A.name + "\r\n  SHA-256 " + A.sha + "\r\n" + "button B was: " + B.name + "\r\n  SHA-256 " + B.sha + "\r\n" +
-        "test rate: " + std::to_string(gTest.rate) + " Hz, both sides through the same resampler; lag of the second source: " + std::to_string(gTest.lag) + " samples\r\n\r\n";
+        "test rate: " + std::to_string(gTest.rate) + " Hz, both sides through the same resampler; lag of the second source: " + std::to_string(gTest.lag) + " samples\r\n";
+    for (int i = 0; i < 2; i++) if (gTest.peak[i] > 1.0f) { char pk[200]; snprintf(pk, sizeof pk, "%s source peaks %.1f dB above full scale (the system may limit it while playing)\r\n", i ? "second" : "first", 20 * std::log10(gTest.peak[i])); log += pk; }
+    log += "\r\n";
     for (auto& l : gTest.lines) log += l + "\r\n";
     char t[160]; snprintf(t, sizeof t, "\r\nTotal: %d/%d\r\np-value (one-sided binomial): %.4f (%.2f %%)\r\n", gTest.correct, gTest.trials, p, 100 * p); log += t;
     Sha256 h; h.add(log.data(), log.size()); const char salt[] = "lae_abx log 2026-11-12"; h.add(salt, sizeof salt - 1); log += "\r\nchecksum (shows accidental edits; not a signature): " + h.hex() + "\r\n";
@@ -436,8 +443,10 @@ static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
     case WM_APP_STATUS: { std::lock_guard<std::mutex> g(gMsgMu); setStatus(gMsg); } SendMessageW(gProgress, PBM_SETPOS, gProg, 0); return 0;
     case WM_APP_READY: gBusy = false; EnableWindow(gPrepare, TRUE); SendMessageW(gProgress, PBM_SETPOS, wp ? 1000 : 0, 0);
         if (!wp) { std::lock_guard<std::mutex> g(gMsgMu); setStatus(gMsg); return 0; }
+        for (int i = 0; i < 2; i++) { float pk = 0; for (const auto* ch : { &gTest.s[i].L, &gTest.s[i].R }) for (float v : *ch) pk = std::max(pk, std::fabs(v)); gTest.peak[i] = pk; }
         gTest.aIs = (int)(rnd32() & 1); gTest.xIsA.clear(); for (int i = 0; i < gTest.trials; i++) gTest.xIsA.push_back((int)(rnd32() & 1)); gTest.startedAt = nowText();
         gPlayer.set(gTest.s, gTest.rate); gReady = true; enableTest(true); updateRange(); showTrial(); return 0;
+    case WM_APP_AUDIO: { char ab[300]; snprintf(ab, sizeof ab, "No sound: the default playback device could not be opened or was removed (error 0x%08lX). Check the playback device in Windows, then press Play again.", (unsigned long)wp); setStatus(ab); } return 0;
     case WM_DESTROY: gPlayer.stop(); gQuit = true;   // FU20-12: end the decoders, let the preparation stop (at most 30 s), then remove the work folder
         if (gPrepRunning) { if (decodeJob()) TerminateJobObject(decodeJob(), 1); for (int k = 0; k < 600 && gPrepRunning; k++) Sleep(50); }
         removeWorkDir(); PostQuitMessage(0); return 0; }
@@ -467,7 +476,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     INITCOMMONCONTROLSEX ic{ sizeof ic, ICC_BAR_CLASSES | ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS }; InitCommonControlsEx(&ic);
     WNDCLASSW wc{}; wc.lpfnWndProc = WndProc; wc.hInstance = inst; wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1); wc.lpszClassName = L"lae_abx"; RegisterClassW(&wc);
-    gWnd = CreateWindowExW(0, L"lae_abx", L"LAE ABX listening test", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, nullptr, nullptr, inst, nullptr);
+    gWnd = CreateWindowExW(0, L"lae_abx", L"LAE ABX listening test", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, nullptr, nullptr, inst, nullptr); gPlayer.notify = gWnd;
     const UINT dpi = GetDpiForWindow(gWnd); RECT rc{ 0, 0, MulDiv(640, (int)dpi, 96), MulDiv(610, (int)dpi, 96) }; AdjustWindowRectExForDpi(&rc, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, FALSE, 0, dpi);
     SetWindowPos(gWnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER);
     NONCLIENTMETRICSW nm{ sizeof nm }; SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof nm, &nm, 0, dpi); gFont = CreateFontIndirectW(&nm.lfMessageFont);

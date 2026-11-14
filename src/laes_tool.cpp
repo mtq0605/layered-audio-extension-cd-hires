@@ -729,6 +729,8 @@ static int laesMain(int argc, char** argv) {
             laess::WavInfo wi; std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } paths.push_back(a); Ts.push_back(T); autoT.push_back(au); wis.push_back(wi); }
         if (paths.empty()) { printf("no master given\n"); return 1; }
         if (paths.size() > 255) { printf("at most 255 masters\n"); return 1; }
+        { std::error_code ec; std::vector<std::string> ins(paths); if (!corePath.empty()) ins.push_back(corePath);   // FU16-7 (2026-11-14): <out> must not be an input
+          if (fs::exists(out, ec)) for (const std::string& p : ins) if (fs::equivalent(out, p, ec)) { printf("%s is one of the inputs (%s): choose another output name; nothing written\n", out.c_str(), p.c_str()); return 1; } }
         // names and "no derived versions" (2026-11-11, payload version 2): --name=<k>:<text> (k = the k-th master as given, from 1; may repeat),
         // --no-derive (every master) or --no-derive=<k>. Names come only from here: nothing is filled in from file names, paths or dates.
         std::vector<std::string> names(paths.size()); std::vector<int> mflags(paths.size(), 0);
@@ -949,7 +951,7 @@ static int laesMain(int argc, char** argv) {
         { const std::string why = selfCheckFile(out + ".part", pm, threads);
           if (!why.empty()) { std::error_code ec; fs::remove(out + ".part", ec); printf("self-check failed: %s; nothing written\n", why.c_str()); return 2; } }
         stage("self-check");
-        { std::error_code ec; fs::remove(out, ec); fs::rename(out + ".part", out, ec); if (ec) { printf("cannot write %s\n", out.c_str()); return 2; } }
+        { std::error_code ec; fs::rename(out + ".part", out, ec); if (ec) { printf("cannot write %s (the new file stays as %s.part)\n", out.c_str(), out.c_str()); return 2; } }   // FU16-7: replaces <out> in one step; a failure keeps the old <out>
         double secs = (double)coreFrames / base; printf("%s: %s form, core master %d Hz %d-bit, %zu master(s), LAES block %.1f kb/s (file %.1f MB, %.1f kb/s)\n", out.c_str(), asFlac ? "FLAC" : "WAV", base, core32.bits, pm.size(),
                                                          bodySize * 8 / secs / 1000, (double)fs::file_size(out) / 1e6, (double)fs::file_size(out) * 8 / secs / 1000);
         for (size_t i = 0; i < info.size(); i++) { const std::string tier = info[i].refTier == 0 ? "the core master" : "master " + std::to_string(info[i].refTier);

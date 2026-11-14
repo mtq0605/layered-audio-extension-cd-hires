@@ -243,7 +243,8 @@ public final class StreamEnc {
     // reads a 16 / 24 / 32-bit integer PCM WAV (PCM or EXTENSIBLE) as laes_tool readWav does (all 32 bits of a 32-bit file), header only first;
     // or (probeMaster) a FLAC master's STREAMINFO: dataOff = its first audio frame, dataBytes = the size of its samples as PCM
     /** port of laes_stream_enc.h:WavInfo */
-    public static final class WavInfo { public int rate = 0, bits = 0; public long dataOff = -1, dataBytes = 0; public long frames = 0; public boolean flac = false; public Flac.Info fi = new Flac.Info(); }
+    public static final class WavInfo { public int rate = 0, bits = 0; public long dataOff = -1, dataBytes = 0; public long frames = 0; public boolean flac = false; public Flac.Info fi = new Flac.Info();
+        public long hdrLen = 0; }   // not 0: the header gives this data length (below 2^63), more than the file holds; dataBytes = what is there, the caller says so (2026-11-14, U15-LAES)
     static boolean eq4(byte[] b, int o, String s) { for (int i = 0; i < 4; i++) if (b[o + i] != (byte) s.charAt(i)) return false; return true; }
     // port of laes_stream_enc.h:probeWav  (lae: null, or {offset, length} of the "LAE " chunk (offset -1: none))
     public static String probeWav(String path, WavInfo wi, long[] lae) {
@@ -263,7 +264,7 @@ public final class StreamEnc {
         while (pos + 8 <= in.n) { in.read(pos, c, 0, 8); long n = (c[4] & 0xFF) | (c[5] & 0xFF) << 8 | (c[6] & 0xFF) << 16 | (long) (c[7] & 0xFF) << 24; final long body = pos + 8;
             if (rf64 && n == 0xFFFFFFFFL) n = eq4(c, 0, "data") ? dsData : eq4(c, 0, "LAE ") ? dsLae : n;
             if (n < 0 && eq4(c, 0, "data")) return path + ": the header gives a data length of 2^63 bytes or more";   // negative as a long: no file has that (2026-11-14)
-            if (com.lae.core.U.gt(n, in.n - body)) n = in.n - body;   // a length beyond the end of the file: a cut-off file; compared unsigned, so pos only moves forward
+            if (com.lae.core.U.gt(n, in.n - body)) { if (eq4(c, 0, "data")) wi.hdrLen = n; n = in.n - body; }   // a length beyond the end of the file: a cut-off file; compared unsigned, so pos only moves forward
             if (eq4(c, 0, "fmt ") && com.lae.core.U.ge(n, 16)) { final byte[] f = new byte[26]; in.read(body, f, 0, com.lae.core.U.ge(n, 26) ? 26 : 16); tag = (f[0] & 0xFF) | (f[1] & 0xFF) << 8; ch = (f[2] & 0xFF) | (f[3] & 0xFF) << 8;
                 wi.rate = (f[4] & 0xFF) | (f[5] & 0xFF) << 8 | (f[6] & 0xFF) << 16 | (f[7] & 0xFF) << 24; wi.bits = (f[14] & 0xFF) | (f[15] & 0xFF) << 8; if (tag == 0xFFFE && com.lae.core.U.ge(n, 26)) tag = (f[24] & 0xFF) | (f[25] & 0xFF) << 8; }
             else if (eq4(c, 0, "data")) { wi.dataOff = body; wi.dataBytes = n; }

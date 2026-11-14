@@ -153,11 +153,15 @@ public final class LaesEncoder {
 
     // ---- WAV read (16/24/32-bit integer PCM, stereo; PCM or EXTENSIBLE with the PCM sub-format), for the core
     // port of laes_tool.cpp:readWav  (the C++ reads the whole file into memory; here the chunk headers, then the samples; the same checks)
-    public static String readWav(String path, StreamEnc.Core p) {
+    public static String readWav(String path, StreamEnc.Core p) { return readWav(path, p, null); }
+    // (hl: null, or hl[0] = the header's data length and hl[1] = the bytes the file holds of it, when the header gives more than the file
+    // holds (the file is read to its end as before); else both 0 (2026-11-14, U15-LAES))
+    public static String readWav(String path, StreamEnc.Core p, long[] hl) {
+        if (hl != null) { hl[0] = 0; hl[1] = 0; }
         RandomAccessFile f; try { f = new RandomAccessFile(path, "r"); } catch (IOException e) { return "cannot read " + path; }
         try { final long size = f.length(); final byte[] h = new byte[12]; if (size < 12) return path + ": not RIFF/WAVE"; f.seek(0); f.readFully(h); if (!StreamEnc.eq4(h, 0, "RIFF") || !StreamEnc.eq4(h, 8, "WAVE")) return path + ": not RIFF/WAVE";
             long pos = 12; int tag = 0, ch = 0, rate = 0, bits = 0; long data = -1, dlen = 0; final byte[] c = new byte[8];
-            while (pos + 8 <= size) { f.seek(pos); f.readFully(c); long n = (c[4] & 0xFF) | (c[5] & 0xFF) << 8 | (c[6] & 0xFF) << 16 | (long) (c[7] & 0xFF) << 24; final long body = pos + 8; if (n > size - body) n = size - body;
+            while (pos + 8 <= size) { f.seek(pos); f.readFully(c); long n = (c[4] & 0xFF) | (c[5] & 0xFF) << 8 | (c[6] & 0xFF) << 16 | (long) (c[7] & 0xFF) << 24; final long body = pos + 8; if (n > size - body) { if (hl != null && StreamEnc.eq4(c, 0, "data")) { hl[0] = n; hl[1] = size - body; } n = size - body; }
                 if (StreamEnc.eq4(c, 0, "fmt ") && n >= 16) { final byte[] b = new byte[26]; f.seek(body); f.readFully(b, 0, (int) Math.min(26, n)); tag = (b[0] & 0xFF) | (b[1] & 0xFF) << 8; ch = (b[2] & 0xFF) | (b[3] & 0xFF) << 8;
                     rate = (b[4] & 0xFF) | (b[5] & 0xFF) << 8 | (b[6] & 0xFF) << 16 | (b[7] & 0xFF) << 24; bits = (b[14] & 0xFF) | (b[15] & 0xFF) << 8; if (tag == 0xFFFE && n >= 26) tag = (b[24] & 0xFF) | (b[25] & 0xFF) << 8; }
                 else if (StreamEnc.eq4(c, 0, "data")) { data = body; dlen = n; }
@@ -215,6 +219,10 @@ public final class LaesEncoder {
         if (new File(wd + "/job.txt").exists()) { say(L, "the work folder " + wd + " is kept: run the same command again to continue (--disk-stop-remove: removed instead)");
             say(L, "  工作文件夹 " + wd + " 已保留：再运行同一条命令，就从停下的地方接着做（加 --disk-stop-remove 时改为删除）"); } }
     static void say(Listener l, String s) { if (l != null) l.message(s); }
+    // port of laes_tool.cpp:longHeaderNote: a master or core master WAV whose header gives a data length beyond the end of the file
+    // (2026-11-14, as lae_enc and laes): told once per file, the file is read to its end
+    static void longHeaderNote(Listener l, String path, long hdrLen, long have) {
+        if (hdrLen != 0) say(l, "NOTE: the header of " + path + " gives a data length of " + hdrLen + " bytes, but the file holds only " + have + " bytes of it: the file may be cut off (incomplete). It is read to its end and the run continues."); }
     // FU26-4: part becomes dst; an existing dst is given up only once part has taken its place. One rename where it may replace a file
     // (Android, Linux); else (Windows) dst is first renamed to dst.laes-old and put back when the rename fails. false: dst as before, part kept.
     static boolean replaceWith(File part, File dst) {
@@ -249,7 +257,7 @@ public final class LaesEncoder {
             say(L, "  给了 " + opt.masters.size() + " 个母带：Java / 手机播放器最多打开 " + Play.File.maxMasters + " 个母带的文件（母带更多时手机内存不够），所以这个编码器最多做 "
                    + Play.File.maxMasters + " 个；最多 255 个母带的文件请用 PC 上的工具（laes enc）制作；没有写任何文件");
             return 1; }
-        for (MasterArg a : opt.masters) { StreamEnc.WavInfo wi = new StreamEnc.WavInfo(); final String e = StreamEnc.probeMaster(a.path, wi); if (!e.isEmpty()) { say(L, e); return 2; } paths.add(a.path); Ts.add(a.T); autoT.add(a.auto); wis.add(wi); }
+        for (MasterArg a : opt.masters) { StreamEnc.WavInfo wi = new StreamEnc.WavInfo(); final String e = StreamEnc.probeMaster(a.path, wi); if (!e.isEmpty()) { say(L, e); return 2; } longHeaderNote(L, a.path, wi.hdrLen, wi.dataBytes); paths.add(a.path); Ts.add(a.T); autoT.add(a.auto); wis.add(wi); }
         if (paths.isEmpty()) { say(L, "no master given"); return 1; }
         if (paths.size() > 255) { say(L, "at most 255 masters"); return 1; }
         // names and "no derived versions" (2026-11-11, payload version 2): --name=<k>:<text> (k = the k-th master as given, from 1; may repeat),
@@ -354,7 +362,7 @@ public final class LaesEncoder {
             StreamEnc.putState(stem + ".prep", StreamEnc.prepState(pm.get(i))); }
         stage(tlog, t0, "read, levels, octaves");
         int coreSrc = -1; StreamEnc.Core core = new StreamEnc.Core();
-        if (!corePath.isEmpty()) { final String e = readWav(corePath, core); if (!e.isEmpty()) { say(L, e); return 2; } if (core.rate != base) { say(L, "the core master must be at " + base + " Hz"); return 2; } }
+        if (!corePath.isEmpty()) { final long[] hl = {0, 0}; final String e = readWav(corePath, core, hl); if (!e.isEmpty()) { say(L, e); return 2; } longHeaderNote(L, corePath, hl[0], hl[1]);if (core.rate != base) { say(L, "the core master must be at " + base + " Hz"); return 2; } }
         else { final boolean[] dith = new boolean[1]; final int[] src = new int[1]; core = StreamEnc.deriveCoreS(pm, base, coreBits, src, dith, 20261028); coreSrc = src[0];
             say(L, "core master: " + coreBits + "-bit base level of " + paths.get(coreSrc) + (dith[0] ? " (TPDF-dithered)" : "")); }
         for (int i = 0; i < paths.size(); i++) if (autoT.get(i)) {   // master.wav@auto: T from LAEY's search against the given core

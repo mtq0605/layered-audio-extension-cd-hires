@@ -170,7 +170,7 @@ public:
         std::lock_guard<std::mutex> g(mx); const std::string k = "file " + std::to_string(size) + " " + path; hints.insert(k);
         FILE* f = _wfopen(this->path().c_str(), L"ab"); if (!f) return; fprintf(f, "%s ok\n", k.c_str()); fclose(f); }
     int get(const unsigned char sha[32], int m) { std::lock_guard<std::mutex> g(mx); load(); auto it = map.find(key(sha, m));
-        if (it == map.end()) { loaded = false; load(); it = map.find(key(sha, m)); }   // another player may have checked it meanwhile
+        if (it == map.end() && grown()) { loaded = false; load(); it = map.find(key(sha, m)); }   // another player may have checked it meanwhile (lines are only appended: the files grew)
         return it == map.end() ? 0 : it->second; }   // 1 ok, -1 fail, 0 unknown
     void put(const unsigned char sha[32], int m, bool ok) { std::lock_guard<std::mutex> g(mx); load(); const std::string k = key(sha, m); auto it = map.find(k);
         if (it != map.end() && it->second == (ok ? 1 : -1)) return; map[k] = ok ? 1 : -1;
@@ -183,7 +183,10 @@ private:
     static std::wstring path() { return laeSharedDir() + L"\\laes_verified.txt"; }
     static std::wstring oldPath() { pfc::string8 p = core_api::get_profile_path(); const char* s = p.get_ptr(); if (!strncmp(s, "file://", 7)) s += 7;
         return std::wstring(pfc::stringcvt::string_wide_from_utf8(s)) + L"\\laes_verified.txt"; }
-    void load() { if (loaded) return; loaded = true;
+    uint64_t seen[2] = {~0ull, ~0ull};   // the sizes of oldPath() and path() when they were last read (~0: not read)
+    static uint64_t sizeOf(const std::wstring& pth) { WIN32_FILE_ATTRIBUTE_DATA a; if (!GetFileAttributesExW(pth.c_str(), GetFileExInfoStandard, &a)) return 0; return (uint64_t)a.nFileSizeHigh << 32 | a.nFileSizeLow; }
+    bool grown() { return sizeOf(oldPath()) != seen[0] || sizeOf(path()) != seen[1]; }
+    void load() { if (loaded) return; loaded = true; seen[0] = sizeOf(oldPath()); seen[1] = sizeOf(path());   // sizes first: a line appended while reading is read next time
         // whole lines only (a long hint line read in pieces could hold a piece that looks like a result); a result line counts only in
         // exactly the form written above
         for (const std::wstring& pth : {oldPath(), path()}) { FILE* f = _wfopen(pth.c_str(), L"rb"); if (!f) continue; std::string s;
@@ -217,7 +220,11 @@ class ChoiceStore {
 public:
     std::string get(const char* path) { std::lock_guard<std::mutex> g(mx); load(); auto it = map.find(path); return it == map.end() ? std::string() : it->second; }
     void set(const char* path, const std::string& name) { std::lock_guard<std::mutex> g(mx); load(); if (name.empty()) map.erase(path); else map[path] = name;
-        FILE* f = _wfopen(file().c_str(), L"wb"); if (!f) return; for (auto& e : map) fprintf(f, "%s\t%s\n", e.second.c_str(), e.first.c_str()); fclose(f); }
+        // written to a temporary file first and then put in place, so a crash or power loss in the middle leaves the old list whole
+        const std::wstring tmp = file() + L".tmp"; FILE* f = _wfopen(tmp.c_str(), L"wb"); if (!f) return;
+        for (auto& e : map) fprintf(f, "%s\t%s\n", e.second.c_str(), e.first.c_str());
+        const bool good = fflush(f) == 0 && !ferror(f); if (fclose(f) != 0 || !good) { _wremove(tmp.c_str()); return; }
+        if (!MoveFileExW(tmp.c_str(), file().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) _wremove(tmp.c_str()); }
 private:
     std::mutex mx; bool loaded = false; std::map<std::string, std::string> map;
     // up to 0.10 the name lacked its backslash, so the file sat beside the profile folder ("<profile>laes_choices.txt"): read that once

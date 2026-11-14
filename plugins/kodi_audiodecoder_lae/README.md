@@ -7,7 +7,7 @@ This add-on plays LAE files in Kodi 21 (Omega). It supports **LAES** (LAE Lossle
 ## Changes in this update
 
 - LAEY files in the FLAC form are decoded as well ([spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4). As before, Kodi passes only files with the extension `.lae` to the add-on.
-- LAEY extension packs (Section 5.6 of the same specification): the setting "LAEY extension pack" (Pack 1 … Pack 9) selects the pack. "Pack n" is the pack of master n, counted from 1 as in the foobar2000 menu; `lae_dec pack=`, DirectShow and VLC count from 0 and call it pack n − 1 ("Pack 1" is the main body, pack 0 in the log). A file without that pack plays pack 1. No pack is chosen automatically.
+- LAEY extension packs (Section 5.6 of the same specification): the setting "LAEY extension pack" (Pack 1 … Pack 9) selects the pack. "Pack n" is the pack of master n, counted from 1 as in the foobar2000 menu; `lae_dec pack=`, DirectShow and VLC count from 0 and call it pack n − 1 ("Pack 1" is the main body; the log uses the same names as the setting: "Pack 3 cannot be used; Pack 1 plays"). A file without that pack plays pack 1. No pack is chosen automatically.
 - The setting "LAEY layers" offers "All layers", "Frequency layer only", "Bit-depth layer only" and "CD/core layer only".
 - LAES payload version 2 ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3): when nothing else is set, the default master stored in the file plays; without one, the core master.
 - A master plays only after it and its chain of tiers have matched their SHA-256 values; the result is kept per file content. A derived 16-bit version starts at the seek position, bit for bit.

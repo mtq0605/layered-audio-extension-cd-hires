@@ -1895,7 +1895,7 @@ LAE Lossy 基于以下已公开技术构建：
 | 参考解码器及 `src/` 中其他解码器端源文件，包括解码器库 `src/lae_decoder.h` 和 `liblae`（`src/lae_api.*`）；`tools/` 中的工具 | Apache License 2.0 |
 | 封装工具 `lae_cdx`（`src/lae_cdx.*`、`src/lae_cdx_read.h`、`src/iso9660.h`） | Apache License 2.0 |
 | 播放器插件源文件（`plugins/`） | Apache License 2.0。构建出的 Kodi 附加组件以 GPL-3.0-or-later 分发，因为它使用 Kodi 的 GPL 头文件构建。已构建软件包中的第三方代码：[THIRD_PARTY.md](THIRD_PARTY.zh.md)。 |
-| Java 库（`java/`） | 与 C++ 源文件相同：解码器和共享辅助代码为 Apache-2.0；编码器文件为 GPL-3.0-or-later 或商业许可证 |
+| Java 库（`java/`） | 与 C++ 源文件相同：解码器和共享辅助代码为 Apache-2.0；编码器文件为 GPL-3.0-or-later 或商业许可证。有三个 Apache-2.0 文件（`WavIo`、`LaeDec`、`NoiseMarks`）调用编码器文件，只能与它们一起编译，也只有编码器使用；解码器和 `Play` 不需要任何编码器文件即可编译（[java/README.md](java/README.zh.md) 的“许可”一节） |
 | 发布中包含的演示音频和母带 | 保留所有权利：仅供收听和验证（[AUDIO_LICENSE.md](AUDIO_LICENSE.zh.md)）。代码和文档许可证不适用。 |
 | 参考编码器（`src/` 中编码器端源文件，包括对齐 `src/cd_align.cpp`、规划器 `src/cd_plan.cpp`、LAES 工具 `src/laes_tool.cpp` 和流媒体导出 `src/laes_export.cpp`） | GNU General Public License v3.0 或更高版本（GPL-3.0-or-later），或作者提供的商业许可证（[COMMERCIAL.md](COMMERCIAL.zh.md)） |
 | 测试脚本、构建文件、CI 配置 | Apache License 2.0 |

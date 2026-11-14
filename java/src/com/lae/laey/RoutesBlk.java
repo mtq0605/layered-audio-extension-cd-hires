@@ -121,6 +121,10 @@ final class RoutesBlk {
             { double b0 = I0(9.0);
               for (int k = -NL; k <= NL; k++) { double rr = (double) k / NL; double w = I0(9.0 * Math.sqrt(Cv.max(0.0, 1 - rr * rr))) / b0; hl[k + NL] = (k == 0 ? xl : LMath.sinpi(xl * k) / (Math.PI * k)) * w; } }
             final Ctx X = new Ctx(); X.env = env; X.b16 = b16; X.dvr = dvr; X.b24 = b24; X.leak = leak; X.Lb = Lb; X.NL = NL; X.NT = NT; X.hl = hl; X.h = h; X.full = full;
+            // T and F are stored as 24-bit values. A value outside is limited below as before, and counted (2026-11-14): the decoder would
+            // then not give back the master, so the split stops after the last block. It cannot happen with the CD layer derived from the
+            // master; it happens with an independent CD that differs from the master by more than full scale (inverted polarity, loud passages).
+            final long[] overT = {0, 0}, overF = {0, 0};   // per channel (the two channels run in two threads)
             Tf = new BlkIo.Writer(env, argv[5]); Ff = new BlkIo.Writer(env, argv[6]);
             for (long A = 0; A < L; A += BM) { env.checkCancel(); final long B = Math.min(L, A + BM); final long ta = A >> stages, tb = B == L ? Lb : (B >> stages);
                 final int[] Tout = new int[(int) (Math.max(0L, tb - ta)) * 2], Fout = new int[(int) (B - A) * 2]; final int[] m = mr.read(A, B); final long AA = A;
@@ -129,9 +133,12 @@ final class RoutesBlk {
                     WinFn p0 = new WinFn() { @Override public BlkIo.WinD get(long a, long b) { BlkIo.WinD T = X.tWin(a, b, c); BlkIo.WinD u = vWin(b16, dvr, a, b, c); for (long i = a; i < b; i++) u.d[(int) (i - a)] += T.d[(int) (i - a)]; Tw[0] = T; haveT[0] = true; return u; } };
                     final long e = Math.min(B, Lu); BlkIo.WinD u = new BlkIo.WinD(); if (e > AA) u = upEval(env, stages, AA, e, Lb, p0);
                     if (tb > ta) { if (!haveT[0] || Tw[0].base > ta || Tw[0].base + Tw[0].d.length < tb) Tw[0] = X.tWin(ta, tb, c);
-                        for (long i = ta; i < tb; i++) Tout[(int) (i - ta) * 2 + c] = Cv.d2i(Cv.max(-8388608.0, Cv.min(8388607.0, Tw[0].at(i)))) * 256; }
-                    for (long i = AA; i < B; i++) { final double ui = i < e ? u.at(i) : 0.0; long d = (long) (m[(int) (i - AA) * 2 + c] >> 8) - Cv.llround(ui); d = Math.max(-8388608L, Math.min(8388607L, d)); Fout[(int) (i - AA) * 2 + c] = (int) (d * 256); } } });
+                        for (long i = ta; i < tb; i++) { final double tv = Tw[0].at(i); if (tv < -8388608.0 || tv > 8388607.0) overT[c]++; Tout[(int) (i - ta) * 2 + c] = Cv.d2i(Cv.max(-8388608.0, Cv.min(8388607.0, tv))) * 256; } }
+                    for (long i = AA; i < B; i++) { final double ui = i < e ? u.at(i) : 0.0; long d = (long) (m[(int) (i - AA) * 2 + c] >> 8) - Cv.llround(ui); if (d < -8388608L || d > 8388607L) overF[c]++; d = Math.max(-8388608L, Math.min(8388607L, d)); Fout[(int) (i - AA) * 2 + c] = (int) (d * 256); } } });
                 Tf.put(Tout); Ff.put(Fout); }
+            if (overT[0] + overT[1] + overF[0] + overF[1] > 0)   // stops before finish(): the writers remove their unfinished files (finally: close)
+                throw EncIo.fail(Fmt.c("the difference between the master and the CD / core layer does not fit into 24 bits at %lld sample(s) of the depth layer signal and %lld sample(s) of the frequency layer signal, so the file would not decode to the master. This happens when an independent CD differs from the master by more than full scale, for example with inverted polarity and passages above -6 dBFS. Correct the polarity or the level of the CD and encode again",
+                                       overT[0] + overT[1], overF[0] + overF[1]));
             Tf.finish(); Tf = null; Ff.finish(); Ff = null;
             return 0; }
         finally { if (Tf != null) Tf.close(); if (Ff != null) Ff.close(); mr.close(); b24.close(); b16.close(); if (dvr0 != null) dvr0.close(); if (leak0 != null) leak0.close(); new File(dvPath).delete(); } }

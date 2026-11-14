@@ -388,6 +388,7 @@ struct SharedLaes { OwnReader rd; laes_file* f = nullptr; std::string path; t_fi
     // kB; never written into the media file): loaded when present and matching, else made once by the pass above and saved
     void startIndex() { indexing = true; indexer = std::thread([this] { FpPin pin; SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
         struct Done { SharedLaes* s; ~Done() { s->indexing = false; parkIdleLaes(true); } } done{this};   // try only: the cache may be destroying this entry
+        try {   // an exception here (memory) would end foobar2000: without the record a start inside the track decodes from the beginning
         const std::wstring rec = recordPath();
         if (!rec.empty()) { std::vector<uint8_t> d; FILE* fi = _wfopen(rec.c_str(), L"rb"); if (!fi) fi = _wfopen(recordPath(true).c_str(), L"rb");
             if (fi) { _fseeki64(fi, 0, SEEK_END); const int64_t n = _ftelli64(fi); _fseeki64(fi, 0, SEEK_SET);
@@ -396,7 +397,8 @@ struct SharedLaes { OwnReader rd; laes_file* f = nullptr; std::string path; t_fi
         laes_index_layers(f, &cancel, 0); if (cancel || rec.empty()) return;
         const int64_t n = laes_index_save(f, nullptr, 0); if (n <= 0) return; std::vector<uint8_t> b((size_t)n); if (laes_index_save(f, b.data(), n) != n) return;
         const std::wstring tmp = rec + L".part"; FILE* fo = _wfopen(tmp.c_str(), L"wb"); if (!fo) return; const bool ok = fwrite(b.data(), 1, b.size(), fo) == b.size(); fclose(fo);
-        if (!ok || !MoveFileExW(tmp.c_str(), rec.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str()); else dbg("index record saved (%u bytes)", (unsigned)b.size()); }); }
+        if (!ok || !MoveFileExW(tmp.c_str(), rec.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str()); else dbg("index record saved (%u bytes)", (unsigned)b.size());
+        } catch (...) { dbg("index: exception"); } }); }
     // in the folder shared by the LAE players (%APPDATA%\LAE\laes_index); old: the foobar2000 profile folder (up to 0.14), read when the shared one is missing
     std::wstring recordPath(bool old = false) const { laes_file_info fi; if (laes_get_info(f, &fi) != 0) return std::wstring();
         static const wchar_t* hx = L"0123456789ABCDEF"; std::wstring name; for (int i = 0; i < 32; i++) { name += hx[fi.file_sha256[i] >> 4]; name += hx[fi.file_sha256[i] & 15]; }
@@ -440,7 +442,9 @@ public:
     LaesWorker(std::string path, uint64_t size, int choice, int master, uint64_t frames, int rate, uint64_t start = 0, std::unique_ptr<Prefetched> adopt = nullptr)
         : m_path(std::move(path)), m_size(size), m_choice(choice), m_master(master), m_frames(frames), m_rate(rate), m_base(adopt ? adopt->b0 : start), m_written(adopt ? adopt->b0 : start), m_adopt(std::move(adopt)), m_prog(std::make_shared<LaesProgress>()) {
         m_prog->name = pfc::string_filename_ext(m_path.c_str()).get_ptr(); m_prog->t0 = nowMs(); m_guessCheck = master >= 0 && !g_verified.hint(m_path, size);
-        m_thread = std::thread([this] { run(); }); }
+        // an exception on this thread (memory) would end foobar2000 (std::terminate): this track fails instead
+        m_thread = std::thread([this] { try { run(); } catch (const std::bad_alloc&) { m_opening = nullptr; fail(T("not enough memory", "内存不足")); }
+            catch (...) { m_opening = nullptr; fail(T("internal error", "内部错误")); } }); }
     ~LaesWorker() { closeProgress(m_prog); m_stop = true; { SharedLaes* o = m_opening.load(); if (o) o->rd.abort.abort(); }   // a read in progress (not yet shared) stops
         if (m_thread.joinable()) m_thread.join(); if (m_play) { FpPin pin; laes_stop(m_play); } }
     // waits until frames [from, from + n) can be played, with the progress bar when that takes a while. Returns false when they never
@@ -561,7 +565,8 @@ public:
         for (auto& c : cs) { Item it; it.idx = c.first; it.ci = c.second; m_items.push_back(std::move(it)); }
         MEMORYSTATUSEX ms{}; ms.dwLength = sizeof ms; GlobalMemoryStatusEx(&ms);
         m_keep = ms.ullAvailPhys < (2ull << 30) || ms.ullAvailVirtual < (1ull << 30) ? 1.0 : 3.0;   // seconds ahead: less on a machine short of memory
-        m_thread = std::thread([this] { run(); }); }
+        // an exception on this thread (memory) would end foobar2000: the samples kept ready are given up instead (a switch then starts a decoder)
+        m_thread = std::thread([this] { try { run(); } catch (...) { FpPin pin; std::lock_guard<std::mutex> g(m_mx); for (auto& it : m_items) { if (it.p) { laes_stop(it.p); it.p = nullptr; } it.idx = -1; } } }); }
     ~LaesPrefetcher() { m_stop = true; if (m_thread.joinable()) m_thread.join(); }
     void setTime(double t) { m_time = t; }
     // the prepared samples of choice index `idx` (laes choice number) when they hold frame `at`; null otherwise

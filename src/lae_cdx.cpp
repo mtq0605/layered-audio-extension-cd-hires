@@ -436,7 +436,9 @@ static vector<pair<long long, long long>> leftovers(const Disc& d, const Report&
 static string writeOutputs(const fs::path& out, const Disc& d, const Report& r, const string& stem, set<string>* names = nullptr) {   // names: the files written
     std::error_code ec; fs::create_directories(out, ec); char nm[300]; string e; const int rate = d.rate > 0 ? d.rate : 44100;
     auto cdFile = [&](const string& name, long long a, long long b) { vector<int16_t> pc; pc.reserve((size_t)max(0LL, b - a) * 2); for (long long x = a; x < b; x++) { pc.push_back(d.L(x)); pc.push_back(d.R(x)); }
-        auto by = canonV5(rate, pc, {}); if (!writeBytes(out / fs::u8path(name), by.data(), by.size())) e = "cannot write " + name; else if (names) names->insert(name); };
+        auto by = canonV5(rate, pc, {}); if (!writeBytes(out / fs::u8path(name), by.data(), by.size())) { e = "cannot write " + name; return; } if (names) names->insert(name);
+        long long unk = 0; for (long long x = a; x < b; x++) if (!d.has(x)) unk++;   // inside the file: positions no input gave or two inputs gave differently (R5)
+        if (unk) printf("%s: %lld of its %lld samples are not in the rip (a missing file, or samples the files disagree on) and are written as digital silence\n", name.c_str(), unk, b - a); };
     for (auto& t : r.tracks) {
         if (t.state == Track::PASS) { snprintf(nm, sizeof nm, "TRACK%02d.lae.wav", t.track); auto by = canonV5((int)t.ext->t.rate, t.cd, vector<uint8_t>(t.ext->bytes.begin(), t.ext->bytes.begin() + (ptrdiff_t)t.ext->blockLen));
             if (!writeBytes(out / nm, by.data(), by.size())) e = string("cannot write ") + nm; else if (names) names->insert(nm); }

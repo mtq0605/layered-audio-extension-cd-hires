@@ -43,6 +43,17 @@ The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IAN
   as the C++ tools (`lae_enc`, `lae_dec`, `laes`) of the same commit.
 - A format change that existing decoders cannot read raises the format version. For CDX, this rule applies from its first stable
   version; version 0 is a draft and may still change.
+- An LAEY file with extension packs is still container version 5. A decoder from before v5-2026-11-14 plays the CD layer with the
+  main body (pack 0) of such a file and ignores the further packs: it does not list them and gives no notice that they exist.
+- The derived 16-bit versions that a decoder offers for an LAES file changed on 2026-11-11
+  ([spec/lossless/SPEC.md](../spec/lossless/SPEC.md), Section 10.1): the tools and plug-ins of v5-2026-11-07 offer at most one per
+  sample rate, and those of v5-2026-11-14 offer one per source. For the same file, the two releases can therefore list a different
+  number of entries, in a different order and under different names, and a script that selects an entry by its number or name can
+  get a different entry. The masters, their rate levels and the core master decode identically in both releases, and the derived
+  versions of master 1 are bit-identical.
+- The encoder of v5-2026-10-18 kept the top 24 bits of a 32-bit integer master and dropped the low 8 bits without notice. From
+  v5-2026-10-24 on, the encoder counts the samples whose low 8 bits are not zero, and then asks on a console or, in a script,
+  stops unless `bits=24` is given. A file encoded with v5-2026-10-18 from a 32-bit master whose low 8 bits carry information holds the 24-bit truncation of that master.
 
 ## Release table
 

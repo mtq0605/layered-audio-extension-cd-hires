@@ -379,6 +379,12 @@ static std::string writeWithPayload(laess::In& in, const Layout& L, const std::s
                   if (isLae) copyRange(body, o, 0, bsz); else copyRange(in, o, q->off, q->len); if (len & 1) { const uint8_t z = 0; o.put(&z, 1); } } }
           o.close(); }
     return ""; }
+// DEC 31 (2026-11-15): laes add / extract estimate their disk use before they start and say so when it is more than is free; they go on
+// (the inner dec / enc stop if the disk is full). need: bytes; dir: where the work folder goes
+static void diskNotice(const std::string& cmd, const std::string& dir, double need) {
+    std::error_code ec; const fs::space_info sp = fs::space(fs::absolute(fs::path(dir), ec), ec); if (ec || need <= (double)sp.available) return;
+    printf("note: laes %s needs about %.1f GB of disk (temporary files and the new file) in %s, %.1f GB free on that disk: it goes on, and stops if the disk is full\n", cmd.c_str(), need / 1073741824.0, dir.c_str(), sp.available / 1073741824.0);
+    printf("%s%s%s%.1f%s%s%s%.1f%s\n", u8"  注意：laes ", cmd.c_str(), u8" 大约需要 ", need / 1073741824.0, u8" GB 磁盘空间（临时文件和新文件），放在 ", dir.c_str(), u8"，这块磁盘剩 ", sp.available / 1073741824.0, u8" GB；照样开始，磁盘满时会停下"); }
 static int laesMain(int argc, char** argv);
 int main(int argc, char** argv) { lae_u8::init(argc, argv); return laesMain(argc, argv); }   // UTF-8 arguments and file names on Windows (win_utf8.h)
 // laes add / extract (2026-11-11) run the dec and enc commands of this same program through laesMain
@@ -416,7 +422,13 @@ static int laesMain(int argc, char** argv) {
     // a few pieces (and the core). Piece length from the memory limit (--mem=<GB>, or by default 2 GB, less where min(1/2, max(1/4,
     // all - 28 GB)) of the physical memory is smaller; 2026-11-04); the files written do not depend on it.
     // job (enc, 2026-11-05): a work folder made for the same job (job.txt equal) is used again: the run continues where an earlier one stopped
-    auto workDir = [&](const std::string& out, const std::string& job = std::string(), bool* resumed = nullptr) { const std::string wd = out + ".laes.tmp"; std::error_code ec;
+    // DEC 31 (2026-11-15): a work folder that cannot be made next to the output (a read-only place) is made in the system temp folder, and said
+    auto workDir = [&](const std::string& out, const std::string& job = std::string(), bool* resumed = nullptr) { std::string wd = out + ".laes.tmp"; std::error_code ec;
+        if (!fs::exists(wd, ec)) { fs::create_directories(wd, ec); if (ec || !fs::exists(wd, ec)) { std::error_code e2;
+                const std::string alt = (fs::temp_directory_path(e2) / ("laes_" + std::to_string((unsigned long long)std::hash<std::string>()(fs::absolute(fs::path(out), e2).string())) + ".laes.tmp")).string();
+                printf("note: the work folder cannot be made at %s; it goes to the system temp folder: %s\n", wd.c_str(), alt.c_str());
+                printf("%s%s%s%s\n", u8"  注意：工作文件夹不能建在 ", wd.c_str(), u8"，改放在系统临时文件夹：", alt.c_str()); wd = alt; }
+            else fs::remove(wd, ec); }
         if (fs::exists(wd, ec) && !fs::exists(wd + "/laes.tmp", ec)) laess::fail(wd + " exists and is not a laes work folder: remove it or choose another output name");
         if (resumed) { *resumed = false; std::string old; if (!job.empty() && laess::getState(wd + "/job.txt", old) && old == job) { *resumed = true; return wd; } }
         fs::remove_all(wd, ec); fs::create_directories(wd, ec); if (ec || !fs::exists(wd)) laess::fail("cannot create the work folder " + wd);
@@ -577,10 +589,18 @@ static int laesMain(int argc, char** argv) {
         std::vector<int> menus(nAll, 0); { bool same = true; for (size_t i = 0; i < nAll; i++) { size_t p = numOf[i]; if (!menuList.empty()) for (size_t z = 0; z < menuList.size(); z++) if (menuList[z] == numOf[i]) p = z + 1; menus[i] = (int)p; same &= p == i + 1; }
           if (same) std::fill(menus.begin(), menus.end(), 0); }
         // the old masters decoded once (this program's dec command): they are the references of the new ones
+        { double need = (double)in.n + 2.5 * (double)le(hd + 16, 8) * 2 * (hd[12] / 8);   // DEC 31: the new file, the core master as WAV and in memory copies
+          for (auto& R : rs) need += (32.0 + 2 * (R.I.bits / 8)) * (double)R.I.frames;   // inner dec: temporary files (32 bytes per frame) and the master WAVs
+          for (auto& w : wis) need += 2.5 * (double)w.dataBytes;                          // the new masters: levels and candidates, as enc estimates
+          diskNotice("add", fs::absolute(fs::path(out)).parent_path().string(), need); }
         Gone g{workDir(out + ".add")}; const std::string dd = g.p + "/dec";
         { std::vector<std::string> av = {"laes", "dec", src, dd}; std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr);
           if (laesMain((int)av.size(), ap.data()) != 0) { printf("%s: the masters could not be decoded and checked; nothing written\n", src.c_str()); return 2; } }
-        Pcm core; { const std::string e = readWav(dd + "/core.wav", core); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
+        Pcm core; {   // DEC 31: through the reader that knows RF64 (a core master above 4 GB); before readWav, RIFF only
+            laess::WavInfo cw; const std::string e = laess::probeWav(dd + "/core.wav", cw); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+            core.rate = cw.rate; core.bits = cw.bits; laess::In ci(dd + "/core.wav"); std::vector<int32_t> x; for (int c = 0; c < 2; c++) core.c[c].resize((size_t)cw.frames);
+            for (long long a = 0; a < cw.frames; a += 1 << 20) { const long long b = std::min<long long>(cw.frames, a + (1 << 20)); laess::wavFrames(ci, cw, a, b, x);
+                for (long long i = a; i < b; i++) for (int c = 0; c < 2; c++) core.c[c][(size_t)i] = x[(size_t)(i - a) * 2 + c]; } }
         int maxSt = 0; std::vector<int> stOf(nAll); for (size_t i = 0; i < nAll; i++) { stOf[i] = i < (size_t)nOld ? rs[i].I.stages : [&] { int st = 0; while ((base << st) < wis[ordN[i - nOld]].rate) st++; return st; }(); maxSt = std::max(maxSt, stOf[i]); }
         auto othersOf = [&](size_t i) { std::vector<int> o; for (size_t k = 0; k < stOf.size(); k++) if (k != i) o.push_back(stOf[k]); return o; };
         const int64_t piece = pieceFor(maxSt); std::vector<laess::Prep> pm(nAll);
@@ -654,6 +674,10 @@ static int laesMain(int argc, char** argv) {
                   if (got.empty()) return 1; hit.clear(); for (long x : got) hit.push_back(mo[(size_t)x - 1]); }
               for (size_t h : hit) if (std::find(chosen.begin(), chosen.end(), h) == chosen.end()) chosen.push_back(h);
               if (b == std::string::npos) break; a = b + 1; } }
+        { double need = (double)in.n + 2.0 * (double)pf.coreFrames * 2 * (pf.coreBits / 8);   // DEC 31: the new file, the core master WAV
+          for (auto& M : pf.ms) need += (32.0 + 2 * (M.I.bits / 8)) * (double)M.I.frames;   // inner dec: temporary files and the master WAVs
+          for (size_t h : chosen) need += 2.5 * 2 * (mi[h].bits / 8) * (double)mi[h].frames;   // inner enc of the chosen masters
+          diskNotice("extract", fs::absolute(fs::path(out)).parent_path().string(), need); }
         const std::string userMem = arg(argc, argv, "--mem");   // FU16-2 (2026-11-14): the user's --mem and --small-disk go to the inner dec / enc (they change no byte)
         { std::vector<std::string> av = {"laes", "dec", src, dd}; if (!userMem.empty()) av.push_back("--mem=" + userMem); std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr);   // every master, checked
           if (laesMain((int)av.size(), ap.data()) != 0) { printf("%s: the masters could not be decoded and checked; nothing written\n", src.c_str()); return 2; } }
@@ -1044,6 +1068,20 @@ static int laesMain(int argc, char** argv) {
     if ((cmd == "dec" || cmd == "verify") && argc >= 4) try {
         if (cmd == "dec" && argv[3][0] == '-' && strncmp(argv[3], "--list", 6) != 0) {   // FU16-9 (2026-11-14): an option is not taken as the output folder
             printf("give the output folder: laes dec <in> <out dir> [--levels] [--pick=...] (or laes dec <in> --list)\n"); return 1; }
+        if (cmd == "dec" && (flag(argc, argv, "--list") || arg(argc, argv, "--list") == "all")) {   // DEC 31 (2026-11-15): the list reads the records only and decodes nothing (the checks belong to decoding and playback)
+            laess::In lin(argv[2]); laesp::FnSrc ls; ls.n = (uint64_t)lin.n; ls.fn = [&](uint64_t at, void* d, size_t k) { lin.read((long long)at, d, k); return 0; };
+            laesp::File lf; char lm[5] = {0}; std::string le; try { le = lf.open(ls, lm, true); } catch (const std::exception& x) { le = x.what(); }
+            if (!le.empty() && !strcmp(lm, "LAE1")) { printf("%s: this is an LAEY file (lossy, extension LAE1): decode it with lae_dec; laes reads LAES (extension LAE2)\n", argv[2]); return 2; }
+            if (!le.empty()) { printf("%s: %s\n", argv[2], le.c_str()); return 2; } if (!lf.why.empty()) { printf("%s: %s (the core master is still playable)\n", argv[2], lf.why.c_str()); return 2; }
+            const std::string fnote = laesflac::foreignNote(lf.foreignFront, lf.foreignBehind); if (!fnote.empty()) printf("note: %s\n", fnote.c_str());
+            std::vector<MasterInfo> infos; for (const auto& M : lf.ms) infos.push_back(M.I);
+            const std::vector<laesc::Spec> specs = laesc::build(lf.baseRate, lf.coreBits, lf.coreFrames, infos, nullptr, &lf.head); const int defJ = laesc::defaultIndex(specs, lf.head); const bool listAll = arg(argc, argv, "--list") == "all";
+            printf("choices (use --pick=<n>[,<n>...], --pick=<rate>:<bits> (masters only), --pick=master:<k> or --pick=name:<text>; listed from the records, nothing decoded or checked here):\n");
+            int hidden = 0;
+            for (size_t j = 0; j < specs.size(); j++) { if (!listAll && specs[j].kind >= 2) { hidden++; continue; } std::string extra; if (specs[j].kind <= 1) { const int64_t sec = specs[j].rate ? specs[j].frames / specs[j].rate : 0; char t[48]; snprintf(t, sizeof t, "  %lld:%02lld", (long long)(sec / 60), (long long)(sec % 60)); extra = t; if ((int)j == defJ) extra += "  [default]"; }
+                printf("  %3zu  %6d Hz %2d-bit  %s%s%s\n", j + 1, specs[j].rate, specs[j].bits, specs[j].kind >= 2 ? "  - " : "", specs[j].what.c_str(), extra.c_str()); }
+            if (hidden) printf("(%d rate levels and derived versions not shown: --list=all)\n", hidden);
+            return 0; }
         Gone g{workDir(std::string(argv[2]) + (cmd == "dec" ? ".dec" : ".verify"))}; const std::string bodyPath = g.p + "/body.bin"; Pcm core; long long bodySize = 0;
         { laess::In in(argv[2]); uint8_t mg[4] = {0}; const long long s0 = (long long)laesflac::flacStart([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)in.n);   // DEC 19: ID3v2 in front
           if (in.n >= s0 + 4) in.read(s0, mg, 4); if (s0 && memcmp(mg, "fLaC", 4)) { printf("%s: no FLAC stream after the ID3v2 tag\n", argv[2]); return 2; }

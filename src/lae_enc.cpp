@@ -135,6 +135,7 @@ namespace m_dec {
 namespace encrun {
 static std::string out, part, tmp; static bool hadOld = false, partMine = false, tmpMine = false, cleaned = false, finished = false;
 static bool keepTmp = false;   // resume: the work folder stays when the run does not finish, so the next run can continue from it
+static std::string outerTmp; static bool outerMine = false;   // extension packs: the calling run's work folder while a further master runs inside it (tmp is then the inner one)
 static void closeAll() {
 #ifdef _WIN32
     _fcloseall();   // files a failed module left open would block their deletion on Windows
@@ -143,7 +144,9 @@ static void closeAll() {
 static void cleanup() { if (cleaned) return; cleaned = true; closeAll(); std::error_code ec;   // the .part only while it is unfinished; the work folder always
     if (partMine) std::filesystem::remove(part, ec); if (tmpMine && !getenv("KEEPTMP") && !keepTmp) std::filesystem::remove_all(tmp, ec); }
 static void oldNote() { if (hadOld) printf("note: the existing %s was NOT written by this run\n", out.c_str()); }
-static void emergency(const char* why) { if (finished) return; finished = true; printf("ENCODER STOPPED: %s; nothing written\n", why); oldNote(); fflush(stdout); cleanup(); lae_u8::restoreConsole(); }   // _exit follows: no atexit, so the console is set back here (win_utf8.h)
+static void emergency(const char* why) { if (finished) return; finished = true; printf("ENCODER STOPPED: %s; nothing written\n", why); oldNote(); fflush(stdout); cleanup();
+    if (outerMine && !getenv("KEEPTMP")) { std::error_code ec; std::filesystem::remove_all(outerTmp, ec); }   // a stop inside a further master: the calling run's work folder goes too
+    lae_u8::restoreConsole(); }   // _exit follows: no atexit, so the console is set back here (win_utf8.h)
 static void onTerminate() { emergency("internal error or out of memory (in a worker thread)"); fflush(stdout); _exit(2); }
 static void onExit() { if (!finished) emergency("a module ended the program"); }
 static void onSignal(int) { emergency("interrupted"); fflush(stdout); _exit(130); }
@@ -771,10 +774,13 @@ static int encode(int argc, char** argv) {
         auto nested = [&](std::vector<std::string> a) {   // one further master: this encoder, run as a step of this run with its own work folder
             const std::string so = encrun::out, sp = encrun::part, st = encrun::tmp; const bool b1 = encrun::hadOld, b2 = encrun::partMine, b3 = encrun::tmpMine, b4 = encrun::cleaned, b5 = encrun::keepTmp;
             std::vector<char*> v; for (auto& s : a) v.push_back(&s[0]); v.push_back(nullptr); int rc;
+            encrun::outerTmp = st; encrun::outerMine = b3;   // a Ctrl+C or a fatal error inside it removes this run's work folder too (emergency)
             try { rc = encode((int)a.size(), v.data()); }
             catch (const encio::Fail& e) { printf("further master: stopped: %s\n", e.what()); rc = 2; }
             catch (const std::bad_alloc&) { printf("further master: stopped: out of memory\n"); rc = 2; }
-            encrun::out = so; encrun::part = sp; encrun::tmp = st; encrun::hadOld = b1; encrun::partMine = b2; encrun::tmpMine = b3; encrun::cleaned = b4; encrun::keepTmp = b5;
+            catch (const std::exception& e) { printf("further master: stopped: %s\n", e.what()); rc = 2; }   // any other error: this run stops cleanly and removes its own work folder
+            catch (...) { printf("further master: stopped: internal error\n"); rc = 2; }
+            encrun::out = so; encrun::part = sp; encrun::tmp = st; encrun::hadOld = b1; encrun::partMine = b2; encrun::tmpMine = b3; encrun::cleaned = b4; encrun::keepTmp = b5; encrun::outerTmp.clear(); encrun::outerMine = false;
             clearModuleEnv(); env("ZSIGN", zsOpt ? "1" : ""); env("RULE_F", scheme == 2 ? "2" : "1"); env("RULE_D", mi == part::MODE_KEEP20 ? "3" : "1"); env("DITHERFLAGS", T("dither.flags"));   // this run's own module settings again
             if (!hadUnits) env("LAE_BLOCKUNITS", "");
             return rc; };

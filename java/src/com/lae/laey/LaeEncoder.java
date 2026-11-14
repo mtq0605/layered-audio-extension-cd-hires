@@ -485,6 +485,10 @@ public final class LaeEncoder {
                    x.Lm / (60.0 * wrate), wrate, units, units > 0 ? (double) (uF * units) / wrate : x.Lm / (double) wrate,
                    planD[0] ? "two at once" : "coded one after the other", needD / 1e6, planF[0] ? "two at once" : "coded one after the other", needF / 1e6,
                    memUse / 1e6, memBudget > 0 ? " (mem=)" : "", memAvail / 1e6);
+        {   // FU22-4 (Java only: the heap limit is a hard limit): say so when even one layer coded alone is estimated above the available heap
+            final long oneF = layerNeed(sF, uF, units > 0 ? units : (sF + uF - 1) / uF, M128);
+            if (memAvail > 0 && oneF > memAvail)
+                env.printf("WARNING: one frequency layer coded alone needs about %.0f MB by this estimate, %.0f MB of Java heap are available: the encoding may stop with \"out of memory\" (nothing is written then); give the program more memory (for a JVM: -Xmx)\n", oneF / 1e6, memAvail / 1e6); }
         env.set("FULLBAND", "1"); env.set("MASTERREF", x.T("b24.s32")); env.set("DEPTHADAPT", "1");
         // resume: once the leak step is done, the first depth pass is not needed any more (its only use is the file the leak is decoded from)
         final boolean skipD1 = x.isDone("leak"); Streams[] dL = {new Streams()}, dR = {new Streams()}; if (!skipD1) layerPair(env, layer, ok, "T.s32", (int) base, "L", "dL", "R", "dR", dL, dR, planD[0]); stamp(env, T0, "depth layers");

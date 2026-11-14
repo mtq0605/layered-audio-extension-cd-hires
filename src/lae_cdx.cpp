@@ -15,7 +15,7 @@
 //        and, in independent-CD mode, the publisher's TITLE / PERFORMER; written as TITLE / PERFORMER lines of the two CUE files
 //   lae_cdx data <laxdir> <startLba> <out.iso> [label=NAME] [date=...]   session 2 at a reported start address (two-step burning)
 //   lae_cdx read <outdir> <extensions> <audio...> [W=N]
-//        the reader (section 6); <extensions> = a folder with .lax files, or iso:<DATA.ISO>@<startLba>;
+//        the reader (section 6); <extensions> = a folder with .lax files, or iso:<DATA.ISO>@<startLba>; <outdir> must be new or empty;
 //        <audio> = one .cue, or one audio file (no TOC), or several audio files (TOC from the file order)
 //        audio files: 16-bit stereo WAV; FLAC (16-bit, 44100 Hz, 2 channels; in a CUE under FILE type WAVE); .bin = raw PCM
 //   lae_cdx sim <imagedir> <outdir> <form> [offset=N] [pregap=1] [overread=N] [change=K] [slip=K]
@@ -887,6 +887,8 @@ static int realMain(int argc, char** argv) {
         printf("session 2 written: %s, %zu sectors, start LBA %s\n", pos[2].c_str(), img.size() / 2048, pos[1].c_str()); return 0; }
     if (cmd == "read" && pos.size() >= 3) {
         const fs::path out(pos[0]); const string src = pos[1]; vector<Ext> x; string e;
+        {   // the user's decision of 2026-11-15 (item 22): as for image, a new or empty folder, so that files of an earlier reading never mix with this one
+            std::error_code ec; if (fs::exists(out, ec) && !fs::is_empty(out, ec)) { printf("%s is not empty: a reading goes into a new or empty folder (files of an earlier reading would mix with this one); nothing written\n", pos[0].c_str()); return 1; } }
         if (src.rfind("iso:", 0) == 0) { size_t at = src.rfind('@'); vector<uint8_t> img; if (at == string::npos || !cdxr::readBytes(fs::path(src.substr(4, at - 4)), img)) { printf("iso:<path>@<startLba> expected\n"); return 1; }
             long long lba = 0; if (!lbaArg(src.substr(at + 1), lba)) { printf("iso:<path>@<startLba>: %s is not a sector address from 0 to 449999\n", src.substr(at + 1).c_str()); return 1; }
             e = cdxr::loadExtIso(img, (uint32_t)lba, x); }
@@ -897,12 +899,7 @@ static int realMain(int argc, char** argv) {
         if (ws.empty() || W < 0 || W > 441000) { printf("W=%s: give the search radius in samples as a whole number up to 441000 (at least 5880 is used); nothing written\n", ws.c_str()); return 1; }
         W = max(WDEF, W); vector<string> in(pos.begin() + 2, pos.end()); Disc d;
         e = openInputs(in, d); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }
-        Report r = cdxr::read(d, x, W); decoderCheck(r); printReport(d, r); set<string> names; e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem()), &names); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
-        {   // files of an earlier reading in the output folder are not part of this result: said, never removed (2026-11-14)
-            set<string> mine; for (auto& n : names) mine.insert(cdxr::lower(n)); vector<string> other; std::error_code ec;
-            for (auto it = fs::directory_iterator(out, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) { std::error_code fe; if (it->is_regular_file(fe) && !mine.count(cdxr::lower(u8(it->path().filename())))) other.push_back(u8(it->path().filename())); }
-            sort(other.begin(), other.end());
-            if (!other.empty()) printf("note: %s also holds %zu file(s) this reading did not write (%s%s): they are not part of this result\n", pos[0].c_str(), other.size(), other[0].c_str(), other.size() > 1 ? ", ..." : ""); }
+        Report r = cdxr::read(d, x, W); decoderCheck(r); printReport(d, r); e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem())); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         int pass = 0, fail = 0; for (auto& t : r.tracks) { if (t.state == Track::PASS) pass++; if (t.state == Track::FAIL) fail++; }
         printf("read: %d verified, %d CD only; output in %s\n", pass, (int)r.tracks.size() - pass, pos[0].c_str()); return fail ? 3 : 0; }
     if (cmd == "sim" && pos.size() == 3) {

@@ -232,6 +232,7 @@ public final class LaeEncoder {
             if (wi.badLen) env.printf("the header of %s gives a data length of 2^63 bytes or more: the file is damaged or not a valid %s file; nothing encoded\n", argv[1], wi.kind);
             else env.printf("need a stereo integer PCM WAV\n");
             x.oldNote(); return 1; }
+        longHeaderNote(env, argv[1], wi);   // rawin=: nothing (hdrLen is 0)
         x.rate = wi.rate; x.bits = wi.bits; final int wrate = wi.rate;
         String note32 = "";
         if (x.bits == 32) {   // LAE v5 carries at most 24 bit: say what reducing the master would drop, then end or continue as the user chooses
@@ -559,6 +560,12 @@ public final class LaeEncoder {
                    nclip >= 0 ? Long.toString(nclip) : "not measured", (System.nanoTime() - T0) / 1e9, extra);
         return 0; }
 
+    // port of lae_enc.cpp:longHeaderNote
+    // An input WAV / RF64 / W64 whose header gives a data length beyond the end of the file (2026-11-14): the file is read to its end as
+    // before (WavIn.probe and WavIo.readCD limit the length to the file), and the user is told.
+    static void longHeaderNote(EncEnv env, String path, WavIn.Info in) {
+        if (in.hdrLen != 0) env.printf("NOTE: the header of %s gives a data length of %d bytes, but the file holds only %d bytes of it: the file may be cut off (incomplete). It is read to its end and the run continues.\n", path, in.hdrLen, in.dataBytes); }
+    static void longHeaderNote(EncEnv env, String path) { WavIn.Info in = new WavIn.Info(); WavIn.probe(path, in); longHeaderNote(env, path, in); }   // for a file another reader has just read
 
     static WavIn.Info readInfo(String path) { WavIn.Info i = new WavIn.Info(); if (!WavIn.probe(path, i)) throw EncIo.fail("cannot open " + path); return i; }
     // port of lae_enc.cpp:encode lambda stamp

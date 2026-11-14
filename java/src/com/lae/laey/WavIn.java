@@ -19,7 +19,8 @@ final class WavIn {
 
     /** port of wav_in.h:Info */
     static final class Info { int rate = 0, ch = 0, bits = 0, fmt = 0; long dataOff = -1, dataBytes = 0; String kind = "";
-        boolean badLen = false; }   // the header gives a data length of 2^63 bytes or more (RF64 / W64): no file has that; probe() refuses it
+        boolean badLen = false;     // the header gives a data length of 2^63 bytes or more (RF64 / W64): no file has that; probe() refuses it
+        long hdrLen = 0; }   // not 0: the header gives this data length (below 2^63), more than the file holds; dataBytes = what is there, and the caller says so (2026-11-14)
 
     // port of wav_in.h:le32 (uint32 as a non-negative long)
     static long le32(byte[] b, int o) { return (b[o] & 0xFFL) | (b[o + 1] & 0xFFL) << 8 | (b[o + 2] & 0xFFL) << 16 | (b[o + 3] & 0xFFL) << 24; }
@@ -51,7 +52,7 @@ final class WavIn {
                     if (rf64 && eq(c, 0, "ds64")) { byte[] d = new byte[24]; if (n >= 24 && at(f, sz, body, d, 24)) ds64Data = le64(d, 8); }
                     if (rf64 && eq(c, 0, "data") && n == 0xFFFFFFFFL) n = ds64Data;
                     if (eq(c, 0, "data") && n < 0) { in.badLen = true; break; }   // 2^63 or more: as a signed length it would be negative (2026-11-14)
-                    if (com.lae.core.U.gt(n, sz - body)) n = sz - body;   // a truncated last chunk is tolerated (as wavio::read); compared unsigned, so p only moves forward
+                    if (com.lae.core.U.gt(n, sz - body)) { if (eq(c, 0, "data")) in.hdrLen = n; n = sz - body; }   // a truncated last chunk is tolerated (as wavio::read); compared unsigned, so p only moves forward
                     if (eq(c, 0, "fmt ")) { if (!fmtChunk(f, sz, body, n, in)) break; haveFmt = true; }
                     else if (eq(c, 0, "data")) { in.dataOff = body; in.dataBytes = n; }
                     p = body + n + (n & 1); }
@@ -60,7 +61,7 @@ final class WavIn {
                 if (eq(h, 0, RIFF64) && eq(h, 24, "wave") && eq(h, 28, TAIL64)) { in.kind = "W64"; boolean haveFmt = false; long p = 40;
                     while (p + 24 <= sz) { byte[] c = new byte[24]; if (!at(f, sz, p, c, 24)) break; long n = le64(c, 16); if (U64.lt(n, 24)) break; final long body = p + 24; long len = n - 24;
                         if (eq(c, 4, TAIL64) && eq(c, 0, "data") && len < 0) { in.badLen = true; break; }
-                        if (com.lae.core.U.gt(len, sz - body)) len = sz - body;
+                        if (com.lae.core.U.gt(len, sz - body)) { if (eq(c, 4, TAIL64) && eq(c, 0, "data")) in.hdrLen = len; len = sz - body; }
                         if (eq(c, 4, TAIL64)) { if (eq(c, 0, "fmt ")) { if (!fmtChunk(f, sz, body, len, in)) break; haveFmt = true; } else if (eq(c, 0, "data")) { in.dataOff = body; in.dataBytes = len; } }
                         p = body + ((len + 7) & ~7L); }
                     ok = haveFmt && in.dataOff >= 0 && !in.badLen; } }

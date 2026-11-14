@@ -29,6 +29,7 @@ final class LaeCd implements LaeEncoder.CdHook {
     @Override public int run(LaeEncoder.Ctx xx) {
         x = xx; env = x.env; base = x.base; stages = x.stages; rate = x.rate; U1 = FracDelay.unitsPerMaster(stages); final int P = x.P;
         WavIo.Wav c = new WavIo.Wav(); if (!WavIo.readCD(x.cdPath, c) || c.bits != 16 || c.ch != 2 || c.rate != base) { env.printf("independent CD must be a 16-bit stereo WAV at %d Hz\n", base); x.oldNote(); return 1; }
+        LaeEncoder.longHeaderNote(env, x.cdPath);
         cd = c.pcm16; b = LaeEncoder.slurp(x.T("b16.s16")); nb0 = b.length / 4; pb0 = P >> stages; need = nb0 - 2 * pb0; have = cd.length / 2;
         {   // alignment (design D and A, 2026-10-22 / 10-23)
             b24 = EncIo.readAllI32(x.T("b24.s32"));

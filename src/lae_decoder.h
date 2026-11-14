@@ -186,6 +186,7 @@ struct Decoder {
             const uint32_t len = (uint32_t)p[e + 4] | (uint32_t)p[e + 5] << 8 | (uint32_t)p[e + 6] << 16 | (uint32_t)p[e + 7] << 24; if (len < 1 || len > n - e - 8) break;
             const size_t nl = p[e + 8]; if (1 + nl + 52 > len) break; PackInfo q; q.name.assign((const char*)p + e + 9, nl); q.off = e + 9 + nl; q.len = len - 1 - nl;
             int32_t magic, ver; memcpy(&magic, p + q.off, 4); memcpy(&ver, p + q.off + 4, 4); if (magic != 0x3145414C || ver != 5) break;
+            int32_t pbase, mbase; memcpy(&pbase, p + q.off + 12, 4); memcpy(&mbase, p + 12, 4); if (pbase != mbase) break;   // F05-5: spec 5.6, a pack has the main body's base (the same CD / core layer)
             memcpy(&q.rate, p + q.off + 8, 4); memcpy(&q.stages, p + q.off + 16, 4); packs.push_back(q); e += 8 + (size_t)len; }
         // the name of the main body (2026-11-12: every master can show under its name): one optional record after the last pack
         // record, "LNAM" | 1 byte name length | the name (UTF-8). Display only, like the pack names: nothing is chosen by it.

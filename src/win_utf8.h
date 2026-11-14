@@ -53,7 +53,8 @@ inline int __stdcall onConsoleEvent(unsigned long) { restoreConsole(); return 0;
 inline void init(int& argc, char**& argv) {
     static std::vector<std::string> store; static std::vector<char*> ptrs;
     static bool done = false; if (done) return; done = true;   // once per process: lae_enc calls the decoder's main with arguments of its own
-    if (!setlocale(LC_CTYPE, ".UTF8")) return;   // no UTF-8 locale in this runtime: arguments and names stay in the system code page, as before
+    if (!setlocale(LC_CTYPE, ".UTF8")) {   // no UTF-8 locale in this runtime (Windows before 10 version 1803): arguments and names stay in the system code page, as before
+        fprintf(stderr, "warning: this Windows has no UTF-8 locale (Windows 10 version 1803 or later needed); file names and tags outside the system code page cannot be used\n"); return; }
     if (_configure_wide_argv(_crt_argv_unexpanded_arguments) == 0 && __wargv) {
         for (int i = 0; i < __argc; i++) store.push_back(fromWide(__wargv[i]));
         for (auto& s : store) ptrs.push_back(&s[0]); ptrs.push_back(nullptr);

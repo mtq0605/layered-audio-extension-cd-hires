@@ -135,6 +135,16 @@ static Pcm deriveCore(const std::vector<MasterIn>& ms, int base, int coreBits, s
     return core; }
 // T (base samples, decimal) -> whole + fraction in 2^-32 base samples
 static void setT(MasterIn& m, double T) { m.whole = (int64_t)std::floor(T); m.frac = (uint32_t)std::llround((T - std::floor(T)) * 4294967296.0); if (m.frac == 0 && T != std::floor(T)) m.whole += 1; }
+// FU15-3 (2026-11-14): "<master>[@T]" of enc / add. The text after the last @ is T only when all of it is a finite decimal number
+// below 2^40 base samples (or "auto" for enc); otherwise the whole argument is the file name when that file exists (a name with
+// an @), else it is refused with the reason. Before, atof took any text: "m.wav@0,37" or "m.wav@abc" gave T = 0 without a word.
+static std::string masterArg(const std::string& a, bool allowAuto, std::string& path, double& T, bool& au) {
+    path = a; T = 0; au = false; const size_t at = a.rfind('@'); if (at == std::string::npos || at <= 2) return "";
+    const std::string t = a.substr(at + 1); if (allowAuto && t == "auto") { au = true; path = a.substr(0, at); return ""; }
+    char* e = nullptr; const double v = t.empty() ? 0 : strtod(t.c_str(), &e);
+    if (!t.empty() && *e == 0 && std::isfinite(v) && std::fabs(v) < 1099511627776.0) { T = v; path = a.substr(0, at); return ""; }
+    std::error_code ec; if (fs::exists(a, ec)) return "";   // a file whose name has an @
+    return a + ": the text after the last @ must be T in base samples (a decimal number below 2^40, e.g. -0.37)" + (allowAuto ? " or auto" : ""); }
 // derived 16-bit version (decoder rule): y = floor((v + r1 - r2 + 2^(s-1)) / 2^s), s = bits - 16, r1, r2 uniform in [0, 2^s) from
 // xorshift64 (seed 20261029, one stream per channel): TPDF dither of +-1 LSB at 16 bits; deterministic. A new master, lossy against src.
 static Pcm derive16(const Pcm& sc) { Pcm dv; dv.rate = sc.rate; dv.bits = 16; const int s = sc.bits - 16;
@@ -164,7 +174,9 @@ static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::stri
     _pclose(pp); if (sug.empty()) { A.why = "lae_enc gave no ALIGN_SUGGEST line (old lae_enc? design D is needed)"; return A; }
     bool have[2] = {false, false}; double T[2] = {0, 0};
     for (int k = 0; k < 2; k++) { size_t p = sug.find(std::string(nm[k]) + "="); if (p == std::string::npos) continue; size_t c = sug.find(':', p), sp = sug.find(' ', p);
-        std::string v = sug.substr(c + 1, sp == std::string::npos ? std::string::npos : sp - c - 1); if (v != "-") { have[k] = true; T[k] = atof(v.c_str()) / (double)(1 << st); } }
+        if (c == std::string::npos || (sp != std::string::npos && c > sp)) continue;   // FU15-3: no "<name>=...:<offset>" here: not found
+        std::string v = sug.substr(c + 1, sp == std::string::npos ? std::string::npos : sp - c - 1); char* e = nullptr; const double tv = v.empty() ? 0 : strtod(v.c_str(), &e);
+        if (v != "-" && !v.empty() && *e == 0 && std::isfinite(tv)) { have[k] = true; T[k] = tv / (double)(1 << st); } }
     A.notes = std::string("LAEY's own placement checks (LAEY rules, not LAES): whitened: ") + why[0] + "; plain: " + why[1];
     if (!have[0] && !have[1]) { A.why = "LAEY's search found no position; give T by hand. " + A.notes; return A; }
     const int k = have[0] && have[1] ? (pooled[1] < pooled[0] ? 1 : 0) : (have[0] ? 0 : 1); A.found = true; A.T = T[k]; A.search = nm[k]; A.err = pooled[k] <= 0 ? pooled[k] : 0;
@@ -480,7 +492,7 @@ static int laesMain(int argc, char** argv) {
         if (pos != ptot - 4) { printf("%s: unexpected bytes after the last master\n", src.c_str()); return 2; }
         // the new masters and the options
         std::vector<std::string> paths; std::vector<double> Ts; std::vector<laess::WavInfo> wis;
-        for (int i = 4; i < argc; i++) { if (argv[i][0] == '-') continue; std::string a = argv[i]; double T = 0; const size_t at = a.rfind('@'); if (at != std::string::npos && at > 2) { T = atof(a.substr(at + 1).c_str()); a = a.substr(0, at); }
+        for (int i = 4; i < argc; i++) { if (argv[i][0] == '-') continue; std::string a; double T = 0; bool au = false; { const std::string me = masterArg(argv[i], false, a, T, au); if (!me.empty()) { printf("%s\n", me.c_str()); return 1; } }   // FU15-3
             laess::WavInfo wi; const std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } paths.push_back(a); Ts.push_back(T); wis.push_back(wi); }
         if (paths.empty()) { printf("no new master given\n"); return 1; }
         const size_t nAll = (size_t)nOld + paths.size(); if (nAll > 255) { printf("at most 255 masters (%zu now, %zu new)\n", (size_t)nOld, paths.size()); return 1; }
@@ -725,8 +737,8 @@ static int laesMain(int argc, char** argv) {
         const bool timing = flag(argc, argv, "--timing"); std::string tlog; auto t0 = std::chrono::steady_clock::now();
         auto stage = [&](const char* s) { const auto t = std::chrono::steady_clock::now(); char b[128]; snprintf(b, sizeof b, "  %-22s %8.2f s   peak memory so far %7.0f MB\n", s, std::chrono::duration<double>(t - t0).count(), peakMemory() / 1048576.0); tlog += b; t0 = t; };
         std::vector<std::string> paths; std::vector<double> Ts; std::vector<bool> autoT; std::vector<laess::WavInfo> wis;
-        for (int i = 3; i < argc; i++) { if (argv[i][0] == '-') continue; std::string a = argv[i]; double T = 0; bool au = false; size_t at = a.rfind('@');
-            if (at != std::string::npos && at > 2) { au = a.substr(at + 1) == "auto"; T = au ? 0 : atof(a.substr(at + 1).c_str()); a = a.substr(0, at); }
+        for (int i = 3; i < argc; i++) { if (argv[i][0] == '-') continue; std::string a; double T = 0; bool au = false;
+            { const std::string me = masterArg(argv[i], true, a, T, au); if (!me.empty()) { printf("%s\n", me.c_str()); return 1; } }   // FU15-3
             laess::WavInfo wi; std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } paths.push_back(a); Ts.push_back(T); autoT.push_back(au); wis.push_back(wi); }
         if (paths.empty()) { printf("no master given\n"); return 1; }
         if (paths.size() > 255) { printf("at most 255 masters\n"); return 1; }

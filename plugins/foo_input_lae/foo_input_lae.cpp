@@ -656,10 +656,11 @@ inline List read(service_ptr_t<file>& f, t_filesize size, abort_callback& a) {
 class input_lae : public input_stubs {
 public:
     ~input_lae() { if (m_laes) dbg("%p closed at %llu", (void*)this, (unsigned long long)m_pos);
+        // first out of the list the menu reads (main thread: wouldChange uses m_lq), then closed
+        if (m_playback) { std::lock_guard<std::mutex> g(s_lock); s_live.erase(std::remove(s_live.begin(), s_live.end(), this), s_live.end()); }
         m_pf.reset(); m_worker.reset();
         if (m_lq) { FpPin pin; laes_close(m_lq); }
         if (m_track) { FpPin pin; lae_close(m_track); }
-        if (m_playback) { std::lock_guard<std::mutex> g(s_lock); s_live.erase(std::remove(s_live.begin(), s_live.end(), this), s_live.end()); }
         parkIdleLaes(false); }   // a file this track played stays decodable in the cache, but no longer open
     void open(service_ptr_t<file> p_filehint, const char* p_path, t_input_open_reason p_reason, abort_callback& p_abort) {
         if (p_reason == input_open_info_write) throw exception_io_unsupported_format();   // tags are not written here: foobar2000's own WAV / FLAC writer does it (it gets every field from get_info)

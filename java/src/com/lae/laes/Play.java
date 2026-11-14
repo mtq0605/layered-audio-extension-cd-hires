@@ -309,6 +309,8 @@ public final class Play {
 
     /** port of laes_play.h:File */
     public static final class File {
+        /** DEC 19: bytes of ID3v2 tags in front of a FLAC file, of APEv2 / ID3v1 tags after its last frame (kept, not read) */
+        public long foreignFront = 0, foreignBehind = 0;
         public boolean flac = false; public int baseRate = 0, coreBits = 0; public long coreFrames = 0;
         public byte[] fileSha = new byte[32]; public String why = "";            // why: "" when the payload passed every check; else the reason (the core still plays)
         public List<Master> ms = new ArrayList<Master>(); public List<Choice> choices = new ArrayList<Choice>(); public List<Tag> tags = new ArrayList<Tag>();
@@ -334,12 +336,15 @@ public final class Play {
         public String open(final ByteSrc src, String[] laeMagic, boolean quickInfo) {
             laeMagic[0] = ""; quick = quickInfo; synchronized (idxM) { idx.clear(); } final long n = src.size(); if (n < 12) return "not LAES";
             // WAV: RIFF, or RF64 / BW64 (EBU Tech 3306, ITU-R BS.2088) for files beyond 4 GB: their 64-bit sizes are in the first chunk, "ds64"
-            byte[] h = new byte[12]; src.read(0, h, 0, 12); flac = eq4(h, 0, "fLaC"); final boolean rf64 = (eq4(h, 0, "RF64") || eq4(h, 0, "BW64")) && eq4(h, 8, "WAVE");
+            byte[] h = new byte[12]; src.read(0, h, 0, 12);
+            foreignFront = Flac.flacStart(new Flac.Rd() { public void read(long at, byte[] buf, int k) { src.read(at, buf, 0, k); } }, n); foreignBehind = 0;   // DEC 19: ID3v2 tags in front of "fLaC"
+            if (foreignFront != 0) { if (n < foreignFront + 12) return "not LAES"; src.read(foreignFront, h, 0, 12); if (!eq4(h, 0, "fLaC")) return "not LAES"; }
+            flac = eq4(h, 0, "fLaC"); final boolean rf64 = (eq4(h, 0, "RF64") || eq4(h, 0, "BW64")) && eq4(h, 8, "WAVE");
             final boolean wav = (eq4(h, 0, "RIFF") && eq4(h, 8, "WAVE")) || rf64; if (!flac && !wav) return "not LAES";
             payload = new SegSrc(); payload.base = src; tags.clear();
             long audioOff = 0, audioLen = 0; final Flac.Info fi = new Flac.Info(); int fmtTag = 0, fmtCh = 0;
             if (flac) {   // metadata: STREAMINFO, the "LAE2" APPLICATION pieces, VORBIS_COMMENT tags
-                long p = 4; boolean last = false, haveSi = false; boolean lae1 = false;
+                long p = foreignFront + 4; boolean last = false, haveSi = false; boolean lae1 = false;
                 while (!last) { if (p + 4 > n) return "FLAC metadata truncated"; byte[] bh = new byte[4]; src.read(p, bh, 0, 4); last = (bh[0] & 0x80) != 0; final int type = bh[0] & 0x7F; final long len = (long) (bh[1] & 0xFF) << 16 | (bh[2] & 0xFF) << 8 | (bh[3] & 0xFF); p += 4;
                     if (p + len > n) return "FLAC metadata truncated";
                     if (type == 0) { if (haveSi) return "two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return "bad STREAMINFO"; byte[] s = new byte[34]; src.read(p, s, 0, 34); Flac.BR r = new Flac.BR(s, 0, 34); fi.minBs = (int) r.get(16); fi.maxBs = (int) r.get(16); r.get(24); r.get(24);
@@ -355,6 +360,7 @@ public final class Play {
                 if (!haveSi) return "no STREAMINFO";
                 if (payload.total == 0) { if (lae1) laeMagic[0] = "LAE1"; return "not LAES"; }
                 if (fi.total == 0 || fi.maxBs < 16 || fi.channels != 2 || (fi.bps != 16 && fi.bps != 24 && fi.bps != 32)) return "core master is not 2-channel 16/24/32-bit FLAC with a sample count";
+                foreignBehind = Flac.trailerLen(new Flac.Rd() { public void read(long at, byte[] buf, int k) { src.read(at, buf, 0, k); } }, p, n);   // DEC 19: APEv2 / ID3v1 tags at the end (checked after the frames)
                 audioOff = p; audioLen = n - p; baseRate = fi.rate; coreBits = fi.bps; coreFrames = fi.total; }
             else {   // RIFF/WAVE chunks (the last 'fmt ', 'data' and 'LAE ' count; sizes clamped to the file), LIST/INFO tags
                 long pos = 12, laeOff = 0, laeLen = 0; boolean haveLae = false, haveData = false;
@@ -413,7 +419,7 @@ public final class Play {
         // port of laes_play.h:File::open (lambda flacFrames)
         private void flacFrames(boolean fin) {
             final int fby = (fiC.bps + 7) / 8; byte[] mb = new byte[0];
-            while (coreErr.isEmpty() && fbHead < fbSize && (fin || fbSize - fbHead > (4 << 20))) {
+            while (coreErr.isEmpty() && fbHead < fbSize && coreCount < fiC.total && (fin || fbSize - fbHead > (4 << 20))) {   // DEC 19: no frame after the last sample
                 final Flac.Frame F = Flac.decodeFrame(fbA, fbHead, fbSize - fbHead, fiC, frameNo, coreCount, frO);
                 if (!F.err.isEmpty()) { coreErr = F.err; break; } cs.addFrame(fbFile0 + fbHead, coreCount); fbHead += F.used; frameNo++; cs.frEnd = fbFile0 + fbHead;
                 if (mb.length < F.n * 2 * fby) mb = new byte[F.n * 2 * fby]; int mf = 0;
@@ -462,6 +468,10 @@ public final class Play {
             hs.finish(fileSha);
             final long crcV = crc.getValue();
             if (flac) { flacFrames(true); if (!coreErr.isEmpty()) return "FLAC core master: " + coreErr;
+                {   // DEC 19: after the last frame only APEv2 / ID3v1 tags (before, any byte there was refused as a frame)
+                    final int rest = fbSize - fbHead;
+                    if (rest != 0 && Flac.trailerLen(Flac.rdOf(fbA, fbHead), 0, rest) != rest) return "FLAC core master: bytes after the last audio frame that are no APEv2 / ID3v1 tag";
+                    foreignBehind = rest; }
                 if (coreCount != fi.total) return "FLAC core master: sample count differs from STREAMINFO";
                 byte[] m = Flac.hexBytes(md5.hex(), 16); boolean zero = true; for (int i = 0; i < 16; i++) zero &= fi.md5[i] == 0;
                 if (zero || !java.util.Arrays.equals(m, fi.md5)) return "FLAC core master: MD5 mismatch"; }

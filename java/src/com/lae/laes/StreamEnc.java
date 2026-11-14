@@ -286,7 +286,8 @@ public final class StreamEnc {
     // port of laes_stream_enc.h:probeFlac
     static String probeFlac(String path, WavInfo wi) {
         Stream.In in = new Stream.In(path);
-        try { long p = 4; boolean last = false, haveSi = false; final Flac.Info fi = wi.fi; final byte[] bh = new byte[4];
+        try { long p = Flac.flacStart(rdOf(in), in.n) + 4; boolean last = false, haveSi = false;   // DEC 19: after ID3v2 tags in front
+            final Flac.Info fi = wi.fi; final byte[] bh = new byte[4];
             while (!last) { if (p + 4 > in.n) return path + ": FLAC metadata truncated"; in.read(p, bh, 0, 4); last = (bh[0] & 0x80) != 0; final int type = bh[0] & 0x7F; final long len = (long) (bh[1] & 0xFF) << 16 | (bh[2] & 0xFF) << 8 | (bh[3] & 0xFF); p += 4;
                 if (p + len > in.n) return path + ": FLAC metadata truncated";
                 if (type == 0) { if (haveSi) return path + ": two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return path + ": bad STREAMINFO"; final byte[] s = new byte[34]; in.read(p, s, 0, 34); final Flac.BR r = new Flac.BR(s, 0, 34); fi.minBs = (int) r.get(16); fi.maxBs = (int) r.get(16); r.get(24); r.get(24);
@@ -296,8 +297,10 @@ public final class StreamEnc {
             if (fi.channels != 2 || (fi.bps != 16 && fi.bps != 24 && fi.bps != 32) || fi.total == 0 || fi.maxBs < 16) return path + ": need a 2-channel 16/24/32-bit FLAC with a sample count";
             wi.flac = true; wi.rate = fi.rate; wi.bits = fi.bps; wi.frames = fi.total; wi.dataOff = p; wi.dataBytes = fi.total * 2 * (fi.bps / 8); return ""; }
         finally { in.close(); } }
-    // port of laes_stream_enc.h:probeMaster
-    public static String probeMaster(String path, WavInfo wi) { final byte[] h = new byte[4]; { Stream.In in = new Stream.In(path); try { if (in.n >= 4) in.read(0, h, 0, 4); } finally { in.close(); } }
+    // Stream.In as a Flac.Rd (DEC 19)
+    static Flac.Rd rdOf(final Stream.In in) { return new Flac.Rd() { public void read(long at, byte[] buf, int k) { in.read(at, buf, 0, k); } }; }
+    // port of laes_stream_enc.h:probeMaster (DEC 19: a FLAC master may have ID3v2 tags in front)
+    public static String probeMaster(String path, WavInfo wi) { final byte[] h = new byte[4]; { Stream.In in = new Stream.In(path); try { final long s0 = Flac.flacStart(rdOf(in), in.n); if (in.n >= s0 + 4) in.read(s0, h, 0, 4); } finally { in.close(); } }
         return eq4(h, 0, "fLaC") ? probeFlac(path, wi) : probeWav(path, wi, null); }
     // one FLAC frame of a master (laesflac::decodeFrame, plus the stereo decorrelations a FLAC encoder uses: left / side, side / right,
     // mid / side, the side channel one bit wider). Into F (its arrays reused when long enough): F.n samples per channel, F.used its size in bytes.

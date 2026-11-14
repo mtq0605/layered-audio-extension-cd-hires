@@ -78,9 +78,11 @@ public final class LaesTool {
     private static int decVerifyIn(String[] args, boolean isDec, String inPath, String wd) {
         final String bodyPath = wd + "/body.bin"; final LaesFile.Pcm core = new LaesFile.Pcm(); long bodySize = 0;
         { final Stream.In in = new Stream.In(inPath);
-          try { final byte[] mg = new byte[4]; if (in.n >= 4) in.read(0, mg, 0, 4);
+          try { final byte[] mg = new byte[4]; final long s0 = Flac.flacStart(StreamEnc.rdOf(in), in.n);   // DEC 19: ID3v2 tags in front
+            if (in.n >= s0 + 4) in.read(s0, mg, 0, 4); if (s0 != 0 && !StreamEnc.eq4(mg, 0, "fLaC")) { System.out.println(inPath + ": no FLAC stream after the ID3v2 tag"); return 2; }
             if (StreamEnc.eq4(mg, 0, "fLaC")) {   // metadata: STREAMINFO kept, the "LAE2" APPLICATION blocks into the payload file; the audio through the FLAC reader
-                long p = 4; boolean last = false; java.io.ByteArrayOutputStream meta = new java.io.ByteArrayOutputStream(); meta.write('f'); meta.write('L'); meta.write('a'); meta.write('C'); final Stream.Out bo = new Stream.Out(bodyPath);
+                { final long tl = Flac.trailerLen(StreamEnc.rdOf(in), s0 + 4, in.n); final String fn = Flac.foreignNote(s0, tl); if (!fn.isEmpty()) System.out.println("note: " + fn); }   // DEC 19
+                long p = s0 + 4; boolean last = false; java.io.ByteArrayOutputStream meta = new java.io.ByteArrayOutputStream(); meta.write('f'); meta.write('L'); meta.write('a'); meta.write('C'); final Stream.Out bo = new Stream.Out(bodyPath);
                 try { while (!last) { if (p + 4 > in.n) { System.out.println(inPath + ": metadata truncated"); return 2; } final byte[] bh = new byte[4]; in.read(p, bh, 0, 4); last = (bh[0] & 0x80) != 0; final int type = bh[0] & 0x7F; final long len = (long) (bh[1] & 0xFF) << 16 | (bh[2] & 0xFF) << 8 | (bh[3] & 0xFF);
                         if (p + 4 + len > in.n) { System.out.println(inPath + ": metadata truncated"); return 2; }
                         if (type == 0 || type != 2) { final byte[] b = new byte[(int) len + 4]; in.read(p, b, 0, b.length); if (type == 0) meta.write(b, 0, b.length); }

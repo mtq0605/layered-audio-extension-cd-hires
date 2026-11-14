@@ -166,6 +166,39 @@ public final class Flac {
         final int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return false;
         if (r.fail || (r.pos & 7) != 0) return false; final int hb = (int) (r.pos / 8); final int c8 = (int) r.get(8); return !r.fail && c8 == crc8(buf, fp, hb); }
 
+    // DEC 19 (2026-11-15, port of laes_flac.h): tags that other programs put around a FLAC stream are accepted and left in the file: ID3v2
+    // tags in front of "fLaC" (each "ID3", version, flags, a 28-bit synchsafe size; +10 bytes with a footer) and, after the last audio
+    // frame, APEv2 tags (footer "APETAGEX", its size, a 32-byte header when flag bit 31 is set) and ID3v1 tags ("TAG", 128 bytes), in any
+    // order, at most 4. They are not read. rd.read(offset, buffer, bytes) reads the file.
+    /** reads bytes of the file: buf[0 .. k) = the k bytes at offset at */
+    public interface Rd { void read(long at, byte[] buf, int k); }
+    /** an Rd over a byte array (offset at = index) */
+    public static Rd rdOf(final byte[] f, final int base) { return new Rd() { public void read(long at, byte[] buf, int k) { System.arraycopy(f, base + (int) at, buf, 0, k); } }; }
+    // port of laes_flac.h:id3v2Len: the whole length of the ID3v2 tag that starts with these 10 bytes, 0 when it is none
+    static long id3v2Len(byte[] h) {
+        if (h[0] != 'I' || h[1] != 'D' || h[2] != '3' || (h[3] & 0xFF) == 0xFF || (h[4] & 0xFF) == 0xFF || ((h[6] | h[7] | h[8] | h[9]) & 0x80) != 0) return 0;
+        return 10 + ((long) (h[6] & 0xFF) << 21 | (long) (h[7] & 0xFF) << 14 | (long) (h[8] & 0xFF) << 7 | (h[9] & 0xFF)) + ((h[5] & 0x10) != 0 ? 10 : 0); }
+    /** port of laes_flac.h:flacStart: where "fLaC" is expected, after the ID3v2 tags in front (0 without) */
+    public static long flacStart(Rd rd, long n) {
+        long p = 0; final byte[] h = new byte[10]; for (int i = 0; i < 64 && p + 10 <= n; i++) { rd.read(p, h, 10); final long l = id3v2Len(h); if (l == 0 || l > n - p) break; p += l; }
+        return p; }
+    /** port of laes_flac.h:trailerLen: the bytes at the end of [from, n) that are APEv2 / ID3v1 tags */
+    public static long trailerLen(Rd rd, long from, long n) {
+        long e = n; final byte[] t = new byte[3], f = new byte[32];
+        for (int i = 0; i < 4; i++) {
+            if (e >= from + 128) { rd.read(e - 128, t, 3); if (t[0] == 'T' && t[1] == 'A' && t[2] == 'G') { e -= 128; continue; } }
+            if (e >= from + 32) { rd.read(e - 32, f, 32);
+                if (f[0] == 'A' && f[1] == 'P' && f[2] == 'E' && f[3] == 'T' && f[4] == 'A' && f[5] == 'G' && f[6] == 'E' && f[7] == 'X') {
+                    final long sz = (f[12] & 0xFFL) | (f[13] & 0xFFL) << 8 | (f[14] & 0xFFL) << 16 | (f[15] & 0xFFL) << 24, fl = (f[20] & 0xFFL) | (f[21] & 0xFFL) << 8 | (f[22] & 0xFFL) << 16 | (f[23] & 0xFFL) << 24;
+                    final long tot = sz + ((fl >>> 31) != 0 ? 32 : 0); if (sz >= 32 && tot <= e - from) { e -= tot; continue; } } }
+            break; }
+        return n - e; }
+    /** port of laes_flac.h:foreignNote: the note for the user (laes dec / verify): what is kept, "" when there are no such tags */
+    public static String foreignNote(long front, long behind) {
+        if (front == 0 && behind == 0) return ""; String s = "tags of other programs are in this file and are kept as they are (not read):";
+        if (front != 0) s += " " + front + " bytes of ID3v2 in front of the FLAC stream"; if (front != 0 && behind != 0) s += ";";
+        if (behind != 0) s += " " + behind + " bytes of APEv2 / ID3v1 after its last audio frame"; return s; }
+
     /** the result of readFlac */
     public static final class Whole { public String err = ""; public Info in = new Info(); public long[][] ch = new long[2][]; public byte[] app = new byte[0]; public boolean md5ok = false; }
     // reads a whole FLAC file: STREAMINFO, the concatenated "LAE2" APPLICATION data, and the audio (two independent channels).
@@ -175,8 +208,9 @@ public final class Flac {
         Whole W = new Whole(); W.err = readFlacImpl(f, W); return W; }
     private static String readFlacImpl(byte[] f, Whole W) {
         final Info in = W.in; java.io.ByteArrayOutputStream app = new java.io.ByteArrayOutputStream();
-        if (f.length < 8 || !(f[0] == 'f' && f[1] == 'L' && f[2] == 'a' && f[3] == 'C')) return "not a FLAC file";
-        long p = 4; boolean last = false, haveSi = false;
+        final Rd rdv = rdOf(f, 0); final int s0 = (int) flacStart(rdv, f.length);   // DEC 19: ID3v2 tags in front skipped
+        if (f.length < s0 + 8 || !(f[s0] == 'f' && f[s0 + 1] == 'L' && f[s0 + 2] == 'a' && f[s0 + 3] == 'C')) return "not a FLAC file";
+        long p = s0 + 4; boolean last = false, haveSi = false;
         while (!last) { if (p + 4 > f.length) return "metadata truncated"; last = (f[(int) p] & 0x80) != 0; final int type = f[(int) p] & 0x7F; final long len = (long) (f[(int) p + 1] & 0xFF) << 16 | (f[(int) p + 2] & 0xFF) << 8 | (f[(int) p + 3] & 0xFF); p += 4;
             if (p + len > f.length) return "metadata truncated"; if (!haveSi && type != 0) return "STREAMINFO is not the first metadata block";
             if (type == 0) { if (haveSi) return "two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return "bad STREAMINFO"; BR r = new BR(f, (int) p, 34); in.minBs = (int) r.get(16); in.maxBs = (int) r.get(16); r.get(24); r.get(24); in.rate = (int) r.get(20); in.channels = (int) r.get(3) + 1; in.bps = (int) r.get(5) + 1; in.total = r.get(36);
@@ -186,9 +220,10 @@ public final class Flac {
         W.app = app.toByteArray();
         if (!haveSi) return "no STREAMINFO"; if (in.total == 0) return "STREAMINFO gives no sample count (an LAES core master always has one)"; if (in.maxBs < 16) return "bad STREAMINFO block size"; if (in.channels != 2) return "LAES core master must have 2 channels"; if (in.bps != 16 && in.bps != 24 && in.bps != 32) return "core master must be 16, 24 or 32 bit";
         long[][] ch = {new long[1024], new long[1024]}; int size = 0; long frameNo = 0;
-        while (p < f.length) { Frame F = decodeFrame(f, (int) p, f.length - p, in, frameNo, size); if (!F.err.isEmpty()) return F.err;
+        while (p < f.length && size < in.total) { Frame F = decodeFrame(f, (int) p, f.length - p, in, frameNo, size); if (!F.err.isEmpty()) return F.err;   // DEC 19: no frame after the last sample
             if (size + F.n > ch[0].length) for (int c = 0; c < 2; c++) ch[c] = java.util.Arrays.copyOf(ch[c], Math.max(size + F.n, ch[c].length * 2));
             for (int c = 0; c < 2; c++) System.arraycopy(F.ch[c], 0, ch[c], size, F.n); size += F.n; p += F.used; frameNo++; }
+        if (p < f.length && trailerLen(rdv, p, f.length) != f.length - p) return "bytes after the last audio frame that are no APEv2 / ID3v1 tag";   // DEC 19
         for (int c = 0; c < 2; c++) W.ch[c] = java.util.Arrays.copyOf(ch[c], size);
         if (in.total != 0 && in.total != size) return "sample count differs from STREAMINFO";
         byte[] m = audioMd5(W.ch, size, in.bps); boolean zero = true; for (int i = 0; i < 16; i++) zero &= in.md5[i] == 0; W.md5ok = !zero && java.util.Arrays.equals(m, in.md5);

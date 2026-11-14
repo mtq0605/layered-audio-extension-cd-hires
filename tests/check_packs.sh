@@ -21,6 +21,9 @@ ENC=$(x lae_enc); DEC=$(x lae_dec); VAR=$(x cd_variant); CUT=$(x cut_wav); GEN=$
 ok() { echo "ok   $1"; }
 no() { echo "FAIL $1"; bad=$((bad + 1)); }
 same() { if cmp -s "$1" "$2"; then ok "$3"; else no "$3"; fi; }
+# a decode into a fresh file: the output is removed first and a refused decode counts as a failure (FU33-3: a refused decode left the
+# previous round's file in place, and the comparison then passed on it)
+d() { rm -f -- "$3"; if "$@" >/dev/null 2>&1; then return 0; fi; no "decoder refused: $(basename "$1") $2 $3 ${4:-} ${5:-} ${6:-}"; return 1; }
 cd "$W" || exit 99
 [ -f electronic_352800.wav ] || "$GEN" . 352800 >/dev/null
 [ -f electronic_176400.wav ] || "$GEN" . 176400 >/dev/null
@@ -38,7 +41,7 @@ if [ -n "$first" ] && [ "$first" -ge "$crc" ]; then ok "core and main body uncha
 
 # 3
 for r in "full" "16" "cd24" "full 176400" "full 88200"; do
-    "$OLD" a.wav o1.wav $r >/dev/null; "$OLD" q.wav o2.wav $r >/dev/null; "$DEC" q.wav o3.wav $r pack=0 >/dev/null; "$DEC" q.wav o4.wav $r >/dev/null
+    d "$OLD" a.wav o1.wav $r; d "$OLD" q.wav o2.wav $r; d "$DEC" q.wav o3.wav $r pack=0; d "$DEC" q.wav o4.wav $r
     if cmp -s o1.wav o2.wav && cmp -s o1.wav o3.wav && cmp -s o1.wav o4.wav; then ok "pack 0 = earlier decoder [$r]"; else no "pack 0 = earlier decoder [$r]"; fi
 done
 
@@ -47,7 +50,7 @@ done
 offp=$(grep -abo "LPAK" q.wav | head -1 | cut -d: -f1); offs=$(grep -abo "LAE " s.wav | tail -1 | cut -d: -f1)
 n=$(od -An -tu4 -j $((offs + 4)) -N4 s.wav | tr -d ' '); pl=$((n - 4))
 if cmp -s -n "$pl" -i "$((offp + 8 + 1 + 4)):$((offs + 8))" q.wav s.wav; then ok "pack 1 payload = standalone payload ($pl bytes)"; else no "pack 1 payload = standalone payload"; fi
-for r in "full" "16" "cd24" "full 88200"; do "$DEC" q.wav o5.wav $r pack=1 >/dev/null; "$OLD" s.wav o6.wav $r >/dev/null; same o5.wav o6.wav "pack 1 decodes like the standalone file [$r]"; done
+for r in "full" "16" "cd24" "full 88200"; do d "$DEC" q.wav o5.wav $r pack=1; d "$OLD" s.wav o6.wav $r; same o5.wav o6.wav "pack 1 decodes like the standalone file [$r]"; done
 
 # 5: positions from the encoder's own search
 pos() { "$ENC" m.wav none.wav 3 s1 master2="$1" 2>&1 | sed -n 's/^ALIGN_SUGGEST whitened=aligned:\([^ ]*\) .*/\1/p' | head -1; }
@@ -56,11 +59,11 @@ if [ -n "$p2" ] && [ -n "$p3" ] && [ ! -f none.wav ]; then ok "without a positio
 "$ENC" m.wav p.wav 3 s1 master2=meq.wav master2align="$p2" master2name="EQ" master3=m176.wav master3align="$p3" >p.log 2>&1 || no "encode with two further masters"
 "$DEC" p.wav o7.wav full pack=1 >/dev/null && "$DEC" p.wav o8.wav full pack=2 >/dev/null && ok "packs 1 and 2 decode" || no "packs 1 and 2 decode"
 if "$DEC" p.wav o9.wav full pack=3 >/dev/null 2>&1; then no "pack 3 refused"; else ok "pack 3 refused"; fi
-"$OLD" p.wav o10.wav full >/dev/null; "$DEC" p.wav o11.wav full pack=0 >/dev/null; same o10.wav o11.wav "two packs: pack 0 = earlier decoder"
+d "$OLD" p.wav o10.wav full; d "$DEC" p.wav o11.wav full pack=0; same o10.wav o11.wav "two packs: pack 0 = earlier decoder"
 
 # 6
 "$ENC" m.wav qf.flac 3 s1 master2=copy.wav master2align=0 master2name=copy >qf.log 2>&1 || no "FLAC form encode"
-for r in "full pack=0" "full pack=1" "16 pack=1"; do "$DEC" q.wav o12.wav $r >/dev/null; "$DEC" qf.flac o13.wav $r >/dev/null; same o12.wav o13.wav "FLAC form = WAV form [$r]"; done
+for r in "full pack=0" "full pack=1" "16 pack=1"; do d "$DEC" q.wav o12.wav $r; d "$DEC" qf.flac o13.wav $r; same o12.wav o13.wav "FLAC form = WAV form [$r]"; done
 "$CDX" split q.wav q_base.wav q_ext.lax track=1 >/dev/null && "$CDX" repack q_base.wav q_ext.lax q_back.wav >/dev/null; same q.wav q_back.wav "disc tool: split + repack keeps the file"
 
 echo "extension packs: $bad check(s) failed"

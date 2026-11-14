@@ -11,7 +11,10 @@ import com.lae.core.LaeException;
 import com.lae.core.U;
 
 /**
- * Port of src/laes_file.h (namespace laes), decoder side: LAES file format and decoder (draft v1, 2026-10-28). An LAES WAV file is an
+ * Port of src/laes_file.h (namespace laes), decoder side: LAES file format and decoder. The field table below is payload version 1;
+ * version 2 (spec/lossless/SPEC.md, Section 6, the normative description) adds: up to 255 masters; header byte 56 = the default master
+ * (0 = the core master), byte 57 = the core master's flags (bit 0: no derived version); in each master record a name length, flags and
+ * a menu position, and the names after the records (FU27-2). An LAES WAV file is an
  * LAE file whose "LAE " chunk carries an LAES payload:
  *   RIFF/WAVE: "fmt " (PCM, 2 ch, base rate, 16 bit) | "data" = the core master (can be CD-compatible: 44.1 kHz or 48 kHz, 16 bit) | "LAE " = payload + CRC-32
  *
@@ -38,7 +41,6 @@ import com.lae.core.U;
 public final class LaesFile {
     private LaesFile() {}
 
-    /** C++ LONG_MAX on the reference build (MSVC x64: long is 32-bit); see the report: masters above it are refused, as by the reference */
     /** the whole-in-memory decoder's limit as laes_file.h has it since 635019a: PTRDIFF_MAX / sizeof(int64_t) on x64 */
     public static final long WHOLE_MAX_FRAMES = Long.MAX_VALUE / 8;
 

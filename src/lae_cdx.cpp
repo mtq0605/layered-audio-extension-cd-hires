@@ -674,13 +674,19 @@ static int runTests(const string& dirArg) {
     caseRun("C25a", "disc S whole-disc file, no CUE, offset 0", wholeRip(mS, 0, mS.n, fixedOff(0), false), xS, S, P3);
     { Disc d = wholeRip(mT, 0, mT.n, fixedOff(667), false); caseRun("C25b", "disc T whole-disc file, no CUE, offset +667", d, xT, T, P2, WDEF, [&](const Report& r, string& why) {
           bool ok = shown(r, d, 1) == 667 && shown(r, d, 2) == 667 + 485100 && leftovers(d, r).empty(); if (!ok) why += "positions, or the 667 leading zeros would be output; "; return ok; }); }
+    // the temporary files of the cases below go into a folder this run creates under the system's temporary folder, removed at the
+    // end; the fixture folder is only read (2026-11-14: fixed names in it were deleted before)
+    fs::path tmpRoot; { std::error_code ec; const fs::path base = fs::temp_directory_path(ec);
+        for (int i = 0; !ec && i < 1000 && tmpRoot.empty(); i++) { const fs::path c = base / ("lae_cdx_test_" + to_string((long long)time(nullptr)) + "_" + to_string(i)); std::error_code cc; if (fs::create_directory(c, cc) && !cc) tmpRoot = c; }
+        if (tmpRoot.empty()) { printf("test: cannot create a temporary folder\n"); return 2; } }
+    struct RemoveTmp { fs::path p; ~RemoveTmp() { std::error_code ec; fs::remove_all(p, ec); } } removeTmp{tmpRoot};
     // C27 refusals of the packaging tool
     { auto refuse = [&](const string& what, vector<V5> v, long long cap, const string& key) { Image im; string r = layoutImage(v, "LAE_EXT", date, cap, im); verdict("C27", what, r.find(key) != string::npos, r); };
       V5 r48 = X1; r48.rate = 48000; refuse("48 kHz family CD layer", {r48, X2}, CAPDEF, "44.1 kHz family");
       V5 shortT = S2; shortT.cd.resize((size_t)3 * 44100 * 2); refuse("track of 3 s", {S1, shortT, S3}, CAPDEF, "at least 300 sectors");
       refuse("99 audio tracks", vector<V5>(99, X2), CAPDEF * 40, "1 to 98");
       refuse("capacity too small", {X1, X2}, 2000, "does not fit");
-      vector<uint8_t> by; cdxr::readBytes(dir / "X1.wav", by); fs::path tmp = dir / "damaged.tmp.wav"; V5 bad;
+      vector<uint8_t> by; cdxr::readBytes(dir / "X1.wav", by); fs::path tmp = tmpRoot / "damaged.wav"; V5 bad;
       by[by.size() - 100] ^= 1; writeBytes(tmp, by.data(), by.size()); string r = loadV5(tmp, bad); by[by.size() - 100] ^= 1;
       verdict("C27", "LAE chunk CRC damaged", r.find("CRC") != string::npos, r);
       const size_t bo = by.size() - X1.block.size() - (X1.block.size() & 1);   // the LAE chunk body (a pad byte follows an odd body)
@@ -715,20 +721,20 @@ static int runTests(const string& dirArg) {
     { Image XN; mk({X1, X2}, XN, "X, track 2 CD only", {2}); vector<Ext> x; extsFrom(XN, x);
       verdict("D7", "image with noext=2: one extension file in the data session, self-check expects track 2 as CD", x.size() == 1 && x[0].t.track == 1 && selfCheck(XN, 0, false), ""); }
     // R19 / R1: CD outputs at the input rate; a silent file without any verified track is output whole
-    { fs::path out = dir / "outputs.tmp"; std::error_code ec; fs::remove_all(out, ec);
+    { fs::path out = tmpRoot / "outputs"; std::error_code ec; fs::remove_all(out, ec);
       Disc d = singleFile(X.t[0].cd, 48000); Report r = cdxr::read(d, {}, WDEF); writeOutputs(out, d, r, "s48");
       vector<uint8_t> b; cdxr::readBytes(out / "s48.cd.wav", b); int rate = 0; vector<int16_t> pc; bool ok = cdxr::parseWav(b, rate, pc, nullptr).empty() && rate == 48000 && pc == X.t[0].cd;
       verdict("R19", "CD output of a 48 kHz input written at 48 kHz, unchanged", ok, to_string(rate));
       vector<int16_t> zero((size_t)44100 * 2 * 5, 0); Disc z = singleFile(zero); Report rz = cdxr::read(z, {xX[0]}, WDEF); writeOutputs(out, z, rz, "silent");
       verdict("R19", "all-silent file, no verified track: the whole file is output as CD", fs::exists(out / "silent.cd.wav"), ""); fs::remove_all(out, ec); }
     // UTF-8 CUE with a Chinese file name, read from disk (wide paths)
-    { fs::path rip = dir / "rip.tmp"; std::error_code ec; fs::remove_all(rip, ec); fs::create_directories(rip, ec); const string name = "第一轨.wav";
+    { fs::path rip = tmpRoot / "rip"; std::error_code ec; fs::remove_all(rip, ec); fs::create_directories(rip, ec); const string name = "第一轨.wav";
       auto wav = canonV5(44100, ripRange(mX, -PREGAP, mX.n + 6000, fixedOff(0)), {}); writeBytes(rip / fs::u8path(name), wav.data(), wav.size());
       string cue = "\xEF\xBB\xBF" "FILE \"" + name + "\" WAVE\r\n  TRACK 01 AUDIO\r\n    INDEX 00 00:00:00\r\n    INDEX 01 00:02:00\r\n  TRACK 02 AUDIO\r\n    INDEX 01 " + msf(X.p[1] / SECTOR + 150) + "\r\n";
       writeBytes(rip / fs::u8path("专辑.cue"), cue.data(), cue.size()); Disc d; string le = cdxr::loadCue(rip / fs::u8path("专辑.cue"), d);
       caseRun("UTF8", "UTF-8 CUE and file names outside the ANSI code page, read from disk", d, xX, X, P2, WDEF, nullptr, le); fs::remove_all(rip, ec); }
     // missing CUE files: no invented CD output (R11, R15); a missing FILE with several tracks; nothing readable -> stop
-    { fs::path out = dir / "missing.tmp"; std::error_code ec; fs::remove_all(out, ec);
+    { fs::path out = tmpRoot / "missing"; std::error_code ec; fs::remove_all(out, ec);
       FileSet g = trackFiles(mS, 0, false); MemRip r = tracksRip(g, false); r.files.erase("TRACK02.wav"); string le; Disc d = viaCue(r, &le); Report rp = cdxr::read(d, xS, WDEF);
       writeOutputs(out, d, rp, "x"); vector<uint8_t> b; int rate = 0; vector<int16_t> pc; bool t3 = cdxr::readBytes(out / "TRACK03.cd.wav", b) && cdxr::parseWav(b, rate, pc, nullptr).empty();
       const long long n3 = (long long)pc.size() / 2; bool ok = le.empty() && !fs::exists(out / "TRACK02.cd.wav") && fs::exists(out / "TRACK01.lae.wav") && fs::exists(out / "TRACK03.lae.wav") == true;
@@ -741,11 +747,11 @@ static int runTests(const string& dirArg) {
       MemRip none; none.cue = discCue(mX, false); string ne; viaCue(none, &ne); verdict("R5", "no audio file of the sheet readable: the reader stops", ne.rfind("cannot read", 0) == 0, ne); }
     // the LAE base rate must equal the WAV rate (P2, X2): fmt says 48000, the LAE header 44100
     { vector<uint8_t> by; cdxr::readBytes(dir / "X1.wav", by); uint32_t r48 = 48000, br = 48000 * 4; memcpy(&by[24], &r48, 4); memcpy(&by[28], &br, 4);
-      fs::path tmp = dir / "rate.tmp.wav"; writeBytes(tmp, by.data(), by.size()); V5 v; string r = loadV5(tmp, v); std::error_code ec; fs::remove(tmp, ec);
+      fs::path tmp = tmpRoot / "rate.wav"; writeBytes(tmp, by.data(), by.size()); V5 v; string r = loadV5(tmp, v); std::error_code ec; fs::remove(tmp, ec);
       verdict("C27", "fmt 48000 Hz around an LAE header with base 44100 Hz: refused", r.find("base rate") != string::npos, r); }
 #ifdef _WIN32
     // a GBK (ANSI code page 936) CUE without BOM naming a Chinese file, read from disk
-    if (GetACP() == 936) { fs::path rip = dir / "gbk.tmp"; std::error_code ec; fs::remove_all(rip, ec); fs::create_directories(rip, ec);
+    if (GetACP() == 936) { fs::path rip = tmpRoot / "gbk"; std::error_code ec; fs::remove_all(rip, ec); fs::create_directories(rip, ec);
         auto wav = canonV5(44100, ripRange(mX, -PREGAP, mX.n + 6000, fixedOff(0)), {}); writeBytes(rip / fs::u8path("第一轨.wav"), wav.data(), wav.size());
         const string gbkName = "\xB5\xDA\xD2\xBB\xB9\xEC.wav";   // 第一轨 in GBK
         string cue = "FILE \"" + gbkName + "\" WAVE\r\n  TRACK 01 AUDIO\r\n    INDEX 00 00:00:00\r\n    INDEX 01 00:02:00\r\n  TRACK 02 AUDIO\r\n    INDEX 01 " + msf(X.p[1] / SECTOR + 150) + "\r\n";

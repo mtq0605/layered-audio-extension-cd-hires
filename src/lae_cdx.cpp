@@ -72,6 +72,8 @@ static string outputClash(const vector<string>& in, const vector<string>& out) {
     for (size_t i = 0; i < out.size(); i++) { for (auto& x : in) if (samePath(fs::path(out[i]), fs::path(x))) return out[i] + " is the input file " + x + ": give another output name";
         for (size_t j = 0; j < i; j++) if (samePath(fs::path(out[i]), fs::path(out[j]))) return out[j] + " and " + out[i] + " are the same file: give two output names"; }
     return ""; }
+// a sector address on the command line: digits only, 0 .. 449999 (99:59:74, the last address a CD can give) (2026-11-14)
+static bool lbaArg(const string& s, long long& v) { if (s.empty() || s.size() > 6) return false; v = 0; for (char c : s) { if (c < '0' || c > '9') return false; v = v * 10 + (c - '0'); } return v <= 449999; }
 static string msf(long long sectors) { char b[16]; snprintf(b, sizeof b, "%02lld:%02lld:%02lld", sectors / 4500, sectors / 75 % 60, sectors % 75); return b; }
 static string arg(int argc, char** argv, const char* key, const string& def) { string k = string(key) + "="; for (int i = 1; i < argc; i++) if (!strncmp(argv[i], k.c_str(), k.size())) return argv[i] + k.size(); return def; }
 static vector<string> positional(int argc, char** argv, int from) { vector<string> v; std::error_code ec; for (int i = from; i < argc; i++) if (!strchr(argv[i], '=') || fs::exists(argv[i], ec)) v.push_back(argv[i]); return v; }
@@ -860,13 +862,15 @@ static int realMain(int argc, char** argv) {
             if (!seen.insert(q.t.track).second) { printf("two files for track %d; nothing written\n", q.t.track); return 1; } lax.push_back(q.bytes); no.push_back(q.t.track); }
         if (lax.empty()) { printf("no .lax files in %s\n", pos[0].c_str()); return 1; }
         printf("tracks in the data session:"); for (int k : no) printf(" %d", k); printf(" (compare with BURN.TXT)\n");
-        string err; auto img = iso::build(dataFiles(lax, no), (uint32_t)strtoul(pos[1].c_str(), nullptr, 10), arg(argc, argv, "label", "LAE_EXT"), arg(argc, argv, "date", nowUtc()), 150, 300, &err);
+        long long lba = 0; if (!lbaArg(pos[1], lba)) { printf("start address %s: give the sector address (LBA) as a whole number from 0 to 449999; nothing written\n", pos[1].c_str()); return 1; }
+        string err; auto img = iso::build(dataFiles(lax, no), (uint32_t)lba, arg(argc, argv, "label", "LAE_EXT"), arg(argc, argv, "date", nowUtc()), 150, 300, &err);
         if (img.empty()) { printf("%s\n", err.c_str()); return 1; } if (!writeBytes(fs::path(pos[2]), img.data(), img.size())) { printf("cannot write %s\n", pos[2].c_str()); return 2; }
         printf("session 2 written: %s, %zu sectors, start LBA %s\n", pos[2].c_str(), img.size() / 2048, pos[1].c_str()); return 0; }
     if (cmd == "read" && pos.size() >= 3) {
         const fs::path out(pos[0]); const string src = pos[1]; vector<Ext> x; string e;
         if (src.rfind("iso:", 0) == 0) { size_t at = src.rfind('@'); vector<uint8_t> img; if (at == string::npos || !cdxr::readBytes(fs::path(src.substr(4, at - 4)), img)) { printf("iso:<path>@<startLba> expected\n"); return 1; }
-            e = cdxr::loadExtIso(img, (uint32_t)strtoul(src.substr(at + 1).c_str(), nullptr, 10), x); }
+            long long lba = 0; if (!lbaArg(src.substr(at + 1), lba)) { printf("iso:<path>@<startLba>: %s is not a sector address from 0 to 449999\n", src.substr(at + 1).c_str()); return 1; }
+            e = cdxr::loadExtIso(img, (uint32_t)lba, x); }
         else e = cdxr::loadExtDir(fs::path(src), x);
         if (!e.empty()) { printf("%s\n", e.c_str()); return 1; } if (x.empty()) printf("no extension files in %s: everything plays as CD\n", src.c_str());
         long long W = max(WDEF, atoll(arg(argc, argv, "W", to_string(WDEF)).c_str())); vector<string> in(pos.begin() + 2, pos.end()); Disc d;

@@ -557,7 +557,11 @@ return 2^(len-1) + top*2^nr + rest                  // uint32
 
 ### 6.7 Termination
 
-The reference encoder flushes four bytes at the end of a stream. A decoder MUST NOT require any termination pattern and MUST NOT check how many bytes it has consumed. Reads beyond `plen` return 0 (Section 6.1).
+The reference encoder flushes four bytes at the end of a stream. A decoder MUST NOT require any termination pattern: the values of these bytes are not checked.
+
+**A stream ends exactly at its last byte.** When the last symbol of a stream (the end of the walk of Section 7) has been decoded, `next()` MUST have returned each of the `plen` bytes of the coded payload once and MUST NOT have been called beyond them. An encoder MUST write every stream so; the streams of the reference encoder always meet this. A file with a stream that ends earlier or later is not a conforming file.
+
+A decoder MAY refuse such a file as damaged (Section 12). The player library `liblae` refuses it since v5-2026-11-07: its one-time check of a file decodes every stream from start to end, and a stream that ends earlier or later makes the open fail, so that a player plays the CD layer alone. Reads beyond `plen` return 0 (Section 6.1); a decoder that does not refuse such a stream decodes it with these zero bytes. *Informative:* the command-line decoder `lae_dec` and the Java decoder do not check this condition at present.
 
 ### 6.8 Model persistence
 
@@ -1078,6 +1082,7 @@ The CD layer is ordinary PCM and is never affected by an error in the extension.
 | A pack number `k >= 1` for which the file has no pack record (Section 5.6) | MUST refuse the request | 1 |
 | FLAC form: a failed frame check or a missing or wrong MD5 (Section 3.4) | MUST NOT decode the extension | 3 |
 | A stream record outside the payload; a decoded stream header invalid (Section 5.3); `nseg` outside `[1, 8]` | MUST refuse | 3 |
+| A stream that does not end exactly at its last byte (Section 6.7) | MAY refuse; `liblae` refuses (since v5-2026-11-07) | 3 (`lae_udec`); `lae_dec` decodes such a file |
 | Output exceeds the WAV size limit (Section 11.8) | MUST refuse | 1 |
 | `CORRUPT` raised during decoding (Sections 7.4, 7.5, 8.3, 9.4) | MUST report the stream as corrupt and MUST NOT deliver the output. The reference decoder deletes the file it has written | 3 |
 

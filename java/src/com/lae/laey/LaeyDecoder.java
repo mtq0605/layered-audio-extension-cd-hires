@@ -97,6 +97,7 @@ public final class LaeyDecoder {
         if (size < 12 || !tag(b, 0, "RIFF") || !tag(b, 8, "WAVE")) return "not a WAV file";
         long p = 12; int fmt = 0, ch = 0, bits = 0; long data = -1; long dlen = 0; boolean haveFmt = false;
         while (size - p >= 8) { long body = p + 8, n = u32(b, (int) (p + 4)); if (n > size - body) n = size - body;   // a truncated last chunk is tolerated
+        if (cd == null) throw new LaeException("the track is closed");   // FU21-6: as lae_dup (was a NullPointerException)
             if (tag(b, (int) p, "fmt ")) { if (n < 16) return "bad fmt chunk"; fmt = u16(b, (int) body); ch = u16(b, (int) body + 2); rate[0] = (int) u32(b, (int) body + 4); bits = u16(b, (int) body + 14); if (fmt == 0xFFFE && n >= 26) fmt = u16(b, (int) body + 24); haveFmt = true; }
             else if (tag(b, (int) p, "data")) { data = body; dlen = n; }
             else if (tag(b, (int) p, "LAE ") && lae != null) { lae[0] = new byte[(int) n]; System.arraycopy(b, (int) body, lae[0], 0, (int) n); }
@@ -211,7 +212,9 @@ public final class LaeyDecoder {
     // after a failure the track is not started (lae_read and lae_seek return -1 until a successful lae_start).
     public void lae_start(int route, int out_rate) {
         try { LaeDecoder.Decoder old = dec; dec = null; this.route = -1; err = false; pos = 0;   // a failed start leaves the track unstarted (read/seek refuse it)
-            if (route == LAE_ROUTE_CD) { if (out_rate != 0 && out_rate != info.base_rate) throw new LaeException("the CD route plays at the base rate only");
+            if (route == LAE_ROUTE_CD) {
+                if (old != null) { seed = old.snapMarks(); seedPack = decPack; }   // FU21-6: the 24-bit route's checkpoints are kept for a later return to it (as lae_dup's seed)
+                if (out_rate != 0 && out_rate != info.base_rate) throw new LaeException("the CD route plays at the base rate only");
                 this.route = route; outRate = 0; wrate = info.base_rate; bits = 16; outFrames = info.cd_frames; return; }
             String m = route == LAE_ROUTE_CD24 ? "cd24" : route == LAE_ROUTE_16 ? "16" : route == LAE_ROUTE_FULL ? "full" : null;
             if (m == null) throw new LaeException("unknown route");
@@ -221,6 +224,7 @@ public final class LaeyDecoder {
             if (route == LAE_ROUTE_CD24 && out_rate != 0 && out_rate != D.wrate) throw new LaeException("the CD24 route plays at the base rate only");
             if (old != null && decPack == pack) D.adoptMarks(old);   // a restart or another route keeps the seek checkpoints decoded so far (of the same pack only)
             else if (seed != null && seedPack == pack) D.adoptMarks(seed);   // Java only: a lae_dup copy starts with its source's checkpoints
+        if (cd == null) throw new LaeException("the track is closed");   // FU21-6: as lae_dup (was a NullPointerException)
             decPack = pack;
             this.route = route; outRate = out_rate; wrate = D.wrate; bits = 24; outFrames = D.Lo; dec = D; }
         catch (OutOfMemoryError e) { throw new LaeException("out of memory or internal error", e); } }

@@ -43,14 +43,17 @@ final class WavIo {
                 if (eq(c, 0, "fmt ")) { byte[] b = new byte[26]; if (n < 16 || !at(f, sz, body, b, n >= 26 ? 26 : 16)) return false;
                     fmt = (b[0] & 0xFF) | (b[1] & 0xFF) << 8; w.ch = (b[2] & 0xFF) | (b[3] & 0xFF) << 8; w.rate = (int) WavIn.le32(b, 4); w.bits = (b[14] & 0xFF) | (b[15] & 0xFF) << 8; if (fmt == 0xFFFE && n >= 26) fmt = (b[24] & 0xFF) | (b[25] & 0xFF) << 8; }
                 else if (eq(c, 0, "data")) { dpos = body; dlen = n; }
-                else if (eq(c, 0, "LAE ")) { w.lae = new byte[(int) n]; if (n != 0 && !at(f, sz, body, w.lae, (int) n)) return false; }
+                else if (eq(c, 0, "LAE ")) { if (n > Integer.MAX_VALUE - 8) throw tooLarge(path); w.lae = new byte[(int) n]; if (n != 0 && !at(f, sz, body, w.lae, (int) n)) return false; }
                 p = body + n + (n & 1); }
             if (w.bits != 16 || fmt != 1 || dpos < 0) return fmt == 1 && dpos >= 0 && (w.bits == 24 || w.bits == 32);   // read(): the encoder refuses it afterwards
             w.dataOff = dpos; w.dataValues = dlen / 2; if (!loadPcm) return true;
+            if (dlen / 2 * 2 > Integer.MAX_VALUE - 8) throw tooLarge(path);
             byte[] d = new byte[(int) (dlen / 2 * 2)]; boolean ok = d.length == 0 || at(f, sz, dpos, d, d.length);
             w.pcm16 = new short[d.length / 2]; EncIo.toShorts(d, 0, w.pcm16, 0, w.pcm16.length);
             return ok; }
         finally { EncIo.close(f); } }
+    // FU21-6 (Java only): a body of 2 GiB or more does not fit a Java array (the C++ reads it); said instead of a NegativeArraySizeException
+    private static RuntimeException tooLarge(String path) { return EncIo.fail(path + ": the file is too large for the Java port (a chunk of 2 GiB or more)"); }
     private static boolean at(RandomAccessFile f, long sz, long p, byte[] d, int n) {
         if (!(p >= 0 && p + n <= sz)) return false; try { f.seek(p); f.readFully(d, 0, n); return true; } catch (IOException e) { return false; } }
     private static boolean eq(byte[] b, int o, String s) { for (int i = 0; i < s.length(); i++) if (b[o + i] != (byte) s.charAt(i)) return false; return true; }

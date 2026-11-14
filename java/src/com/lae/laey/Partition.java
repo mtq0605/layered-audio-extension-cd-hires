@@ -67,7 +67,7 @@ final class Partition {
     // full = false (the share search): only bits and shares are computed; no stream, leaves or planes (same tree, same shares)
     // mean: the plane's mean energies when the caller already has them (the share search runs with the same plane and tags many times)
     // rule, zs: the C++ thread_local ruleRef() and zeroSignOpt() of the calling thread; nth: worker threads (C++ PARTTHREADS or the hardware)
-    static Result run(final Plane P, final byte[] cellA, final int[] cellE, final int[] lab, byte[] noZL, final boolean equal, final Costs cost, final double lamD, final double lamC,
+    static Result run(final Plane P, final byte[] cellA, final int[] cellE, final int[] lab, final boolean equal, final Costs cost, final double lamD, final double lamC,
                       final int wmode, double TH0, final boolean full, MeanE mean, Result seed, final int rule, final boolean zs, int nth) {
         if (TH0 < 0) TH0 = deadzone(); final double TH = TH0;
         final Result R = new Result(); if (full) { R.k0 = P.k0; R.bw = P.k1 - P.k0; R.Q = new int[(int) (P.K * R.bw)]; }

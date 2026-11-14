@@ -208,9 +208,9 @@ final class LossyBlk {
             for (long j = 0; j < nblk; j++) { env.checkCancel(); long[] mm = blk(j); long m0 = mm[0], m1 = mm[1]; int[] X = Xf.read(m0, m1); int[] Qall = null;
                 if (full) Qall = new int[X.length];
                 for (int wi = 0; wi < which.length; wi++) { final int si = which[wi]; Seg S = segs[si]; Partition.Plane P = new Partition.Plane(X, m1 - m0, N, S.k0, S.k1, S.nc);
-                    final int n = (int) ((m1 - m0) * S.nc), o = (int) (m0 * S.nc); byte[] cA = new byte[n], noF = new byte[n]; int[] cE = new int[n], lab = new int[n];   // cellsOf
-                    for (int i = 0; i < n; i++) { cA[i] = (byte) (S.fl[o + i] & 1); cE[i] = S.cE[o + i] & 0xFF; lab[i] = S.lab[o + i]; noF[i] = (byte) ((S.fl[o + i] & 2) != 0 ? 1 : 0); }
-                    Partition.Result R = Partition.run(P, cA, cE, lab, noF, eq, cost, lD[wi], lC[wi], wm, -1, full, S.me, tot[si], rule, zs, nth);
+                    final int n = (int) ((m1 - m0) * S.nc), o = (int) (m0 * S.nc); byte[] cA = new byte[n]; int[] cE = new int[n], lab = new int[n];   // cellsOf
+                    for (int i = 0; i < n; i++) { cA[i] = (byte) (S.fl[o + i] & 1); cE[i] = S.cE[o + i] & 0xFF; lab[i] = S.lab[o + i]; }
+                    Partition.Result R = Partition.run(P, cA, cE, lab, eq, cost, lD[wi], lC[wi], wm, -1, full, S.me, tot[si], rule, zs, nth);
                     tot[si].bits = R.bits; tot[si].cnt = R.cnt; tot[si].en = R.en; tot[si].zsum = R.zsum; tot[si].zcnt = R.zcnt; nleaves[si] += R.leaves.size();
                     if (h != null) for (Partition.Leaf lf : R.leaves) { if (lf.tier == 0) continue; int sh = Partition.shiftOf(lf.E, lf.tier, rule);
                         for (long m = lf.m0; m < lf.m1; m++) for (int c = lf.c0; c < lf.c1; c++) { int nb = Partition.cellBins(P, c, kbo); int kb = kbo[0];
@@ -302,7 +302,7 @@ final class LossyBlk {
             nextRow = rowsUpTo(src, RD, detA, nextRow, j == nblk - 1 ? L : Math.min(L, m1 * N - N)); }
         if (masterRef) { double mn = 1e30, mxv = 0; for (double v : FlM) { mn = Cv.min(mn, v); mxv = Cv.max(mxv, v); } env.printf("master floor per band (24-bit LSB, coefficient rms): min %.1f max %.1f\n", mn, mxv); }
         final List<Ev> toneEv = detA.finish();
-        // ---- segments (frequency) and the per-cell records (3 bytes per cell: exponent, tag, flags 1 = A, 2 = no zero level, 4 = noise-like)
+        // ---- segments (frequency) and the per-cell records (3 bytes per cell: exponent, tag, flags 1 = A, 2 = a cell of the structure, of the depth layer, raised by the closed loop or a G cell (a mark only: the partition does not read it, and with zs every leaf gets a zero level), 4 = noise-like)
         final String pm = env.get("PART"); { final String rv = env.get(fullBand ? "RULE_D" : "RULE_F"); st.rule = rv != null ? Fmt.atoi(rv) : 0; st.zs = env.get("ZSIGN") != null; }
         int mi = PartitionFormat.modeIndex(pm); if (mi < 0) { env.printf("unknown mode %s (max, 1, 3, 5, keep, keep20)\n", pm); return 1; }
         final PartitionFormat.Mode MD = PartitionFormat.MODES[mi]; boolean eq = env.get("PARTEQ") != null; int wm = env.get("PARTW") != null ? Fmt.atoi(env.get("PARTW")) : 0;
@@ -445,7 +445,7 @@ final class LossyBlk {
                             ge += g * g; me += mc * mc; mx = Cv.max(mx, Math.abs((double) XT[i])); if (all && !marked(nzRows, m, kb + jj)) all = false; }
                         if (!(ge > gSig2 * nb)) continue;   // G at or below the 24-bit floor: stays A
                         if (!all && me > gSig2 * nb) { gKept++; continue; }   // not deleted and the master is not silent here: left as it is
-                        final int e = Cv.d2i(Math.ceil(LMath.log2(mx + 1))); T.cE[cid] = (byte) e; T.lab[cid] = (byte) (gLv == 'b' ? 1 : gLv == 'c' ? 2 : (e <= 4 ? 2 : 3)); T.fl[cid] = 2;   // 2 = no zero level: zeros stay zero (no filling)
+                        final int e = Cv.d2i(Math.ceil(LMath.log2(mx + 1))); T.cE[cid] = (byte) e; T.lab[cid] = (byte) (gLv == 'b' ? 1 : gLv == 'c' ? 2 : (e <= 4 ? 2 : 3)); T.fl[cid] = 2;   // flag 2 marks a G cell; the partition does not read it. With zs these cells get a zero level like every leaf, by design: where a coefficient that g is responsible for becomes zero, the up-converted CD layer's noise would stay there, and zs reverses it (g itself makes no zero level)
                         if (e <= 4) gC++; else gD++;
                         for (int jj = 0; jj < nb; jj++) { final int i = (int) ((m - m0) * N + kb + jj); XG[i] = XT[i]; } } }
                 XGf.write(m0, XG, m1 - m0); }

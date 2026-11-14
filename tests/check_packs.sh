@@ -57,6 +57,7 @@ pos() { "$ENC" m.wav none.wav 3 s1 master2="$1" 2>&1 | sed -n 's/^ALIGN_SUGGEST 
 p2=$(pos meq.wav); p3=$(pos m176.wav)
 if [ -n "$p2" ] && [ -n "$p3" ] && [ ! -f none.wav ]; then ok "without a position: both searches run, nothing written ($p2, $p3)"; else no "search without a position"; fi
 "$ENC" m.wav p.wav 3 s1 master2=meq.wav master2align="$p2" master2name="EQ" master3=m176.wav master3align="$p3" --overwrite >p.log 2>&1 || no "encode with two further masters"
+rm -f -- o7.wav o8.wav o9.wav   # the decoders do not replace an existing output (decision of 2026-11-15)
 "$DEC" p.wav o7.wav full pack=1 >/dev/null && "$DEC" p.wav o8.wav full pack=2 >/dev/null && ok "packs 1 and 2 decode" || no "packs 1 and 2 decode"
 if "$DEC" p.wav o9.wav full pack=3 >/dev/null 2>&1; then no "pack 3 refused"; else ok "pack 3 refused"; fi
 d "$OLD" p.wav o10.wav full; d "$DEC" p.wav o11.wav full pack=0; same o10.wav o11.wav "two packs: pack 0 = earlier decoder"
@@ -64,7 +65,7 @@ d "$OLD" p.wav o10.wav full; d "$DEC" p.wav o11.wav full pack=0; same o10.wav o1
 # 6
 "$ENC" m.wav qf.flac 3 s1 master2=copy.wav master2align=0 master2name=copy --overwrite >qf.log 2>&1 || no "FLAC form encode"
 for r in "full pack=0" "full pack=1" "16 pack=1"; do d "$DEC" q.wav o12.wav $r; d "$DEC" qf.flac o13.wav $r; same o12.wav o13.wav "FLAC form = WAV form [$r]"; done
-"$CDX" split q.wav q_base.wav q_ext.lax track=1 >/dev/null && "$CDX" repack q_base.wav q_ext.lax q_back.wav >/dev/null; same q.wav q_back.wav "disc tool: split + repack keeps the file"
+"$CDX" split q.wav q_base.wav q_ext.lax track=1 --overwrite >/dev/null && "$CDX" repack q_base.wav q_ext.lax q_back.wav --overwrite >/dev/null; same q.wav q_back.wav "disc tool: split + repack keeps the file"
 
 echo "extension packs: $bad check(s) failed"
 exit $bad

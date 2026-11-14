@@ -31,11 +31,12 @@ same "$W/c.lae" "$W/a.flac" ".lae --form=flac is not the FLAC form"
 
 rate=$(od -An -tu4 -j 24 -N 4 "$W/a.wav" | tr -d ' ')   # the base rate (fmt chunk of the encoder's WAV: offset 24)
 for r in "full" "16" "cd24" "full $((rate * 2))"; do
+    rm -f -- "$W/w.out" "$W/f.out"   # the decoders do not replace an existing output (decision of 2026-11-15)
     "$DEC" "$W/a.wav" "$W/w.out" $r > /dev/null 2>&1 || fail "decode WAV form, route $r"
     "$DEC" "$W/a.flac" "$W/f.out" $r > /dev/null 2>&1 || fail "decode FLAC form, route $r"
     same "$W/w.out" "$W/f.out" "route $r differs between the forms"
 done
-"$DEC" "$W/a.wav" "$W/ref.out" full > /dev/null 2>&1
+rm -f -- "$W/ref.out"; "$DEC" "$W/a.wav" "$W/ref.out" full > /dev/null 2>&1
 
 # the extension: one APPLICATION block (type 2, last) right after STREAMINFO in an untagged file written by lae_enc
 if [ "$(od -An -tu1 -j 42 -N 1 "$W/a.flac" | tr -d ' ')" = 130 ]; then
@@ -48,7 +49,7 @@ else echo "note: the extension is in more than one block; the byte comparison wi
 
 LAE_TEST_MODE=1 LAEY_TEST_PIECE=300000 "$ENC" "$M" "$W/p.flac" "$MODE" --overwrite > "$W/enc_piece.txt" 2>&1 || fail "encode with small pieces"
 grep -q "extension in 1 LAE1 block" "$W/enc_piece.txt" && fail "the small-piece file has one block" || pass
-"$DEC" "$W/p.flac" "$W/p.out" full > /dev/null 2>&1; same "$W/p.out" "$W/ref.out" "the multi-block file decodes differently"
+rm -f -- "$W/p.out"; "$DEC" "$W/p.flac" "$W/p.out" full > /dev/null 2>&1; same "$W/p.out" "$W/ref.out" "the multi-block file decodes differently"
 
 "$ENC" "$M" "$W/t1.flac" "$MODE" --tag=TITLE=Test --tag=ARTIST=lae --overwrite > /dev/null 2>&1 || fail "encode with tags"
 "$ENC" tag "$W/a.flac" "$W/t2.flac" --tag=TITLE=Test --tag=ARTIST=lae --overwrite > /dev/null 2>&1 || fail "lae_enc tag (FLAC form)"
@@ -56,7 +57,7 @@ same "$W/t1.flac" "$W/t2.flac" "encoding with tags differs from tagging afterwar
 "$ENC" tag "$W/t1.flac" "$W/t3.flac" --overwrite > /dev/null 2>&1 || fail "lae_enc tag without tags"
 same "$W/t3.flac" "$W/a.flac" "removing the tags does not give the untagged file"
 "$ENC" tag "$W/p.flac" "$W/t4.flac" --tag=TITLE=Test --overwrite > /dev/null 2>&1 || fail "lae_enc tag on a multi-block file"
-"$DEC" "$W/t4.flac" "$W/t4.out" full > /dev/null 2>&1; same "$W/t4.out" "$W/ref.out" "the tagged multi-block file decodes differently"
+rm -f -- "$W/t4.out"; "$DEC" "$W/t4.flac" "$W/t4.out" full > /dev/null 2>&1; same "$W/t4.out" "$W/ref.out" "the tagged multi-block file decodes differently"
 [ "$(code "$ENC" tag "$W/a.flac" "$W/t5.wav" --tag=TITLE=x)" = 1 ] && pass || fail "tag: FLAC form into a .wav name was not refused"
 [ "$(code "$ENC" tag "$W/a.wav" "$W/t5.flac" --tag=TITLE=x)" = 1 ] && pass || fail "tag: WAV form into a .flac name was not refused"
 

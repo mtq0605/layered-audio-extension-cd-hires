@@ -684,9 +684,12 @@ static int laesMain(int argc, char** argv) {
             if (in.f) { fclose(in.f); in.f = nullptr; }   // closed before writing
             if (chg.empty()) { printf("%s: nothing changes\n", src.c_str()); return 0; }
             printf("%s: %zu bytes change in place (file offset: old -> new):", src.c_str(), chg.size()); for (auto& x : chg) printf(" %lld: %02X -> %02X;", x.at, x.old, x.now); printf("\n");
-            auto put = [&](bool now) { FILE* f = fopen(src.c_str(), "r+b"); if (!f) return false; bool ok = true;
+            bool opened = false;   // FU16-4 (2026-11-14): whether the file could be opened for writing at all
+            auto put = [&](bool now) { FILE* f = fopen(src.c_str(), "r+b"); opened = f != nullptr; if (!f) return false; bool ok = true;
                 for (auto& x : chg) { ok = ok && laess::seekTo(f, x.at) && fputc(now ? x.now : x.old, f) != EOF; } ok = fflush(f) == 0 && ok; fclose(f); return ok; };
-            if (!put(true)) { put(false); printf("cannot write %s; the old bytes are written back\n", src.c_str()); return 2; }
+            if (!put(true)) { if (!opened) { printf("cannot write %s (it cannot be opened for writing); nothing changed\n", src.c_str()); return 2; }
+                const bool back = put(false);   // FU16-4: the writing back is checked too, as after the self-check
+                printf("cannot write %s; %s\n", src.c_str(), back ? "the old bytes are written back" : "WRITING THE OLD BYTES BACK FAILED"); return 2; }
             const std::string why = checkStored(src, threads);
             if (!why.empty()) { const bool back = put(false); printf("self-check failed: %s; %s\n", why.c_str(), back ? "the old bytes are written back" : "WRITING THE OLD BYTES BACK FAILED"); return 2; }
             printf("%s: payload version %d, changed in place; every master's SHA-256 checked\n", src.c_str(), ver);

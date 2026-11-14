@@ -234,11 +234,13 @@ public final class LaeDecoder {
                 try { q.name = new String(p, (int) e + 9, nl, "UTF-8"); } catch (java.io.UnsupportedEncodingException x) { q.name = ""; }
                 q.off = (int) e + 9 + nl; q.len = (int) (len - 1 - nl);
                 if (Le.i32(p, q.off) != 0x3145414C || Le.i32(p, q.off + 4) != 5) break;
+                if (Le.i32(p, q.off + 12) != Le.i32(p, 12)) break;   // F05-5 (C++ 47c58c4): spec 5.6, a pack has the main body's base (the same CD / core layer)
                 q.rate = Le.i32(p, q.off + 8); q.stages = Le.i32(p, q.off + 16); packs.add(q); e += 8 + len; }
             // the name of the main body: one optional record after the last pack record, "LNAM" | 1 byte length | the name (UTF-8); display only
             mainName = ""; if (n - e >= 5 && p[(int) e] == 'L' && p[(int) e + 1] == 'N' && p[(int) e + 2] == 'A' && p[(int) e + 3] == 'M' && (p[(int) e + 4] & 0xFF) <= n - e - 5) {
                 try { mainName = new String(p, (int) e + 5, p[(int) e + 4] & 0xFF, "UTF-8"); } catch (java.io.UnsupportedEncodingException x) { mainName = ""; } } }
         public String mainName = "";   // the main body's name ("" = none stored)
+        private boolean opened = false;   // FU21-2: set by the first openCd (open / openRef included)
         private String fail(int[] code, int c, String m) { if (code != null) code[0] = c; return m; }
         // port of lae_decoder.h:Decoder::open
         // returns "" when ready; otherwise the message and code[0] (1 = not this format / bad arguments, 3 = corrupt: the CD audio still plays)
@@ -249,6 +251,10 @@ public final class LaeDecoder {
         public String openRef(final short[] cd, final byte[] lae, String route, int outRate, int[] code) { return openCd(CdPcm.of(cd), lae, route, outRate, code); }
         // Java only: as openRef, with the CD layer from a source (an array, or read on demand from the file with a bounded cache: {@link CdPcm})
         public String openCd(final CdPcm cd, final byte[] lae, String route, int outRate, int[] code) {
+            // FU21-2: one object, one open. A second open would add the depth streams again and keep the former file's streams and
+            // checkpoints in the lists (the C++ clears only fS); every caller makes a new Decoder for every open
+            if (opened) return fail(code, 1, "internal error: this decoder was opened before (use a new one for every open)");
+            opened = true;
             mode = route;
             if (!mode.equals("full") && !mode.equals("16") && !mode.equals("cd24")) return fail(code, 1, "route must be full, 16 or cd24");
             if (lae.length == 0) return fail(code, 1, "no LAE chunk: plain CD audio");

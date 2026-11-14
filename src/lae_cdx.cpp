@@ -26,6 +26,8 @@
 //        tracks-gapnext[-nocue] / tracks-gapomit[-nocue] (the INDEX 00 gaps of tracks 2... in the next file / left out)
 //   lae_cdx selftest                                    known answers (C19)
 //   lae_cdx test <fixturedir>                           section-7 cases on the test discs X, Y, S, T (in memory)
+// --overwrite (pack, split, repack, data, sim): an output file that exists is replaced. Without it the tool asks twice on a console and
+// refuses without one (the user's decision of 2026-11-15); image and read need a new or empty folder in any case.
 // Every input v5 file of pack, split and image, and every verified track of read and repack, is decoded completely before anything is
 // written (P2, R8; the user's decision of 2026-11-15): LAEY every extension pack to its last frame, LAES every master against its SHA-256
 // (by the stream decoder with temporary files when a block does not fit into memory). An input that does not decode stops the tool; a
@@ -50,6 +52,11 @@
 #include "laes_stream.h"   // the LAES stream decoder (temporary files), when a block does not fit into memory (2026-11-15)
 #include "lae_cdx_read.h"
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 namespace fs = std::filesystem;
 using namespace std;
 using cdxr::Disc; using cdxr::Ext; using cdxr::Report; using cdxr::Track; using cdxr::u8;
@@ -67,6 +74,28 @@ static bool writeBytes(const fs::path& p, const void* d, size_t n) {
 #endif
     if (!f) return false; bool ok = n == 0 || fwrite(d, 1, n, f) == n; ok = (fclose(f) == 0) && ok;
     if (!ok) { std::error_code ec; fs::remove(p, ec); } return ok; }
+// an output file that already exists is never replaced silently (the user's decision of 2026-11-15, item 21): run by hand on a console
+// (input and output both a terminal) the person is asked twice and only two "yes" answers replace it; without a console it is refused
+// unless --overwrite was given. Asked before any work starts.
+static bool g_overwrite = false;
+static bool onConsole() {
+#ifdef _WIN32
+    return _isatty(_fileno(stdin)) && _isatty(_fileno(stdout));
+#else
+    return isatty(fileno(stdin)) && isatty(fileno(stdout));
+#endif
+}
+static bool answeredYes() { char line[256]; if (!fgets(line, sizeof line, stdin)) return false; string s = line;
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    const size_t a = s.find_first_not_of(" \t"); return a != string::npos && cdxr::lower(s.substr(a)) == "yes"; }
+static bool mayReplace(const string& f) {   // true: f does not exist, or may be replaced
+    std::error_code ec; if (!fs::exists(fs::path(f), ec) || g_overwrite) return true;
+    const char* n = f.c_str();
+    if (onConsole()) {
+        printf("\"%s\" already exists. Replace it? Type yes to continue: \n\"%s\" 已经存在。要替换吗？输入 yes 继续：", n, n); fflush(stdout);
+        if (answeredYes()) { printf("Really replace \"%s\"? It cannot be undone. Type yes again: \n确定要替换 \"%s\" 吗？替换后无法恢复。再输入一次 yes：", n, n); fflush(stdout); if (answeredYes()) return true; } }
+    printf("\"%s\" already exists; it was not replaced (give --overwrite to replace it).\n\"%s\" 已经存在，没有替换（加 --overwrite 才替换）。\n", n, n); return false; }
+static bool mayReplaceAll(const vector<string>& fs_) { for (auto& f : fs_) if (!mayReplace(f)) { printf("nothing written\n"); return false; } return true; }
 // an output that is an input (or the other output) would overwrite it: refused before anything is written (2026-11-14)
 static bool samePath(const fs::path& a, const fs::path& b) {
     std::error_code ea, eb; if (fs::exists(a, ea) && fs::exists(b, eb)) { std::error_code ee; const bool eq = fs::equivalent(a, b, ee); if (!ee) return eq; }
@@ -100,7 +129,7 @@ static string startCheck(long long lba, const string& a2opt, const vector<fs::pa
     return ""; }
 static string msf(long long sectors) { char b[16]; snprintf(b, sizeof b, "%02lld:%02lld:%02lld", sectors / 4500, sectors / 75 % 60, sectors % 75); return b; }
 static string arg(int argc, char** argv, const char* key, const string& def) { string k = string(key) + "="; for (int i = 1; i < argc; i++) if (!strncmp(argv[i], k.c_str(), k.size())) return argv[i] + k.size(); return def; }
-static vector<string> positional(int argc, char** argv, int from) { vector<string> v; std::error_code ec; for (int i = from; i < argc; i++) if (!strchr(argv[i], '=') || fs::exists(argv[i], ec)) v.push_back(argv[i]); return v; }
+static vector<string> positional(int argc, char** argv, int from) { vector<string> v; std::error_code ec; for (int i = from; i < argc; i++) if ((!strchr(argv[i], '=') && strcmp(argv[i], "--overwrite")) || fs::exists(argv[i], ec)) v.push_back(argv[i]); return v; }
 static string nowUtc() { time_t t = time(nullptr); tm g;
 #ifdef _WIN32
     gmtime_s(&g, &t);
@@ -855,6 +884,7 @@ static int runTests(const string& dirArg) {
 static int realMain(int argc, char** argv) {
     if (argc < 2) { printf("usage: see the header of lae_cdx.cpp\n"); return 1; }
     string cmd = argv[1]; vector<string> pos = positional(argc, argv, 2);
+    { std::error_code ec; for (int i = 2; i < argc; i++) if (!strcmp(argv[i], "--overwrite") && !fs::exists(argv[i], ec)) g_overwrite = true; }
     {   // an argument with '=' that is no existing file must be an option of this command: a mistyped option or a missing file name
         // with '=' in it stops the tool instead of being ignored (2026-11-14)
         static const map<string, set<string>> known = {{"pack", {"track"}}, {"split", {"track"}}, {"repack", {}}, {"selftest", {}}, {"test", {}},
@@ -867,6 +897,7 @@ static int realMain(int argc, char** argv) {
     if (cmd == "test" && pos.size() == 1) return runTests(pos[0]);
     if ((cmd == "pack" && pos.size() == 2) || (cmd == "split" && pos.size() == 3)) {   // pack: extension file; split: base-layer WAV + extension file (F2)
         { const string c = outputClash({pos[0]}, vector<string>(pos.begin() + 1, pos.end())); if (!c.empty()) { printf("%s; nothing written\n", c.c_str()); return 1; } }
+        if (!mayReplaceAll(vector<string>(pos.begin() + 1, pos.end()))) return 1;
         V5 v; string e = loadV5(fs::path(pos[0]), v); if (!e.empty()) { printf("%s: %s; nothing written\n", pos[0].c_str(), e.c_str()); return 1; }
         printf("%s: decoder check passed: %s\n", pos[0].c_str(), v.checked.c_str());
         int track = atoi(arg(argc, argv, "track", "1").c_str()); if (track < 1 || track > 65535) { printf("track must be 1-65535 (1-98 on a CD); nothing written\n"); return 1; }
@@ -879,6 +910,7 @@ static int realMain(int argc, char** argv) {
         printf("%sextension file %s: track %d, %u CD frames at %u Hz, MD5 %s, extension block %zu bytes\n", cmd == "split" ? ("base layer " + pos[1] + "; ").c_str() : "", pos.back().c_str(), track, t.ncd, t.rate, t.md5hex().c_str(), bl); return 0; }
     if (cmd == "repack" && pos.size() == 3) {
         { const string c = outputClash({pos[0], pos[1]}, {pos[2]}); if (!c.empty()) { printf("%s; nothing written\n", c.c_str()); return 1; } }
+        if (!mayReplaceAll({pos[2]})) return 1;
         vector<int16_t> pcm; int rate = 0; string e = cdxr::loadPcm(fs::path(pos[0]), "WAVE", pcm, rate, 0); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }
         vector<Ext> x(1); x[0].name = pos[1]; if (!cdxr::readBytes(fs::path(pos[1]), x[0].bytes)) { printf("cannot read %s\n", pos[1].c_str()); return 1; } cdxr::check(x[0]);
         if (!x[0].bad.empty()) { printf("%s: %s; only the base layer can be played\n", x[0].name.c_str(), x[0].bad.c_str()); return 3; }
@@ -947,6 +979,7 @@ static int realMain(int argc, char** argv) {
             printf("cannot write the deliverables in %s; the %zu file(s) written so far were removed again, nothing written\n", pos[0].c_str(), written.size()); return 2; }
         printf("CD-Extra image written to %s: AUDIO.BIN, IMAGE.CUE, DATA.ISO, SESSION1.CUE, BURN.TXT, LAE\\TRACKnn.LAX\n", pos[0].c_str()); return 0; }
     if (cmd == "data" && pos.size() == 3) {   // session 2 of a CD: every file must be a CD extension file (track 1-98, 44100 Hz)
+        if (!mayReplaceAll({pos[2]})) return 1;
         vector<Ext> x; string e = cdxr::loadExtDir(fs::path(pos[0]), x, true); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }
         vector<vector<uint8_t>> lax; vector<int> no; set<int> seen;
         for (auto& q : x) { if (!q.bad.empty()) { printf("%s: %s (a CD needs track 1-98 and a 44100 Hz CD layer); nothing written\n", q.name.c_str(), q.bad.c_str()); return 1; }
@@ -988,8 +1021,8 @@ static int realMain(int argc, char** argv) {
         int change = atoi(arg(argc, argv, "change", "0").c_str()), slip = atoi(arg(argc, argv, "slip", "0").c_str());
         if (change && m.p.count(change)) m.a[(size_t)(m.p[change] + 1000) * 2] ^= 1;
         if (slip && m.p.count(slip)) { long long mid = (m.p[slip] + trackEnd(m, slip)) / 2; m.a.erase(m.a.begin() + (ptrdiff_t)mid * 2, m.a.begin() + (ptrdiff_t)mid * 2 + 2); m.n--; }
-        std::error_code ec; fs::create_directories(out, ec); bool ok = true; string cue;
-        auto wav = [&](const string& n, const vector<int16_t>& pc) { auto by = canonV5(44100, pc, {}); ok = writeBytes(out / n, by.data(), by.size()) && ok; };
+        bool ok = true; string cue; vector<pair<string, vector<uint8_t>>> files;   // made first, written after the check of existing files (2026-11-15)
+        auto wav = [&](const string& n, const vector<int16_t>& pc) { files.push_back({n, canonV5(44100, pc, {})}); };
         if (form == "disc" || form == "disc-nocue") { MemRip r = discRip(m, o, pg, over); wav("DISC.wav", r.files["DISC.wav"]); if (form == "disc") cue = r.cue; }
         else if (form == "tracks" || form == "tracks-nocue") { FileSet f = trackFiles(m, o, pg, over); MemRip r = tracksRip(f, pg); for (auto& kv : r.files) wav(kv.first, kv.second); if (form == "tracks") cue = r.cue; }
         else if (form.rfind("tracks-gap", 0) == 0) { const int mode = form.rfind("tracks-gapnext", 0) == 0 ? 1 : form.rfind("tracks-gapomit", 0) == 0 ? 2 : 0; if (!mode) { printf("unknown form %s\n", form.c_str()); return 1; }
@@ -997,7 +1030,10 @@ static int realMain(int argc, char** argv) {
             FileSet f = trackFilesGap(m, mode); MemRip r = tracksRipGap(f, m, mode); for (auto& kv : r.files) wav(kv.first, kv.second); if (form.find("-nocue") == string::npos) cue = r.cue; }
         else if (form.rfind("single", 0) == 0) { int k = atoi(form.c_str() + 6); if (!m.p.count(k)) { printf("no track %d\n", k); return 1; } wav("SINGLE.wav", ripRange(m, m.p[k], trackEnd(m, k), fixedOff(o))); }
         else { printf("unknown form %s\n", form.c_str()); return 1; }
-        if (!cue.empty()) ok = writeBytes(out / "RIP.CUE", cue.data(), cue.size()) && ok;
+        if (!cue.empty()) files.push_back({"RIP.CUE", vector<uint8_t>(cue.begin(), cue.end())});
+        { vector<string> names; for (auto& f : files) names.push_back(u8(out / f.first)); if (!mayReplaceAll(names)) return 1; }
+        std::error_code ec; fs::create_directories(out, ec);
+        for (auto& f : files) ok = writeBytes(out / f.first, f.second.data(), f.second.size()) && ok;
         if (!ok) { printf("cannot write in %s\n", pos[1].c_str()); return 2; }
         printf("simulated rip (%s, combined offset %+lld%s%s%s) written to %s\n", form.c_str(), o, pg ? ", with the track-1 pregap" : "", change ? ", one sample changed" : "", slip ? ", one sample lost" : "", pos[1].c_str()); return 0; }
     printf("unknown command or wrong arguments (see the header of lae_cdx.cpp)\n"); return 1; }

@@ -35,6 +35,10 @@ public final class LaeDecoder {
     // port of lae_decoder.h:tab (half-length returned in half[0])
     static int[] tab(int s, int[] half) { switch (s) { case 0: half[0] = Halfband.kHalfLen0; return Halfband.kHalf0; case 1: half[0] = Halfband.kHalfLen1; return Halfband.kHalf1;
         case 2: half[0] = Halfband.kHalfLen2; return Halfband.kHalf2; default: half[0] = Halfband.kHalfLen3; return Halfband.kHalf3; } }
+    // Decision 13 (2026-11-15, F05-6 point 5, spec Appendix C): the sums and products of the signal stages after the IMDCT (rq31, the
+    // half-band stages UpSrc and DecSrc, the mix MixSrc, the final (v + 8) >> 4 of read) are taken modulo 2^64, two's complement. Java's
+    // long arithmetic wraps modulo 2^64 and >> is arithmetic, so these lines already give the values lae_decoder.h now computes in
+    // unsigned arithmetic; nothing changes here.
     // port of lae_decoder.h:rq31
     static long rq31(long a) { return (a + (1L << 30)) >> 31; }
 

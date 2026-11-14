@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: Apache-2.0
-// GENERATED from src/mdct_tables.h by a sed script (port_work/laey_dec/gen_mdct_tables_java.sh): exact double constants of the
-// textbook MDCT, N = 512 (do not edit). Java hexadecimal floating-point literals are exact, as the C++ ones.
+// Transcribed from src/mdct_tables.h (the normative table, written by tools/gen_mdct_tables.cpp): exact double constants of the
+// textbook MDCT, N = 512. Every literal must equal the C++ one (do not edit; tests/check_mdct_tables.sh compares the two files).
+// Java hexadecimal floating-point literals are exact, as the C++ ones.
 package com.lae.laey;
 
 /** port of src/mdct_tables.h (namespace mdct) */

@@ -322,6 +322,7 @@ int main(int argc, char** argv) { lae_u8::init(argc, argv); return laesMain(argc
 static int laesMain(int argc, char** argv) {
     if (argc < 2) { printf("laes enc | tag | parts | dec | verify | align | selftest | excerpt | mkcd  (see the source header)\n"); return 1; }
     const std::string cmd = argv[1];
+    bool madePart = false;   // FU16-3 (2026-11-14): tag / add / extract / names remove <out>.part and <out>.body.part on an error only when this run made them
     if (cmd == "selftest") return selftest::run() ? 2 : 0;
     if (cmd == "reduce" && argc >= 5) {   // laes reduce <in.wav> <out.wav> <bits>: a shorter word length with TPDF dither (+-1 LSB of the result), fixed seed
         Pcm p; std::string e = readWav(argv[2], p); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } const int bits = atoi(argv[4]);
@@ -409,7 +410,7 @@ static int laesMain(int argc, char** argv) {
         if (L.payload.empty()) { printf("%s: no LAE extension found (not an LAES / LAE file)\n", src.c_str()); return 2; }
         { char mg[5] = {0}; if (L.payload[0].second >= 4) in.read(L.payload[0].first, mg, 4);
           if (strcmp(mg, "LAE2")) { printf("%s: not LAES (extension %s); an LAEY file (LAE1) is tagged by lae_enc\n", src.c_str(), mg); return 2; } }
-        { laess::Out o(out + ".part");
+        madePart = true; { laess::Out o(out + ".part");
           if (L.flac) {   // "fLaC" | STREAMINFO | the new tags | the other blocks as they were (old VORBIS_COMMENT, PICTURE, PADDING dropped) | audio frames
               std::vector<const Part*> keep; for (size_t i = 1; i < L.parts.size(); i++) { const int t = L.parts[i].type; if (t != 1 && t != 4 && t != 6 && t != 0) keep.push_back(&L.parts[i]); }
               const std::vector<uint8_t> tb = laestag::flacBlocks(tags, keep.empty());
@@ -445,7 +446,7 @@ static int laesMain(int argc, char** argv) {
         size_t pb = 0; for (auto& p : tags.pics) pb += p.data.size();
         printf("%s: %s form, %zu tag(s), %zu picture(s) (%.1f MB); audio bytes, payload and every master's SHA-256 checked\n", out.c_str(), L.flac ? "FLAC" : "WAV", tags.kv.size(), tags.pics.size(), pb / 1e6);
         return 0; }
-    catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[3]) + ".part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
+    catch (const std::exception& x) { std::error_code ec; if (madePart) fs::remove(std::string(argv[3]) + ".part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
     if (cmd == "add" && argc >= 5) try {   // 2026-11-11: a NEW file = the old one + new masters at the end of the payload
         // laes add <in> <out> <master>[@T] ... [--name=<k>:<text>] [--no-derive[=<k>]] [--menu-order=<k1>,...]   (k of --name / --no-derive: the new
         // masters as given; --menu-order: the masters by their present numbers, the new ones numbered after them in the order given).
@@ -532,7 +533,7 @@ static int laesMain(int argc, char** argv) {
         laes::Head Hold; if (!laes::headFrom((uint64_t)ver0, hd + 56, (uint64_t)nOld, Hold)) { printf("%s: invalid LAES header\n", src.c_str()); return 2; }   // kept: the default master's index does not change (new masters go last)
         const int ver = laes::payloadVersionFor(vi, Hold);
         auto crcOf = [](uint32_t c, const uint8_t* p, size_t n) { for (size_t i = 0; i < n; i++) { c ^= p[i]; for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1; } return c; };
-        const std::string bodyP = out + ".body.part"; long long bsz = 0;
+        const std::string bodyP = out + ".body.part"; long long bsz = 0; madePart = true;
         { laess::Out o(bodyP); uint32_t c = 0xFFFFFFFFu; auto put = [&](const void* d, size_t n) { o.put(d, n); c = crcOf(c, (const uint8_t*)d, n); bsz += (long long)n; };
           uint8_t h2[64]; memcpy(h2, hd, 64); h2[4] = (uint8_t)ver; h2[5] = 0; h2[14] = (uint8_t)nAll; laes::headTo(ver, Hold, h2 + 56); put(h2, 64); std::vector<uint8_t> b;
           for (size_t i = 0; i < rs.size(); i++) { const ORec& R = rs[i]; uint8_t r2[72]; memcpy(r2, R.r, 72); r2[5] = ver == 2 ? (uint8_t)R.I.name.size() : 0; r2[6] = ver == 2 ? (uint8_t)R.I.flags : 0; r2[7] = ver == 2 ? (uint8_t)menus[i] : 0;
@@ -540,7 +541,7 @@ static int laesMain(int argc, char** argv) {
               for (auto& l : R.lay) for (long long a = 0; a < l.second; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, l.second - a)); pread(l.first + a, b.data(), b.size()); put(b.data(), b.size()); } }
           { laess::In nb(bp); for (long long a = 64; a < nb.n - 4; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, nb.n - 4 - a)); nb.read(a, b.data(), b.size()); put(b.data(), b.size()); } }
           c ^= 0xFFFFFFFFu; const uint8_t t[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)}; o.put(t, 4); bsz += 4; o.close(); }
-        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); fs::remove(bodyP, ec); if (!we.empty()) { printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }
+        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); fs::remove(bodyP, ec); if (!we.empty()) { fs::remove(out + ".part", ec); printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }
         std::string why; { laess::In nw(out + ".part"); Layout N; why = readLayout(nw, N);
             if (why.empty() && shaOf(in, {{L.audioOff, L.audioLen}}) != shaOf(nw, {{N.audioOff, N.audioLen}})) why = "the audio bytes differ"; }
         if (why.empty()) why = checkStored(out + ".part", threads);   // every master, old and new, decoded and checked against its SHA-256
@@ -552,7 +553,7 @@ static int laesMain(int argc, char** argv) {
           for (size_t p = 0; p < o1.size(); p++) { const size_t i = o1[p]; const MasterInfo& I = m1[i]; const std::string tier = I.storage == 1 ? "full" : I.refTier == 0 ? "difference to the core master" : "difference to master " + std::to_string(laesc::displayNo(m1, (size_t)I.refTier - 1));
               printf("  master %zu%s: %d Hz %d-bit%s%s\n", p + 1, I.name.empty() ? "" : (" \"" + I.name + "\"").c_str(), I.rate, I.bits, i < (size_t)nOld ? " (as before)" : (", new, " + tier).c_str(), (I.flags & laes::kNoDerive) ? " (no derived versions)" : ""); } }
         return 0; }
-    catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
+    catch (const std::exception& x) { std::error_code ec; if (madePart) { fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); } printf("stopped: %s; nothing written\n", x.what()); return 2; }
     if (cmd == "extract" && argc >= 5) try {   // 2026-11-11: a NEW file with some of the masters, packed again
         // laes extract <in> <out> --pick=<p>[,<p>...]   p = master:<k> | name:<text> | <rate>:<bits> (masters only; several fit: the user ticks them; master:<a>-<b> a range).
         // The chosen masters are decoded and encoded again in full (laes enc with the same core master), so each one gets the best
@@ -600,8 +601,8 @@ static int laesMain(int argc, char** argv) {
         { std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr); if (laesMain((int)av.size(), ap.data()) != 0) { printf("encoding the chosen masters failed; nothing written\n"); return 2; } }
         // the new payload in the old file's layout (tags, pictures and the core master's audio bytes as they were)
         laess::In nt(tmpOut); Layout NL; { const std::string e = readLayout(nt, NL); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } }
-        const std::string bodyP = out + ".body.part"; long long bsz = 0; { laess::Out o(bodyP); for (auto& r : NL.payload) { copyRange(nt, o, r.first, r.second); bsz += r.second; } o.close(); }
-        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); fs::remove(bodyP, ec); if (!we.empty()) { printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }
+        const std::string bodyP = out + ".body.part"; long long bsz = 0; madePart = true; { laess::Out o(bodyP); for (auto& r : NL.payload) { copyRange(nt, o, r.first, r.second); bsz += r.second; } o.close(); }
+        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); fs::remove(bodyP, ec); if (!we.empty()) { fs::remove(out + ".part", ec); printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }
         std::string why; { laess::In nw(out + ".part"); Layout N; why = readLayout(nw, N);
             if (why.empty() && shaOf(in, {{L.audioOff, L.audioLen}}) != shaOf(nw, {{N.audioOff, N.audioLen}})) why = "the audio bytes differ"; }
         if (why.empty()) why = checkStored(out + ".part", threads);
@@ -610,7 +611,7 @@ static int laesMain(int argc, char** argv) {
         printf("%s: %s form, %zu of %zu master(s), encoded again; tags and the core master's audio bytes as before; every master's SHA-256 checked\n", out.c_str(), L.flac ? "FLAC" : "WAV", chosen.size(), mi.size());
         for (size_t q = 0; q < chosen.size(); q++) { const MasterInfo& I = mi[chosen[q]]; printf("  master %zu%s: %d Hz %d-bit (master %d before)\n", q + 1, I.name.empty() ? "" : (" \"" + I.name + "\"").c_str(), I.rate, I.bits, laesc::displayNo(mi, chosen[q])); }
         return 0; }
-    catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
+    catch (const std::exception& x) { std::error_code ec; if (madePart) { fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); } printf("stopped: %s; nothing written\n", x.what()); return 2; }
     if (cmd == "names" && argc >= 4) try {   // 2026-11-11: a NEW file with other master names / derive flags; every layer copied byte for byte
         const std::string src = argv[2], out = argv[3]; std::error_code ec;
         // --in-place (2026-11-12): only the default and the core master's flag change; the file keeps its size and every
@@ -697,15 +698,14 @@ static int laesMain(int argc, char** argv) {
             if (H.coreFlags & laes::kNoDerive) printf("  the core master: no derived 16-bit version\n");
             return 0; }
         // pass 2: the new payload (header with the version, records with names and flags, the layers byte for byte, a new CRC-32)
-        const std::string bodyP = out + ".body.part"; long long bsz = 0;
+        const std::string bodyP = out + ".body.part"; long long bsz = 0; madePart = true;
         { laess::Out o(bodyP); uint32_t c = 0xFFFFFFFFu; auto put = [&](const void* d, size_t n) { o.put(d, n); c = crcOf(c, (const uint8_t*)d, n); bsz += (long long)n; };
           uint8_t h2[64]; memcpy(h2, hd, 64); h2[4] = (uint8_t)ver; h2[5] = 0; laes::headTo(ver, H, h2 + 56); put(h2, 64);
           std::vector<uint8_t> b;
           for (const Rec& R : rs) { uint8_t r2[72]; memcpy(r2, R.r, 72); r2[5] = ver == 2 ? (uint8_t)R.name.size() : 0; r2[6] = ver == 2 ? (uint8_t)R.flags : 0; r2[7] = ver == 2 ? (uint8_t)R.menu : 0; put(r2, 72); if (ver == 2 && !R.name.empty()) put(R.name.data(), R.name.size());
               for (auto& l : R.lay) for (long long a = 0; a < l.second; a += 1 << 22) { b.resize((size_t)std::min<long long>(1 << 22, l.second - a)); pread(l.first + a, b.data(), b.size()); put(b.data(), b.size()); } }
           c ^= 0xFFFFFFFFu; const uint8_t t[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)}; o.put(t, 4); bsz += 4; o.close(); }
-        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); if (!we.empty()) { printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }
-        fs::remove(bodyP, ec);
+        { const std::string we = writeWithPayload(in, L, bodyP, bsz, out + ".part"); fs::remove(bodyP, ec); if (!we.empty()) { fs::remove(out + ".part", ec); printf("%s: %s\n", src.c_str(), we.c_str()); return 2; } }   // FU16-3: removed first, as in add / extract
         std::string why; { laess::In nw(out + ".part"); Layout N; why = readLayout(nw, N);
             if (why.empty() && shaOf(in, {{L.audioOff, L.audioLen}}) != shaOf(nw, {{N.audioOff, N.audioLen}})) why = "the audio bytes differ"; }
         if (why.empty()) why = checkStored(out + ".part", threads);   // every master decoded and checked against its SHA-256
@@ -717,7 +717,7 @@ static int laesMain(int argc, char** argv) {
               printf("  master %zu%s%s%s%s\n", p + 1, R.name.empty() ? "" : (" \"" + R.name + "\"").c_str(), (R.flags & laes::kNoDerive) ? " (no derived versions)" : "", inFile.c_str(), H.def == (int)o1[p] + 1 ? "  [default]" : ""); }
           if (!H.def) printf("  default: the core master\n"); if (H.coreFlags & laes::kNoDerive) printf("  the core master: no derived 16-bit version\n"); }
         return 0; }
-    catch (const std::exception& x) { std::error_code ec; fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); printf("stopped: %s; nothing written\n", x.what()); return 2; }
+    catch (const std::exception& x) { std::error_code ec; if (madePart) { fs::remove(std::string(argv[3]) + ".part", ec); fs::remove(std::string(argv[3]) + ".body.part", ec); } printf("stopped: %s; nothing written\n", x.what()); return 2; }
     if (cmd == "enc" && argc >= 4) try {
         const std::string out = argv[2], corePath = arg(argc, argv, "--core"); const bool derive = flag(argc, argv, "--derive-core");
         // --timing: prints the time of each stage at the end (L5, 2026-11-03); the file written does not change

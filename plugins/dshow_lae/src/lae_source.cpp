@@ -370,7 +370,10 @@ void LaePin::push() {
     for (;;) { if (m_stop) break; IMediaSample* s = nullptr; if (FAILED(m_alloc->GetBuffer(&s, nullptr, nullptr, 0)) || !s) break;
         BYTE* p = nullptr; s->GetPointer(&p); const int64_t n = (int64_t)(s->GetSize() / (2 * by)); buf.resize((size_t)n * 2);
         const uint64_t first = d.pos; const int64_t k = d.readFrames(buf.data(), n);
-        if (k <= 0) { s->Release(); if (!m_stop && m_peer) m_peer->EndOfStream(); break; }
+        if (k <= 0) { s->Release(); if (!m_stop && m_peer) { m_peer->EndOfStream();
+                if (k < 0) {   // a decoding or read error is not the end of the track: the graph is told (EC_ERRORABORT), as a source filter does
+                    IMediaEventSink* sink = nullptr; if (m_filter->m_graph && SUCCEEDED(m_filter->m_graph->QueryInterface(IID_IMediaEventSink, (void**)&sink)) && sink) { sink->Notify(EC_ERRORABORT, E_FAIL, 0); sink->Release(); } } }
+            break; }
         for (int64_t i = 0; i < k * 2; i++) { const int32_t v = buf[(size_t)i]; const uint32_t u = d.bits == 24 ? (uint32_t)v << 8 : (uint32_t)v; for (int b = 0; b < by; b++) p[i * by + b] = (BYTE)(u >> (8 * b)); }
         s->SetActualDataLength((long)(k * 2 * by));
         REFERENCE_TIME t0 = (REFERENCE_TIME)((first - m_segFrame) * (uint64_t)kUnits / (uint64_t)d.rate), t1 = (REFERENCE_TIME)((first + (uint64_t)k - m_segFrame) * (uint64_t)kUnits / (uint64_t)d.rate);

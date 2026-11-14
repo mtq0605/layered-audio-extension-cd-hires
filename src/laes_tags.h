@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <stdexcept>
 
 namespace laestag {
 struct Picture { int type = 3; std::string mime; uint32_t w = 0, h = 0, depth = 0, colors = 0; std::vector<uint8_t> data; };
@@ -54,6 +55,39 @@ inline bool validUtf8(const std::string& s) {
         i += k; }
     return true; }
 inline std::string upperKey(const std::string& k) { std::string u = k; for (char& c : u) if (c >= 'a' && c <= 'z') c = (char)(c - 32); return u; }
+// a repeated key: one INFO entry / text frame (INFO "; ", ID3v2.4 NUL-separated values)
+inline std::vector<std::pair<std::string, std::vector<std::string>>> merged(const Tags& t) {
+    std::vector<std::pair<std::string, std::vector<std::string>>> m;
+    for (auto& kv : t.kv) { bool found = false; for (auto& e : m) if (e.first == kv.first) { e.second.push_back(kv.second); found = true; }
+        if (!found) m.push_back({kv.first, {kv.second}}); }
+    return m; }
+inline const char* id3Frame(const std::string& k);
+// DEC 26 (FU28-3 (1)(2)): the final lengths of what flacBlocks / wavChunks write, for a vendor string of encLen bytes; "" or the reason.
+// FLAC: VORBIS_COMMENT and every PICTURE below 2^24 (24-bit block length); WAV: every ID3 frame and the whole ID3 tag below 2^28
+// (syncsafe), the LIST/INFO and "id3 " chunks below 2^32.
+inline std::string checkSizes(const Tags& t, size_t encLen, bool flac = true, bool wav = true) {   // flac / wav: which form to check
+    const uint64_t kFlac = 1ull << 24, kId3 = 1ull << 28, kRiff = 1ull << 32;
+    if (flac && !t.kv.empty()) { uint64_t vc = 8 + encLen; for (auto& kv : t.kv) vc += 4 + kv.first.size() + 1 + kv.second.size();
+        if (vc >= kFlac) return "the tags together are too large for a FLAC VORBIS_COMMENT block (16 MB)"; }
+    if (flac) for (auto& p : t.pics) if (32 + p.mime.size() + p.data.size() >= kFlac) return "a picture is too large for a FLAC metadata block (16 MB)";
+    if (!wav || t.empty()) return "";
+    uint64_t fr = 0, info = 4 + 8 + encLen + 1 + 1;   // "INFO" + ISFT
+    auto frame = [&](uint64_t body) { fr += 10 + body; return body < kId3; };
+    for (auto& m : merged(t)) { uint64_t v = 0, iv = 0;
+        for (size_t i = 0; i < m.second.size(); i++) { v += (i ? 1 : 0) + m.second[i].size(); iv += (i ? 2 : 0) + m.second[i].size(); }
+        info += 8 + iv + 1 + 1;   // upper bound (an INFO entry only for the known names)
+        const uint64_t body = m.first == "COMMENT" ? 1 + 3 + 1 + v : *id3Frame(m.first) ? 1 + v : 1 + m.first.size() + 1 + v;
+        if (!frame(body)) return "a tag is too large for an ID3v2 frame (256 MB)"; }
+    frame(1 + encLen);   // TSSE
+    for (auto& p : t.pics) if (!frame(1 + p.mime.size() + 1 + 1 + 1 + p.data.size())) return "a picture is too large for an ID3v2 frame (256 MB)";
+    if (fr >= kId3) return "the tags and pictures together are too large for an ID3v2 tag (256 MB)";
+    if (info >= kRiff || 10 + fr >= kRiff) return "the tags together are too large for a RIFF chunk (4 GB)";
+    return ""; }
+// the final check inside flacBlocks / wavChunks: with err the reason goes there and nothing is returned, else std::length_error
+inline bool sizesOk(const Tags& t, const char* enc, std::string* err, bool flac) {
+    const std::string e = checkSizes(t, strlen(enc), flac, !flac); if (e.empty()) return true;
+    if (err) { *err = e; return false; } throw std::length_error(e); }
+
 // --tag / --cover / --picture from the command line; "" or the reason. Checked before any work is done.
 inline std::string parseArgs(int argc, char** argv, Tags& t) {
     for (int i = 1; i < argc; i++) { const std::string a = argv[i];
@@ -71,7 +105,7 @@ inline std::string parseArgs(int argc, char** argv, Tags& t) {
             if (32 + p.mime.size() + p.data.size() >= (1u << 24)) return path + ": too large for a FLAC metadata block (16 MB)";
             t.pics.push_back(std::move(p)); } }
     size_t all = 0; for (auto& p : t.pics) all += p.data.size() + 64; if (all >= (1u << 28) - 4096) return "the pictures together are too large for an ID3v2 tag (256 MB)";
-    return ""; }
+    return checkSizes(t, 64); }   // DEC 26: the text counts too (room for a vendor string of 64 bytes)
 // true when the argument is one of ours (the work folder does not depend on it)
 inline bool isTagArg(const std::string& a) { return !a.compare(0, 6, "--tag=") || !a.compare(0, 8, "--cover=") || !a.compare(0, 10, "--picture="); }
 
@@ -80,7 +114,8 @@ inline void be32(std::vector<uint8_t>& o, uint32_t v) { for (int i = 3; i >= 0; 
 inline void add(std::vector<uint8_t>& o, const std::string& s) { o.insert(o.end(), s.begin(), s.end()); }
 
 // FLAC: VORBIS_COMMENT (type 4) then one PICTURE (type 6) per picture; lastBlock: the final one carries the "last" flag. Empty for no tags.
-inline std::vector<uint8_t> flacBlocks(const Tags& t, bool lastBlock, const char* enc = kEncoder) {   // enc: the vendor string (lae_enc names itself)
+inline std::vector<uint8_t> flacBlocks(const Tags& t, bool lastBlock, const char* enc = kEncoder, std::string* err = nullptr) {   // enc: the vendor string (lae_enc names itself)
+    if (!sizesOk(t, enc, err, true)) return {};   // DEC 26
     std::vector<std::vector<uint8_t>> bl; std::vector<int> types;
     if (!t.kv.empty()) { std::vector<uint8_t> b; le32(b, (uint32_t)strlen(enc)); add(b, enc); le32(b, (uint32_t)t.kv.size());
         for (auto& kv : t.kv) { const std::string s = kv.first + "=" + kv.second; le32(b, (uint32_t)s.size()); add(b, s); }
@@ -105,11 +140,10 @@ inline const char* id3Frame(const std::string& k) {
 inline void syncsafe(std::vector<uint8_t>& o, uint32_t v) { for (int i = 3; i >= 0; i--) o.push_back((uint8_t)((v >> (7 * i)) & 0x7F)); }
 
 // WAV: a LIST/INFO chunk (UTF-8 text, NUL-terminated, even sizes) and an "id3 " chunk (ID3v2.4, UTF-8). Empty for no tags.
-inline std::vector<uint8_t> wavChunks(const Tags& t, const char* enc = kEncoder) {   // enc: the encoder named in ISFT / TSSE (lae_enc names itself)
+inline std::vector<uint8_t> wavChunks(const Tags& t, const char* enc = kEncoder, std::string* err = nullptr) {   // enc: the encoder named in ISFT / TSSE (lae_enc names itself)
     std::vector<uint8_t> o; if (t.empty()) return o;
-    std::vector<std::pair<std::string, std::vector<std::string>>> merged;   // a repeated key: one INFO entry / text frame (INFO "; ", ID3v2.4 NUL-separated values)
-    for (auto& kv : t.kv) { bool found = false; for (auto& m : merged) if (m.first == kv.first) { m.second.push_back(kv.second); found = true; }
-        if (!found) merged.push_back({kv.first, {kv.second}}); }
+    if (!sizesOk(t, enc, err, false)) return o;   // DEC 26
+    const auto merged = laestag::merged(t);
     auto join = [](const std::vector<std::string>& v, const std::string& sep) { std::string s; for (size_t i = 0; i < v.size(); i++) s += (i ? sep : std::string()) + v[i]; return s; };
     {   std::vector<uint8_t> info; add(info, "INFO");
         auto put = [&](const char* id, const std::string& v) { add(info, id); le32(info, (uint32_t)v.size() + 1); add(info, v); info.push_back(0); if ((v.size() + 1) & 1) info.push_back(0); };

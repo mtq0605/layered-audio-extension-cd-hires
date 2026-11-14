@@ -56,12 +56,21 @@ public final class PartitionFormat {
 
     // ---- geometry shared by encoder and decoder
     // port of partition_format.h:cuts (returns the cut positions; the C++ vector)
+    // FU21-1 (Java only): the walkers call this twice per node; the arrays depend only on w and equal, so widths up to CUT_TAB come from a
+    // table made once (shared and read-only: no caller writes into the result); wider ones (none in valid streams) are made as before
     static int[] cuts(int w, boolean equal) {
+        if (w < 2) return EMPTY;
+        if (w <= CUT_TAB) return CUTS[equal ? 1 : 0][w];
+        return makeCuts(w, equal); }
+    private static int[] makeCuts(int w, boolean equal) {
         if (w < 2) return EMPTY;
         if (equal) return new int[] {w / 2};
         int[] c = new int[w - 1]; for (int p = 1; p < w; p++) c[p - 1] = p;
         return c; }
     private static final int[] EMPTY = new int[0];
+    private static final int CUT_TAB = 64;
+    private static final int[][][] CUTS = new int[2][CUT_TAB + 1][];
+    static { for (int e = 0; e < 2; e++) for (int w = 0; w <= CUT_TAB; w++) CUTS[e][w] = makeCuts(w, e != 0); }
     // port of partition_format.h:posBits (the C++ loop `(size_t)(1u << b) < n`: n is at most ROOTF - 1 here, so b stays far below 32)
     static int posBits(long n) { int b = 0; while ((long) (1 << b) < n) b++; return b; }
     // port of partition_format.h:cellBins (Plane P reduced to its fields k0, k1; kb returned in kb[0])

@@ -88,7 +88,9 @@ int main(int argc, char** argv) {
     // a derived 16-bit version starts at any frame too: the player moves its dither state there (2026-11-12), bit for bit as from frame 0
     if (!whole) {   // the block positions: from the record, else made now (and saved when a record path is given)
         std::vector<uint8_t> rec; if (!index.empty()) { FILE* fi = fopen(index.c_str(), "rb"); if (fi) { int ch; while ((ch = fgetc(fi)) != EOF) rec.push_back((uint8_t)ch); fclose(fi); } }
-        if (rec.empty() || !f.importIndex(rec.data(), rec.size())) { std::atomic<bool> no{false}; f.indexLayers(&no, (int)std::max(1u, std::thread::hardware_concurrency()));
+        if (rec.empty() || !f.importIndex(rec.data(), rec.size())) { std::atomic<bool> no{false};
+            try { f.indexLayers(&no, (int)std::max(1u, std::thread::hardware_concurrency())); }   // a failed read comes back as an exception (2026-11-14)
+            catch (const std::exception& x) { printf("%s: %s (while making the block positions): nothing written\n", argv[1], x.what()); return 1; }
             if (!index.empty()) { const std::vector<uint8_t> r = f.exportIndex(); FILE* fo = fopen(index.c_str(), "wb");   // FU14-3: a record not written whole is removed
                 if (fo) { const bool okR = fwrite(r.data(), 1, r.size(), fo) == r.size(); if (fclose(fo) != 0 || !okR) { fs::remove(index); printf("note: cannot write the block position record %s (disk full?): not saved\n", index.c_str()); } } } } }
     std::vector<std::string> tags = {"LAES_CHOICE=" + C.name, "LAES_FILE_SHA256=" + hex(f.fileSha, 32)};

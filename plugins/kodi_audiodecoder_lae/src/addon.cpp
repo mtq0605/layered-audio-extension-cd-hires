@@ -189,15 +189,17 @@ public:
             if (!laeyflac::layout(rd, s.size, L).empty() || !laeyflac::check(L, notLaey).empty() || !laeyflac::head(rd, L, hd, 24)) return false;
             return fromHeader(hd, laeyflac::comments(rd, L)); }
         if (memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) return false;
+        uint64_t laeAt = 0, laeLen = 0;   // the last "LAE " chunk counts, as in liblae (spec: a reader uses the last one)
         for (uint64_t pos = 12; pos + 8 <= s.size;) { uint8_t c[8]; if (Src::read(&s, pos, c, 8) != 0) return false; const uint64_t n = (uint64_t)c[4] | (uint64_t)c[5] << 8 | (uint64_t)c[6] << 16 | (uint64_t)c[7] << 24;
-            if (!memcmp(c, "LAE ", 4)) { uint8_t hd[24]; if (n < 24 || Src::read(&s, pos + 8, hd, 24) != 0) return false; auto u32 = [&](int o) { return (uint32_t)hd[o] | (uint32_t)hd[o + 1] << 8 | (uint32_t)hd[o + 2] << 16 | (uint32_t)hd[o + 3] << 24; };
-                if (u32(0) != 0x3145414Cu || u32(4) != 5) return false; const uint32_t master = u32(8), base = u32(12), frames = u32(20); if (!master || !base) return false;
-                const int ly = kodi::addon::GetSettingInt("layers"), cap = rateSetting(); int out = ly == 1 || ly == 2 ? (int)base : (int)master;   // as Init picks the route
-                if ((ly == 0 || ly == 3) && cap > 0) while (out > cap && out > (int)base) out /= 2;
-                tag.SetDuration((int)(frames / master)); tag.SetSamplerate(out); tag.SetChannels(2);
-                for (auto& kv : wt) putTag(tag, kv.first.c_str(), kv.second.c_str());
-                return true; }
+            if (!memcmp(c, "LAE ", 4)) { laeAt = pos + 8; laeLen = n; }
             pos += 8 + n + (n & 1); }
+        if (laeAt) { uint8_t hd[24]; if (laeLen < 24 || Src::read(&s, laeAt, hd, 24) != 0) return false; auto u32 = [&](int o) { return (uint32_t)hd[o] | (uint32_t)hd[o + 1] << 8 | (uint32_t)hd[o + 2] << 16 | (uint32_t)hd[o + 3] << 24; };
+            if (u32(0) != 0x3145414Cu || u32(4) != 5) return false; const uint32_t master = u32(8), base = u32(12), frames = u32(20); if (!master || !base) return false;
+            const int ly = kodi::addon::GetSettingInt("layers"), cap = rateSetting(); int out = ly == 1 || ly == 2 ? (int)base : (int)master;   // as Init picks the route
+            if ((ly == 0 || ly == 3) && cap > 0) while (out > cap && out > (int)base) out /= 2;
+            tag.SetDuration((int)(frames / master)); tag.SetSamplerate(out); tag.SetChannels(2);
+            for (auto& kv : wt) putTag(tag, kv.first.c_str(), kv.second.c_str());
+            return true; }
         return false; }
     catch (...) { return false; }   // memory: no tags for this file (nothing may reach Kodi)
 

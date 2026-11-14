@@ -711,9 +711,9 @@ public:
             p_abort.check(); laesOpen(p_abort); return; }
         if ((!memcmp(h, "RF64", 4) || !memcmp(h, "BW64", 4)) && !memcmp(h + 8, "WAVE", 4)) { m_size = size; m_wavForm = true; m_wavTags = wavtags::read(m_file, size, p_abort); laesOpen(p_abort); return; }   // RF64 (beyond 4 GB): LAES only
         if (memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) throw exception_io_unsupported_format();
-        t_filesize pos = 12, laeAt = 0, laeLen = 0;
+        t_filesize pos = 12, laeAt = 0, laeLen = 0;   // the last "LAE " chunk counts, as in liblae (spec: a reader uses the last one)
         while (pos + 8 <= size) { uint8_t c[8]; m_file->seek(pos, p_abort); m_file->read_object(c, 8, p_abort); const t_filesize n = le32(c + 4);
-            if (!memcmp(c, "LAE ", 4)) { laeAt = pos + 8; laeLen = (std::min)(n, size - laeAt); break; } pos += 8 + n + (n & 1); }
+            if (!memcmp(c, "LAE ", 4)) { laeAt = pos + 8; laeLen = (std::min)(n, size - laeAt); } pos += 8 + n + (n & 1); }
         if (!laeAt || laeAt + 24 > size) throw exception_io_unsupported_format();
         uint8_t hd[24]; m_file->seek(laeAt, p_abort); m_file->read_object(hd, 24, p_abort);
         if (le32(hd) == 0x3245414Cu) { m_size = size; m_wavForm = true; m_wavTags = wavtags::read(m_file, size, p_abort); laesOpen(p_abort); return; }   // LAE2: LAES

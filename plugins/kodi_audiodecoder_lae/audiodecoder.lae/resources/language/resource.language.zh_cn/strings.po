@@ -111,6 +111,14 @@ msgctxt "#30101"
 msgid "Verifying all masters (SHA-256, first playback only)"
 msgstr "校验全部母带（SHA-256，仅首次播放）"
 
+msgctxt "#30102"
+msgid "Master %d did not pass its SHA-256 check. The core master is playing instead."
+msgstr "母带 %d 没有通过 SHA-256 校验。现在播放的是核心母带。"
+
+msgctxt "#30103"
+msgid "Master %d could not be checked. The core master is playing instead."
+msgstr "母带 %d 无法校验。现在播放的是核心母带。"
+
 msgctxt "#30200"
 msgid "LAE audio (LAES / LAEY)"
 msgstr "LAE 音频（LAES / LAEY）"

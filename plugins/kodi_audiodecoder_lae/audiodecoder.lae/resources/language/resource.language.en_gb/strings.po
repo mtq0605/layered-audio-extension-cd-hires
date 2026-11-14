@@ -111,6 +111,14 @@ msgctxt "#30101"
 msgid "Verifying all masters (SHA-256, first playback only)"
 msgstr ""
 
+msgctxt "#30102"
+msgid "Master %d did not pass its SHA-256 check. The core master is playing instead."
+msgstr ""
+
+msgctxt "#30103"
+msgid "Master %d could not be checked. The core master is playing instead."
+msgstr ""
+
 msgctxt "#30200"
 msgid "LAE audio (LAES / LAEY)"
 msgstr ""

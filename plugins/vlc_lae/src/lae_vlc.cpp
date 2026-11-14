@@ -121,17 +121,20 @@ struct Sys {
     ~Sys() { cancel = 1; if (indexer.joinable()) indexer.join(); FpPin pin; if (play) laes_stop(play); if (laes) laes_close(laes); if (track) lae_close(track); }
 };
 
-// the first play of a file content with a master: every master is decoded and checked in one pass, with a progress dialog
-void checkAll(demux_t* d, Sys* sy) {
+// the first play of a file content with a master: every master is decoded and checked in one pass, with a progress dialog that can be
+// cancelled; false when it was (nothing is recorded then: no master counts as checked)
+bool checkAll(demux_t* d, Sys* sy) {
     laes_file_info fi; laes_get_info(sy->laes, &fi); int first = -1, nm = 0;
     for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(sy->laes, i, &c); if (c.kind == LAES_KIND_MASTER) { nm++; if (first < 0) first = i; } }
-    char err[256]; laes_play* p = laes_start_all(sy->laes, first, 0, err, sizeof err); if (!p) return; laes_choice_info c; laes_get_choice(sy->laes, first, &c);
-    vlc_dialog_id* dlg = vlc_dialog_display_progress(d, false, 0.f, nullptr, "LAE decoder: LAES", "First play of this file: checking all %d masters (SHA-256), once per file", nm);
-    std::vector<int32_t> b(65536 * 2); uint64_t got = 0; int64_t k; int last = -1;
+    char err[256]; laes_play* p = laes_start_all(sy->laes, first, 0, err, sizeof err); if (!p) return true; laes_choice_info c; laes_get_choice(sy->laes, first, &c);
+    vlc_dialog_id* dlg = vlc_dialog_display_progress(d, false, 0.f, LT("Cancel", "取消"), LT("LAE decoder: LAES", "LAE 解码器：LAES"),
+        LT("First play of this file: checking all %d masters (SHA-256), once per file", "首次播放这个文件：校验全部 %d 个母带（SHA-256，每个文件一次）"), nm);
+    std::vector<int32_t> b(65536 * 2); uint64_t got = 0; int64_t k; int last = -1; bool cancelled = false;
     while ((k = laes_read(p, b.data(), 65536)) > 0) { got += (uint64_t)k; const int pc = (int)(100.0 * (double)got / (double)(c.frames ? c.frames : 1));
+        if (dlg && vlc_dialog_is_cancelled(d, dlg)) { cancelled = true; break; }
         if (dlg && pc != last) { vlc_dialog_update_progress(d, dlg, (float)pc / 100.f); last = pc; } }
-    if (laes_verified(p) >= 0) for (int m = 0; m < nm; m++) { const int r = laes_master_ok(p, m); if (r >= 0) g_verified.put(fi.file_sha256, m, r == 1); }
-    if (dlg) vlc_dialog_release(d, dlg); laes_stop(p); }
+    if (!cancelled && laes_verified(p) >= 0) for (int m = 0; m < nm; m++) { const int r = laes_master_ok(p, m); if (r >= 0) g_verified.put(fi.file_sha256, m, r == 1); }
+    if (dlg) vlc_dialog_release(d, dlg); laes_stop(p); return !cancelled; }
 
 bool seekTo(Sys* sy, uint64_t frame) {
     FpPin pin; char err[256]; if (frame > sy->frames) frame = sy->frames;
@@ -148,8 +151,14 @@ bool startLaes(demux_t* d, Sys* sy) {
     laes_file_info fi; laes_get_info(sy->laes, &fi);
     sy->choice = pick(sy->laes, (int)var_InheritInteger(d, "lae-layers"), (int)var_InheritInteger(d, "lae-maxrate"), (int)var_InheritInteger(d, "lae-maxbits"));
     laes_choice_info c; laes_get_choice(sy->laes, sy->choice, &c);
-    if (c.master >= 0) { if (g_verified.get(fi.file_sha256, c.master) == 0) checkAll(d, sy);
-        if (g_verified.get(fi.file_sha256, c.master) != 1) { msg_Warn(d, LT("LAES: master %d: SHA-256 mismatch; playing the core master", "LAES：母带 %d：SHA-256 不符；播放核心母带"), c.master + 1); sy->choice = 0; laes_get_choice(sy->laes, 0, &c); } }
+    // a master plays only after it matched its SHA-256 (spec 1.3); otherwise the core master plays, and the user is told which and why
+    if (c.master >= 0) { bool done = true; if (g_verified.get(fi.file_sha256, c.master) == 0) done = checkAll(d, sy); const int v = g_verified.get(fi.file_sha256, c.master);
+        if (v != 1) { const int num = laes_master_number(sy->laes, c.master);
+            const char* why = !done ? LT("Master %d: the check was cancelled. The core master is playing instead; this master plays only after a complete check has passed (the check runs again the next time the file is opened).",
+                                         "母带 %d 的校验已取消。现在播放的是核心母带；这个母带要在完整校验通过后才能播放（下次打开文件时重新校验）。")
+                            : v < 0 ? LT("Master %d did not pass its SHA-256 check. The core master is playing instead.", "母带 %d 没有通过 SHA-256 校验。现在播放的是核心母带。")
+                                    : LT("Master %d could not be checked. The core master is playing instead.", "母带 %d 无法校验。现在播放的是核心母带。");
+            msg_Warn(d, why, num); vlc_dialog_display_error(d, LT("LAE decoder: LAES", "LAE 解码器：LAES"), why, num); sy->choice = 0; laes_get_choice(sy->laes, 0, &c); } }
     sy->rate = c.rate; sy->bits = c.bits; sy->frames = c.frames; if (!seekTo(sy, 0)) return false;
     msg_Info(d, LT("LAES: playing %s", "LAES：播放 %s"), c.name);
     // block positions for seeking: the saved record, else one entropy-decoding pass on a thread of its own, then saved

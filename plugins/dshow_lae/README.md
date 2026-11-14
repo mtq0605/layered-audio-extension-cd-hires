@@ -51,7 +51,7 @@ Playback is controlled by DWORD registry values under `HKCU\Software\LAE\DirectS
 
 ## Rules (as in the foobar2000 component)
 
-- A master is played as that master only after it has been decoded completely and its SHA-256 has matched. The first time a given file content is opened, all masters are checked in one pass, with a small progress window. For Grand (10 min, 4 masters), this took about 1 minute on the test machine. The result is stored by the SHA-256 of the whole file in `%APPDATA%\LAE\laes_verified.txt`, so later opens take a few seconds (the file check).
+- A master is played as that master only after it has been decoded completely and its SHA-256 has matched. The first time a given file content is opened, all masters are checked in one pass, with a small progress window that has a Cancel button. For Grand (10 min, 4 masters), this took about 1 minute on the test machine. The result is stored by the SHA-256 of the whole file in `%APPDATA%\LAE\laes_verified.txt`, so later opens take a few seconds (the file check). After Cancel, the core master plays this time and nothing is recorded: the chosen master plays only after a complete check has passed, which runs again the next time the file is opened. Whenever the core master plays instead of the chosen master (the check was cancelled, the master did not pass, or it could not be checked), a message box says so.
 - Seeking starts at the block that contains the requested time. Block positions (every 16th block, tens of kB) are stored in `%APPDATA%\LAE\laes_index\` and are never written to the media file.
 
 ## Tested (Windows 11)

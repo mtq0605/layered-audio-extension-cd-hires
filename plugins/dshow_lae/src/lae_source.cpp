@@ -12,6 +12,7 @@
 // maxbits (0 = no limit, 16, 24, 32).
 #include <windows.h>
 #include <commctrl.h>
+#pragma comment(lib, "gdi32.lib")   // GetStockObject (the font of the progress window)
 #include <dshow.h>
 #include <mmreg.h>
 #include <ks.h>
@@ -36,8 +37,16 @@ namespace {
 // texts: two standalone builds, English (the standard) and Chinese (/DLAE_LANG_ZH)
 #ifdef LAE_LANG_ZH
 const wchar_t* const kTitle = L"LAE 解码器：LAES"; const wchar_t* const kVerifyA = L"校验 "; const wchar_t* const kVerifyB = L" 个母带（SHA-256，仅首次播放）";
+const wchar_t* const kCancel = L"取消"; const wchar_t* const kMaster = L"母带 ";
+const wchar_t* const kFailed = L" 没有通过 SHA-256 校验。现在播放的是核心母带。";
+const wchar_t* const kCancelled = L" 的校验已取消。现在播放的是核心母带；这个母带要在完整校验通过后才能播放（下次打开文件时重新校验）。";
+const wchar_t* const kUnchecked = L" 无法校验。现在播放的是核心母带。";
 #else
 const wchar_t* const kTitle = L"LAE decoder: LAES"; const wchar_t* const kVerifyA = L"Verifying "; const wchar_t* const kVerifyB = L" masters (SHA-256, first playback only)";
+const wchar_t* const kCancel = L"Cancel"; const wchar_t* const kMaster = L"Master ";
+const wchar_t* const kFailed = L" did not pass its SHA-256 check. The core master is playing instead.";
+const wchar_t* const kCancelled = L": the check was cancelled. The core master is playing instead; this master plays only after a complete check has passed (the check runs again the next time the file is opened).";
+const wchar_t* const kUnchecked = L" could not be checked. The core master is playing instead.";
 #endif
 HMODULE g_module = nullptr; std::atomic<long> g_objects{0}, g_locks{0};
 struct FpPin { unsigned mx; FpPin() : mx(_mm_getcsr()) { _mm_setcsr(0x1F80u); } ~FpPin() { _mm_setcsr(mx); } };
@@ -94,21 +103,41 @@ int pick(const laes_file* f, int layers, int maxrate, int maxbits) {
 
 
 
-// a small window with one progress bar, on a thread of its own (the first check of a file's masters)
+// a small window with one progress bar and a Cancel button, on a thread of its own (the first check of a file's masters). Cancel (or
+// Esc, or closing the window) only sets cancelled(); the check stops at its next piece.
 class ProgressWindow {
 public:
     explicit ProgressWindow(const std::wstring& text) { m_thread = std::thread([this, text] { run(text); }); while (!m_ready) Sleep(5); }
-    ~ProgressWindow() { if (m_hwnd) PostMessageW(m_hwnd, WM_CLOSE, 0, 0); if (m_thread.joinable()) m_thread.join(); }
+    ~ProgressWindow() { if (m_hwnd) PostMessageW(m_hwnd, WM_APP, 0, 0); if (m_thread.joinable()) m_thread.join(); }
     void set(int percent) { if (m_bar) PostMessageW(m_bar, PBM_SETPOS, (WPARAM)percent, 0); }
+    bool cancelled() const { return m_cancel.load(); }
 private:
-    std::thread m_thread; std::atomic<bool> m_ready{false}; HWND m_hwnd = nullptr, m_bar = nullptr;
+    std::thread m_thread; std::atomic<bool> m_ready{false}, m_cancel{false}; HWND m_hwnd = nullptr, m_bar = nullptr;
+    static LRESULT CALLBACK proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+        ProgressWindow* self = (ProgressWindow*)GetWindowLongPtrW(h, GWLP_USERDATA);
+        if (self && ((msg == WM_COMMAND && LOWORD(wp) == IDCANCEL) || msg == WM_CLOSE)) { self->m_cancel = true; EnableWindow(GetDlgItem(h, IDCANCEL), FALSE); return 0; }
+        return DefWindowProcW(h, msg, wp, lp); }
     void run(const std::wstring& text) {
-        INITCOMMONCONTROLSEX ic{sizeof ic, ICC_PROGRESS_CLASS}; InitCommonControlsEx(&ic);
-        m_hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"STATIC", text.c_str(), WS_POPUP | WS_CAPTION | WS_VISIBLE | SS_CENTER, CW_USEDEFAULT, CW_USEDEFAULT, 460, 90, nullptr, nullptr, g_module, nullptr);
-        if (m_hwnd) { RECT r; GetClientRect(m_hwnd, &r); m_bar = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 10, r.bottom - 26, r.right - 20, 18, m_hwnd, nullptr, g_module, nullptr);
-            SendMessageW(m_bar, PBM_SETRANGE, 0, MAKELPARAM(0, 100)); SetWindowTextW(m_hwnd, kTitle); SetWindowPos(m_hwnd, HWND_TOPMOST, 200, 200, 0, 0, SWP_NOSIZE); }
-        m_ready = true; MSG msg; while (m_hwnd && GetMessageW(&msg, nullptr, 0, 0) > 0) { if (msg.message == WM_CLOSE && msg.hwnd == m_hwnd) { DestroyWindow(m_hwnd); break; } TranslateMessage(&msg); DispatchMessageW(&msg); } }
+        INITCOMMONCONTROLSEX ic{sizeof ic, ICC_PROGRESS_CLASS | ICC_STANDARD_CLASSES}; InitCommonControlsEx(&ic);
+        WNDCLASSEXW wc{sizeof wc}; wc.lpfnWndProc = &ProgressWindow::proc; wc.hInstance = g_module; wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1); wc.lpszClassName = L"LaeSourceProgress"; RegisterClassExW(&wc);   // a second registration fails harmlessly
+        m_hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"LaeSourceProgress", kTitle, WS_POPUP | WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 460, 120, nullptr, nullptr, g_module, nullptr);
+        if (m_hwnd) { SetWindowLongPtrW(m_hwnd, GWLP_USERDATA, (LONG_PTR)this); RECT r; GetClientRect(m_hwnd, &r); const HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+            HWND label = CreateWindowExW(0, L"STATIC", text.c_str(), WS_CHILD | WS_VISIBLE | SS_CENTER, 10, 8, r.right - 20, 18, m_hwnd, nullptr, g_module, nullptr);
+            m_bar = CreateWindowExW(0, PROGRESS_CLASSW, L"", WS_CHILD | WS_VISIBLE, 10, 32, r.right - 20, 18, m_hwnd, nullptr, g_module, nullptr);
+            HWND btn = CreateWindowExW(0, L"BUTTON", kCancel, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, r.right - 100, r.bottom - 32, 90, 24, m_hwnd, (HMENU)(INT_PTR)IDCANCEL, g_module, nullptr);
+            for (HWND c : {label, btn}) if (c) SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
+            SendMessageW(m_bar, PBM_SETRANGE, 0, MAKELPARAM(0, 100)); SetWindowPos(m_hwnd, HWND_TOPMOST, 200, 200, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW); }
+        m_ready = true; MSG msg;
+        while (m_hwnd && GetMessageW(&msg, nullptr, 0, 0) > 0) { if (msg.message == WM_APP && msg.hwnd == m_hwnd) { DestroyWindow(m_hwnd); break; }
+            if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) { PostMessageW(m_hwnd, WM_COMMAND, IDCANCEL, 0); continue; }
+            if (!IsDialogMessageW(m_hwnd, &msg)) { TranslateMessage(&msg); DispatchMessageW(&msg); } } }
 };
+// a notice to the user, without stopping the player: a message box on a thread of its own (the DLL stays loaded while it is open)
+void notice(const std::wstring& text) {
+    g_objects++; try { std::thread([text] { MessageBoxW(nullptr, text.c_str(), kTitle, MB_OK | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND); g_objects--; }).detach(); } catch (...) { g_objects--; } }
+std::wstring widen(const char* s) { if (!s || !*s) return std::wstring(); const int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0); if (n <= 1) return std::wstring();
+    std::wstring w((size_t)n, L'\0'); MultiByteToWideChar(CP_UTF8, 0, s, -1, &w[0], n); w.resize((size_t)n - 1); return w; }
 
 // ---- the decoder side: an opened file and what plays
 struct Decoder {
@@ -133,19 +162,25 @@ struct Decoder {
             if (tags.empty()) { const laeyflac::ReadFn rd = [this](uint64_t off, void* buf, size_t n) { return read(this, off, buf, n) == 0; }; laeyflac::Layout L; if (laeyflac::layout(rd, size, L).empty()) tags = laeyflac::comments(rd, L); }
             return startLaey() ? S_OK : E_FAIL; }
         return VFW_E_UNSUPPORTED_STREAM; }
-    void checkAll() {
+    // the first check of every master; false when the user cancelled it (nothing is recorded then: no master counts as checked)
+    bool checkAll() {
         laes_file_info fi; laes_get_info(laes, &fi); int first = -1, nm = 0;
         for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(laes, i, &c); if (c.kind == LAES_KIND_MASTER) { nm++; if (first < 0) first = i; } }
-        char err[256]; laes_play* p = laes_start_all(laes, first, 0, err, sizeof err); if (!p) return; laes_choice_info c; laes_get_choice(laes, first, &c);
+        char err[256]; laes_play* p = laes_start_all(laes, first, 0, err, sizeof err); if (!p) return true; laes_choice_info c; laes_get_choice(laes, first, &c);
         ProgressWindow w(kVerifyA + std::to_wstring(nm) + kVerifyB);
-        std::vector<int32_t> b(65536 * 2); uint64_t got = 0; int64_t k;
-        while ((k = laes_read(p, b.data(), 65536)) > 0) { got += (uint64_t)k; w.set((int)(100.0 * (double)got / (double)(c.frames ? c.frames : 1))); }
+        std::vector<int32_t> b(65536 * 2); uint64_t got = 0; int64_t k = 0;
+        while (!w.cancelled() && (k = laes_read(p, b.data(), 65536)) > 0) { got += (uint64_t)k; w.set((int)(100.0 * (double)got / (double)(c.frames ? c.frames : 1))); }
+        if (w.cancelled()) { laes_stop(p); return false; }
         if (laes_verified(p) >= 0) for (int m = 0; m < nm; m++) { const int r = laes_master_ok(p, m); if (r >= 0) g_verified.put(fi.file_sha256, m, r == 1); }
-        laes_stop(p); }
+        laes_stop(p); return true; }
     bool startLaes() {
         laes_file_info fi; laes_get_info(laes, &fi); choice = pick(laes, (int)setting(L"layers", 0), (int)setting(L"maxrate", 0), (int)setting(L"maxbits", 0));
         laes_choice_info c; laes_get_choice(laes, choice, &c);
-        if (c.master >= 0) { if (g_verified.get(fi.file_sha256, c.master) == 0) checkAll(); if (g_verified.get(fi.file_sha256, c.master) != 1) { choice = 0; laes_get_choice(laes, 0, &c); } }
+        // a master plays only after it matched its SHA-256 (spec 1.3); otherwise the core master plays, and the user is told which and why
+        if (c.master >= 0) { bool done = true; if (g_verified.get(fi.file_sha256, c.master) == 0) done = checkAll(); const int v = g_verified.get(fi.file_sha256, c.master);
+            if (v != 1) { std::wstring who = kMaster + std::to_wstring(laes_master_number(laes, c.master)); const std::wstring nm = widen(laes_master_name(laes, c.master));
+                if (!nm.empty()) who += L" \"" + nm + L"\"";
+                notice(who + (!done ? kCancelled : v < 0 ? kFailed : kUnchecked)); choice = 0; laes_get_choice(laes, 0, &c); } }
         rate = c.rate; bits = c.bits; frames = c.frames; if (!seek(0)) return false;
         const std::wstring rec = dataDir() + L"\\laes_index\\" + std::wstring(pfcw(hex(fi.file_sha256, 32))) + L".idx"; laes_file* f = laes;
         indexer = std::thread([this, rec, f] { FpPin pin2; try {   // an exception here (memory) would end the player: without the record a seek decodes from the start

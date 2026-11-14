@@ -227,7 +227,12 @@ private:
         laes_file_info fi; laes_get_info(m_laes, &fi); m_choice = pick(m_laes, kodi::addon::GetSettingInt("layers"), rateSetting(), bitsSetting());
         laes_choice_info c; laes_get_choice(m_laes, m_choice, &c);
         if (c.master >= 0) { if (g_verified.get(fi.file_sha256, c.master) == 0) checkAll();
-            if (g_verified.get(fi.file_sha256, c.master) != 1) { kodi::Log(ADDON_LOG_WARNING, "LAES: master %d did not pass its SHA-256 check: the core master plays", c.master + 1); m_choice = 0; laes_get_choice(m_laes, 0, &c); } }
+            // the core master plays instead of a master that did not match its SHA-256 (spec 1.3), and the user is told which and why
+            const int v = g_verified.get(fi.file_sha256, c.master);
+            if (v != 1) { const int num = laes_master_number(m_laes, c.master); std::string msg = kodi::addon::GetLocalizedString(v < 0 ? 30102 : 30103);
+                const size_t at = msg.find("%d"); if (at != std::string::npos) msg.replace(at, 2, std::to_string(num));
+                kodi::Log(ADDON_LOG_WARNING, "LAES: master %d %s: the core master plays", num, v < 0 ? "did not pass its SHA-256 check" : "could not be checked");
+                kodi::QueueNotification(QUEUE_WARNING, kodi::addon::GetLocalizedString(30100), msg); m_choice = 0; laes_get_choice(m_laes, 0, &c); } }
         char err[256]; m_play = laes_start_at(m_laes, m_choice, 0, 0, err, sizeof err); if (!m_play) m_play = laes_start(m_laes, m_choice, 0, err, sizeof err);
         if (!m_play) { kodi::Log(ADDON_LOG_ERROR, "LAES: %s", err); return false; }
         m_rate = c.rate; m_bits = c.bits; m_frames = c.frames;

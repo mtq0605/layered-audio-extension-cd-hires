@@ -83,10 +83,12 @@ struct WavIn {
         char hdr[12]; if (!rd(hdr, 12) || (memcmp(hdr, "RIFF", 4) && memcmp(hdr, "RF64", 4)) || memcmp(hdr + 8, "WAVE", 4)) { err = "not a WAV file"; return false; }
         long long ds64data = -1, pos = 12;
         for (;;) { char ck[8]; if (!rd(ck, 8)) { err = "no data chunk"; return false; } uint32_t n; memcpy(&n, ck + 4, 4); pos += 8;
-            if (!memcmp(ck, "ds64", 4)) { std::vector<char> b(n); if (!rd(b.data(), n)) { err = "bad ds64"; return false; } long long d; memcpy(&d, b.data() + 8, 8); ds64data = d; }
-            else if (!memcmp(ck, "fmt ", 4)) { std::vector<char> b(n); if (!rd(b.data(), n)) { err = "bad fmt"; return false; } uint16_t tag; memcpy(&tag, b.data(), 2); uint16_t c; memcpy(&c, b.data() + 2, 2); uint32_t r; memcpy(&r, b.data() + 4, 4); uint16_t bp; memcpy(&bp, b.data() + 14, 2);
-                ch = c; rate = (int)r; bits = bp; if (tag == 0xFFFE && n >= 40) memcpy(&tag, b.data() + 24, 2); isFloat = tag == 3; if (tag != 1 && tag != 3) { err = "unsupported WAV format"; return false; } }
-            else if (!memcmp(ck, "data", 4)) { long long len = (n == 0xFFFFFFFFu && ds64data >= 0) ? ds64data : n; dataOff = pos; frames = len / (ch * (bits / 8)); return ch > 0 && rate > 0; }
+            if (!memcmp(ck, "ds64", 4)) { if (n < 16) { err = "bad ds64"; return false; } std::vector<char> b(n); if (!rd(b.data(), n)) { err = "bad ds64"; return false; } long long d; memcpy(&d, b.data() + 8, 8); ds64data = d; }
+            else if (!memcmp(ck, "fmt ", 4)) { if (n < 16) { err = "bad fmt"; return false; } std::vector<char> b(n); if (!rd(b.data(), n)) { err = "bad fmt"; return false; } uint16_t tag; memcpy(&tag, b.data(), 2); uint16_t c; memcpy(&c, b.data() + 2, 2); uint32_t r; memcpy(&r, b.data() + 4, 4); uint16_t bp; memcpy(&bp, b.data() + 14, 2);
+                ch = c; rate = (int)r; bits = bp; if (tag == 0xFFFE && n >= 40) memcpy(&tag, b.data() + 24, 2); isFloat = tag == 3; if (tag != 1 && tag != 3) { err = "unsupported WAV format"; return false; }
+                if (isFloat ? bits != 32 : (bits != 16 && bits != 24 && bits != 32)) { err = "unsupported WAV format (" + std::to_string(bits) + "-bit " + (isFloat ? "float" : "PCM") + "; 16, 24, 32-bit PCM and 32-bit float are read)"; return false; } }
+            else if (!memcmp(ck, "data", 4)) { if (ch <= 0 || rate <= 0 || bits == 0) { err = "bad WAV (no fmt chunk before the data, or 0 channels / rate 0)"; return false; }
+                long long len = (n == 0xFFFFFFFFu && ds64data >= 0) ? ds64data : n; dataOff = pos; frames = len / (ch * (bits / 8)); return true; }
             else { LARGE_INTEGER m; m.QuadPart = n + (n & 1); SetFilePointerEx(f, m, nullptr, FILE_CURRENT); }
             pos += n + (n & 1); if (memcmp(ck, "data", 4)) { LARGE_INTEGER m; m.QuadPart = pos; SetFilePointerEx(f, m, nullptr, FILE_BEGIN); } } }
     // reads up to n frames as float, channel-separated (first two channels; mono is duplicated)
@@ -136,10 +138,16 @@ struct Resampler {
 struct Source { std::string name, file, pick, sha; std::vector<float> L, R; };
 
 
+// the resampler's pass band ends at 20 kHz, so both rates must be above 40 kHz unless they are equal (FU20-8)
+static bool resampleOk(int in, int out, std::string& err) {
+    if (in > 0 && (in == out || std::min(in, out) > 40000)) return true;
+    err = "the source rate is " + std::to_string(in) + " Hz: rates of 40 kHz and below cannot be brought to the test rate (the resampler passes 0-20 kHz)"; return false; }
+
 // reads a WAV in pieces, resamples each channel to the test rate; progress runs from base to base + span
 static bool loadWav(const std::wstring& path, int rate, Source& s, std::string& err, const Say& say, double base, double span) {
-    WavIn w; if (!w.open(path, err)) return false;
-    std::vector<float> L, R, l, r; L.reserve((size_t)w.frames); R.reserve((size_t)w.frames); long long done = 0;
+    WavIn w; if (!w.open(path, err)) return false; if (!resampleOk(w.rate, rate, err)) return false;
+    LARGE_INTEGER fsz; const long long inFile = GetFileSizeEx(w.f, &fsz) ? std::max(0LL, (fsz.QuadPart - w.dataOff) / (w.ch * (w.bits / 8))) : w.frames;   // a header may announce more than the file holds
+    std::vector<float> L, R, l, r; L.reserve((size_t)std::min(w.frames, inFile)); R.reserve((size_t)std::min(w.frames, inFile)); long long done = 0;
     while (done < w.frames) { long long n = w.read(std::min<long long>(1 << 20, w.frames - done), l, r); if (n <= 0) break; L.insert(L.end(), l.begin(), l.end()); R.insert(R.end(), r.begin(), r.end()); done += n;
         const double f = (double)done / std::max(1LL, w.frames); say("reading the decoded audio  " + std::to_string((int)(f * 100)) + " %", base + span * 0.3 * f); }
     Resampler rs(w.rate, rate); const std::string what = "resampling " + std::to_string(w.rate) + " Hz to " + std::to_string(rate) + " Hz";
@@ -149,13 +157,18 @@ static bool loadWav(const std::wstring& path, int rate, Source& s, std::string& 
 
 static bool loadMp3(const std::wstring& path, int rate, Source& s, std::string& err, const Say& say, double base, double span) {
     IMFSourceReader* rd = nullptr; if (FAILED(MFCreateSourceReaderFromURL(path.c_str(), nullptr, &rd))) { err = "Media Foundation cannot open the file"; return false; }
-    IMFMediaType* mt = nullptr; MFCreateMediaType(&mt); mt->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio); mt->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_Float);
-    rd->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, mt); mt->Release();
-    IMFMediaType* cur = nullptr; rd->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, &cur); UINT32 sr = 0, nch = 0; cur->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sr); cur->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &nch); cur->Release();
+    IMFMediaType* mt = nullptr; if (FAILED(MFCreateMediaType(&mt))) { rd->Release(); err = "Media Foundation cannot decode the file"; return false; } mt->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio); mt->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_Float);
+    const HRESULT setHr = rd->SetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, mt); mt->Release();
+    IMFMediaType* cur = nullptr; UINT32 sr = 0, nch = 0;
+    if (FAILED(setHr) || FAILED(rd->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, &cur)) || !cur) { rd->Release(); err = "Media Foundation cannot decode the file to float samples"; return false; }
+    cur->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sr); cur->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &nch); cur->Release();
+    if (sr == 0 || nch == 0) { rd->Release(); err = "Media Foundation gives no sample rate or no channels for the file"; return false; }
+    if (!resampleOk((int)sr, rate, err)) { rd->Release(); return false; }
     PROPVARIANT dv; PropVariantInit(&dv); double dur = 0; if (SUCCEEDED(rd->GetPresentationAttribute((DWORD)MF_SOURCE_READER_MEDIASOURCE, MF_PD_DURATION, &dv)) && dv.vt == VT_UI8) dur = (double)dv.uhVal.QuadPart; PropVariantClear(&dv);
     std::vector<float> L, R; int lastPct = -1;
     for (;;) { DWORD flags = 0; LONGLONG ts = 0; IMFSample* smp = nullptr; if (FAILED(rd->ReadSample((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, &ts, &smp))) break;
-        if (smp) { IMFMediaBuffer* b = nullptr; smp->ConvertToContiguousBuffer(&b); BYTE* p = nullptr; DWORD len = 0; b->Lock(&p, nullptr, &len);
+        if (smp) { IMFMediaBuffer* b = nullptr; BYTE* p = nullptr; DWORD len = 0;
+            if (FAILED(smp->ConvertToContiguousBuffer(&b)) || !b || FAILED(b->Lock(&p, nullptr, &len))) { if (b) b->Release(); smp->Release(); rd->Release(); err = "Media Foundation gave a sample that cannot be read"; return false; }
             const float* f = (const float*)p; const size_t fr = len / (4 * nch); for (size_t i = 0; i < fr; i++) { L.push_back(f[i * nch]); R.push_back(f[i * nch + (nch > 1 ? 1 : 0)]); }
             b->Unlock(); b->Release(); smp->Release(); }
         if (dur > 0) { const double fr = std::min(1.0, ts / dur); const int pct = (int)(fr * 100); if (pct != lastPct) { lastPct = pct; say("decoding the MP3  " + std::to_string(pct) + " %", base + span * 0.6 * fr); } }
@@ -288,6 +301,12 @@ static bool preparePair(const Pair& p, int rate, Source s[2], long long& lag, st
     for (int c = 0; c < 2; c++) { std::vector<float>& b = c ? s[1].R : s[1].L; if (lag > 0) b.erase(b.begin(), b.begin() + std::min<long long>(lag, (long long)b.size())); else if (lag < 0) b.insert(b.begin(), (size_t)(-lag), 0.0f); }
     const size_t n = std::min(s[0].L.size(), s[1].L.size()); for (int i = 0; i < 2; i++) { s[i].L.resize(n); s[i].R.resize(n); }
     say("ready", 1.0); return n > 0; }
+// FU20-8: an exception (memory, mostly) ends the preparation with a reason instead of ending the program
+static bool preparePairSafe(const Pair& p, int rate, Source s[2], long long& lag, std::string& err, const Say& say) {
+    try { return preparePair(p, rate, s, lag, err, say); }
+    catch (const std::bad_alloc&) { err = "not enough memory (both sources are held in memory, at the source rate while they are read)"; }
+    catch (const std::exception& e) { err = std::string("internal error: ") + e.what(); }
+    return false; }
 
 // ---------------------------------------------------------------- playback (WASAPI shared mode, float stereo at the test rate)
 struct Player {
@@ -388,7 +407,7 @@ static void startPrepare() {
         CoInitializeEx(nullptr, COINIT_MULTITHREADED); MFStartup(MF_VERSION); std::string err;
         gProg = 0;
         auto say = [](const std::string& m, double f) { if (f >= 0) gProg = (int)(f * 1000); { std::lock_guard<std::mutex> g(gMsgMu); gMsg = "Preparing " + gTest.pair.name + "  (" + std::to_string(gProg / 10) + " %)\r\n" + m; } PostMessageW(gWnd, WM_APP_STATUS, 0, 0); };
-        const bool ok = preparePair(gTest.pair, gTest.rate, gTest.s, gTest.lag, err, say);
+        const bool ok = preparePairSafe(gTest.pair, gTest.rate, gTest.s, gTest.lag, err, say);
         MFShutdown(); CoUninitialize();
         { std::lock_guard<std::mutex> g(gMsgMu); gMsg = ok ? "" : "Could not prepare: " + err; } PostMessageW(gWnd, WM_APP_READY, ok, 0); }).detach(); }
 
@@ -421,7 +440,7 @@ static HWND mk(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int 
 static int cliPrepare(int idx, int rate, const std::wstring& outDir) {
     gSet = readSet(exeDir()); if (idx < 1 || idx > (int)gSet.size()) { printf("pair %d not in abx_set.txt (%zu pairs)\n", idx, gSet.size()); return 1; }
     CoInitializeEx(nullptr, COINIT_MULTITHREADED); MFStartup(MF_VERSION); Source s[2]; long long lag = 0; std::string err;
-    const bool ok = preparePair(gSet[(size_t)idx - 1], rate, s, lag, err, [](const std::string& m, double f) { static int last = -1; const int pct = f >= 0 ? (int)(f * 100) : last; if (pct != last) { last = pct; printf("  %3d %%  %s\n", pct, m.c_str()); } });
+    const bool ok = preparePairSafe(gSet[(size_t)idx - 1], rate, s, lag, err, [](const std::string& m, double f) { static int last = -1; const int pct = f >= 0 ? (int)(f * 100) : last; if (pct != last) { last = pct; printf("  %3d %%  %s\n", pct, m.c_str()); } });
     MFShutdown(); removeWorkDir(); if (!ok) { printf("failed: %s\n", err.c_str()); return 1; }
     CreateDirectoryW(outDir.c_str(), nullptr);
     for (int i = 0; i < 2; i++) { const std::wstring p = outDir + (i ? L"\\B.wav" : L"\\A.wav"); FILE* f = _wfopen(p.c_str(), L"wb"); const uint32_t n = (uint32_t)s[i].L.size(), bytes = n * 8;

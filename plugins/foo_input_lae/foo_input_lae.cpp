@@ -848,10 +848,14 @@ public:
 private:
     static std::mutex s_lock; static std::vector<const input_lae*> s_live;   // decoders opened for playback
     int layers() const { return (int)g_layers.get(); }
-    int askedRoute() const { return layers() == 2 ? LAE_ROUTE_CD : layers() == 1 ? LAE_ROUTE_CD24 : layers() == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL; }
+    // a maximum sample rate below 2 x the base rate: no rate above the base rate fits, so (as the DirectShow filter and the VLC module do)
+    // all layers plays the bit-depth layer (24-bit at the base rate) and the frequency layer only the CD/core layer; the label says so
+    bool capBelowHigh() const { const int cap = (int)g_maxrate.get(); return (layers() == 0 || layers() == 3) && cap > 0 && m_base > 0 && cap < 2 * m_base; }
+    int askedRoute() const { if (capBelowHigh()) return layers() == 0 ? LAE_ROUTE_CD24 : LAE_ROUTE_CD;
+        return layers() == 2 ? LAE_ROUTE_CD : layers() == 1 ? LAE_ROUTE_CD24 : layers() == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL; }
     static bool hiRate(int route) { return route == LAE_ROUTE_FULL || route == LAE_ROUTE_16; }   // the routes that play above the base rate
     int outRate() const {   // all layers: the highest octave of the master not above the setting (and above the base rate)
-        if (layers() != 0 && layers() != 3) return m_base;
+        if ((layers() != 0 && layers() != 3) || capBelowHigh()) return m_base;
         const int cap = (int)g_maxrate.get(); int r = m_master;
         while (cap > 0 && r > cap && (r >> 1) > m_base) r >>= 1;
         return r; }
@@ -869,7 +873,7 @@ private:
         { const int want = packWanted();   // the user chose another pack of this file in the menu: its own master rate and layers from here on
           if (want != m_pack && m_track && !m_cdOnly) { if (lae_select_pack(m_track, want) == 0) usePack(want); else console::formatter() << T("LAEY: pack ", "LAEY：扩展包 ") << want + 1 << T(" unavailable; keeping pack ", " 不可用；保持扩展包 ") << m_pack + 1;
               m_packNow = m_pack; } }
-        const int route = askedRoute(); m_route = route;
+        const int route = askedRoute(); m_route = route; m_capForced = capBelowHigh();
         if (lae_start(m_track, route, hiRate(route) ? outRate() : 0, err, sizeof err) != 0) {
             if (noFallback) throw exception_io_data((std::string("LAE: ") + err).c_str());
             console::formatter() << T("LAEY: ", "LAEY：") << err << T("; playing the CD/core layer", "；播放 CD 层/核心层");
@@ -905,10 +909,12 @@ private:
         // stored it, the pack number when it has none; files with one pack show no pack)
         const std::string sep = " \xC2\xB7 ", only = std::string(T("", "仅 ")) + baseName(m_base) + T(" only", "");
         if (m_fallbackNow) return "LAEY" + sep + only + sep + T("extension unusable", "扩展层不可用");
-        if (m_route == LAE_ROUTE_CD) return "LAEY" + sep + only;
+        // the layers asked for need a rate above the base rate, which the maximum sample rate does not allow
+        const std::string capped = m_capForced ? sep + T("maximum sample rate ", "最高采样率 ") + khz((int)g_maxrate.get()) : std::string();
+        if (m_route == LAE_ROUTE_CD) return "LAEY" + sep + only + capped;
         std::string pk; if (!m_packs.empty() || !m_mainName.empty()) { const std::string nm = m_pack ? m_packs[(size_t)m_pack - 1].name : m_mainName;
             pk = sep + (nm.empty() ? std::string(T("Pack ", "扩展包 ")) + std::to_string(m_pack + 1) : nm); }
-        if (m_route == LAE_ROUTE_CD24) return "LAEY" + pk + sep + T("Bit-depth layer only", "仅位深层");
+        if (m_route == LAE_ROUTE_CD24) return "LAEY" + pk + sep + T("Bit-depth layer only", "仅位深层") + capped;
         if (m_route == LAE_ROUTE_16) return "LAEY" + pk + sep + T("Frequency layer only", "仅频率层");
         return "LAEY" + pk + sep + T("All layers", "全部层"); }
     // the track, verified by liblae (read through the file object: only the CD layer and the LAE chunk are held, about the file size);
@@ -1048,6 +1054,7 @@ private:
     lae_track* m_track = nullptr; std::vector<int16_t> m_cd; size_t m_pos = 0;
     bool m_cdOnly = false;        // the extension could not be verified: the whole track plays from m_cd
     bool m_fallbackNow = false;   // the current decode plays the CD layer (m_cdOnly, or lae_start failed); m_fallback says why
+    bool m_capForced = false;     // the current decode plays CD24 / CD because the maximum sample rate is below 2 x the base rate
     bool m_report = false, m_reportRate = false, m_playback = false, m_testing = false; unsigned m_gen = 0; std::string m_fallback;
     std::atomic<bool> m_fallbackNowA{false};   // m_fallbackNow published for the menu thread
     uint64_t m_winFrames = 0, m_winBytes = 0; t_int64 m_kbps = 0; bool m_needBase = true;

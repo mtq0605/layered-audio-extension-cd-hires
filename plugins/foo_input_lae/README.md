@@ -75,6 +75,8 @@ If the WAV decoder comes first, an LAE `.wav` file plays only its CD layer.
 | Bit-depth layer only · 24-bit | The CD/core layer and the bit-depth layer at the base rate, for example 44.1 kHz / 24-bit. |
 | CD/core layer only · 16-bit | The CD/core layer unchanged, for example 44.1 kHz / 16-bit. |
 
+When "Maximum sample rate, Hz" (Advanced settings) is below twice the base rate, for example 48000 for a 44.1 kHz file, no rate above the base rate fits: "All layers" then plays the bit-depth layer (24-bit at the base rate) and "Frequency layer only" the CD/core layer (16-bit), as in the DirectShow and VLC plug-ins; the status bar adds "maximum sample rate" and the limit.
+
 A selection made during playback takes effect immediately and continues from the current position; the track does not restart. The first field of the status bar names the layers that are playing:
 
 ![Switching during playback](images/07_layer_switch.png)

@@ -13,9 +13,12 @@
 //        CD-TEXT (2026-11-06): [album=TEXT] [performer=TEXT] [cdtitle=1:TEXT,...] [cdperformer=1:TEXT,...] [cdtext=off]; otherwise from the files'
 //        tags (TITLE, ARTIST, ALBUM); ASCII only: a Chinese text stops the image until the user types it (no automatic conversion)
 //        and, in independent-CD mode, the publisher's TITLE / PERFORMER; written as TITLE / PERFORMER lines of the two CUE files
-//   lae_cdx data <laxdir> <startLba> <out.iso> [label=NAME] [date=...]   session 2 at a reported start address (two-step burning)
-//   lae_cdx read <outdir> <extensions> <audio...> [W=N]
-//        the reader (section 6); <extensions> = a folder with .lax files, or iso:<DATA.ISO>@<startLba>; <outdir> must be new or empty;
+//   lae_cdx data <laxdir> <startLba> <out.iso> [label=NAME] [date=...] [a2=A2]   session 2 at a reported start address (two-step burning)
+//        startLba must be A2 + 11400 (P15; 2026-11-15): A2 from a2=, else from the BURN.TXT beside <laxdir> or in it; neither: the tool
+//        stops. startLba 0 = a copy for mounting on a computer (C34), not checked
+//   lae_cdx read <outdir> <extensions> <audio...> [W=N] [a2=A2]
+//        the reader (section 6); <extensions> = a folder with .lax files, or iso:<DATA.ISO>@<startLba> (startLba checked as for data, with
+//        the BURN.TXT beside DATA.ISO); <outdir> must be new or empty;
 //        <audio> = one .cue, or one audio file (no TOC), or several audio files (TOC from the file order)
 //        audio files: 16-bit stereo WAV; FLAC (16-bit, 44100 Hz, 2 channels; in a CUE under FILE type WAVE); .bin = raw PCM
 //   lae_cdx sim <imagedir> <outdir> <form> [offset=N] [pregap=1] [overread=N] [change=K] [slip=K]
@@ -74,6 +77,21 @@ static string outputClash(const vector<string>& in, const vector<string>& out) {
     return ""; }
 // a sector address on the command line: digits only, 0 .. 449999 (99:59:74, the last address a CD can give) (2026-11-14)
 static bool lbaArg(const string& s, long long& v) { if (s.empty() || s.size() > 6) return false; v = 0; for (char c : s) { if (c < '0' || c > '9') return false; v = v * 10 + (c - '0'); } return v <= 449999; }
+// P15 (the user's decision of 2026-11-15, item 28): the start address of session 2 must be A2 + 11400. A2 is taken from a2=, else from
+// the first of the given BURN.TXT files that exists (its line "A2 (lead-out of session 1): LBA n"); without either the tool stops.
+// Start address 0 is a copy for mounting on a computer (C34), never a session 2 on a disc: not checked, and said.
+static bool burnA2(const fs::path& p, long long& a2) {
+    vector<uint8_t> b; std::error_code ec; if (!fs::is_regular_file(p, ec) || !cdxr::readBytes(p, b)) return false;
+    const string t(b.begin(), b.end()), key = "A2 (lead-out of session 1): LBA "; const size_t at = t.find(key); if (at == string::npos) return false;
+    size_t e = at + key.size(); while (e < t.size() && t[e] >= '0' && t[e] <= '9') e++; return lbaArg(t.substr(at + key.size(), e - at - key.size()), a2); }
+static string startCheck(long long lba, const string& a2opt, const vector<fs::path>& burns) {
+    if (lba == 0) { printf("start address 0: a copy for mounting on a computer, not for burning (on a disc, session 2 starts at A2 + 11400)\n"); return ""; }
+    long long a2 = -1; string from;
+    if (!a2opt.empty()) { if (!lbaArg(a2opt, a2)) return "a2=" + a2opt + ": give A2 (the lead-out of session 1, in BURN.TXT) as a whole number from 0 to 449999"; from = "a2="; }
+    else for (auto& b : burns) if (burnA2(b, a2)) { from = u8(b); break; }
+    if (a2 < 0) return "the start address " + to_string(lba) + " cannot be checked against A2 + 11400 (P15): no BURN.TXT found; give a2=<A2> (the lead-out of session 1, in the BURN.TXT of the image)";
+    if (lba != a2 + GAP2) return "the start address " + to_string(lba) + " differs from A2 + 11400 = " + to_string(a2 + GAP2) + " (A2 = " + to_string(a2) + ", from " + from + "): a session 2 at that address cannot be read on the disc (P15)";
+    return ""; }
 static string msf(long long sectors) { char b[16]; snprintf(b, sizeof b, "%02lld:%02lld:%02lld", sectors / 4500, sectors / 75 % 60, sectors % 75); return b; }
 static string arg(int argc, char** argv, const char* key, const string& def) { string k = string(key) + "="; for (int i = 1; i < argc; i++) if (!strncmp(argv[i], k.c_str(), k.size())) return argv[i] + k.size(); return def; }
 static vector<string> positional(int argc, char** argv, int from) { vector<string> v; std::error_code ec; for (int i = from; i < argc; i++) if (!strchr(argv[i], '=') || fs::exists(argv[i], ec)) v.push_back(argv[i]); return v; }
@@ -790,7 +808,7 @@ static int realMain(int argc, char** argv) {
         // with '=' in it stops the tool instead of being ignored (2026-11-14)
         static const map<string, set<string>> known = {{"pack", {"track"}}, {"split", {"track"}}, {"repack", {}}, {"selftest", {}}, {"test", {}},
             {"image", {"noext", "label", "date", "capacity", "verbose", "layout", "album", "performer", "cdtitle", "cdperformer", "cdtext"}},
-            {"data", {"label", "date"}}, {"read", {"W"}}, {"sim", {"offset", "pregap", "overread", "change", "slip"}}};
+            {"data", {"label", "date", "a2"}}, {"read", {"W", "a2"}}, {"sim", {"offset", "pregap", "overread", "change", "slip"}}};
         auto kn = known.find(cmd); std::error_code ec;
         for (int i = 2; kn != known.end() && i < argc; i++) { const char* q = strchr(argv[i], '='); if (!q || fs::exists(argv[i], ec)) continue;
             if (!kn->second.count(string(argv[i], (size_t)(q - argv[i])))) { printf("%s: not an option of %s, and no such file; nothing written\n", argv[i], cmd.c_str()); return 1; } } }
@@ -882,6 +900,8 @@ static int realMain(int argc, char** argv) {
         if (lax.empty()) { printf("no .lax files in %s\n", pos[0].c_str()); return 1; }
         printf("tracks in the data session:"); for (int k : no) printf(" %d", k); printf(" (compare with BURN.TXT)\n");
         long long lba = 0; if (!lbaArg(pos[1], lba)) { printf("start address %s: give the sector address (LBA) as a whole number from 0 to 449999; nothing written\n", pos[1].c_str()); return 1; }
+        {   std::error_code ec; const fs::path ld = fs::absolute(fs::path(pos[0]), ec); const string sc = startCheck(lba, arg(argc, argv, "a2", ""), {ld.parent_path() / "BURN.TXT", ld / "BURN.TXT"});
+            if (!sc.empty()) { printf("%s; nothing written\n", sc.c_str()); return 1; } }
         string err; auto img = iso::build(dataFiles(std::move(lax), no), (uint32_t)lba, arg(argc, argv, "label", "LAE_EXT"), arg(argc, argv, "date", nowUtc()), 150, 300, &err);
         if (img.empty()) { printf("%s\n", err.c_str()); return 1; } if (!writeBytes(fs::path(pos[2]), img.data(), img.size())) { printf("cannot write %s\n", pos[2].c_str()); return 2; }
         printf("session 2 written: %s, %zu sectors, start LBA %s\n", pos[2].c_str(), img.size() / 2048, pos[1].c_str()); return 0; }
@@ -891,6 +911,8 @@ static int realMain(int argc, char** argv) {
             std::error_code ec; if (fs::exists(out, ec) && !fs::is_empty(out, ec)) { printf("%s is not empty: a reading goes into a new or empty folder (files of an earlier reading would mix with this one); nothing written\n", pos[0].c_str()); return 1; } }
         if (src.rfind("iso:", 0) == 0) { size_t at = src.rfind('@'); vector<uint8_t> img; if (at == string::npos || !cdxr::readBytes(fs::path(src.substr(4, at - 4)), img)) { printf("iso:<path>@<startLba> expected\n"); return 1; }
             long long lba = 0; if (!lbaArg(src.substr(at + 1), lba)) { printf("iso:<path>@<startLba>: %s is not a sector address from 0 to 449999\n", src.substr(at + 1).c_str()); return 1; }
+            {   std::error_code ec; const string sc = startCheck(lba, arg(argc, argv, "a2", ""), {fs::absolute(fs::path(src.substr(4, at - 4)), ec).parent_path() / "BURN.TXT"});
+                if (!sc.empty()) { printf("%s; nothing written\n", sc.c_str()); return 1; } }
             e = cdxr::loadExtIso(img, (uint32_t)lba, x); }
         else e = cdxr::loadExtDir(fs::path(src), x);
         if (!e.empty()) { printf("%s\n", e.c_str()); return 1; } if (x.empty()) printf("no extension files in %s: everything plays as CD\n", src.c_str());

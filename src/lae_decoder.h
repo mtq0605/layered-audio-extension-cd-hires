@@ -35,14 +35,20 @@ struct PlaneStream {
     // checkpoints for seeking: the decoder state before the row at frame M0, kept every `every` rows (about 4 s of the stream)
     struct Mark { long M0; Dec dc; std::unique_ptr<Walker<Dec>> w; };
     std::vector<Mark> marks; long every = 1;
+    // F05-2 (2026-11-14): the stream header's rate and K are the file's own statement and have no upper limit, so nothing that costs
+    // memory or time follows them alone. srate = the sample rate of this stream's layer from the main header (base for the depth layer,
+    // the master rate for the frequency layer): the checkpoint spacing is counted with it. lim = min(K, frames of the layer): rows from
+    // frame lim on are never requested (spec 5.3) and are not decoded. The decoded samples of every file are the same as before.
+    int srate = 0; long lim = 0;
     // checkpoints from the player's own one-time check of this file (every 30 s, kept in the player's folder, never in the file)
     std::vector<Mark> fileMarks; Dec dc0;   // dc0: the state at the start of the stream
-    bool open(const uint8_t* p, int32_t nbytes) { if (nbytes < 40) return false; Rd s{p, (size_t)nbytes}; int32_t f[10]; for (int i = 0; i < 10; i++) f[i] = s.i32v();
+    bool open(const uint8_t* p, int32_t nbytes, int layerRate, long layerFrames) { if (nbytes < 40) return false; Rd s{p, (size_t)nbytes}; int32_t f[10]; for (int i = 0; i < 10; i++) f[i] = s.i32v();
         h = Hdr{f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8]}; if (h.N != N || f[9] != nbytes - 40 || h.K <= 0 || h.k0 < 0 || h.k1 > N || h.k0 >= h.k1) return false;
         dc.p = p + 40; dc.n = f[9]; dc.init(); dc0 = dc; w.reset(new Walker<Dec>(h)); rowBuf.assign((size_t)part::ROOTT * N, 0);
-        every = h.rate > 0 ? std::max<long>(1, (long)(4.0 * h.rate / ((double)part::ROOTT * N))) : 64; return true; }
+        srate = layerRate; lim = std::min(h.K, layerFrames);
+        every = srate > 0 ? std::max<long>(1, (long)(4.0 * srate / ((double)part::ROOTT * N))) : 64; return true; }
     const int32_t* frame(long m) {   // frames are requested in increasing order (seekTo excepted)
-        while (!(m >= row0 && m < row0 + rows)) { if (w->done()) return nullptr;
+        while (!(m >= row0 && m < row0 + rows)) { if (w->M0 >= lim) return nullptr;
             if ((w->M0 / part::ROOTT) % every == 0 && (marks.empty() || marks.back().M0 < w->M0)) marks.push_back(Mark{w->M0, dc, std::unique_ptr<Walker<Dec>>(new Walker<Dec>(*w))});
             row0 = w->M0; rows = w->rowFrames(); std::fill(rowBuf.begin(), rowBuf.end(), 0); tokens.clear(); w->row(dc, tokens, false, rowBuf, row0); }
         return &rowBuf[(size_t)(m - row0) * N]; }
@@ -62,13 +68,16 @@ template <class W, class F> static void forEachModel(W& w, F f) { size_t k = 0;
     for (auto& m : w.expM) { for (auto& v : m.tree) f(k++, v); for (auto& v : m.mant) f(k++, v); }
     for (auto& v : w.tierP) f(k++, v); for (auto& v : w.zlP) f(k++, v); for (auto& v : w.expZero) f(k++, v); for (auto& v : w.expSign) f(k++, v); }
 static size_t modelCount(const Hdr& h) { Walker<Dec> w(h); size_t n = 0; forEachModel(w, [&](size_t, uint16_t&) { n++; }); return n; }
-static long fileMarkRows(const Hdr& h) { return h.rate > 0 ? std::max<long>(1, std::lround(FILE_MARK_SECONDS * h.rate / ((double)part::ROOTT * N))) : 64; }
+static long fileMarkRows(int srate) { return srate > 0 ? std::max<long>(1, std::lround(FILE_MARK_SECONDS * srate / ((double)part::ROOTT * N))) : 64; }   // srate: PlaneStream::srate
 // decodes the whole stream from its start on the calling thread, saving the state every fileMarkRows rows; true when the stream ends exactly
-// at its last byte with no symbol out of range
+// at its last byte with no symbol out of range. F05-2: the walk stops at the first byte asked for beyond the end (the answer is then
+// already "no"; every full row costs at least one bypass bit per root, so the number of rows is limited by the stream's bytes, not by
+// its K), and a K within one row of 2^31 is refused before the walk (the walker's frame counter would pass 2^31 - 1 after the last row).
 static bool scanStream(const PlaneStream& ps, std::vector<SavedMark>& out) {
-    out.clear(); Dec d = ps.dc0; Walker<Dec> w(ps.h); std::vector<int32_t> buf((size_t)part::ROOTT * N, 0), tok; const long every = fileMarkRows(ps.h);
+    out.clear(); Dec d = ps.dc0; Walker<Dec> w(ps.h); std::vector<int32_t> buf((size_t)part::ROOTT * N, 0), tok; const long every = fileMarkRows(ps.srate);
+    if (ps.h.K > 2147483647L - part::ROOTT) return false;
     const bool errBefore = g_streamErr; g_streamErr = false;
-    while (!w.done()) {
+    while (!w.done() && d.over == 0) {
         if (w.M0 > 0 && (w.M0 / part::ROOTT) % every == 0) { SavedMark s{w.M0, d.i, d.width, d.code, (uint64_t)w.pos, w.prevTier, w.prevE, {}};
             forEachModel(w, [&](size_t k, uint16_t& v) { if (v != 1024) s.diff.push_back((uint32_t)k << 16 | v); }); out.push_back(std::move(s)); }
         tok.clear(); w.row(d, tok, false, buf, w.M0); }
@@ -219,16 +228,16 @@ struct Decoder {
         d = 0; while (d <= stages && (rate >> d) > orate) d++;
         if (mode != "cd24" && ((rate >> d) != orate || d >= stages)) { if (code) *code = 1; return "output rate must be " + std::to_string(rate) + " / 2^n and above " + std::to_string(base); }
         // streams: depth L, depth R, then n segments for M, n for S
-        auto take = [&](PlaneStream* ps, bool use) { int32_t nbytes = r.i32v(); size_t start = r.i; if (nbytes < 40 || start + nbytes > r.n) return false;
-            if (use && !ps->open(r.p + start, nbytes)) return false; r.i = start + nbytes; return true; };
-        for (int c = 0; c < 2; c++) if (!take(&dS[c], mode != "16")) return fail(3, "corrupt depth stream");
+        auto take = [&](PlaneStream* ps, bool use, int layerRate, long layerFrames) { int32_t nbytes = r.i32v(); size_t start = r.i; if (nbytes < 40 || start + nbytes > r.n) return false;
+            if (use && !ps->open(r.p + start, nbytes, layerRate, layerFrames)) return false; r.i = start + nbytes; return true; };
+        for (int c = 0; c < 2; c++) if (!take(&dS[c], mode != "16", base, mdct::frames(nb))) return fail(3, "corrupt depth stream");
         nseg = r.i32v(); if (nseg < 1 || nseg > 8) return fail(3, "corrupt frequency layer");
         const int kcut = (int)lround((double)N * (orate / 2.0) / (rate / 2.0)); nused = 0;
         fS.clear(); fS.resize(2 * (size_t)nseg); std::vector<bool> used(2 * nseg, false);
         for (int c = 0; c < 2; c++) for (int sg = 0; sg < nseg; sg++) { int k0s = 0; if (r.i + 4 + 12 <= r.n) memcpy(&k0s, r.p + r.i + 4 + 8, 4);   // header field 3 = start bin
             bool use = mode != "cd24" && k0s < kcut;
             used[c * nseg + sg] = use; if (use && c == 0) nused++;
-            if (!take(&fS[c * nseg + sg], use)) return fail(3, "corrupt frequency stream"); }
+            if (!take(&fS[c * nseg + sg], use, rate, mdct::frames(Lm + 2L * P))) return fail(3, "corrupt frequency stream"); }
         Lp = Lm + 2 * P;
         for (int c = 0; c < 2; c++) { dI[c].init(nb); if (mode != "16") dI[c].parts.push_back(&dS[c]); }
         mI.init(Lp); sI.init(Lp); for (int sg = 0; sg < nseg; sg++) { if (used[sg]) mI.parts.push_back(&fS[sg]); if (used[nseg + sg]) sI.parts.push_back(&fS[nseg + sg]); }

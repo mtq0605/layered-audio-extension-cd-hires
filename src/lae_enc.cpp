@@ -565,7 +565,9 @@ static int encode(int argc, char** argv) {
             // a master whose speed drifts against the CD (tape wow and flutter): never continued on its own; with the position given by
             // hand AND cdaccept it goes on like a difference beyond -33 dB (the extension codes the whole difference, the precision stays the same)
             auto driftConfirmed = [&](m_align::Report& r) { if (manual && !r.found && (r.tag == "drift" || r.tag == "edit")) { r.found = true;   /* "edit": some check blocks do not match at all; no block matching ("nomatch") is never continued */ r.band = m_align::BAND_CONFIRM_LARGE;   // then asked like every difference beyond -33 dB
-                printf("align: WARNING: the master's speed drifts against the CD (for example tape wow and flutter): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"); } };
+                // the text names which of the two the check found (2026-11-14); what happens next is the same for both
+                printf(r.tag == "edit" ? "align: WARNING: some check blocks of the master do not match the CD at this position at all (an edit, another take or another version of the recording): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"
+                                       : "align: WARNING: the master's speed drifts against the CD (for example tape wow and flutter): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"); } };
             auto attempt = [&](const m_align::Report& rep1, const std::string& sch, long long tPlace, double mv, int edge) -> Att {
                 Att A; const std::string pre = sch.empty() ? "align: " : "align (" + sch + "): ", key = sch.empty() ? "" : " search=" + sch;
                 rep = rep1; placed.clear(); padP = cutL = cutT = 0; rpT = tPlace; rpMv = mv; edgeQ = m_align::Place(); edgeAsk = false;

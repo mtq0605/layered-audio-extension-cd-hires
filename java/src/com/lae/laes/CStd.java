@@ -13,6 +13,9 @@ import java.math.RoundingMode;
 public final class CStd {
     private CStd() {}
     static boolean space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == 11 || c == '\f' || c == '\r'; }
+    // FU25-5: the C digits only ('0'-'9', and a-f / A-F in hex); Character.isDigit / digit also take full-width and other scripts' digits
+    static boolean dig(char c) { return c >= '0' && c <= '9'; }
+    static boolean hex(char c) { return dig(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
     // C atof (strtod): leading white space, sign, decimal or hexadecimal digits with an optional exponent, "inf" / "infinity" / "nan"
     public static double atof(String s) {
         int i = 0; final int n = s.length(); while (i < n && space(s.charAt(i))) i++;
@@ -22,22 +25,22 @@ public final class CStd {
         if (rest.startsWith("infinity") || rest.startsWith("inf")) return neg ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
         if (rest.startsWith("nan")) return Double.NaN;
         if (rest.startsWith("0x")) { int k = i + 2; final int d0 = k; boolean any = false;
-            while (k < n && Character.digit(s.charAt(k), 16) >= 0) { k++; any = true; }
-            if (k < n && s.charAt(k) == '.') { k++; while (k < n && Character.digit(s.charAt(k), 16) >= 0) { k++; any = true; } }
+            while (k < n && hex(s.charAt(k))) { k++; any = true; }
+            if (k < n && s.charAt(k) == '.') { k++; while (k < n && hex(s.charAt(k))) { k++; any = true; } }
             if (!any) return neg ? -0.0 : 0.0;   // "0x" alone: the "0" is the number
             int e = k; String exp = "p0";
-            if (e < n && (s.charAt(e) == 'p' || s.charAt(e) == 'P')) { int q = e + 1; if (q < n && (s.charAt(q) == '+' || s.charAt(q) == '-')) q++; final int q0 = q; while (q < n && Character.isDigit(s.charAt(q))) q++; if (q > q0) { exp = s.substring(e, q); } }
+            if (e < n && (s.charAt(e) == 'p' || s.charAt(e) == 'P')) { int q = e + 1; if (q < n && (s.charAt(q) == '+' || s.charAt(q) == '-')) q++; final int q0 = q; while (q < n && dig(s.charAt(q))) q++; if (q > q0) { exp = s.substring(e, q); } }
             final String body = s.substring(d0, k); final double v = Double.parseDouble("0x" + (body.startsWith(".") ? "0" + body : body) + exp); return neg ? -v : v; }
-        int k = i; boolean any = false; while (k < n && Character.isDigit(s.charAt(k))) { k++; any = true; }
-        if (k < n && s.charAt(k) == '.') { k++; while (k < n && Character.isDigit(s.charAt(k))) { k++; any = true; } }
+        int k = i; boolean any = false; while (k < n && dig(s.charAt(k))) { k++; any = true; }
+        if (k < n && s.charAt(k) == '.') { k++; while (k < n && dig(s.charAt(k))) { k++; any = true; } }
         if (!any) return 0.0;
-        if (k < n && (s.charAt(k) == 'e' || s.charAt(k) == 'E')) { int q = k + 1; if (q < n && (s.charAt(q) == '+' || s.charAt(q) == '-')) q++; final int q0 = q; while (q < n && Character.isDigit(s.charAt(q))) q++; if (q > q0) k = q; }
+        if (k < n && (s.charAt(k) == 'e' || s.charAt(k) == 'E')) { int q = k + 1; if (q < n && (s.charAt(q) == '+' || s.charAt(q) == '-')) q++; final int q0 = q; while (q < n && dig(s.charAt(q))) q++; if (q > q0) k = q; }
         return Double.parseDouble(s.substring(st, k)); }
     // C atoll / atoi (strtol base 10; out of range: the limit, as the MSVC CRT)
     public static long atoll(String s) {
         int i = 0; final int n = s.length(); while (i < n && space(s.charAt(i))) i++;
         boolean neg = false; if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) { neg = s.charAt(i) == '-'; i++; }
-        BigDecimal v = BigDecimal.ZERO; boolean any = false; while (i < n && Character.isDigit(s.charAt(i))) { v = v.multiply(BigDecimal.TEN).add(BigDecimal.valueOf(s.charAt(i) - '0')); i++; any = true; if (v.compareTo(BigDecimal.valueOf(Long.MAX_VALUE).add(BigDecimal.ONE)) > 0) break; }
+        BigDecimal v = BigDecimal.ZERO; boolean any = false; while (i < n && dig(s.charAt(i))) { v = v.multiply(BigDecimal.TEN).add(BigDecimal.valueOf(s.charAt(i) - '0')); i++; any = true; if (v.compareTo(BigDecimal.valueOf(Long.MAX_VALUE).add(BigDecimal.ONE)) > 0) break; }
         if (!any) return 0; if (neg) v = v.negate();
         if (v.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0) return Long.MAX_VALUE; if (v.compareTo(BigDecimal.valueOf(Long.MIN_VALUE)) < 0) return Long.MIN_VALUE; return v.longValue(); }
     // C strtol(s, &e, 10) with the whole string required (*e == 0): the value, or 0 when anything is left over (callers refuse k < 1); overflow: Long.MAX_VALUE / MIN_VALUE

@@ -94,8 +94,9 @@ template <class C> struct Walker {
             int E = enc ? s[pos] : 0; int d = E - prevE, z = d == 0;
             if constexpr (is_same<C, Enc>::value) c.bit(expZero[tier], z); else z = c.bit(expZero[tier]);
             if (!z) { int sg = enc ? d < 0 : 0; if constexpr (is_same<C, Enc>::value) c.bit(expSign[tier], sg); else sg = c.bit(expSign[tier]);
-                uint32_t a = enc ? (uint32_t)(abs(d) - 1) : 0; codeU(c, expM[tier], a, enc); if (!enc) d = sg ? -(int)(a + 1) : (int)(a + 1); } else d = 0;
-            if (!enc && (prevE + d < 0 || prevE + d > 34)) { g_streamErr = true; d = max(0, min(34, prevE + d)) - prevE; }   // exponents beyond 24-bit range: corrupt
+                uint32_t a = enc ? (uint32_t)(abs(d) - 1) : 0; codeU(c, expM[tier], a, enc); if (!enc) d = (int)(sg ? 0u - (a + 1u) : a + 1u); } else d = 0;
+            // F05-6: a (up to 2^31 - 1 in a corrupt stream) and prevE + d are taken modulo 2^32 (unsigned), as before but without signed overflow
+            if (!enc) { const int ne = (int)((uint32_t)prevE + (uint32_t)d); if (ne < 0 || ne > 34) { g_streamErr = true; d = max(0, min(34, ne)) - prevE; } }   // exponents beyond 24-bit range: corrupt
             E = tok(prevE + d); prevE = E;
             int zl = tok(tree(&zlP[tier * 8], enc ? s[pos] : 0, 3));
             int sh = part::shiftOfR(E, tier, (h.cw >> 8) & 255); double st = ldexp(1.0, sh); UModel& cm = coefM[(tier - 1) * 13 + min(12, max(0, E / 2))];

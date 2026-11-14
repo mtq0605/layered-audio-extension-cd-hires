@@ -94,7 +94,8 @@ template <class F> static void runParallel(size_t n, int threads, F job) {
     if (n <= 1 || threads <= 1) { for (size_t i = 0; i < n; i++) job(i); return; }
     std::vector<char> err(n, 0); bool failed = false;
     for (size_t i0 = 0; i0 < n; i0 += (size_t)threads) { const size_t i1 = std::min(n, i0 + (size_t)threads); std::vector<std::thread> th; std::vector<char> thrown(i1 - i0, 0);
-        for (size_t i = i0; i < i1; i++) th.emplace_back([&, i] { try { g_streamErr = false; job(i); err[i] = g_streamErr ? 1 : 0; } catch (...) { thrown[i - i0] = 1; } });
+        // F05-6: a thread that cannot be started: the started ones are joined first, then the error goes to the caller (no std::terminate)
+        try { for (size_t i = i0; i < i1; i++) th.emplace_back([&, i] { try { g_streamErr = false; job(i); err[i] = g_streamErr ? 1 : 0; } catch (...) { thrown[i - i0] = 1; } }); } catch (...) { for (auto& t : th) t.join(); throw; }
         for (auto& t : th) t.join(); for (char c : thrown) if (c) failed = true; }
     for (char c : err) if (c) g_streamErr = true;
     if (failed) throw std::bad_alloc(); }
@@ -129,7 +130,8 @@ struct Cached : Src { std::vector<int64_t> ring; long lo = 0, hi = 0;   // compu
         }
         while (hi <= i) { ring[hi & (ring.size() - 1)] = compute(hi); hi++; if (hi - lo > (long)ring.size()) lo = hi - (long)ring.size(); }
         return ring[i & (ring.size() - 1)]; }
-    static int64_t mirror(Src& in, long i) { long n = in.n; if (i < 0) i = -i; if (i >= n) i = 2 * (n - 1) - i; if (i < 0) i = 0; if (i > n - 1) i = n - 1; return in.get(i); }
+    // F05-6: 2 (n - 1) in 64 bits (it passes 2^31 when n > 2^30; long is 32 bits on Windows)
+    static int64_t mirror(Src& in, long i) { long n = in.n; if (i < 0) i = -i; if (i >= n) i = (long)(2LL * (n - 1) - i); if (i < 0) i = 0; if (i > n - 1) i = n - 1; return in.get(i); }
     void resetAt(long s) { lo = hi = s; } };   // seeking: the next value computed is index s (compute(i) depends only on the inputs at fixed offsets of i)
 // xorshift32 (13, 17, 5) advanced by `steps` steps in O(log steps): the step is linear over GF(2), so it is applied as a 32 x 32 bit matrix power
 static inline uint32_t xsApply(const uint32_t* col, uint32_t v) { uint32_t r = 0; for (int j = 0; j < 32; j++) if ((v >> j) & 1u) r ^= col[j]; return r; }
@@ -138,8 +140,9 @@ static inline uint32_t xsJump(uint32_t s, uint64_t steps) {
     while (steps) { if (steps & 1) s = xsApply(M, s); for (int j = 0; j < 32; j++) M2[j] = xsApply(M, M[j]); memcpy(M, M2, sizeof M); steps >>= 1; }
     return s; }
 struct BaseSrc : Cached {   // 4096 x CD - dither + 16 x depth, base rate, padded length nb
-    const std::vector<int16_t>* cd; const int16_t* edge; long pb, ncd; int ch; const uint8_t* dfl; long nbk; ImdctStream* depth; uint32_t st[2] = {0x12345678u, 0x12345678u + 0x9E3779B9u};
-    int16_t sample(long i) { return i < pb ? edge[i * 2 + ch] : (i < pb + ncd ? (*cd)[(i - pb) * 2 + ch] : edge[2 * pb + (i - pb - ncd) * 2 + ch]); }
+    const std::vector<int16_t>* cd; const uint8_t* edge; long pb, ncd; int ch; const uint8_t* dfl; long nbk; ImdctStream* depth; uint32_t st[2] = {0x12345678u, 0x12345678u + 0x9E3779B9u};
+    int16_t edgeAt(long k) const { int16_t v; memcpy(&v, edge + 2 * (size_t)k, 2); return v; }   // F05-6: a pack's edge samples may lie at an odd address
+    int16_t sample(long i) { return i < pb ? edgeAt(i * 2 + ch) : (i < pb + ncd ? (*cd)[(i - pb) * 2 + ch] : edgeAt(2 * pb + (i - pb - ncd) * 2 + ch)); }
     int64_t compute(long i) override { int64_t d16 = 0;
         for (int cc = 0; cc < 2; cc++) { uint32_t& s = st[cc]; s ^= s << 13; s ^= s >> 17; s ^= s << 5; int u1 = (s >> 20) & 0xFFF; s ^= s << 13; s ^= s >> 17; s ^= s << 5; int u2 = (s >> 20) & 0xFFF;
             if (cc == ch && nbk && dfl[cc * nbk + i / 4096]) d16 = u1 + u2 - 4096; }
@@ -221,7 +224,7 @@ struct Decoder {
         bool hdrOk = (base == 44100 || base == 48000) && stages >= 1 && stages <= 3 && rate == (base << stages) && P > 0 && P <= 65536 && P % (1 << stages) == 0
                      && pb == (P >> stages) && Lm > 0 && Lm <= 2000000000L - 2L * P && nb == ((Lm + 2L * P) >> stages) && mi >= 0 && mi < part::NMODES;
         if (!hdrOk || 8 * (size_t)pb > r.n - r.i) return fail(3, "corrupt LAE header: refusing to decode");
-        const int16_t* edge = (const int16_t*)r.take(8 * (size_t)pb); int32_t ndf = r.i32v();
+        const uint8_t* edge = r.take(8 * (size_t)pb); int32_t ndf = r.i32v();
         if (ndf != 2 * ((nb + 4095) / 4096) || r.i > r.n || (size_t)ndf > r.n - r.i) return fail(3, "corrupt dither flags: refusing to decode");
         const uint8_t* dfl = r.take((size_t)ndf);
         ncd = (long)cd.size() / 2; if (ncd != nb - 2 * pb || r.i > r.n || mi < 0 || mi >= part::NMODES || stages < 1 || stages > 3) return fail(3, "CD audio does not match the LAE chunk (edited or misaligned): refusing to decode");

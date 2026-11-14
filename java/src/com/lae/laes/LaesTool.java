@@ -145,6 +145,15 @@ public final class LaesTool {
                         for (int j : hit) System.out.println(String.format("  %4d  %6d Hz %2d-bit  %s", j + 1, ch.get(j).s.rate, ch.get(j).s.bits, Choices.masterLabel(ch.get(j).no, infos.get(ch.get(j).s.m))));
                         System.out.println("Not in a console: give the numbers with --pick=<n>, several --pick=<n>,<n>, a range --pick=<a>-<b>. Nothing written."); return 1; }
                     for (int j : hit) if (!pick.contains(j)) pick.add(j); if (b < 0) break; a = b + 1; } }
+            {   // FU16-5 (2026-11-14, as laes_tool.cpp): the WAVs' size against the free space, before anything is written (as enc does for its work folder)
+                long need = 0; for (int j : pick) { final long db = ch.get(j).s.n * 2 * (ch.get(j).s.bits / 8); need += 128 + db + (db & 1); }
+                File fsAt = new File(args[2]).getAbsoluteFile(); while (fsAt != null && !fsAt.exists()) fsAt = fsAt.getParentFile();   // the folder may not exist yet
+                final long avail = fsAt != null ? fsAt.getUsableSpace() : 0;   // 0: not known (as the C++ error code): no check
+                if (avail > 0 && need > avail) { final boolean force = LaesEncoder.Options.flag(args, "--force-disk");
+                    System.out.println(String.format(java.util.Locale.ROOT, "the WAVs need about %.1f GB, %.1f GB free on that disk%s", need / 1073741824.0, avail / 1073741824.0, force ? "; --force-disk: running anyway" : "; nothing written (--force-disk runs anyway)"));
+                    System.out.println(String.format(java.util.Locale.ROOT, "  输出大约需要 %.1f GB，这块磁盘剩 %.1f GB%s", need / 1073741824.0, avail / 1073741824.0, force ? "；--force-disk：照样开始" : "；没有开始，也没有写任何文件（加 --force-disk 可以照样开始）"));
+                    if (!force) return 2; } }
+            boolean wroteAll = true;
             new File(args[2]).mkdirs(); final String d = args[2] + "/";
             for (int j : pick) { final Choice C = ch.get(j); final Src S = C.derived ? ch.get(C.from).s : C.s; final int by = C.s.bits / 8; final long n = C.s.n, db = n * 2 * by;
                 byte[] h = LaesEncoder.wavHeader(C.s.rate, C.s.bits); final long fmtLen = C.s.bits > 16 ? 40 : 16;
@@ -156,7 +165,7 @@ public final class LaesTool {
                     final byte[] r0 = {'R', 'F', '6', '4', (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, 'W', 'A', 'V', 'E', 'd', 's', '6', '4', 28, 0, 0, 0}; System.arraycopy(r0, 0, r, 0, 20);
                     com.lae.core.Le.put64(r, 20, riff + 36); com.lae.core.Le.put64(r, 28, db); com.lae.core.Le.put64(r, 36, n);   // then the table length 0
                     System.arraycopy(h, 12, r, 48, h.length - 12); for (int i = r.length - 4; i < r.length; i++) r[i] = (byte) 0xFF; h = r; }   // the data size: in ds64
-                boolean okw = true; Stream.Out o = null;
+                boolean okw = true; Stream.Out o = null; String why = "";
                 try { o = new Stream.Out(d + C.name + ".wav"); o.put(h, 0, h.length); final long P = 1 << 18;
                     final long[] stc = {20261029L + 0x9E3779B97F4A7C15L * 1, 20261029L + 0x9E3779B97F4A7C15L * 2}; final int sft = C.derived ? S.bits - 16 : 0;   // derive16: one stream per channel
                     for (long a = 0; a < n; a += P) { final long e = Math.min(n, a + P); final long[] x0 = readSrc(core, dec, S, 0, a, e), x1 = readSrc(core, dec, S, 1, a, e); final byte[] b = new byte[(int) (e - a) * 2 * by]; int f = 0;
@@ -166,10 +175,11 @@ public final class LaesTool {
                             final int u = (int) v; for (int k = 0; k < by; k++) b[f++] = (byte) (u >>> (8 * k)); }
                         o.put(b, 0, f); }
                     if ((db & 1) != 0) o.put(new byte[1], 0, 1); o.close(); o = null; }
-                catch (LaeException x) { okw = false; }
+                catch (LaeException x) { okw = false; why = String.valueOf(x.getMessage()); }
                 finally { StreamEnc.closeQuiet(o); }
-                all &= okw; System.out.println(C.name + ".wav: " + C.s.rate + " Hz " + C.s.bits + "-bit, " + C.what); }
-            System.out.println("written to " + args[2]); }
+                if (!okw) { new File(d + C.name + ".wav").delete(); System.out.println(C.name + ".wav: FAILED, the file was removed: " + why); }   // FU16-5: said, and the part written is removed (the file is closed)
+                all &= okw; wroteAll &= okw; if (okw) System.out.println(C.name + ".wav: " + C.s.rate + " Hz " + C.s.bits + "-bit, " + C.what); }
+            if (wroteAll) System.out.println("written to " + args[2]); else System.out.println("not every file was written: see above (" + args[2] + ")"); }
         else { final boolean[] used = new boolean[dec.size()];   // each given file must equal one decoded master (the file order may differ from the command line)
             for (int i = 2; i < args.length; i++) { if (args[i].length() > 0 && args[i].charAt(0) == '-') continue; final StreamEnc.WavInfo wi = new StreamEnc.WavInfo(); final String re = StreamEnc.probeWav(args[i], wi, null); int hit = -1;
                 for (int k = 0; k < dec.size() && hit < 0 && re.isEmpty(); k++) { if (used[k] || wi.rate != dec.get(k).I.rate || wi.bits != dec.get(k).I.bits || wi.frames != dec.get(k).I.frames) continue;

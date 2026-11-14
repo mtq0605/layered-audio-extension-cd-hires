@@ -7,6 +7,11 @@
 # Called by build_kodi.cmd after the add-on folder was copied; the sources keep both languages.
 param([Parameter(Mandatory)][string]$PkgDir, [Parameter(Mandatory)][ValidateSet('en', 'zh')][string]$Lang)
 $ErrorActionPreference = 'Stop'
+# the source folder of the add-on (beside this script) is never rewritten: the script works only in a copy of it
+$srcAddon = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'audiodecoder.lae')).TrimEnd('\')
+$pkgFull = [System.IO.Path]::GetFullPath($PkgDir).TrimEnd('\')
+if ($pkgFull -eq $srcAddon -or $pkgFull.StartsWith($srcAddon + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "lang_pkg.ps1: $PkgDir is the add-on's source folder; give the package copy (build_kodi.cmd makes it)" }
 $langRoot = Join-Path $PkgDir 'resources\language'
 $enFile = Join-Path $langRoot 'resource.language.en_gb\strings.po'
 $zhDir = Join-Path $langRoot 'resource.language.zh_cn'

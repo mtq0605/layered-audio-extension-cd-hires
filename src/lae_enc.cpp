@@ -1050,8 +1050,9 @@ static int encode(int argc, char** argv) {
     { g_streamErr = false; std::error_code ec; std::filesystem::remove(T("clip.bin"), ec);
       env("CLIPMAP", T("clip.bin")); int rc = call(m_dec::main, {"dec", partPath, T("check.wav"), "full"}); env("CLIPMAP", "");
       if (rc || encio::testFail("finaldecode")) { printf("end-to-end check FAILED: the decoder could not decode the final file (code %d): nothing written\n", rc); oldNote(); return 2; }
-      const long long wantWav = 44 + Lm * 6 + ((Lm * 6) & 1), clipB = fileSize(T("clip.bin"));
-      if (fileSize(T("check.wav")) == wantWav && clipB >= 0 && !encio::testFail("clipdecode")) nclip = (long)(clipB / 4);
+      const long long wantWav = 44 + Lm * 6 + ((Lm * 6) & 1), clipB = fileSize(T("clip.bin")), haveWav = fileSize(T("check.wav"));
+      if (haveWav != wantWav) { printf("end-to-end check FAILED: the decoded file has %lld bytes, expected %lld: nothing written\n", haveWav, wantWav); oldNote(); return 2; }   // the decoder said OK but did not write the whole track
+      if (clipB >= 0 && !encio::testFail("clipdecode")) nclip = (long)(clipB / 4);
       if (nclip >= 0) printf("samples beyond full scale before the decoder's hard limiter: %ld\n", nclip);
       else printf("samples beyond full scale before the decoder's hard limiter: not measured (the check files are incomplete)\n"); }
     { std::error_code ec; std::filesystem::remove(T("check.wav"), ec); }

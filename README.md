@@ -684,7 +684,7 @@ This is the twiddle form used in FFmpeg `libavcodec/mdct.c` [6]. The bit-reversa
 
 The geometry that a decoder requires is defined in `src/partition_format.h`. The encoder's search is in `src/partition.h`.
 
-**Cells.** The coefficient plane of one channel of one stream is divided into cells. A cell is a group of adjacent spectral lines in one frame. The stream header signals the cell width; in container version 5 it is always 8 lines.
+**Cells.** The coefficient plane of one channel of one stream is divided into cells. A cell is a group of adjacent spectral lines in one frame. The stream header has a field for the cell width; in container version 5, encoders write 8, and the decoder uses 8 lines without checking the field ([SPEC.md](spec/lossy/SPEC.md), Section 5.3).
 
 **Root blocks.** Cells are organised in root blocks of 16 cells × 8 frames. Root blocks form a fixed regular grid and are processed in time-major order. The root-block geometry is the same in every mode.
 
@@ -825,7 +825,7 @@ The offset 0.20 is a format constant. In the development measurements of Table 1
 **Zero coefficients.** By default, a zero quantisation index is reconstructed as exactly zero. The effect of this rule is small:
 
 - in the CD band, the CD layer underlies the extension, so no spectral holes arise;
-- in the ultrasonic band, only components below 0.5–0.8 of a step are missing;
+- in the ultrasonic band, only components below 0.8 of a step are missing (the dead zone of Section 8.2: $|q| = 0$ for $|X| < 0.8\,\Delta$);
 - in development measurements, the ultrasonic level of the decoded signal was 0.3–1.4 dB below that of the master.
 
 **Optional zero level (`zs`, off by default).** With `zs`, the encoder transmits the true sign of each coefficient that quantises to zero. Such a coefficient is then reconstructed as sign × leaf level × step.
@@ -953,6 +953,8 @@ The precision rule numbers are:
 - 2: B16/C20/D24;
 - 3: keep20 depth layer, B20/C22/D24.
 
+Encoders for container version 5 write rule 1, 2 or 3; other values are reserved, and a decoder applies the default rule to them ([SPEC.md](spec/lossy/SPEC.md), Section 8.2).
+
 K is the number of MDCT frames in the plane. It must be positive and should equal $\lceil L_s/512 \rceil + 1$, where $L_s$ is the padded base-rate length nb for depth streams and the padded master length for frequency streams. If K is smaller, the missing frames decode as zero ([SPEC.md](spec/lossy/SPEC.md), Section 5.3).
 
 ### 10.4 Validation
@@ -965,7 +967,7 @@ A decoder refuses a file in any of the following cases:
 - any coded value is out of range;
 - the container version is not 5.
 
-All header fields are validated before use. The reference decoder also provides the following protections:
+Two fields are not checked: the cell width in the low byte of the stream-header field `cw` (the decoder always uses 8) and a reserved precision rule number (decoded with the default rule). All other header fields are validated before use. The reference decoder also provides the following protections:
 
 - read bounds;
 - checks against non-terminating loops caused by malicious files;

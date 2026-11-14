@@ -28,6 +28,36 @@
 namespace fsp = std::filesystem;
 using m_align::detail::fmt;
 
+// cdalign position text: begin
+// A position is the master sample of a piece's CD frame 0: whole - f, f the fraction moved, written with 7 decimals. In one double the
+// fraction is rounded to the double's step at that position (4e-9 from 2^24 master samples, 6e-8 from 2^28, 1.2e-7 from 2^29, which is
+// 25 minutes at 352.8 kHz). The pieces of one group share one fraction, but printed and read each as one double they could come back
+// with fractions more than 5e-8 apart where the group lies across a power of two (the last decimal differs: seldom in short albums,
+// in about half of the cases from 2^29 on), and the planner refused its own suggested values. So the pieces of a group are printed
+// from the first piece's text by adding whole samples in decimal (posAdd), and from 2^29 on the whole part and the fraction are printed
+// and read separately. Below 2^29 the text of a group's first piece and every value read are the former arithmetic, bit for bit:
+// nothing changes for a group that starts before 2^29.
+static const long long POS_SPLIT = 1LL << 29;
+static std::string posUnits(long long t) {   // t in 1e-7 master samples, exact
+    char b[64]; const long long a = t < 0 ? -t : t; snprintf(b, sizeof b, "%c%lld.%07lld", t < 0 ? '-' : '+', a / 10000000LL, a % 10000000LL); return b; }
+static std::string posText(long long whole, double f) {   // whole - f with 7 decimals and a sign, as "%+.7f" prints it
+    if (whole > -POS_SPLIT && whole < POS_SPLIT) { char b[64]; snprintf(b, sizeof b, "%+.7f", (double)whole - f); return b; }
+    return posUnits(whole * 10000000LL - std::llround(f * 1e7)); }
+static std::string posAdd(const std::string& p, long long d) {   // the position p (a text of posText) plus d whole samples: the same decimals
+    const size_t dot = p.find('.'); if (dot == std::string::npos || p.size() != dot + 8 || dot < 2) return p;
+    const long long t = strtoll(p.substr(1, dot - 1).c_str(), nullptr, 10) * 10000000LL + strtoll(p.substr(dot + 1).c_str(), nullptr, 10);
+    return posUnits((p[0] == '-' ? -t : t) + d * 10000000LL); }
+static void posParse(const std::string& v, double x, long long& whole, double& f) {   // v: the text, x: its value by strtod; whole - f = the position
+    whole = (long long)std::llround(x); f = (double)whole - x;
+    if (std::fabs(x) < (double)POS_SPLIT) return;
+    size_t i = 0; const bool neg = !v.empty() && v[0] == '-'; if (!v.empty() && (v[0] == '+' || v[0] == '-')) i = 1;
+    const size_t w0 = i; while (i < v.size() && v[i] >= '0' && v[i] <= '9') i++; const size_t w1 = i; size_t d0 = i, d1 = i;
+    if (i < v.size() && v[i] == '.') { d0 = ++i; while (i < v.size() && v[i] >= '0' && v[i] <= '9') i++; d1 = i; }
+    if (i != v.size() || w1 == w0 || w1 - w0 > 18) return;   // not plain digits (an exponent, ...): the value as one number, as before
+    const long long W = strtoll(v.substr(w0, w1 - w0).c_str(), nullptr, 10); const double fp = d1 > d0 ? strtod(("0." + v.substr(d0, d1 - d0)).c_str(), nullptr) : 0.0;
+    const bool up = fp >= 0.5; whole = (neg ? -1 : 1) * (W + (up ? 1 : 0)); f = neg ? (up ? fp - 1.0 : fp) : (up ? 1.0 - fp : 0.0 - fp); }   // rounds half away from zero, as llround
+// cdalign position text: end
+
 struct Pub { cdxr::Disc d; cdxr::Layout lay; std::vector<long long> p; long long end = 0; };
 static std::string readPublisher(const std::string& cue, Pub& P) {
     std::string e = cdxr::loadCue(fsp::path(cue), P.d, cdxr::diskSource(), &P.lay); if (!e.empty()) return e;
@@ -218,7 +248,7 @@ static int planMain(int argc, char** argv) {
             for (auto& g : groupsOf()) { double f = 0; m_align::Report r; if (!measureGroup(s0, g, f, r)) { printf("base derivation failed\n"); return 2; }
                 if (!r.found || r.band == m_align::BAND_STOP) fail = true; else if (r.band != m_align::BAND_OK) ask = true;
                 printf("plan (%s): %s%s: fraction %+.7f master samples; check: %s\n", nm, gname(g).c_str(), g.size() > 1 ? " (one group: the CD splits continuous master there)" : "", f, r.alignLine.c_str());
-                for (size_t k : g) pos[k] = fmt("%+.7f", (double)A[k] - f); }   // where CD frame 0 lies after the move: whole minus the fraction moved
+                for (size_t k : g) pos[k] = k == g[0] ? posText(A[k], f) : posAdd(pos[g[0]], A[k] - A[g[0]]); }   // where CD frame 0 lies after the move: whole minus the fraction moved; one fraction text per group
             li[v].clear(); for (size_t k = 0; k < n; k++) li[v] += (k ? "," : "") + pos[k];
             st[v] = fail ? "failed" : (ask ? "not_aligned" : "aligned");
             printf("plan: %s search: %s: cdalign=%s\n", nm, fail ? "alignment failed" : (ask ? "not aligned within the limit" : "aligned"), li[v].c_str()); }
@@ -232,8 +262,8 @@ static int planMain(int argc, char** argv) {
       for (size_t k = 0; k < n; k++) { if (silentCd[k]) { if (v[k] != "-") { printf("piece %02zu is digital silence on the CD: give - for it; nothing written\n", k + 1); return 1; } continue; }
           char* e = nullptr; const double x = strtod(v[k].c_str(), &e);
           if (v[k].empty() || v[k] == "-" || !e || *e || !std::isfinite(x)) { printf("piece %02zu: '%s' is not a position (master samples; a fraction is written with a point); nothing written\n", k + 1, v[k].c_str()); return 1; }
-          A[k] = (long long)std::llround(x); fr[k] = (double)A[k] - x;   // the slice at the whole position, the master moved by -fr = x - A: slice sample j = master(x + j)
-          printf("plan: piece %02zu: confirmed CD frame 0 = master sample %+.7f (whole %lld, fraction %+.7f)\n", k + 1, x, A[k], fr[k]); } }
+          posParse(v[k], x, A[k], fr[k]);   // A = the whole position (x rounded), fr = A - x. The slice at the whole position, the master moved by -fr = x - A: slice sample j = master(x + j)
+          printf("plan: piece %02zu: confirmed CD frame 0 = master sample %s (whole %lld, fraction %+.7f)\n", k + 1, posText(A[k], fr[k]).c_str(), A[k], fr[k]); } }
     std::vector<Slice> sl; if (build(sl, true)) return 1;   // the silence and coverage checks on the master as it is, before anything is moved
     const auto G = groupsOf();
     for (auto& g : G) for (size_t k : g) if (std::fabs(fr[k] - fr[g[0]]) > 5e-8) {
@@ -319,7 +349,7 @@ static int planMain(int argc, char** argv) {
             char tx[64]; snprintf(tx, sizeof tx, "%.10f", Tk);
             printf("plan: piece %02zu: master %s, %lld samples (%d bit, not moved), CD %lld frames%s; T = %s base samples%s\n", k + 1, silentCd[k] ? "digital silence" : fmt("%.6f-%.6f s", sec(s.S), sec(s.S + s.len)).c_str(), s.len, fullBits, nk[k] + s.lead,
                    s.lead ? " (one digital-silence frame in front, in the pregap)" : "", tx, needsAccept[k] ? " (confirmed by you)" : "");
-            t += fmt("piece %02zu: CD frame 0 = master sample %+.7f; slice from master sample %lld; T = %s base samples\n", k + 1, silentCd[k] ? 0.0 : (double)A[k] - fr[k], s.S, tx);
+            t += fmt("piece %02zu: CD frame 0 = master sample %s; slice from master sample %lld; T = %s base samples\n", k + 1, silentCd[k] ? "+0.0000000" : posText(A[k], fr[k]).c_str(), s.S, tx);
             cmds += fmt("  laes enc TRACK%02zu.laes.wav --core=TRACK%02zu.cd.wav TRACK%02zu.master.wav@%s\n", k + 1, k + 1, k + 1, tx); }
         const fsp::path pr = out / "plan.align.txt"; FILE* f = fopen(pr.string().c_str(), "wb"); const bool ok = f && fwrite(t.data(), 1, t.size(), f) == t.size(); if (f) fclose(f);
         printf(ok ? "plan: alignment report %s\n" : "plan: WARNING: the alignment report %s could not be written\n", pr.u8string().c_str());
@@ -334,8 +364,8 @@ static int planMain(int argc, char** argv) {
                s.lead ? " (one digital-silence frame in front, in the pregap)" : "", needsAccept[k] ? " cdaccept" : ""); }
     {   // the movement report (a separate text file for the user's records; plain text, read by no program)
         std::string t = "LAE plan alignment report\npublisher disc: " + cueArg + "\nmaster:"; for (auto& f : mfiles) t += " " + f; t += "\n";
-        for (auto& g : G) t += fmt("%s%s: CD frame 0 of piece %02zu = master sample %+.7f; master moved by %+.7f master samples\n", gname(g).c_str(), g.size() > 1 ? " (one group: the CD splits continuous master there)" : "",
-                                   g[0] + 1, (double)A[g[0]] - fr[g[0]], -fr[g[0]]);
+        for (auto& g : G) t += fmt("%s%s: CD frame 0 of piece %02zu = master sample %s; master moved by %+.7f master samples\n", gname(g).c_str(), g.size() > 1 ? " (one group: the CD splits continuous master there)" : "",
+                                   g[0] + 1, posText(A[g[0]], fr[g[0]]).c_str(), -fr[g[0]]);
         for (auto& s : spill) t += "the move carries " + s + " (not in any slice)\n";
         t += "each slice is already moved: encode it with cdalign=0\n";
         const fsp::path pr = out / "plan.align.txt"; FILE* f = fopen(pr.string().c_str(), "wb"); const bool ok = f && fwrite(t.data(), 1, t.size(), f) == t.size(); if (f) fclose(f);

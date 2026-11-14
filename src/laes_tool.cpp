@@ -263,7 +263,7 @@ static std::string readLayout(laess::In& in, Layout& L) {
         if (L.rf64 && q.id == "ds64" && n >= 28) { std::vector<uint8_t> d((size_t)n); in.read(q.off, d.data(), d.size()); auto le64 = [&](size_t at) { uint64_t v = 0; for (int i = 7; i >= 0; i--) v = v << 8 | d[at + (size_t)i]; return v; };
             dsData = le64(8); const uint32_t cnt = d[24] | d[25] << 8 | d[26] << 16 | (uint32_t)d[27] << 24; for (uint32_t i = 0; i < cnt && 28 + 12 * (size_t)(i + 1) <= d.size(); i++) table.push_back({std::string((const char*)&d[28 + 12 * i], 4), le64(32 + 12 * (size_t)i)}); }
         if (L.rf64 && n == 0xFFFFFFFFu) { if (q.id == "data") n = dsData; else for (auto& t : table) if (t.first == q.id) n = t.second; }
-        if ((long long)n > in.n - q.off) return in.path + ": chunk " + q.id + " runs past the end of the file";
+        if (n > (uint64_t)(in.n - q.off)) return in.path + ": chunk " + q.id + " runs past the end of the file";   // compared unsigned: a ds64 length of 2^63 or more is refused too (2026-11-14)
         q.len = (long long)n; if (q.id == "data") { L.audioOff = q.off; L.audioLen = q.len; haveData = true; } else if (q.id == "LAE ") L.payload.push_back({q.off, q.len});
         L.parts.push_back(q); pos = q.off + q.len + (q.len & 1); }
     if (!haveData) return in.path + ": no data chunk"; return ""; }

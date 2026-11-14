@@ -522,7 +522,7 @@ public final class StreamEnc {
     static boolean[] makeShort(boolean autoSel, List<Cand> cs, int mi, Prep m, int st, LaesFile.MasterInfo I, Core core, List<LaesFile.MasterInfo> info, List<Prep> ms,
                                List<MasterSel> sel, String stem, Ctx ctx) {
         final int kShort = 3;
-        if (!(autoSel && ms.size() > 16 && cs.size() > kShort) || System.getenv("LAES_NO_SHORTLIST") != null) return null;
+        if (!(autoSel && ms.size() > 16 && cs.size() > kShort) || LaesFile.testEnv("LAES_NO_SHORTLIST") != null) return null;
         final List<double[]> est = new ArrayList<double[]>();   // {estimate, q}
         for (int q = 0; q < cs.size(); q++) { final Cand C = cs.get(q); long wh = 0; int fr = 0; if (C.storage != 1) { final long[] wf = relT(sel, mi, autoSel, C.tier); if (wf == null) continue; wh = wf[0]; fr = (int) wf[1]; }
             final int j = C.j; final long nj = LaesFile.levLen(I.frames, st - j), B = 4096L << j, L = (1L << 15) << j;

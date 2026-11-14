@@ -18,7 +18,8 @@ import com.lae.core.LaeException;
  *       (&lt;n&gt; or a range &lt;a&gt;-&lt;b&gt;), &lt;rate&gt;:&lt;bits&gt; (the masters of that rate and word length), master:&lt;k&gt; or name:&lt;text&gt; (a master by its
  *       number or by its exact name); a selection that matches several masters lists them and writes nothing
  *   verify &lt;in.wav | in.flac&gt; &lt;master.wav&gt; ...
- * Environment (test hooks, as the C++): LAES_PIECE, LAES_FORCE_RF64, LAES_SELFCHECK_FLIP, KEEPTMP.
+ * Environment (test hooks, as the C++): LAES_PIECE, LAES_FORCE_RF64, LAES_SELFCHECK_FLIP, LAES_NO_SHORTLIST, LAES_DISK_RESERVE only with
+ * LAE_TEST_MODE=1 (decision 39: one line names them at the start); KEEPTMP always.
  * An existing output (enc: the file, dec: each WAV) is replaced only after two "yes" at a console, or with --overwrite (decision 21).
  * Not ported: align, selftest, excerpt, reduce, mkcd (out of scope). enc with master.wav@auto: this tool uses LAEY's search (LaeyAutoAligner);
  * an app that calls LaesEncoder sets LaesEncoder.Options.aligner itself.
@@ -33,7 +34,7 @@ public final class LaesTool {
     // port of laes_tool.cpp:main  (args = the C++ argv[1..])
     public static int run(String[] args) {
         if (args.length < 1) { System.out.println("laes enc | dec | verify  (see the source header; the other commands of the C++ laes are not in this port)"); return 1; }
-        final String cmd = args[0];
+        final String cmd = args[0]; { final String tl = LaesFile.testModeLine(); if (!tl.isEmpty()) System.out.println(tl); }   // decision 39
         if (cmd.equals("enc") && args.length >= 3) {
             final LaesEncoder.Options o = LaesEncoder.Options.fromArgs(args);
             o.aligner = new LaeyAutoAligner();   // master.wav@auto: LAEY's search in Java (com.lae.laey)
@@ -171,7 +172,7 @@ public final class LaesTool {
                 // FU28-1: beyond 4 GB RF64 as the encoder writes it (ds64 with the 64-bit RIFF and data sizes, no table; 32-bit fields
                 // 0xFFFFFFFF), as laes_tool.cpp dec (2026-11-04); the header lengths wrapped before. Test hook LAES_FORCE_RF64 as the C++
                 final long riff = 4 + 8 + fmtLen + 8 + db + (db & 1);
-                if (riff > 0xFFFFFFFFL || System.getenv("LAES_FORCE_RF64") != null) { final byte[] r = new byte[20 + 28 + h.length - 12];
+                if (riff > 0xFFFFFFFFL || LaesFile.testEnv("LAES_FORCE_RF64") != null) { final byte[] r = new byte[20 + 28 + h.length - 12];
                     final byte[] r0 = {'R', 'F', '6', '4', (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, 'W', 'A', 'V', 'E', 'd', 's', '6', '4', 28, 0, 0, 0}; System.arraycopy(r0, 0, r, 0, 20);
                     com.lae.core.Le.put64(r, 20, riff + 36); com.lae.core.Le.put64(r, 28, db); com.lae.core.Le.put64(r, 36, n);   // then the table length 0
                     System.arraycopy(h, 12, r, 48, h.length - 12); for (int i = r.length - 4; i < r.length; i++) r[i] = (byte) 0xFF; h = r; }   // the data size: in ds64

@@ -41,6 +41,16 @@ import com.lae.core.U;
 public final class LaesFile {
     private LaesFile() {}
 
+    // port of laes_file.h:testEnv / testModeLine (decision 39, 2026-11-15): the test switches of the LAES code act only when the master
+    // switch LAE_TEST_MODE=1 is set; testEnv gives the value then, else null. KEEPTMP (keep the work folder) changes no output byte and acts
+    // without it. testModeLine gives, once per program run, the line naming the active test switches ("" when LAE_TEST_MODE is not 1).
+    static final String[] TEST_SWITCHES = {"LAES_TEST_KEYS", "LAES_NO_SHORTLIST", "LAES_FORCE_RF64", "LAES_PIECE", "LAES_SELFCHECK_FLIP", "LAES_DISK_RESERVE"};
+    public static String testEnv(String name) { return "1".equals(System.getenv("LAE_TEST_MODE")) ? System.getenv(name) : null; }
+    private static boolean testLineDone = false;
+    public static synchronized String testModeLine() { if (testLineDone) return ""; testLineDone = true; if (!"1".equals(System.getenv("LAE_TEST_MODE"))) return "";
+        final StringBuilder on = new StringBuilder(); for (String n : TEST_SWITCHES) if (System.getenv(n) != null) on.append(' ').append(n);
+        return "LAE_TEST_MODE=1: test switches active:" + (on.length() == 0 ? " none" : on.toString()) + " (unset LAE_TEST_MODE for normal behaviour)"; }
+
     /** the whole-in-memory decoder's limit as laes_file.h has it since 635019a: PTRDIFF_MAX / sizeof(int64_t) on x64 */
     public static final long WHOLE_MAX_FRAMES = Long.MAX_VALUE / 8;
 

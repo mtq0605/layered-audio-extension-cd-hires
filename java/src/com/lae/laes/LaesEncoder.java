@@ -121,7 +121,7 @@ public final class LaesEncoder {
             o.timing = flag(args, "--timing"); o.accept = flag(args, "--accept"); o.laeEnc = arg(args, "--lae-enc"); o.form = arg(args, "--form");
             o.overwrite = flag(args, "--overwrite");
             o.smallDisk = flag(args, "--small-disk"); o.diskStopRemove = flag(args, "--disk-stop-remove"); o.diskStop = o.diskStopRemove || flag(args, "--disk-stop"); o.forceDisk = flag(args, "--force-disk");
-            { final String r = System.getenv("LAES_DISK_RESERVE"); if (r != null) o.diskReserve = CStd.atoll(r); }
+            { final String r = LaesFile.testEnv("LAES_DISK_RESERVE"); if (r != null) o.diskReserve = CStd.atoll(r); }   // test switches: only with LAE_TEST_MODE=1 (decision 39)
             o.tagError = LaesTags.parseArgs(args, o.tags);
             for (int i = 2; i < args.length; i++) if (args[i].startsWith("--name=") || args[i].equals("--no-derive") || args[i].startsWith("--no-derive=") || args[i].startsWith("--default=")) o.nameArgs.add(args[i]);
             o.menuOrder = arg(args, "--menu-order");
@@ -129,8 +129,8 @@ public final class LaesEncoder {
             for (int i = 2; i < args.length; i++) { if (args[i].length() > 0 && args[i].charAt(0) == '-') continue; String a = args[i]; double T = 0; boolean au = false; final int at = a.lastIndexOf('@');
                 if (at >= 0 && at > 2) { au = a.substring(at + 1).equals("auto"); T = au ? 0 : CStd.atof(a.substring(at + 1)); a = a.substring(0, at); }
                 o.masters.add(new MasterArg(a, T, au)); }
-            final String pe = System.getenv("LAES_PIECE"); if (pe != null) o.piece = Math.max(4096, CStd.atoll(pe) / 4096 * 4096);
-            o.forceRf64 = System.getenv("LAES_FORCE_RF64") != null; o.selfCheckFlip = System.getenv("LAES_SELFCHECK_FLIP"); o.keepTmp = System.getenv("KEEPTMP") != null;
+            final String pe = LaesFile.testEnv("LAES_PIECE"); if (pe != null) o.piece = Math.max(4096, CStd.atoll(pe) / 4096 * 4096);
+            o.forceRf64 = LaesFile.testEnv("LAES_FORCE_RF64") != null; o.selfCheckFlip = LaesFile.testEnv("LAES_SELFCHECK_FLIP"); o.keepTmp = System.getenv("KEEPTMP") != null;
             return o; }
     }
 

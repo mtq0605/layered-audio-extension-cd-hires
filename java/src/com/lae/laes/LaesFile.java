@@ -158,7 +158,7 @@ public final class LaesFile {
             if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                 || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))   // all in uint64
                 || I.whole <= -(1L << 40) || I.whole >= (1L << 40)) return "invalid master record";
-            if (U.gt(F64, WHOLE_MAX_FRAMES)) return "master too long for this decoder"; I.frames = F64;
+            if (U.gt(F64, WHOLE_MAX_FRAMES) || F64 > Integer.MAX_VALUE - 8) return "master too long for this decoder";   // FU27-1: a Java array holds at most 2^31 - 9 values I.frames = F64;
             System.arraycopy(body, sha, I.sha, 0, 32); final int j = I.storage == 2 ? Math.min(I.stages, info.get(I.refTier - 1).stages) : 0; final long nj = levLen(I.frames, I.stages - j);
             Pcm m = new Pcm(); m.rate = I.rate; m.bits = I.bits; long[][] top = new long[2][];
             for (int c = 0; c < 2; c++) {

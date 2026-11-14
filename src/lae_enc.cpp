@@ -225,7 +225,8 @@ static int outputForm(const std::string& out, int argc, char** argv, int from) {
 
 // lae_enc tag <in.wav> <out.wav> [tags] (2026-11-06): new tags without re-encoding. A new file is written ("fmt ", the new tags, then
 // every other chunk in its order; former LIST/INFO and "id3 " chunks are left out; no tags given = none); the input is not changed. The
-// new file's CD audio ("data") and "LAE " chunk are then compared byte for byte with the input's.
+// new file's CD audio ("data") and "LAE " chunk are then compared byte for byte with the input's. First the input must pass the
+// decoder's open check (2026-11-15, decoderOpens below): a damaged file is refused, nothing written.
 namespace m_tag {
 struct Ck { char id[4]; long long body; uint32_t len; };
 static bool walk(FILE* f, std::vector<Ck>& cks, std::string& why) {
@@ -272,11 +273,23 @@ static bool sameRange(FILE* a, long long offA, FILE* b, long long offB, unsigned
     if (_fseeki64(a, offA, SEEK_SET) || _fseeki64(b, offB, SEEK_SET)) return false; std::vector<uint8_t> x(1 << 20), y(1 << 20);
     while (len) { const size_t n = (size_t)std::min<unsigned long long>(len, x.size()); if (fread(x.data(), 1, n, a) != n || fread(y.data(), 1, n, b) != n || memcmp(x.data(), y.data(), n)) return false; len -= n; }
     return true; }
+// the decoder's open check (2026-11-15), before anything is written: the WAV form's "LAE " chunk (its CRC-32, the header and every
+// stream header) or the FLAC form's frames, MD5 and "LAE1" blocks, exactly as lae_dec opens the file. A damaged file is refused.
+static bool decoderOpens(const std::string& in, bool inFlac, std::string& why) {
+    wavio::Wav w; int flacRate = 0;
+    if (inFlac) { bool notLaey = true; why = laeyflac::readFile(in.c_str(), w.rate, w.pcm16, w.lae, notLaey); if (!why.empty()) return false; flacRate = w.rate; }
+    else if (!wavio::readCD(in.c_str(), w) || w.bits != 16 || w.ch != 2) { why = "not a 16-bit stereo WAV"; return false; }
+    m_dec::Decoder D; int code = 0; why = D.open(std::move(w.pcm16), std::move(w.lae), "full", 0, &code); if (!why.empty()) return false;
+    if (flacRate && flacRate != D.base) { why = "FLAC STREAMINFO gives " + std::to_string(flacRate) + " Hz, the extension's base rate is " + std::to_string(D.base) + " Hz"; return false; }
+    return true; }
+static bool openCheckFails(const std::string& in, bool inFlac) { std::string why; if (decoderOpens(in, inFlac, why)) return false;
+    printf("%s does not pass the decoder's open check (%s): lae_enc tag copies only undamaged files; nothing written\n", in.c_str(), why.c_str()); return true; }
 static int retagFlac(FILE* fi, const std::string& in, const std::string& out, const std::string& part, const laestag::Tags& tags) {
     std::error_code ec; std::vector<Bk> bks; long long audioOff = 0, end = 0; std::string why;
     if (!walkFlac(fi, bks, audioOff, end, why)) { fclose(fi); printf("%s: %s; nothing written\n", in.c_str(), why.c_str()); return 1; }
     bool haveLae = false; for (auto& k : bks) haveLae = haveLae || k.lae1;
     if (bks.empty() || bks[0].type != 0 || bks[0].len != 34 || !haveLae) { fclose(fi); printf("%s is not an LAE file in the FLAC form (it needs STREAMINFO and \"LAE1\" APPLICATION blocks); nothing written\n", in.c_str()); return 1; }
+    if (openCheckFails(in, true)) { fclose(fi); return 1; }
     std::vector<Bk> keep; for (size_t i = 1; i < bks.size(); i++) { const int t = bks[i].type; if (t != 0 && t != 1 && t != 4 && t != 6) keep.push_back(bks[i]); }
     const std::vector<uint8_t> tb = laestag::flacBlocks(tags, false, kLaeyEncoder);
     FILE* fo = fopen(part.c_str(), "wb"); bool ok = fo != nullptr;
@@ -312,6 +325,7 @@ static int retag(int argc, char** argv) {
     std::vector<Ck> cks; std::string why; if (!walk(fi, cks, why)) { fclose(fi); printf("%s: %s; nothing written\n", in.c_str(), why.c_str()); return 1; }
     const Ck* fmt = find(cks, "fmt "); const Ck* dat = find(cks, "data"); const Ck* lae = find(cks, "LAE ");
     if (!fmt || !dat || !lae) { fclose(fi); printf("%s is not an LAE file (it needs \"fmt \", \"data\" and \"LAE \" chunks); nothing written\n", in.c_str()); return 1; }
+    if (openCheckFails(in, false)) { fclose(fi); return 1; }
     std::vector<Ck> keep; keep.push_back(*fmt); for (auto& k : cks) if (&k != fmt && !isOldTag(fi, k)) keep.push_back(k);
     unsigned long long riff = 4 + tc.size(); for (auto& k : keep) riff += 8ULL + k.len + (k.len & 1);
     if (riff > 0xFFFFFFFFull) { fclose(fi); printf("the new file would exceed the 4 GB limit of WAV; nothing written\n"); return 1; }

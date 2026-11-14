@@ -185,9 +185,9 @@ static string readme() {
            "这是一张 CD-Extra 光盘。第 1 区段是普通的音乐 CD，任何 CD 机都能播放；它的音轨就是每一轨的 CD 层。\r\n"
            "LAE 文件夹里是扩展文件。用任何抓轨软件、任何设置抓下音轨，再把抓轨结果和这个文件夹交给 LAE 读取器（lae_cdx read）。\r\n"
            "读取器把每一轨的 CD 层和它的扩展文件合成 LAE 文件，LAE 解码器或播放器再用它播放高解析度版本。\r\n"; }
-static vector<iso::File> dataFiles(const vector<vector<uint8_t>>& lax, const vector<int>& trackNo) {
+static vector<iso::File> dataFiles(vector<vector<uint8_t>> lax, const vector<int>& trackNo) {   // f[0] README.TXT, f[1 + k] the file of lax[k] (moved in)
     vector<iso::File> f; string rm = readme(); f.push_back({"README.TXT", vector<uint8_t>(rm.begin(), rm.end())});
-    for (size_t k = 0; k < lax.size(); k++) { char nm[32]; snprintf(nm, sizeof nm, "LAE/TRACK%02d.LAX", trackNo[k]); f.push_back({nm, lax[k]}); } return f; }
+    for (size_t k = 0; k < lax.size(); k++) { char nm[32]; snprintf(nm, sizeof nm, "LAE/TRACK%02d.LAX", trackNo[k]); f.push_back({nm, std::move(lax[k])}); } return f; }
 static string finishImage(Image& im, vector<V5>& t, const string& label, const string& date, const set<int>& noext);
 static string layoutImage(vector<V5> t, const string& label, const string& date, long long cap, Image& im, const set<int>& noext = {}) {
     if (t.empty() || t.size() > 98) return "1 to 98 audio tracks are needed (L2: the data track takes one of the 99 track numbers)";
@@ -207,9 +207,12 @@ static string layoutImage(vector<V5> t, const string& label, const string& date,
 // the common end of both layouts: extension files (data session) and the capacity check
 static string finishImage(Image& im, vector<V5>& t, const string& label, const string& date, const set<int>& noext) {
     vector<vector<uint8_t>> lax; vector<int> no; im.lax.resize(t.size());
-    for (size_t k = 0; k < t.size(); k++) { if (noext.count((int)k + 1)) continue; im.lax[k] = laxOf(t[k], (uint16_t)(k + 1)); lax.push_back(im.lax[k]); no.push_back((int)k + 1); }
+    for (size_t k = 0; k < t.size(); k++) { if (noext.count((int)k + 1)) continue; lax.push_back(laxOf(t[k], (uint16_t)(k + 1))); no.push_back((int)k + 1); }
     im.isoLba = (uint32_t)(im.A2 + GAP2); string err;
-    im.iso = iso::build(dataFiles(lax, no), im.isoLba, label, date, 150, 300, &err); if (im.iso.empty()) return "data session: " + err;
+    {   // one copy of each extension file besides the volume (FU10-3): moved into the file list, then back into im.lax
+        vector<iso::File> files = dataFiles(std::move(lax), no);
+        im.iso = iso::build(files, im.isoLba, label, date, 150, 300, &err); if (im.iso.empty()) return "data session: " + err;
+        for (size_t i = 0; i < no.size(); i++) im.lax[(size_t)no[i] - 1].swap(files[i + 1].data); }
     im.N2 = (long long)im.iso.size() / 2048; im.total = im.A2 + GAP2 + im.N2; im.t.swap(t);
     if (im.total > im.cap) return "does not fit (P18): " + to_string(im.total) + " sectors needed, " + to_string(im.cap) + " available. Options: leave the extension out of some tracks "
                                   "(noext=K,...), use a larger disc, or limit the octaves (needs re-encoding). Nothing is removed automatically.";
@@ -877,7 +880,7 @@ static int realMain(int argc, char** argv) {
         if (lax.empty()) { printf("no .lax files in %s\n", pos[0].c_str()); return 1; }
         printf("tracks in the data session:"); for (int k : no) printf(" %d", k); printf(" (compare with BURN.TXT)\n");
         long long lba = 0; if (!lbaArg(pos[1], lba)) { printf("start address %s: give the sector address (LBA) as a whole number from 0 to 449999; nothing written\n", pos[1].c_str()); return 1; }
-        string err; auto img = iso::build(dataFiles(lax, no), (uint32_t)lba, arg(argc, argv, "label", "LAE_EXT"), arg(argc, argv, "date", nowUtc()), 150, 300, &err);
+        string err; auto img = iso::build(dataFiles(std::move(lax), no), (uint32_t)lba, arg(argc, argv, "label", "LAE_EXT"), arg(argc, argv, "date", nowUtc()), 150, 300, &err);
         if (img.empty()) { printf("%s\n", err.c_str()); return 1; } if (!writeBytes(fs::path(pos[2]), img.data(), img.size())) { printf("cannot write %s\n", pos[2].c_str()); return 2; }
         printf("session 2 written: %s, %zu sectors, start LBA %s\n", pos[2].c_str(), img.size() / 2048, pos[1].c_str()); return 0; }
     if (cmd == "read" && pos.size() >= 3) {

@@ -110,6 +110,26 @@ public final class LaeRetag {
         while (len > 0) { final int n = (int) Math.min(len, x.length); a.readFully(x, 0, n); b.readFully(y, 0, n);
             for (int i = 0; i < n; i++) if (x[i] != y[i]) return false; len -= n; }
         return true; }
+    // port of lae_enc.cpp:decoderOpens (decision 4, 2026-11-15): the decoder's open check, before anything is written: the WAV form's
+    // "LAE " chunk (its CRC-32, the header and every stream header) or the FLAC form's frames, MD5 and "LAE1" blocks, exactly as lae_dec
+    // opens the file (Java: the WAV form's CD layer read on demand, as LaeDec does; the result is the same). A damaged file is refused.
+    static boolean decoderOpens(String in, boolean inFlac, String[] why) {
+        CdPcm cdp; byte[] lae; int flacRate = 0; RandomAccessFile raf = null;
+        try {
+            if (inFlac) { int[] frate = {0}; short[][] fpcm = {null}; byte[][] flae = {null}; boolean[] notLaey = {true};
+                why[0] = LaeyFlac.readFile(in, frate, fpcm, flae, notLaey); if (!why[0].isEmpty()) return false; cdp = CdPcm.of(fpcm[0]); lae = flae[0]; flacRate = frate[0]; }
+            else { WavIo.Wav w = new WavIo.Wav(); if (!WavIo.readCD(in, w, false) || w.bits != 16 || w.ch != 2) { why[0] = "not a 16-bit stereo WAV"; return false; }
+                try { raf = new RandomAccessFile(in, "r"); } catch (IOException x) { why[0] = "not a 16-bit stereo WAV"; return false; }
+                final RandomAccessFile r = raf;
+                cdp = CdPcm.reader(new LaeyDecoder.ReadFn() { @Override public int read(long offset, byte[] buf, int off, int len) { try { r.seek(offset); r.readFully(buf, off, len); return 0; } catch (IOException x) { return -1; } } }, w.dataOff, w.dataValues, LaeDec.CD_CACHE);
+                lae = w.lae; }
+            LaeDecoder.Decoder D = new LaeDecoder.Decoder(); int[] code = {0}; why[0] = D.openCd(cdp, lae, "full", 0, code); if (!why[0].isEmpty()) return false;
+            if (flacRate != 0 && flacRate != D.base) { why[0] = "FLAC STREAMINFO gives " + flacRate + " Hz, the extension's base rate is " + D.base + " Hz"; return false; }
+            return true; }
+        finally { if (raf != null) try { raf.close(); } catch (IOException x) { /* read only */ } } }
+    // port of lae_enc.cpp:openCheckFails
+    static boolean openCheckFails(EncEnv env, String in, boolean inFlac) { final String[] why = {""}; if (decoderOpens(in, inFlac, why)) return false;
+        env.printf("%s does not pass the decoder's open check (%s): lae_enc tag copies only undamaged files; nothing written\n", in, why[0]); return true; }
     // port of lae_enc.cpp:m_tag::retagFlac (fi is closed by the caller)
     static int retagFlac(EncEnv env, RandomAccessFile fi, String in, String out, String part, LaesTags.Tags tags) {
         boolean ok = false;
@@ -118,6 +138,7 @@ public final class LaeRetag {
             if (!walkFlac(fi, bks, audioOff, end, why)) { env.printf("%s: %s; nothing written\n", in, why[0]); return 1; }
             boolean haveLae = false; for (Bk k : bks) haveLae = haveLae || k.lae1;
             if (bks.isEmpty() || bks.get(0).type != 0 || bks.get(0).len != 34 || !haveLae) { env.printf("%s is not an LAE file in the FLAC form (it needs STREAMINFO and \"LAE1\" APPLICATION blocks); nothing written\n", in); return 1; }
+            if (openCheckFails(env, in, true)) return 1;   // decision 4: a damaged file is refused
             List<Bk> keep = new ArrayList<Bk>(); for (int i = 1; i < bks.size(); i++) { final int t = bks.get(i).type; if (t != 0 && t != 1 && t != 4 && t != 6) keep.add(bks.get(i)); }
             final byte[] tb = LaesTags.flacBlocks(tags, false, kLaeyEncoder);
             try { BufferedOutputStream fo = new BufferedOutputStream(new FileOutputStream(part), 1 << 16);
@@ -169,6 +190,7 @@ public final class LaeRetag {
             if (!walk(fi, cks, why)) { env.printf("%s: %s; nothing written\n", in, why[0]); return 1; }
             final Ck fmt = find(cks, "fmt "), dat = find(cks, "data"), lae = find(cks, "LAE ");
             if (fmt == null || dat == null || lae == null) { env.printf("%s is not an LAE file (it needs \"fmt \", \"data\" and \"LAE \" chunks); nothing written\n", in); return 1; }
+            if (openCheckFails(env, in, false)) return 1;   // decision 4: a damaged file is refused
             List<Ck> keep = new ArrayList<Ck>(); keep.add(fmt); for (Ck k : cks) if (k != fmt && !isOldTag(fi, k)) keep.add(k);
             long riff = 4 + tc.length; for (Ck k : keep) riff += 8L + k.len + (k.len & 1);
             if (riff > 0xFFFFFFFFL) { env.printf("the new file would exceed the 4 GB limit of WAV; nothing written\n"); return 1; }

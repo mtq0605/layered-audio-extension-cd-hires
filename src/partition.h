@@ -59,7 +59,7 @@ inline MeanE meanEnergies(const Plane& P, const std::vector<char>& cellA, const 
         for (int j = 0; j < nb; j++) { double v = (*P.X)[(size_t)m * P.N + kb + j]; e += v * v; } if (lab[cid] == 3) { eD += e; nD++; } else { eC += e; nC++; } }
     MeanE r; r.eD = nD ? eD / nD : 1; r.eC = nC ? eC / nC : 1; return r; }
 inline Result run(const Plane& P, const std::vector<char>& cellA, const std::vector<int>& cellE, const std::vector<int>& lab,
-                  const std::vector<char>& noZL, bool equal, const Costs& cost, double lamD, double lamC, int wmode, double TH = -1, bool full = true,
+                  bool equal, const Costs& cost, double lamD, double lamC, int wmode, double TH = -1, bool full = true,
                   const MeanE* mean = nullptr, const Result* seed = nullptr) {
     // seed: totals of the blocks before this one (block-wise encoder): bits and shares keep adding in root order, as in one whole-track call
     // full = false (the share search): only bits and shares are computed; no stream, leaves or planes (same tree, same shares)
@@ -183,19 +183,19 @@ inline double shareC(const Result& r, int wm) { auto f = [](const Share& s) { re
 // smallest penalties meeting the mode's targets: bisection on lambda (log scale, 7 steps), C first with lambda D = 0, then D.
 // Raising lambda D only moves blocks up to tier D, which keeps every C cell in them at C or higher, so one round suffices.
 inline Result runTarget(const Plane& P, const std::vector<char>& cellA, const std::vector<int>& cellE, const std::vector<int>& lab,
-                        const std::vector<char>& noZL, bool equal, const Costs& cost, const Mode& md, int wm, double* lamOut = nullptr) {
+                        bool equal, const Costs& cost, const Mode& md, int wm, double* lamOut = nullptr) {
     const double HARD = 1e9; const MeanE me = meanEnergies(P, cellA, lab);   // the same for every pass of the search
     double lamD = 0, lamC = md.cShare >= 1.0 ? HARD : 0;
     auto solve = [&](bool forD) {
         double target = forD ? md.dShare : md.cShare; if (!forD && md.cShare >= 1.0) return;
-        Result r0 = run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm, -1, false, &me);
+        Result r0 = run(P, cellA, cellE, lab, equal, cost, lamD, lamC, wm, -1, false, &me);
         if ((forD ? shareD(r0, wm) : shareC(r0, wm)) >= target) return;
         double lo = 1e-3, hi = 1e4;
         for (int it = 0; it < 7; it++) { double mid = std::sqrt(lo * hi); (forD ? lamD : lamC) = mid;
-            Result r = run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm, -1, false, &me);
+            Result r = run(P, cellA, cellE, lab, equal, cost, lamD, lamC, wm, -1, false, &me);
             if ((forD ? shareD(r, wm) : shareC(r, wm)) >= target) hi = mid; else lo = mid; }
         (forD ? lamD : lamC) = hi; };
     solve(false); solve(true);
     if (lamOut) { lamOut[0] = lamD; lamOut[1] = lamC; }
-    return run(P, cellA, cellE, lab, noZL, equal, cost, lamD, lamC, wm, -1, true, &me); }
+    return run(P, cellA, cellE, lab, equal, cost, lamD, lamC, wm, -1, true, &me); }
 }   // namespace part

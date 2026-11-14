@@ -116,12 +116,12 @@ int main(int argc, char** argv) {
         vector<int> edges{k0};
         if (getenv("OCTSPLIT")) for (double f = 2 * baseNyq; f < rate / 2 - 1; f *= 2) { int b = (int)lround(f / (rate / 2 / N)); if (b > edges.back()) edges.push_back(b); }
         edges.push_back(N);
-        struct Seg { part::Plane P; vector<char> cA, noF, nz; vector<int> cE, lab; part::Result R; double lam[2] = {0, 0}; };   // nz: noise-like cell (never raised by the closed loop)
+        struct Seg { part::Plane P; vector<char> cA, nz; vector<int> cE, lab; part::Result R; double lam[2] = {0, 0}; };   // nz: noise-like cell (never raised by the closed loop)
         vector<Seg> segs(edges.size() - 1);
         // full scan: every non-A cell gets a depth tag from the bits it needs above its floor (most bits = D, then C, the rest B).
         // A is fixed before this point (silence + noise removed before encoding) and never changes.
         for (size_t si = 0; si < segs.size(); si++) { Seg& S = segs[si]; S.P = part::Plane{&X, K, N, edges[si], edges[si + 1], part::numCells(edges[si], edges[si + 1])};
-            size_t nc = (size_t)K * S.P.nc; S.cA.assign(nc, 0); S.noF.assign(nc, 0); S.nz.assign(nc, 0); S.cE.assign(nc, 0); S.lab.assign(nc, 0);
+            size_t nc = (size_t)K * S.P.nc; S.cA.assign(nc, 0); S.nz.assign(nc, 0); S.cE.assign(nc, 0); S.lab.assign(nc, 0);
             for (long m = 0; m < K; m++) for (int c = 0; c < S.P.nc; c++) { size_t cid = (size_t)m * S.P.nc + c; int kb; int nb = part::cellBins(S.P, c, kb);
                 double mx = 0; for (int j = 0; j < nb; j++) mx = max(mx, fabs((double)X[(size_t)m * N + kb + j]));
                 int g = kb2g[kb]; size_t id = (size_t)m * ng + g; double fl = Fl[(size_t)g * nseg + m / seg];
@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
                 // carries a structure if any of them does, and uses the lower floor
                 int g2 = kb2g[kb + nb - 1]; size_t id2 = (size_t)m * ng + g2; bool st = structMap[id] || structMap[id2];
                 if (g2 != g) fl = min(fl, Fl[(size_t)g2 * nseg + m / seg]);
-                int e = (int)ceil(log2(mx + 1)); S.cE[cid] = e; S.noF[cid] = st || fullBand;
+                int e = (int)ceil(log2(mx + 1)); S.cE[cid] = e;
                 if (cls[id] == 0 && cls[id2] == 0) { S.cA[cid] = 1; continue; }
                 int need;
                 if (fullBand && depthAdapt && !FlM.empty()) { need = e - (int)floor(log2(max(1.0, FlM[(size_t)g * nseg + m / seg]))); S.nz[cid] = need <= 2 && !st; }   // depth: bits above the master's own floor
@@ -144,7 +144,7 @@ int main(int argc, char** argv) {
         // Qall (all segments' planes together) is needed only by the closed loop; the final bisection does not build it (memory)
         auto solveAll = [&](bool bisect) { if (bisect) vector<i32>().swap(Qall); else Qall.assign((size_t)K * N, 0); for (auto& S : segs) {
             S.R = part::Result();   // the previous result is not needed by the search: free it first (memory)
-            S.R = bisect ? part::runTarget(S.P, S.cA, S.cE, S.lab, S.noF, eq, cost, MD, wm, S.lam) : part::run(S.P, S.cA, S.cE, S.lab, S.noF, eq, cost, S.lam[0], S.lam[1], wm);
+            S.R = bisect ? part::runTarget(S.P, S.cA, S.cE, S.lab, eq, cost, MD, wm, S.lam) : part::run(S.P, S.cA, S.cE, S.lab, eq, cost, S.lam[0], S.lam[1], wm);
             if (!bisect) for (long m = 0; m < K; m++) for (int k = 0; k < S.R.bw; k++) Qall[(size_t)m * N + S.R.k0 + k] += S.R.Q[(size_t)m * S.R.bw + k]; } };   // each segment holds its own bins
         // closed loop on the tags themselves: every cell kept at its own tier (penalties effectively infinite), so a tag is raised
         // only where the content is damaged even at its own tier; the mode's demotion is applied afterwards (final bisection)
@@ -181,7 +181,7 @@ int main(int argc, char** argv) {
                         vector<double> nbv; nbv.reserve(16); for (long m = 8; m < K - 8; m++) { nbv.clear(); for (long d = -8; d <= 8; d++) if (labs(d) > 1) nbv.push_back(eo[m + d]);
                             nth_element(nbv.begin(), nbv.begin() + nbv.size() / 2, nbv.end()); double medo = nbv[nbv.size() / 2];
                             if (eo[m] > 6 * medo && eo[m] > 16.0 && en[m] > 0.25 * eo[m]) mark[(size_t)m * S.P.nc + c] = 1; } }
-                    for (size_t cid = 0; cid < mark.size(); cid++) if (mark[cid] && !S.cA[cid] && !S.nz[cid] && S.lab[cid] < 3) { S.lab[cid]++; S.noF[cid] = 1; raised++; } } }
+                    for (size_t cid = 0; cid < mark.size(); cid++) if (mark[cid] && !S.cA[cid] && !S.nz[cid] && S.lab[cid] < 3) { S.lab[cid]++; raised++; } } }
             part::Share cn, en; long nl = 0; double bits = 0;
             for (auto& S : segs) { cn.dTot += S.R.cnt.dTot; cn.dKept += S.R.cnt.dKept; cn.cTot += S.R.cnt.cTot; cn.cKept += S.R.cnt.cKept;
                 en.dTot += S.R.en.dTot; en.dKept += S.R.en.dKept; en.cTot += S.R.en.cTot; en.cKept += S.R.en.cKept; nl += (long)S.R.leaves.size(); bits += S.R.bits; }

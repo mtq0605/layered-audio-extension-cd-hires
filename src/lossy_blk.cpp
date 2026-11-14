@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
         rowsUpTo(j == nblk - 1 ? L : std::min(L, m1 * N - N), detA, xsig); }
     if (masterRef) { double mn = 1e30, mxv = 0; for (double v : FlM) { mn = min(mn, v); mxv = max(mxv, v); } printf("master floor per band (24-bit LSB, coefficient rms): min %.1f max %.1f\n", mn, mxv); }
     const std::vector<Ev> toneEv = detA.finish();
-    // ---- segments (frequency) and the per-cell records (3 bytes per cell: exponent, tag, flags 1 = A, 2 = no zero level, 4 = noise-like)
+    // ---- segments (frequency) and the per-cell records (3 bytes per cell: exponent, tag, flags 1 = A, 2 = a cell of the structure, of the depth layer, raised by the closed loop or a G cell (a mark only: the partition does not read it, and with zs every leaf gets a zero level), 4 = noise-like)
     const char* pm = getenv("PART"); { const char* rv = getenv(fullBand ? "RULE_D" : "RULE_F"); part::ruleRef() = rv ? atoi(rv) : 0; part::zeroSignOpt() = getenv("ZSIGN") != nullptr; }
     int mi = part::modeIndex(pm); if (mi < 0) { printf("unknown mode %s (max, 1, 3, 5, keep, keep20)\n", pm); return 1; }
     const part::Mode& MD = part::MODES[mi]; bool eq = getenv("PARTEQ") != nullptr; int wm = getenv("PARTW") ? atoi(getenv("PARTW")) : 0;
@@ -271,9 +271,9 @@ int main(int argc, char** argv) {
     meanScan();
     // ---- DP scans
     part::Costs cost; for (int t = 0; t < 4; t++) for (int b = 0; b <= 32; b++) cost.bl[t][b] = 1.0 + b;
-    auto cellsOf = [&](Seg& S, long long m0, long long m1, vector<char>& cA, vector<int>& cE, vector<int>& lab, vector<char>& noF) {
-        const size_t n = (size_t)((m1 - m0) * S.nc), o = (size_t)(m0 * S.nc); cA.resize(n); cE.resize(n); lab.resize(n); noF.resize(n);
-        for (size_t i = 0; i < n; i++) { cA[i] = S.fl[o + i] & 1; cE[i] = S.cE[o + i]; lab[i] = S.lab[o + i]; noF[i] = (S.fl[o + i] & 2) ? 1 : 0; } };
+    auto cellsOf = [&](Seg& S, long long m0, long long m1, vector<char>& cA, vector<int>& cE, vector<int>& lab) {
+        const size_t n = (size_t)((m1 - m0) * S.nc), o = (size_t)(m0 * S.nc); cA.resize(n); cE.resize(n); lab.resize(n);
+        for (size_t i = 0; i < n; i++) { cA[i] = S.fl[o + i] & 1; cE[i] = S.cE[o + i]; lab[i] = S.lab[o + i]; } };
     // one pass of run() over all blocks for the segments in 'which' with their lambdas; full: Q rows to the Q file (all segments together),
     // and the code-length histogram of the leaves when h != null
     auto dpScan = [&](const vector<int>& which, const vector<double>& lD, const vector<double>& lC, bool full, vector<vector<double>>* h, vector<part::Result>& tot, vector<long>& nleaves,
@@ -282,8 +282,8 @@ int main(int argc, char** argv) {
         for (long long j = 0; j < nblk; j++) { long long m0, m1; blk(j, m0, m1); std::vector<int32_t> X; Xf.read(m0, m1, X); std::vector<int32_t> Qall;
             if (full) Qall.assign(X.size(), 0);
             for (size_t wi = 0; wi < which.size(); wi++) { const int si = which[wi]; Seg& S = segs[si]; part::Plane P{&X, (long)(m1 - m0), N, S.k0, S.k1, S.nc};
-                vector<char> cA, noF; vector<int> cE, lab; cellsOf(S, m0, m1, cA, cE, lab, noF);
-                part::Result R = part::run(P, cA, cE, lab, noF, eq, cost, lD[wi], lC[wi], wm, -1, full, &S.me, &tot[si]);
+                vector<char> cA; vector<int> cE, lab; cellsOf(S, m0, m1, cA, cE, lab);
+                part::Result R = part::run(P, cA, cE, lab, eq, cost, lD[wi], lC[wi], wm, -1, full, &S.me, &tot[si]);
                 tot[si].bits = R.bits; tot[si].cnt = R.cnt; tot[si].en = R.en; tot[si].zsum = R.zsum; tot[si].zcnt = R.zcnt; nleaves[si] += (long)R.leaves.size();
                 if (h) for (auto& lf : R.leaves) { if (!lf.tier) continue; int sh = part::shiftOf(lf.E, lf.tier);
                     for (long m = lf.m0; m < lf.m1; m++) for (int c = lf.c0; c < lf.c1; c++) { int kb; int nb = part::cellBins(P, c, kb);
@@ -420,7 +420,7 @@ int main(int argc, char** argv) {
                     for (int jj = 0; jj < nb; jj++) { const size_t i = (size_t)((m - m0) * N + kb + jj); mx = max(mx, fabs((double)XT[i])); if (all && !marked(m, kb + jj)) all = false; }
                     if (!(ge > gSig2 * nb)) continue;   // G at or below the 24-bit floor: stays A
                     if (!all && me > gSig2 * nb) { gKept++; continue; }   // not deleted and the master is not silent here: left as it is
-                    const int e = (int)ceil(lmath::log2(mx + 1)); T.cE[cid] = (uint8_t)e; T.lab[cid] = (uint8_t)(gLv == 'b' ? 1 : gLv == 'c' ? 2 : (e <= 4 ? 2 : 3)); T.fl[cid] = 2;   // 2 = no zero level: zeros stay zero (no filling)
+                    const int e = (int)ceil(lmath::log2(mx + 1)); T.cE[cid] = (uint8_t)e; T.lab[cid] = (uint8_t)(gLv == 'b' ? 1 : gLv == 'c' ? 2 : (e <= 4 ? 2 : 3)); T.fl[cid] = 2;   // flag 2 marks a G cell; the partition does not read it. With zs these cells get a zero level like every leaf, by design: where a coefficient that g is responsible for becomes zero, the up-converted CD layer's noise would stay there, and zs reverses it (g itself makes no zero level)
                     (e <= 4 ? gC : gD)++;
                     for (int jj = 0; jj < nb; jj++) { const size_t i = (size_t)((m - m0) * N + kb + jj); XG[i] = XT[i]; } } }
             Xf.write(m0, XG.data(), m1 - m0); }

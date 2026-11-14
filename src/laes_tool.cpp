@@ -87,7 +87,7 @@ static const char* kShellBad = "$`\"\\";   // FU15-1: characters sh still reads 
 #endif
 using namespace laes;
 namespace fs = std::filesystem;
-static bool readAll(const std::string& p, std::vector<uint8_t>& b) { FILE* f = fopen(p.c_str(), "rb"); if (!f) return false; _fseeki64(f, 0, SEEK_END); long long s = _ftelli64(f); _fseeki64(f, 0, SEEK_SET);
+static bool readAll(const std::string& p, std::vector<uint8_t>& b) { FILE* f = fopen(p.c_str(), "rb"); if (!f) return false; _fseeki64(f, 0, SEEK_END); long long s = _ftelli64(f); if (s < 0) { fclose(f); return false; } _fseeki64(f, 0, SEEK_SET);   // FU15-7 (1): a failed ftell is a read error
     b.resize((size_t)s); bool ok = fread(b.data(), 1, b.size(), f) == b.size(); fclose(f); return ok; }
 static bool writeAll(const std::string& p, const std::vector<uint8_t>& b) { FILE* f = fopen(p.c_str(), "wb"); if (!f) return false; bool ok = fwrite(b.data(), 1, b.size(), f) == b.size(); return fclose(f) == 0 && ok; }
 // ---- WAV read (16/24/32-bit integer PCM, stereo; PCM or EXTENSIBLE with the PCM sub-format) + the "LAE " chunk body
@@ -395,6 +395,8 @@ static int laesMain(int argc, char** argv) {
         const unsigned long long topUsed = flag(argc, argv, "--small-disk") ? top / 2 : top;
         return std::max<int64_t>(4096, (int64_t)((topUsed >> maxStages) / 4096 * 4096)); };
     const int threads = laesfast::defaultThreads();
+    { const std::string mm = arg(argc, argv, "--mem"); char* e = nullptr; const double gb = mm.empty() ? 1 : strtod(mm.c_str(), &e);   // FU15-7 (2) (2026-11-14): checked before any work
+      if (!mm.empty() && (*e || !(gb > 0 && gb <= 1048576))) { printf("--mem=<GB> must be a number of GB above 0, e.g. --mem=4 (given: %s)\n", mm.c_str()); return 1; } }
     if (cmd == "align" && argc >= 4) {   // check only: prints T and the band; nothing is moved or written
         Pcm cd; std::string e = readWav(argv[2], cd); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         if (cd.bits != 16 || (cd.rate != 44100 && cd.rate != 48000)) { printf("the core master must be 16-bit at 44100 or 48000 Hz\n"); return 2; }

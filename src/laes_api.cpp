@@ -12,7 +12,7 @@
 #include "laes_play.h"
 
 struct laes_file { laesp::FnSrc src; laesp::File f; };
-struct laes_play { laesp::Player p; std::string err; };
+struct laes_play { laesp::Player p; };
 namespace {
 void setErrS(char* err, int errlen, const std::string& m) { if (!err || errlen <= 0) return; size_t n = std::min(m.size(), (size_t)errlen - 1); memcpy(err, m.data(), n); err[n] = 0; }
 }
@@ -61,7 +61,8 @@ LAE_API laes_play* LAE_CALL laes_start_all(laes_file* h, int choice, int threads
 LAE_API laes_play* LAE_CALL laes_start_at(laes_file* h, int choice, uint64_t frame, int threads, char* err, int errlen) { return startImpl(h, choice, threads, false, err, errlen, frame); }
 LAE_API void LAE_CALL laes_index_layers(laes_file* h, const volatile int* cancel, int threads) {
     if (!h) return; std::atomic<bool> stop{false}; std::atomic<bool> done{false};
-    std::thread watch([&] { while (!done) { if (cancel && *cancel) stop = true; std::this_thread::sleep_for(std::chrono::milliseconds(20)); } });
+    std::thread watch; try { watch = std::thread([&] { while (!done) { if (cancel && *cancel) stop = true; std::this_thread::sleep_for(std::chrono::milliseconds(20)); } }); }
+    catch (...) { return; }   // F06-6: no thread for the cancel flag: nothing is indexed (as if cancelled at once); no exception leaves this C function
     try { h->f.indexLayers(&stop, threads > 0 ? threads : std::max(1, laesfast::defaultThreads() / 2)); } catch (...) {}
     done = true; watch.join(); }
 LAE_API int64_t LAE_CALL laes_index_save(laes_file* h, void* buf, int64_t cap) {

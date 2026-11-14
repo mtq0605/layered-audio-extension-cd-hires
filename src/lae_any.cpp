@@ -143,7 +143,8 @@ std::string fillLaes(lae_any& a) {
     return ""; }
 
 lae_any* openImpl(lae_read_fn rd, void* ctx, uint64_t size, FILE* own, lae_probe_info* format, char* err, int errlen) {
-    std::unique_ptr<lae_any> a(new lae_any()); a->fp = own; a->rd = rd; a->ctx = ctx; a->size = size;
+    std::unique_ptr<lae_any> a; try { a.reset(new lae_any()); } catch (...) { if (own) fclose(own); throw; }   // F06-6: the file is closed also when this fails
+    a->fp = own; a->rd = rd; a->ctx = ctx; a->size = size;
     std::string why; const int r = probe(rd, ctx, size, &a->pi, why); if (format) *format = a->pi;
     if (r) { setE(err, errlen, why); return nullptr; }
     if (a->pi.format == LAE_FORMAT_NONE) { setE(err, errlen, a->pi.container == LAE_CONTAINER_NONE ? "no LAE extension: not a WAV or FLAC file" : "no LAE extension: a plain WAV / FLAC file"); return nullptr; }

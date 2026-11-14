@@ -187,16 +187,6 @@ static void clearModuleEnv() {
 static std::vector<uint8_t> slurp(const std::string& p) { return encio::readAll<uint8_t>(p.c_str()); }   // a missing or unreadable file stops the encoder
 static bool exists(const std::string& p) { std::error_code ec; return std::filesystem::exists(p, ec); }
 static long long fileSize(const std::string& p) { std::error_code ec; auto n = std::filesystem::file_size(p, ec); return ec ? -1 : (long long)n; }
-// number of samples of a 32-bit PCM WAV whose lowest byte is not zero (what reducing it to 24 bit would drop); -1 if unreadable
-static long long low8Count(const char* path) {
-    FILE* f = fopen(path, "rb"); if (!f) return -1; long long n = encio::size(f); if (n < 12) { fclose(f); return -1; }
-    std::vector<uint8_t> b; try { b.resize((size_t)n); } catch (...) { fclose(f); return -1; }
-    bool ok = fread(b.data(), 1, b.size(), f) == b.size(); fclose(f); if (!ok) return -1;
-    size_t p = 12; long long cnt = 0;
-    while (p + 8 <= b.size()) { uint32_t len = b[p + 4] | b[p + 5] << 8 | b[p + 6] << 16 | (uint32_t)b[p + 7] << 24; size_t body = p + 8; if (body + len > b.size()) len = (uint32_t)(b.size() - body);
-        if (!memcmp(&b[p], "data", 4)) { for (size_t i = body; i + 4 <= body + len; i += 4) if (b[i]) cnt++; return cnt; }
-        p = body + len + (len & 1); }
-    return -1; }
 // An input WAV / RF64 / W64 whose header gives a data length beyond the end of the file (2026-11-14): the file is read to its end as
 // before (wavin::probe, wavio::read, wavio::readCD and the CUE reader all limit the length to the file), and the user is told.
 static void longHeaderNote(const char* path, const wavin::Info& in) {
@@ -441,7 +431,7 @@ static int encode(int argc, char** argv) {
                 char line[32] = {0}; if (!fgets(line, sizeof line, stdin) || line[0] != '2') { printf("task ended: nothing encoded\n"); oldNote(); return 1; } }
             note32 = "input 32 bit, encoded as 24 bit"; } }
     const double base = fmod((double)w.rate, 44100.0) == 0 ? 44100.0 : 48000.0; int stages = (int)lround(lmath::log2(w.rate / base));
-    if (fabs(base * (1 << stages) - w.rate) > 0.5 || stages < 1 || stages > 3) { printf("rate %d is not 2/4/8 x 44.1 or 48 kHz\n", w.rate); oldNote(); return 1; }
+    if (stages < 1 || stages > 3 || fabs(base * (1 << stages) - w.rate) > 0.5) { printf("rate %d is not 2/4/8 x 44.1 or 48 kHz\n", w.rate); oldNote(); return 1; }
     if (manual) {   // cdalign=<o>: parsed as o = manualPlace - manualPhi / U (U units per master sample), then the nearest whole offset and the fraction
         const long long Ux = lae_fd::unitsPerMaster(stages);
         if (manualF == 0) { manualPlace = manualSg * manualI; manualPhi = 0; }
@@ -608,19 +598,19 @@ static int encode(int argc, char** argv) {
                         if (mv != 0) {   // the fraction (2026-10-23): digital silence at both ends first, so that what the move carries past the master's first /
                             // last sample is kept; afterwards only what is still digital silence is removed again: at most the added frames, never a frame of
                             // the given CD. Nothing about it is stored anywhere; decoders never discard a sample.
-                            const long P = 128; const long long up1 = 1LL << stages, Pm = (long long)P * up1;
-                            c.pcm16.insert(c.pcm16.begin(), 2 * (size_t)P, (int16_t)0); c.pcm16.insert(c.pcm16.end(), 2 * (size_t)P, (int16_t)0); have = (long)c.pcm16.size() / 2;
+                            const long Pcd = 128; const long long up1 = 1LL << stages, Pm = (long long)Pcd * up1;   // Pcd: CD frames of digital silence at each end (not the mirror padding P)
+                            c.pcm16.insert(c.pcm16.begin(), 2 * (size_t)Pcd, (int16_t)0); c.pcm16.insert(c.pcm16.end(), 2 * (size_t)Pcd, (int16_t)0); have = (long)c.pcm16.size() / 2;
                             masterRange(0, Lm, Pm, Pm); Lm += 2 * Pm;
                             long nclip = 0; { const blkio::View m(mFile); m_align::moveMasterFile(m, Lm, mv, mNew, nclip); } masterReplace();   // then the fraction: the placed master's waveform taken mv later
                             if (nclip) printf("%sWARNING: %ld samples of the moved master exceed 24-bit full scale and are hard-clipped\n", pre.c_str(), nclip);
                             long kL = 0, kT = 0;
                             { const blkio::View m(mFile); auto silent = [&](long long a) { for (long long i = a; i < a + up1; i++) if (m[(size_t)i * 2] || m[(size_t)i * 2 + 1]) return false; return true; };
-                              while (kL < P && silent((long long)kL * up1)) kL++; while (kT < P && silent(Lm - (long long)(kT + 1) * up1)) kT++; }
+                              while (kL < Pcd && silent((long long)kL * up1)) kL++; while (kT < Pcd && silent(Lm - (long long)(kT + 1) * up1)) kT++; }
                             c.pcm16.erase(c.pcm16.end() - 2 * (size_t)kT, c.pcm16.end()); c.pcm16.erase(c.pcm16.begin(), c.pcm16.begin() + 2 * (size_t)kL); have = (long)c.pcm16.size() / 2;
                             if (kL || kT) masterRange((long long)kL * up1, Lm - (long long)kT * up1, 0, 0); Lm -= (long long)(kL + kT) * up1;
-                            padP = P; cutL = kL; cutT = kT; cdAddLead += P - kL; cdAddTail += P - kT;
+                            padP = Pcd; cutL = kL; cutT = kT; cdAddLead += Pcd - kL; cdAddTail += Pcd - kT;
                             printf("%sdigital silence: %ld CD frames added at each end before the move; removed again where still digital silence: start %ld, end %ld (kept: start %ld, end %ld)\n",
-                                   pre.c_str(), P, kL, kT, P - kL, P - kT); }
+                                   pre.c_str(), Pcd, kL, kT, Pcd - kL, Pcd - kT); }
                         if (!spaceOk(reuse) || !derive()) { A.kind = 3; return A; }
                         b = slurp(T("b16.s16")); nb0 = (long)b.size() / 4; need = nb0 - 2 * pb0; b24 = encio::readAll<int32_t>(T("b24.s32").c_str()); }
                     m_align::Place qc = q;   // the layout cdOnly sees: the frames of added silence that the move filled are zeros added to the master too

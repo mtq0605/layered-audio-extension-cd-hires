@@ -25,6 +25,7 @@ public final class LaeyAutoAligner implements LaesEncoder.Aligner {
         LaesEncoder.AutoT A = new LaesEncoder.AutoT(); int st = 0; while ((cd.rate << st) < m.rate && st < 4) st++;
         if ((cd.rate << st) != m.rate || st > 3) { A.why = "master rate must be the core master rate times 1, 2, 4 or 8"; return A; }
         if (st == 0) { A.why = "LAEY's search needs a master at 2, 4 or 8 times the core master rate; give T by hand (master.wav@T)"; return A; }
+        if (cd.frames() < 1 || m.frames < 1) { A.why = (cd.frames() < 1 ? "the core master" : "the master") + " has no samples: there is nothing to align"; return A; }   // FU15-4 (as laes_tool.cpp 4977ac7): LAEY's check needs samples on both sides
         final String dummy = new File(System.getProperty("java.io.tmpdir"), "laes_align_unused.lae").getPath();   // cdcheck encodes nothing
         final StringBuilder out = new StringBuilder();
         String[] args = m.bits == 32 ? new String[] {"lae_enc", mPath, dummy, "3", "cd=" + cdPath, "cdcheck", "bits=24"} : new String[] {"lae_enc", mPath, dummy, "3", "cd=" + cdPath, "cdcheck"};

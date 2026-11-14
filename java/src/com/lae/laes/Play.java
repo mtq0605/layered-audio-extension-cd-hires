@@ -446,7 +446,7 @@ public final class Play {
                     try { if (coreErr.isEmpty()) coreFeed(b, 0, b.length); } catch (RuntimeException x) { coreErr = String.valueOf(x.getMessage()); }
                     catch (OutOfMemoryError x) { coreErr = "bad allocation"; } } } }, "laes-core");
             ct.start();
-            Hasher hs = new Hasher();
+            Hasher hs = new Hasher(); boolean readAll = false;
             try {
                 for (long a = 0; a < n; a += RD) { final int k = (int) Math.min(RD, n - a); final byte[] buf = new byte[k]; src.read(a, buf, 0, k); hs.push(buf);
                     for (int s = 0; s < payload.cnt; s++) {   // payload bytes in this read
@@ -456,7 +456,9 @@ public final class Play {
                     final long c0 = Math.max(a, audioOff), c1 = Math.min(a + k, audioOff + audioLen);   // core bytes in this read
                     if (c0 < c1) { final byte[] piece = (c0 == a && c1 == a + k) ? buf : java.util.Arrays.copyOfRange(buf, (int) (c0 - a), (int) (c1 - a));
                         synchronized (cm) { while (cq.size() >= 4) { try { cm.wait(); } catch (InterruptedException x) { throw fail("interrupted"); } } cq.addLast(piece); cm.notifyAll(); } } }
-            } finally { synchronized (cm) { cend = true; cm.notifyAll(); } joinQuiet(ct); }
+                readAll = true;
+            } finally { synchronized (cm) { cend = true; cm.notifyAll(); } joinQuiet(ct);
+                if (!readAll) hs.close(); }   // FU25-1: a read that failed half-way also ends the SHA-256 thread (it waited for ever, holding its buffers)
             hs.finish(fileSha);
             final long crcV = crc.getValue();
             if (flac) { flacFrames(true); if (!coreErr.isEmpty()) return "FLAC core master: " + coreErr;

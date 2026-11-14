@@ -4,6 +4,7 @@
 //   lae_cdx pack <v5.wav> <out.lax> [track=N]          extension file of one track (section 3)
 //   lae_cdx split <v5.wav> <base.wav> <ext.lax> [track=N]   base-layer WAV + extension file (F2, distribution as two files)
 //   lae_cdx repack <base.wav> <ext.lax> <out.v5.wav>    base-layer file + extension file -> v5 WAV (F3 pairing, else section 6)
+//        the base-layer file: 16-bit stereo WAV, or FLAC (16-bit, 44100 Hz, 2 channels; known by its content)
 //   lae_cdx image <outdir> <t1.v5.wav> [t2.v5.wav ...] [noext=K[,K...]] [label=NAME] [date=YYYYMMDDhhmmss] [capacity=SECTORS] [verbose=1] [layout=<publisher.cue>]
 //        CD-Extra image (sections 2, 5): AUDIO.BIN, IMAGE.CUE, DATA.ISO, SESSION1.CUE, BURN.TXT, LAE\TRACKnn.LAX; self-check first.
 //        <outdir> must be new or empty. noext: these tracks go on the disc as CD only, without an extension file (D7, P18)
@@ -16,6 +17,7 @@
 //   lae_cdx read <outdir> <extensions> <audio...> [W=N]
 //        the reader (section 6); <extensions> = a folder with .lax files, or iso:<DATA.ISO>@<startLba>;
 //        <audio> = one .cue, or one audio file (no TOC), or several audio files (TOC from the file order)
+//        audio files: 16-bit stereo WAV; FLAC (16-bit, 44100 Hz, 2 channels; in a CUE under FILE type WAVE); .bin = raw PCM
 //   lae_cdx sim <imagedir> <outdir> <form> [offset=N] [pregap=1] [overread=N] [change=K] [slip=K]
 //        simulated rips for tests; form: disc, disc-nocue, tracks, tracks-nocue, singleK (the file of track K alone),
 //        tracks-gapnext[-nocue] / tracks-gapomit[-nocue] (the INDEX 00 gaps of tracks 2... in the next file / left out)

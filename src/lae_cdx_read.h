@@ -21,6 +21,7 @@
 #include <functional>
 #include <filesystem>
 #include "lae_cdx.h"
+#include "laes_flac.h"  // the project's own FLAC reader (RFC 9639): bit reader, subframes, CRC-8 / CRC-16; used by parseFlac (2026-11-14)
 #include "iso9660.h"
 #include "win_utf8.h"   // fromAnsi: the ANSI reading of a CUE file name (2026-11-05)
 namespace cdxr {
@@ -62,6 +63,60 @@ inline std::string parseWav(const uint8_t* b, size_t size, int& rate, std::vecto
     return ""; }
 inline std::string parseWav(const std::vector<uint8_t>& b, int& rate, std::vector<int16_t>& pcm, std::vector<uint8_t>* lae) { return parseWav(b.data(), b.size(), rate, pcm, lae); }
 
+// ---- FLAC in memory (RFC 9639): a rip or a base-layer file stored as FLAC (F2-F4). Accepted: 16-bit, 44100 Hz, 2 channels, nothing
+// else. The subframes, the bit reader and the CRCs are those of laes_flac.h; the frame loop is here because a rip from another
+// encoder uses what the LAES core master never does: left/side, side/right and mid/side frames (the side channel has 17 bits), the
+// variable block size strategy, any metadata blocks, a STREAMINFO without a sample count. Every frame is checked by its CRC-8 and
+// CRC-16; a STREAMINFO MD5 that is set (not all zero) must equal the MD5 of the decoded samples. An ID3 tag before or after the
+// stream is not accepted. The decoded samples go the same way as those of a WAV file.
+inline std::string parseFlac(const uint8_t* f, size_t size, int& rate, std::vector<int16_t>& pcm) {
+    pcm.clear(); if (size < 8 || memcmp(f, "fLaC", 4)) return "not a FLAC file";
+    size_t p = 4; bool last = false, haveSi = false; laesflac::Info in;
+    while (!last) { if (size - p < 4) return "FLAC metadata truncated"; last = (f[p] & 0x80) != 0; const int type = f[p] & 0x7F; const size_t len = (size_t)f[p + 1] << 16 | (size_t)f[p + 2] << 8 | f[p + 3]; p += 4;
+        if (len > size - p) return "FLAC metadata truncated"; if (type == 127) return "bad FLAC metadata block"; if (!haveSi && type != 0) return "FLAC STREAMINFO is not the first metadata block";
+        if (type == 0) { if (haveSi || len != 34) return "bad FLAC STREAMINFO"; laesflac::BR r{f + p, 34}; in.minBs = (int)r.get(16); in.maxBs = (int)r.get(16); r.get(24); r.get(24);
+            in.rate = (int)r.get(20); in.channels = (int)r.get(3) + 1; in.bps = (int)r.get(5) + 1; in.total = r.get(36); memcpy(in.md5, f + p + 18, 16); haveSi = true; }
+        p += len; }
+    const std::string want = " (accepted: 16-bit, 44100 Hz, 2 channels)";
+    if (in.channels != 2) return "FLAC with " + std::to_string(in.channels) + " channel(s)" + want;
+    if (in.bps != 16) return "FLAC is " + std::to_string(in.bps) + "-bit" + want;
+    if (in.rate != 44100) return "FLAC sample rate " + std::to_string(in.rate) + " Hz" + want;
+    if (in.maxBs < 16) return "bad FLAC STREAMINFO block size";
+    const uint64_t cap = 1ull << 28; if (in.total > cap) return "FLAC longer than 2^28 samples per channel (more than a CD holds)";
+    std::vector<int64_t> a, b; uint64_t have = 0, frameNo = 0;
+    while (p < size) { laesflac::BR r{f + p, size - p}; const uint8_t* fp = f + p;
+        if (r.get(15) != 0x7FFC) return "FLAC frame sync lost (damaged file, or other data after the audio)";
+        const int strategy = (int)r.get(1), bsc = (int)r.get(4), src = (int)r.get(4), chc = (int)r.get(4), ssc = (int)r.get(3);
+        if (r.get(1)) return "FLAC frame header reserved bit set";
+        if (chc != 1 && (chc < 8 || chc > 10)) return "FLAC frame without 2 channels";   // 1: left, right; 8: left, side; 9: side, right; 10: mid, side
+        uint64_t num = r.get(8); { int extra = 0; if (num == 0xFF) return "bad FLAC frame number"; if (num >= 0xFE) { if (strategy == 0) return "bad FLAC frame number"; extra = 6; } else if (num >= 0xFC) extra = 5; else if (num >= 0xF8) extra = 4; else if (num >= 0xF0) extra = 3; else if (num >= 0xE0) extra = 2; else if (num >= 0xC0) extra = 1; else if (num >= 0x80) return "bad FLAC frame number";
+            if (extra) { num &= (0x3F >> extra); for (int i = 0; i < extra; i++) { const uint64_t c = r.get(8); if ((c & 0xC0) != 0x80) return "bad FLAC frame number"; num = num << 6 | (c & 0x3F); } } }
+        int64_t n; if (bsc == 1) n = 192; else if (bsc >= 2 && bsc <= 5) n = 576L << (bsc - 2); else if (bsc == 6) n = (int64_t)r.get(8) + 1; else if (bsc == 7) { n = (int64_t)r.get(16) + 1; if (n == 65536) return "bad FLAC block size"; } else if (bsc >= 8) n = 256L << (bsc - 8); else return "bad FLAC block size";
+        if (n > in.maxBs || (in.total && have + (uint64_t)n > in.total)) return "FLAC block larger than STREAMINFO allows";   // also caps the memory to what the header declares
+        if (have + (uint64_t)n > cap) return "FLAC longer than 2^28 samples per channel (more than a CD holds)";
+        long long fr; if (src == 0 || src == 9) fr = 44100; else if (src == 12) fr = (long long)r.get(8) * 1000; else if (src == 13) fr = (long long)r.get(16); else if (src == 14) fr = (long long)r.get(16) * 10; else if (src == 15) return "bad FLAC sample rate code"; else fr = 0;
+        if (fr != 44100) return "FLAC frame sample rate differs from STREAMINFO";
+        if (ssc != 0 && ssc != 4) return "FLAC frame bit depth differs from STREAMINFO";
+        if (r.fail || (r.pos & 7)) return "FLAC frame header truncated"; const size_t hb = r.pos / 8; const uint8_t c8 = (uint8_t)r.get(8); if (r.fail || c8 != laesflac::crc8(fp, hb)) return "FLAC frame header CRC-8 mismatch";
+        if (num != (strategy == 0 ? frameNo : have)) return "FLAC frame number out of order";   // fixed block size: the frame's index; variable: its first sample
+        a.resize((size_t)n); b.resize((size_t)n);
+        if (!laesflac::readSubframe(r, a.data(), n, chc == 9 ? 17 : 16) || !laesflac::readSubframe(r, b.data(), n, chc == 8 || chc == 10 ? 17 : 16)) return "damaged FLAC subframe";
+        r.pos = (r.pos + 7) & ~(size_t)7; const size_t fb = r.pos / 8; if (fb + 2 > r.n) return "FLAC frame truncated";
+        if (laesflac::crc16(fp, fb) != (uint16_t)(fp[fb] << 8 | fp[fb + 1])) return "FLAC frame CRC-16 mismatch";
+        const size_t at = pcm.size(); pcm.resize(at + (size_t)n * 2);
+        for (int64_t i = 0; i < n; i++) { int64_t l = a[(size_t)i], rr = b[(size_t)i];
+            if (chc == 8) rr = l - rr; else if (chc == 9) l = l + rr; else if (chc == 10) { const int64_t side = rr, mid = l * 2 + (side & 1); l = (mid + side) >> 1; rr = (mid - side) >> 1; }   // RFC 9639 section 4.2
+            if (l < -32768 || l > 32767 || rr < -32768 || rr > 32767) return "FLAC sample outside 16 bits";
+            pcm[at + (size_t)i * 2] = (int16_t)l; pcm[at + (size_t)i * 2 + 1] = (int16_t)rr; }
+        p += fb + 2; have += (uint64_t)n; frameNo++; }
+    if (in.total && have != in.total) return "FLAC sample count differs from STREAMINFO";
+    bool zero = true; for (int i = 0; i < 16; i++) zero = zero && in.md5[i] == 0;
+    if (!zero) { alignhash::Md5 m; std::vector<uint8_t> by; by.reserve(1 << 16); std::string hex;   // the audio MD5 as STREAMINFO defines it: interleaved little-endian int16
+        for (size_t i = 0; i < pcm.size(); i++) { by.push_back((uint8_t)pcm[i]); by.push_back((uint8_t)((uint16_t)pcm[i] >> 8)); if (by.size() >= (1 << 16)) { m.update(by.data(), by.size()); by.clear(); } }
+        m.update(by.data(), by.size()); for (int i = 0; i < 16; i++) { char h[4]; snprintf(h, sizeof h, "%02x", in.md5[i]); hex += h; }
+        if (m.hex() != hex) return "FLAC audio MD5 mismatch: the decoded samples are not those the STREAMINFO MD5 was made from (damaged file)"; }
+    rate = in.rate; return ""; }
+
 // ---- the disc stream (6.2): samples at absolute positions; position 0 = INDEX 01 of the first audio track of the TOC
 struct Disc {
     bool toc = false, tocFromOrder = false;    // tocFromOrder: TOC derived from the order and lengths of files (R2, reported prominently)
@@ -89,14 +144,16 @@ inline void place(Disc& d, long long at, const int16_t* pcm, long long n) {
         if (d.st[j] == 1) { if (d.s[j * 2] != l || d.s[j * 2 + 1] != r) { d.st[j] = 2; d.s[j * 2] = d.s[j * 2 + 1] = 0; d.conflicts++; } continue; }
         d.st[j] = 1; d.s[j * 2] = l; d.s[j * 2 + 1] = r; } }
 
-// ---- input audio files: 16-bit stereo PCM WAV, raw little-endian PCM (BINARY), raw big-endian PCM (MOTOROLA).
+// ---- input audio files: 16-bit stereo PCM WAV, FLAC (16-bit, 44100 Hz, 2 channels; known by its content, the "fLaC" marker at the
+// start, under FILE type WAVE as ripping programs write it), raw little-endian PCM (BINARY), raw big-endian PCM (MOTOROLA).
 // A reason starting with "cannot read" means the file is missing or unreadable; any other reason is about its content.
 inline std::string loadPcm(const fs::path& path, const std::string& type, std::vector<int16_t>& pcm, int& rate, int wantRate) {
     const std::string ext = extOf(path);
     if (lossyExt(ext)) return "lossy base layer (" + u8(path) + "): not used for the extension (F7)";
     std::vector<uint8_t> raw; if (!readBytes(path, raw)) return "cannot read " + u8(path);
-    if (type == "WAVE") { std::string e = parseWav(raw, rate, pcm, nullptr);
-        if (!e.empty()) return ext == ".flac" ? "FLAC input is not supported by this reader yet: " + u8(path) : e + ": " + u8(path);
+    if (type == "WAVE") { const bool flac = raw.size() >= 4 && !memcmp(raw.data(), "fLaC", 4);
+        std::string e = flac ? parseFlac(raw.data(), raw.size(), rate, pcm) : parseWav(raw, rate, pcm, nullptr);
+        if (!e.empty()) { pcm.clear(); return (!flac && ext == ".flac" ? "neither a FLAC stream (no fLaC marker at the start of the file) nor a WAV file" : e) + ": " + u8(path); }
         if (wantRate && rate != wantRate) return "sample rate " + std::to_string(rate) + " Hz, expected " + std::to_string(wantRate) + ": " + u8(path);
         return ""; }
     if (type == "BINARY" || type == "MOTOROLA") { rate = wantRate ? wantRate : 44100;

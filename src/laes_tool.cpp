@@ -968,6 +968,8 @@ static int laesMain(int argc, char** argv) {
             printf("%s%s%s\n", u8"  \u5de5\u4f5c\u6587\u4ef6\u5939 ", argv[2], u8".laes.tmp \u5df2\u4fdd\u7559\uff1a\u518d\u8fd0\u884c\u540c\u4e00\u6761\u547d\u4ee4\uff0c\u5c31\u4ece\u505c\u4e0b\u7684\u5730\u65b9\u63a5\u7740\u505a\uff08\u52a0 --disk-stop-remove \u65f6\u6539\u4e3a\u5220\u9664\uff09"); }
         return 2; }
     if ((cmd == "dec" || cmd == "verify") && argc >= 4) try {
+        if (cmd == "dec" && argv[3][0] == '-' && strncmp(argv[3], "--list", 6) != 0) {   // FU16-9 (2026-11-14): an option is not taken as the output folder
+            printf("give the output folder: laes dec <in> <out dir> [--levels] [--pick=...] (or laes dec <in> --list)\n"); return 1; }
         Gone g{workDir(std::string(argv[2]) + (cmd == "dec" ? ".dec" : ".verify"))}; const std::string bodyPath = g.p + "/body.bin"; Pcm core; long long bodySize = 0;
         { laess::In in(argv[2]); uint8_t mg[4] = {0}; if (in.n >= 4) in.read(0, mg, 4);
           if (!memcmp(mg, "fLaC", 4)) {   // metadata: STREAMINFO kept, the "LAE2" APPLICATION blocks into the payload file; the audio through the FLAC reader

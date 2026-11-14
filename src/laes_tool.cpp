@@ -89,13 +89,18 @@ using namespace laes;
 namespace fs = std::filesystem;
 static bool readAll(const std::string& p, std::vector<uint8_t>& b) { FILE* f = fopen(p.c_str(), "rb"); if (!f) return false; _fseeki64(f, 0, SEEK_END); long long s = _ftelli64(f); if (s < 0) { fclose(f); return false; } _fseeki64(f, 0, SEEK_SET);   // FU15-7 (1): a failed ftell is a read error
     b.resize((size_t)s); bool ok = fread(b.data(), 1, b.size(), f) == b.size(); fclose(f); return ok; }
+// a master or core master WAV whose header gives a data length beyond the end of the file (2026-11-14, as lae_enc): told once, read to its end
+static void longHeaderNote(const std::string& path, unsigned long long hdrLen, long long have) {
+    if (hdrLen) printf("NOTE: the header of %s gives a data length of %llu bytes, but the file holds only %lld bytes of it: the file may be cut off (incomplete). It is read to its end and the run continues.\n", path.c_str(), hdrLen, have); }
 static bool writeAll(const std::string& p, const std::vector<uint8_t>& b) { FILE* f = fopen(p.c_str(), "wb"); if (!f) return false; bool ok = fwrite(b.data(), 1, b.size(), f) == b.size(); return fclose(f) == 0 && ok; }
 // ---- WAV read (16/24/32-bit integer PCM, stereo; PCM or EXTENSIBLE with the PCM sub-format) + the "LAE " chunk body
-static std::string readWav(const std::string& path, Pcm& p, std::vector<uint8_t>* lae = nullptr) {
+// hdrLen / haveLen (2026-11-14): the header's data length and the bytes the file holds of it, when the header gives more than the file holds (the file
+// is read to its end as before); else 0
+static std::string readWav(const std::string& path, Pcm& p, std::vector<uint8_t>* lae = nullptr, unsigned long long* hdrLen = nullptr, long long* haveLen = nullptr) {
     std::vector<uint8_t> b; if (!readAll(path, b)) return "cannot read " + path; if (b.size() < 12 || memcmp(b.data(), "RIFF", 4) || memcmp(&b[8], "WAVE", 4)) return path + ": not RIFF/WAVE";
-    size_t pos = 12; int tag = 0, ch = 0, rate = 0, bits = 0; const uint8_t* data = nullptr; size_t dlen = 0; if (lae) lae->clear();
+    size_t pos = 12; int tag = 0, ch = 0, rate = 0, bits = 0; const uint8_t* data = nullptr; size_t dlen = 0; if (lae) lae->clear(); if (hdrLen) *hdrLen = 0; if (haveLen) *haveLen = 0;
     auto u16 = [&](size_t o) { return (int)(b[o] | b[o + 1] << 8); }; auto u32 = [&](size_t o) { return (uint32_t)(b[o] | b[o + 1] << 8 | b[o + 2] << 16 | (uint32_t)b[o + 3] << 24); };
-    while (pos + 8 <= b.size()) { uint32_t n = u32(pos + 4); size_t body = pos + 8; if (n > b.size() - body) n = (uint32_t)(b.size() - body);
+    while (pos + 8 <= b.size()) { uint32_t n = u32(pos + 4); size_t body = pos + 8; if (n > b.size() - body) { if (hdrLen && !memcmp(&b[pos], "data", 4)) { *hdrLen = n; if (haveLen) *haveLen = (long long)(b.size() - body); } n = (uint32_t)(b.size() - body); }
         if (!memcmp(&b[pos], "fmt ", 4) && n >= 16) { tag = u16(body); ch = u16(body + 2); rate = (int)u32(body + 4); bits = u16(body + 14); if (tag == 0xFFFE && n >= 26) tag = u16(body + 24); }
         else if (!memcmp(&b[pos], "data", 4)) { data = &b[body]; dlen = n; }
         else if (!memcmp(&b[pos], "LAE ", 4) && lae) lae->assign(b.begin() + body, b.begin() + body + n);
@@ -506,7 +511,7 @@ static int laesMain(int argc, char** argv) {
         // the new masters and the options
         std::vector<std::string> paths; std::vector<double> Ts; std::vector<laess::WavInfo> wis;
         for (int i = 4; i < argc; i++) { if (argv[i][0] == '-') continue; std::string a; double T = 0; bool au = false; { const std::string me = masterArg(argv[i], false, a, T, au); if (!me.empty()) { printf("%s\n", me.c_str()); return 1; } }   // FU15-3
-            laess::WavInfo wi; const std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } paths.push_back(a); Ts.push_back(T); wis.push_back(wi); }
+            laess::WavInfo wi; const std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } longHeaderNote(a, wi.hdrLen, wi.dataBytes); paths.push_back(a); Ts.push_back(T); wis.push_back(wi); }
         if (paths.empty()) { printf("no new master given\n"); return 1; }
         const size_t nAll = (size_t)nOld + paths.size(); if (nAll > 255) { printf("at most 255 masters (%zu now, %zu new)\n", (size_t)nOld, paths.size()); return 1; }
         for (auto& w : wis) { int st = 0; while ((base << st) < w.rate && st < 4) st++; if ((base << st) != w.rate || st > 3) { printf("a new master must be at %d Hz times 1, 2, 4 or 8\n", base); return 1; } }
@@ -752,7 +757,7 @@ static int laesMain(int argc, char** argv) {
         std::vector<std::string> paths; std::vector<double> Ts; std::vector<bool> autoT; std::vector<laess::WavInfo> wis;
         for (int i = 3; i < argc; i++) { if (argv[i][0] == '-') continue; std::string a; double T = 0; bool au = false;
             { const std::string me = masterArg(argv[i], true, a, T, au); if (!me.empty()) { printf("%s\n", me.c_str()); return 1; } }   // FU15-3
-            laess::WavInfo wi; std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } paths.push_back(a); Ts.push_back(T); autoT.push_back(au); wis.push_back(wi); }
+            laess::WavInfo wi; std::string e = laess::probeMaster(a, wi); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } longHeaderNote(a, wi.hdrLen, wi.dataBytes); paths.push_back(a); Ts.push_back(T); autoT.push_back(au); wis.push_back(wi); }
         if (paths.empty()) { printf("no master given\n"); return 1; }
         if (paths.size() > 255) { printf("at most 255 masters\n"); return 1; }
         { std::error_code ec; std::vector<std::string> ins(paths); if (!corePath.empty()) ins.push_back(corePath);   // FU16-7 (2026-11-14): <out> must not be an input
@@ -849,7 +854,7 @@ static int laesMain(int argc, char** argv) {
             laess::putState(stem + ".prep", laess::prepState(pm[i])); }
         stage("read, levels, octaves");
         size_t coreSrc = SIZE_MAX; Pcm core; laess::Core32 core32;   // core: a given core (--core) until the alignment; core32: from then on (a derived one: at once)
-        if (!corePath.empty()) { std::string e = readWav(corePath, core); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } if (core.rate != base) { printf("the core master must be at %d Hz\n", base); return 2; } }
+        if (!corePath.empty()) { unsigned long long hl = 0; long long hv = 0; std::string e = readWav(corePath, core, nullptr, &hl, &hv); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; } longHeaderNote(corePath, hl, hv); if (core.rate != base) { printf("the core master must be at %d Hz\n", base); return 2; } }
         else { bool dith; std::vector<laess::Prep*> pp; for (auto& m : pm) pp.push_back(&m); core32 = laess::deriveCore32(pp, base, coreBits, coreSrc, dith, 20261028); printf("core master: %d-bit base level of %s%s\n", coreBits, paths[coreSrc].c_str(), dith ? " (TPDF-dithered)" : ""); }
         for (size_t i = 0; i < paths.size(); i++) if (autoT[i]) {   // master.wav@auto: T from LAEY's search against the given core
             if (corePath.empty() || core.bits != 16) { printf("@auto needs --core=<cd.wav>, a 16-bit CD / DVD (a derived core is at T = 0)\n"); return 1; }

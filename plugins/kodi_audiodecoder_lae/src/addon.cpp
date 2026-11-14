@@ -127,7 +127,7 @@ public:
     ~CLaeDecoder() override { close(); }
 
     bool Init(const std::string& filename, unsigned int, int& channels, int& samplerate, int& bitspersample, int64_t& totaltime, int& bitrate,
-              AudioEngineDataFormat& format, std::vector<AudioEngineChannel>& channellist) override {
+              AudioEngineDataFormat& format, std::vector<AudioEngineChannel>& channellist) override try {   // no C++ exception may reach Kodi (it would end Kodi): the file does not open instead
         FpPin pin; close(); m_src.reset(new Src()); if (!m_src->f.OpenFile(filename)) return false; m_src->size = (uint64_t)m_src->f.GetLength();
         char err[512] = "", mg[5] = "";
         m_laes = laes_open_reader(&Src::read, m_src.get(), m_src->size, 0, mg, err, sizeof err);
@@ -138,8 +138,9 @@ public:
         bitrate = (int)((double)m_src->size * 8 / ((double)m_frames / m_rate) / 1000 + 0.5);
         format = m_bits == 16 ? AUDIOENGINE_FMT_S16NE : m_bits == 24 ? AUDIOENGINE_FMT_S24NE4MSB : AUDIOENGINE_FMT_S32NE;   // 24 bit: at the top of 32 (Kodi passes S24NE4 to FFmpeg as S32 without a shift)
         channellist = {AUDIOENGINE_CH_FL, AUDIOENGINE_CH_FR}; return true; }
+    catch (...) { kodi::Log(ADDON_LOG_ERROR, "LAE: %s: not enough memory or internal error", filename.c_str()); close(); return false; }
 
-    int ReadPCM(uint8_t* buffer, size_t size, size_t& actualsize) override {
+    int ReadPCM(uint8_t* buffer, size_t size, size_t& actualsize) override try {
         FpPin pin; actualsize = 0; const int by = m_bits == 16 ? 2 : 4; const int64_t want = (int64_t)(size / (size_t)(2 * by)); if (want <= 0) return AUDIODECODER_READ_SUCCESS;
         m_buf.resize((size_t)want * 2); const int64_t k = m_play ? laes_read(m_play, m_buf.data(), want) : m_track ? lae_read(m_track, m_buf.data(), want) : -1;
         if (k < 0) return AUDIODECODER_READ_ERROR; if (k == 0) return AUDIODECODER_READ_EOF;
@@ -147,6 +148,7 @@ public:
         else if (m_bits == 24) { uint32_t* o = (uint32_t*)buffer; for (int64_t i = 0; i < k * 2; i++) o[i] = (uint32_t)m_buf[(size_t)i] << 8; }   // S24NE4MSB
         else memcpy(buffer, m_buf.data(), (size_t)k * 8);   // S32NE as is
         actualsize = (size_t)k * 2 * (size_t)by; return AUDIODECODER_READ_SUCCESS; }
+    catch (...) { actualsize = 0; return AUDIODECODER_READ_ERROR; }
 
     int64_t Seek(int64_t time) override {
         if (time < 0) time = 0;   // a negative time is the start (as an unsigned frame number it was the end)
@@ -164,7 +166,7 @@ public:
         if (K == "TITLE") tag.SetTitle(val); else if (K == "ARTIST") tag.SetArtist(val); else if (K == "ALBUM") tag.SetAlbum(val);
         else if (K == "ALBUMARTIST" || K == "ALBUM ARTIST") tag.SetAlbumArtist(val); else if (K == "GENRE") tag.SetGenre(val); else if (K == "TRACKNUMBER") tag.SetTrack(atoi(val));
         else if (K == "DISCNUMBER") tag.SetDisc(atoi(val)); else if (K == "DATE") tag.SetReleaseDate(val); else if (K == "COMMENT") tag.SetComment(val); }
-    bool ReadTag(const std::string& file, kodi::addon::AudioDecoderInfoTag& tag) override {
+    bool ReadTag(const std::string& file, kodi::addon::AudioDecoderInfoTag& tag) override try {
         FpPin pin; Src s; if (!s.f.OpenFile(file)) return false; s.size = (uint64_t)s.f.GetLength(); char err[256], mg[5] = "";
         const lae_wavtags::List wt = lae_wavtags::read([&s](uint64_t off, void* buf, size_t n) { return Src::read(&s, off, buf, n) == 0; }, s.size);
         laes_file* q = laes_open_reader(&Src::read, &s, s.size, 1, mg, err, sizeof err);
@@ -197,6 +199,7 @@ public:
                 return true; }
             pos += 8 + n + (n & 1); }
         return false; }
+    catch (...) { return false; }   // memory: no tags for this file (nothing may reach Kodi)
 
 private:
     std::unique_ptr<Src> m_src; laes_file* m_laes = nullptr; laes_play* m_play = nullptr; lae_track* m_track = nullptr; int m_choice = 0, m_rate = 0, m_bits = 16; uint64_t m_frames = 0;
@@ -229,11 +232,12 @@ private:
         kodi::Log(ADDON_LOG_INFO, "LAES: plays %s", c.name);
         // block positions for seeking: the saved record, else one entropy-decoding pass on a thread of its own, then saved
         const std::string sha = hex(fi.file_sha256, 32); laes_file* f = m_laes;
-        m_indexer = std::thread([this, sha, f] { FpPin pin; const std::vector<uint8_t> d = readRecord(sha);
+        m_indexer = std::thread([this, sha, f] { FpPin pin; try {   // an exception here (memory) would end Kodi: without the record a seek decodes from the start
+            const std::vector<uint8_t> d = readRecord(sha);
             if (!d.empty() && laes_index_load(f, d.data(), (int64_t)d.size()) == 0) return;
             laes_index_layers(f, &m_cancel, 0); if (m_cancel) return;
             const int64_t n = laes_index_save(f, nullptr, 0); if (n <= 0) return; std::vector<uint8_t> b((size_t)n); if (laes_index_save(f, b.data(), n) != n) return;
-            writeRecord(sha, b); });
+            writeRecord(sha, b); } catch (...) {} });
         return true; }
 
     bool startLaey() {

@@ -7,7 +7,7 @@
 <!-- SPDX-FileCopyrightText: 2026 mtq0605 -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <!-- LAE Noise Marker panel (2026-11-04; Chinese and English since 2026-11-06). Displays and saves only; it never
-     processes audio: previews are made beforehand by lae_noise preview, the page just plays those files.
+     processes audio: previews are made beforehand by lae_noise preview, the page just plays those files (matched to rows by rectangle through the folder's preview_check.txt, 2026-11-14).
      Spectrogram and waveform in separate panes, never overlaid; selections only on the spectrogram, as rectangles whose time
      and frequency both come from the user's drag or numbers; every candidate starts unchecked, no select-all.
      Positions snap inward to the encoder's cells (frames of N = 512, columns of 8 bins), as lae_noise mark does. -->
@@ -77,7 +77,8 @@ const TEXT = {
     openFirst: "先打开显示数据。", view: "视图", start: "开始", length: "长度", s: "秒", level: "电平", to: "到", manualIn: "手动输入", add: "加入（吸附到格子）",
     dragHint: "也可以在频谱图上拖一个矩形。", hMark: "标定", hStart: "开始 秒", hEnd: "结束 秒", hLen: "长度 秒", hF0: "Hz 从", hF1: "Hz 到", hLevel: "电平", hLine: "窄线 Hz",
     hListen: "试听", hSrc: "来源", save: "保存标定文件（只含勾选的）", cand: "候选", manual: "手动", original: "原始", silenced: "静音后", marked: "被静音的部分",
-    listenNote: "试听：候选的预览文件由 <code>lae_noise preview 母带 候选.laenoise 文件夹</code> 预先生成，每个位置最长 10 秒，只供试听。手动加的区域要先保存，再对保存的文件运行 <code>lae_noise preview</code>，然后重新打开预览文件夹。页面本身不处理任何声音。",
+    listenNote: "试听：预览文件由 <code>lae_noise preview 母带 标定文件 文件夹</code> 预先生成，每个位置最长 10 秒，只供试听。页面按文件夹里的 preview_check.txt 把每个预览对应到矩形相同的行；没有对应预览的行，试听按钮是灰的。手动加的区域：先保存，对保存的文件运行 <code>lae_noise preview</code>，再打开那个预览文件夹。页面本身不处理任何声音。",
+    wrongPrev: "这个预览文件夹不是这个母带的（preview_check.txt 里的母带名不同），里面的文件不能试听。", noPrevList: "预览文件夹里没有 preview_check.txt，无法把预览对应到行，里面的文件不能试听。",
     scope: "LAE 噪声标定只识别和标定，不删除，也不导出声音。标定文件只记母带的 SHA-256、长度、采样率和格子矩形；LAE 编码器用 noise= 读它。",
     info: (m, r, len, cw, ms, st) => `${m}：${r} Hz，${len} 秒；格子 ${cw} Hz × ${ms} ms；显示步长 ${st} 帧`,
     axis: (t0, t1, k, cw) => `横轴 ${t0} – ${t1} 秒；纵轴 0 – ${k} kHz（每行一列格子，${cw} Hz）；实线 = 已勾选，虚线 = 候选`,
@@ -87,7 +88,8 @@ const TEXT = {
     openFirst: "Open the display data first.", view: "View", start: "Start", length: "Length", s: "s", level: "Level", to: "to", manualIn: "Enter by hand", add: "Add (snaps to cells)",
     dragHint: "Or drag a rectangle on the spectrogram.", hMark: "Mark", hStart: "Start s", hEnd: "End s", hLen: "Length s", hF0: "From Hz", hF1: "To Hz", hLevel: "Level", hLine: "Line Hz",
     hListen: "Listen", hSrc: "Source", save: "Save marking file (checked only)", cand: "candidate", manual: "manual", original: "Original", silenced: "Silenced", marked: "Removed part",
-    listenNote: "Listening: the candidates' preview files are made beforehand with <code>lae_noise preview master candidates.laenoise folder</code>, at most 10 s per position, for listening only. For a region added by hand, save first, run <code>lae_noise preview</code> on the saved file, then open the preview folder again. The page itself does not process any sound.",
+    listenNote: "Listening: preview files are made beforehand with <code>lae_noise preview master marks.laenoise folder</code>, at most 10 s per position, for listening only. The page matches each preview to the row with the same rectangle, using the folder's preview_check.txt; a row without a matching preview has its buttons greyed out. For a region added by hand, save first, run <code>lae_noise preview</code> on the saved file, then open that preview folder. The page itself does not process any sound.",
+    wrongPrev: "This preview folder belongs to a different master (the master name in preview_check.txt differs); nothing in it can be played.", noPrevList: "The preview folder has no preview_check.txt, so its files cannot be matched to rows; nothing in it can be played.",
     scope: "LAE Noise Marker only identifies and marks; it neither removes nor exports any sound. A marking file holds only the master's SHA-256, length, sample rate and rectangles of cells; the LAE encoder reads it with noise=.",
     info: (m, r, len, cw, ms, st) => `${m}: ${r} Hz, ${len} s; cell ${cw} Hz × ${ms} ms; display step ${st} frames`,
     axis: (t0, t1, k, cw) => `Across: ${t0} – ${t1} s; up: 0 – ${k} kHz (one row per column of cells, ${cw} Hz); solid = checked, dashed = candidate`,
@@ -102,6 +104,7 @@ function applyLang() { document.documentElement.lang = lang;
 let D = null;            // display data
 let rows = [];           // {m0, m1, c0, c1, lv, at, src, on, idx}
 let files = {};          // preview file name -> File
+let pvList = null, pvMaster = "", pvCells = null, pvFor = null;   // FU17-8: the positions of the folder's preview_check.txt {n, t0, t1, f0, f1}, its master name, as cells
 let drag = null, hover = -1;
 const N = () => D.N, CW = () => D.cw;
 const frameT0 = m => (m * N() - N() / 2) / D.rate;
@@ -133,7 +136,24 @@ $("fMarks").onchange = async e => { const f = e.target.files[0]; if (!f || !D) r
   const have = new Map(rows.map(r => [key(r), r]));
   for (const p of mk.pos) { const r = have.get(key(p)); if (r) r.on = true; else rows.push({ ...p, src: "manual", on: true, idx: 0 }); }
   sortRows(); render(); };
-$("fPrev").onchange = e => { files = {}; for (const f of e.target.files) files[f.name] = f; render(); };
+// FU17-8 (2026-11-14): a preview is played only for the row whose rectangle preview_check.txt lists for it (lae_noise preview writes
+// the master and, per position, its time and Hz range), never by the row's number in the candidate file
+$("fPrev").onchange = async e => { files = {}; pvList = null; pvMaster = ""; pvFor = null; let chk = null;
+  for (const f of e.target.files) { files[f.name] = f; if (f.name === "preview_check.txt") chk = f; }
+  if (chk) { pvList = []; for (const ln of (await chk.text()).split(/\r?\n/)) { let m;
+      if ((m = ln.match(/^master (.*)$/))) pvMaster = m[1].split(/[\\/]/).pop();
+      else if ((m = ln.match(/^\s*(\d+)\s+(-?\d+\.\d+)-\s*(-?\d+\.\d+)\s+(-?\d+\.\d+)-\s*(-?\d+\.\d+)\s/))) pvList.push({ n: +m[1], t0: +m[2], t1: +m[3], f0: +m[4], f1: +m[5] }); }
+    if (D && pvMaster !== D.master) alert(T("wrongPrev")); }
+  else if (Object.keys(files).some(n => /^pos_\d+_/.test(n))) alert(T("noPrevList"));
+  render(); };
+function pvOf(r) {   // the preview number of row r: its rectangle exactly, or a long position previewed from its start; 0 = none
+  if (!pvList || !D || pvMaster !== D.master) return 0;
+  if (pvFor !== D) { pvFor = D; const fr = t => { const k = Math.round((t * D.rate + N() / 2) / N()); return Math.abs(frameT0(k) - t) < 0.00051 ? k : NaN; },
+      co = f => { const k = Math.round(f / colHz(1)); return Math.abs(colHz(k) - f) < 0.051 ? k : NaN; };
+    pvCells = pvList.map(p => ({ n: p.n, m0: fr(p.t0), m1: fr(p.t1), c0: co(p.f0), c1: co(p.f1) })); }
+  const exact = pvCells.find(p => key(p) === key(r)); if (exact) return exact.n;
+  const cut = pvCells.filter(p => p.m0 === r.m0 && p.c0 === r.c0 && p.c1 === r.c1 && p.m1 < r.m1 && !rows.some(x => key(x) === key(p)));
+  return cut.length === 1 ? cut[0].n : 0; }
 for (const id of ["vT0", "vLen", "dbLo", "dbHi"]) $(id).oninput = () => render();
 
 function addManual(t0, t1, f0, f1) { if (!D) return; const [m0, m1] = snapTime(Math.min(t0, t1), Math.max(t0, t1)), [c0, c1] = snapFreq(Math.min(f0, f1), Math.max(f0, f1));
@@ -173,14 +193,14 @@ function render() {
 function fmt(v, d) { return Number.isFinite(v) ? v.toFixed(d) : ""; }
 function renderList() { const tb = $("list").tBodies[0]; tb.innerHTML = "";
   rows.forEach((r, i) => { const tr = document.createElement("tr"); if (i === hover) tr.className = "hi";
-    const nm = r.idx ? String(r.idx).padStart(3, "0") : "";
-    const play = (kind, label) => { const f = nm && files[`pos_${nm}_${kind}.wav`]; return `<button data-i="${i}" data-k="${kind}" ${f ? "" : "disabled"}>${label}</button>`; };
+    const pn = pvOf(r), nm = pn ? String(pn).padStart(3, "0") : "";
+    const play = (kind, label) => { const f = nm && files[`pos_${nm}_${kind}.wav`]; return `<button data-n="${nm}" data-k="${kind}" ${f ? "" : "disabled"}>${label}</button>`; };
     tr.innerHTML = `<td class="l"><input type="checkbox" data-i="${i}" ${r.on ? "checked" : ""}></td><td>${i + 1}</td><td>${fmt(frameT0(r.m0), 3)}</td><td>${fmt(frameT0(r.m1), 3)}</td>` +
       `<td>${fmt(frameT0(r.m1) - frameT0(r.m0), 2)}</td><td>${fmt(colHz(r.c0), 1)}</td><td>${fmt(colHz(r.c1), 1)}</td><td>${fmt(r.lv, 1)}</td><td>${fmt(r.at, 2)}</td>` +
       `<td class="l">${play("original", T("original"))} ${play("silenced", T("silenced"))} ${play("marked", T("marked"))}</td><td class="l">${T(r.src)}${r.idx ? " " + r.idx : ""}</td>`;
     tr.onmouseenter = () => { hover = i; render(); }; tb.appendChild(tr); });
   tb.querySelectorAll("input[type=checkbox]").forEach(cb => cb.onchange = () => { rows[+cb.dataset.i].on = cb.checked; render(); });
-  tb.querySelectorAll("button").forEach(b => b.onclick = () => { const r = rows[+b.dataset.i], f = files[`pos_${String(r.idx).padStart(3, "0")}_${b.dataset.k}.wav`]; if (!f) return;
+  tb.querySelectorAll("button").forEach(b => b.onclick = () => { const f = b.dataset.n && files[`pos_${b.dataset.n}_${b.dataset.k}.wav`]; if (!f) return;
     const p = $("player"); if (p.src) URL.revokeObjectURL(p.src); p.src = URL.createObjectURL(f); p.play(); });
   const n = rows.filter(r => r.on).length; $("saveNote").textContent = T("checked")(n); }
 // drag a rectangle on the spectrogram: time and frequency both from the drag

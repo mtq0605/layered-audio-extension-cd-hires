@@ -200,20 +200,35 @@ static void removeWorkDir() {
     if (h != INVALID_HANDLE_VALUE) { do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) DeleteFileW((w + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(h, &fd)); FindClose(h); }
     RemoveDirectoryW(w.c_str()); }
 static std::wstring cacheDir() { static std::wstring c; if (c.empty()) { wchar_t tmp[MAX_PATH]; GetTempPathW(MAX_PATH, tmp); c = std::wstring(tmp) + L"lae_abx_cache"; CreateDirectoryW(c.c_str(), nullptr); } return c; }
-static void pruneCache() {   // prepared sources older than 14 days
-    const std::wstring c = cacheDir(); WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((c + L"\\src_*.f32").c_str(), &fd); if (h == INVALID_HANDLE_VALUE) return;
-    FILETIME now; GetSystemTimeAsFileTime(&now); const unsigned long long n = ((unsigned long long)now.dwHighDateTime << 32) | now.dwLowDateTime, limit = 14ULL * 24 * 3600 * 10000000ULL;
-    do { const unsigned long long t = ((unsigned long long)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime; if (n > t && n - t > limit) DeleteFileW((c + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(h, &fd)); FindClose(h); }
-static std::wstring cachePath(const Source& x, int rate, const std::string& sha) { return cacheDir() + L"\\src_" + widen(sha.substr(0, 16)) + L"_" + widen(x.pick == "-" ? "plain" : x.pick) + L"_" + std::to_wstring(rate) + L".f32"; }
+static void pruneCache() {   // prepared sources (and unfinished copies) older than 14 days
+    const std::wstring c = cacheDir(); FILETIME now; GetSystemTimeAsFileTime(&now); const unsigned long long n = ((unsigned long long)now.dwHighDateTime << 32) | now.dwLowDateTime, limit = 14ULL * 24 * 3600 * 10000000ULL;
+    for (const wchar_t* pat : { L"\\src_*.f32", L"\\src_*.f32.part" }) { WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((c + pat).c_str(), &fd); if (h == INVALID_HANDLE_VALUE) continue;
+        do { const unsigned long long t = ((unsigned long long)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime; if (n > t && n - t > limit) DeleteFileW((c + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(h, &fd)); FindClose(h); } }
+// A kept copy (FU20-9, 2026-11-14): the 8 bytes "LAEABXC1", the frame count (uint64), then all left samples and all right samples
+// (float). It is written to <name>.part and renamed when complete; a file whose head or length does not match is prepared again.
+// Characters a file name cannot hold are written as '_' in the pick part of the name.
+static const char kCacheMagic[8] = { 'L', 'A', 'E', 'A', 'B', 'X', 'C', '1' };
+static std::wstring cachePath(const Source& x, int rate, const std::string& sha) {
+    std::string pk = x.pick == "-" ? "plain" : x.pick; for (auto& c : pk) if (strchr("\\/:*?\"<>|", c) || (unsigned char)c < 32) c = '_';
+    return cacheDir() + L"\\src_" + widen(sha.substr(0, 16)) + L"_" + widen(pk) + L"_" + std::to_wstring(rate) + L".f32"; }
+static HANDLE cacheOpen(const std::wstring& path, unsigned long long& frames) {   // the open file after a matching head, or INVALID_HANDLE_VALUE
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr); if (f == INVALID_HANDLE_VALUE) return f;
+    char hd[16]; DWORD got = 0; LARGE_INTEGER sz; frames = 0;
+    if (GetFileSizeEx(f, &sz) && ReadFile(f, hd, 16, &got, nullptr) && got == 16 && !memcmp(hd, kCacheMagic, 8)) { memcpy(&frames, hd + 8, 8);
+        if (frames > 0 && frames < (1ULL << 40) && (unsigned long long)sz.QuadPart == 16 + frames * 8) return f; }
+    CloseHandle(f); return INVALID_HANDLE_VALUE; }
+static bool cacheValid(const std::wstring& path) { unsigned long long fr; HANDLE f = cacheOpen(path, fr); if (f == INVALID_HANDLE_VALUE) return false; CloseHandle(f); return true; }
 static bool cacheLoad(const std::wstring& path, Source& x) {
-    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr); if (f == INVALID_HANDLE_VALUE) return false;
-    LARGE_INTEGER sz; GetFileSizeEx(f, &sz); const size_t n = (size_t)(sz.QuadPart / 8); x.L.resize(n); x.R.resize(n); DWORD got = 0; bool ok = true;
+    unsigned long long fr = 0; HANDLE f = cacheOpen(path, fr); if (f == INVALID_HANDLE_VALUE) return false;
+    const size_t n = (size_t)fr; x.L.resize(n); x.R.resize(n); DWORD got = 0; bool ok = true;
     for (int c = 0; c < 2 && ok; c++) { char* p = (char*)(c ? x.R.data() : x.L.data()); size_t left = n * 4; while (left > 0) { const DWORD part = (DWORD)std::min<size_t>(left, 1u << 30); if (!ReadFile(f, p, part, &got, nullptr) || got != part) { ok = false; break; } p += part; left -= part; } }
     CloseHandle(f); return ok && n > 0; }
-static void cacheSave(const std::wstring& path, const Source& x) {
-    HANDLE f = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr); if (f == INVALID_HANDLE_VALUE) return; DWORD put = 0;
-    for (int c = 0; c < 2; c++) { const char* p = (const char*)(c ? x.R.data() : x.L.data()); size_t left = x.L.size() * 4; while (left > 0) { const DWORD part = (DWORD)std::min<size_t>(left, 1u << 30); WriteFile(f, p, part, &put, nullptr); p += part; left -= part; } }
-    CloseHandle(f); }
+static void cacheSave(const std::wstring& path, const Source& x) {   // nothing is kept when a write fails (the source is prepared again next time)
+    const std::wstring part = path + L".part"; HANDLE f = CreateFileW(part.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr); if (f == INVALID_HANDLE_VALUE) return; DWORD put = 0;
+    char hd[16]; memcpy(hd, kCacheMagic, 8); const unsigned long long fr = x.L.size(); memcpy(hd + 8, &fr, 8); bool ok = x.R.size() == x.L.size() && WriteFile(f, hd, 16, &put, nullptr) && put == 16;
+    for (int c = 0; c < 2 && ok; c++) { const char* p = (const char*)(c ? x.R.data() : x.L.data()); size_t left = x.L.size() * 4; while (left > 0) { const DWORD n = (DWORD)std::min<size_t>(left, 1u << 30); if (!WriteFile(f, p, n, &put, nullptr) || put != n) { ok = false; break; } p += n; left -= n; } }
+    if (!CloseHandle(f)) ok = false;
+    if (!ok || !MoveFileExW(part.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(part.c_str()); }
 static long long fileSize(const std::wstring& path) { WIN32_FILE_ATTRIBUTE_DATA a; return GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a) ? ((long long)a.nFileSizeHigh << 32) | a.nFileSizeLow : 0; }
 
 struct Job;
@@ -242,7 +257,7 @@ static bool preparePair(const Pair& p, int rate, Source s[2], long long& lag, st
         src[i] = dir + L"\\" + widen(x.file); if (!PathFileExistsW(src[i].c_str())) { err = "missing file: " + x.file + " (put it next to lae_abx.exe)"; return false; }
         x.sha = fileSha256(src[i], [&](double f) { say("checking " + x.file + "  " + std::to_string((int)(f * 100)) + " %", 0.025 * i + 0.025 * f); });
         std::string ext = x.file.substr(x.file.find_last_of('.') + 1); for (auto& ch : ext) ch = (char)tolower(ch); isMp3[i] = ext == "mp3" || ext == "m4a" || ext == "aac";
-        cache[i] = cachePath(x, rate, x.sha); cached[i] = PathFileExistsW(cache[i].c_str()) != FALSE; }
+        cache[i] = cachePath(x, rate, x.sha); cached[i] = cacheValid(cache[i]); }
     // decode the LAE sources that are not kept yet, both at once
     int running = 0; const DWORD t0 = GetTickCount();
     for (int i = 0; i < 2; i++) if (!cached[i] && !isMp3[i] && s[i].pick != "-") {

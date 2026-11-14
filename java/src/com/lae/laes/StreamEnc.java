@@ -94,7 +94,9 @@ public final class StreamEnc {
     public static final class StateR { final String s; int at = 0; public boolean bad = false; public StateR(String t) { s = t; }
         public String str() { final int e = s.indexOf('\n', at); if (e < 0) { bad = true; return ""; } final String v = s.substring(at, e); at = e + 1; return v; }
         public long i() { final String v = str(); if (v.isEmpty()) { bad = true; return 0; } return CStd.atoll(v); } public double d() { return CStd.atof(str()); }
-        public void hex(byte[] p, int n) { final String v = str(); if (v.length() != 2 * n) { bad = true; return; } for (int k = 0; k < n; k++) p[k] = (byte) Integer.parseInt(v.substring(2 * k, 2 * k + 2), 16); } }
+        public void hex(byte[] p, int n) { final String v = str(); if (v.length() != 2 * n) { bad = true; return; }
+            for (int k = 0; k < 2 * n; k++) if (!CStd.hex(v.charAt(k))) { bad = true; return; }   // FU26-11: a damaged line makes the state bad (it threw)
+            for (int k = 0; k < n; k++) p[k] = (byte) Integer.parseInt(v.substring(2 * k, 2 * k + 2), 16); } }
     // "%.17g": enough digits to read the same double back (only this port reads its state files)
     static String g17(double v) { return Double.toString(v); }
     // port of laes_stream_enc.h:putInfo / getInfo

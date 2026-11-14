@@ -16,6 +16,7 @@
 - **Java 库。**移植了 LAEY 的 FLAC 形式、扩展包和 `master1name=`，以及 LAES 有效载荷版本 2（名称、菜单顺序、默认母带、不提供派生版本的标志、最多 255 个母带），与 C++ 工具逐字节相同。仅 Java 有：`lae_dup()`（在已打开的文件上再开一个曲目），以及面向手机、播放器前端 `Play` 最多 16 个母带的上限（[java/README.md](java/README.zh.md)）。
 - **`lae_noise scan` 快了约 10 倍（2026-11-13），**输出逐字节相同。
 - **ABX 测试工具 `lae_abx`（2026-11-12，`tools/lae_abx/`）。**Windows 上独立运行的 ABX 听音测试：用 `lae_udec` 解码两个音源（MP3 用 Windows Media Foundation），转到相同采样率并对齐，写出带两个文件 SHA-256 的记录。
+- **`lae_cdx` 读取 FLAC 抓轨和 FLAC 基础层文件（2026-11-14）。**`lae_cdx read` 和 `lae_cdx repack` 接受 16 位、44.1 kHz、两声道的 FLAC 文件，按内容识别（在 CUE 表中写作 `FILE "…" WAVE`，与抓轨程序的写法相同）。读取器核对每一帧的 CRC-8 和 CRC-16、采样数，以及 STREAMINFO 块中的音频 MD5（存有该值时）；FLAC 文件未通过检查或为其他格式时，读取停止，不写出任何内容。输出与同一抓轨存为 WAV 时逐字节相同（单个文件、整盘抓轨和逐轨抓轨，带和不带 CUE 表；x64、x86 和 Linux）。`lae_enc plan` 和 `lae_cdx image … layout=` 通过同一段代码读取带 FLAC 音频的发行方 CUE 表。限制：48 kHz 的 FLAC 基础层文件被拒绝（48 kHz 的 WAV 可以读取）；`liblae` 和各插件只配对 WAV 基础层文件。测试用的是 `flac` 1.3.3 和测试工具写出的文件，没有用真实光盘的抓轨。写到光盘上的 `README.TXT` 没有改变。
 - **测试工具。**`src/cd_variant.cpp`（用于对齐测试、定义精确的 CD 变体）、`tests/check_packs.sh` 和 `tests/check_flacform.sh`；`src/gen_suite.cpp` 可以只生成一个类别（字节相同）。
 
 ## 2026-11-07（v5-2026-11-07）

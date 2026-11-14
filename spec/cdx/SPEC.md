@@ -688,7 +688,7 @@ Each of these tracks MUST fall back. If any one of them does not fall back, the 
 
 **[R1]** The reader has three kinds of input:
 
-- **Rips:** a whole-disc image (BIN or WAV, with or without CUE), per-track files (with or without CUE), or a single per-track file. They may come from any ripping software and any offset setting.
+- **Rips:** a whole-disc image (BIN, WAV or FLAC, with or without CUE), per-track files (with or without CUE), or a single per-track file. They may come from any ripping software and any offset setting.
 - **LAE streams:** the CD layer delivered per track, plus the extension file (4.5).
 - **Extension files:** from the `/LAE/` directory of session 2 of a CD, from a copied folder, or delivered with an LAE stream.
 

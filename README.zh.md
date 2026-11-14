@@ -54,7 +54,7 @@ LAE Lossy（LAEY）允许单个文件同时承载最高 24 位、最高 352.8/38
 
 - **44.1 kHz 系列。**使用工具 `lae_cdx` 进行 CD-Extra 封装（目前生成 CD-Extra 光盘镜像）。光盘在其音频区段中原样承载 CD 层，在其数据区段中承载扩展，因此所有 CD 播放器都能重现 CD 层。
 - **48 kHz 系列（96/192/384 kHz 母带）。**这些母带具有 48 kHz 基础层，面向 DVD、蓝光和文件分发。
-- **文件与数据流。**在 CD 之外，音轨也可以作为基础层文件（FLAC 或 WAV）分发，并在其旁边附带一个扩展文件（由规范定义；目前 `lae_cdx` 仅读取 WAV 基础层文件）。
+- **文件与数据流。**在 CD 之外，音轨也可以作为基础层文件（FLAC 或 WAV）分发，并在其旁边附带一个扩展文件（由规范定义；`lae_cdx` 读取 WAV 基础层文件，以及 16 位、44.1 kHz、两声道的 FLAC 基础层文件）。
 
 高解析度信息完全存储在 PCM 信号之外，位于单独的扩展中。扩展按三级金字塔组织：
 
@@ -482,7 +482,7 @@ CD 层就是输出 WAV 文件的音频内容。因此，它与派生 CD 逐字�
 
 ### 4.5 整盘规划器
 
-规划器 `lae_enc plan` 将母带与发行方的完整光盘组合。它以 CUE 表加 BIN 或 WAV 音频的形式读取发行方的光盘。母带可以以一个文件或多个文件的形式给出。
+规划器 `lae_enc plan` 将母带与发行方的完整光盘组合。它以 CUE 表加 BIN、WAV 或 FLAC 音频（FLAC：16 位、44.1 kHz、两声道）的形式读取发行方的光盘。母带可以以一个文件或多个文件的形式给出。
 
 **操作顺序。**规划器按以下固定顺序处理：
 
@@ -1065,7 +1065,7 @@ CUE 表不包含 CRC、MD5 或其他哈希。
 - **基础层文件**，为 FLAC [1] 或 WAV，恰好承载该音轨的 CD 层；
 - **扩展文件**，与基础层文件同名，扩展名为 `.lax`。若该音轨也以 CD 发布，此文件与光盘上的 `TRACKnn.LAX` 逐字节相同。
 
-普通播放器播放基础层文件。扩展文件及其尾部记录绝不放入基础层文件内部（第 10.1 节的 FLAC 形式是另一种单文件形式）。当解码后的基础层有 ncd 个采样且其整轨 MD5 等于尾部记录中的 MD5 时，读取器将这两个文件配对。配对后的音轨重新封装为规范化 v5 WAV，与编码器的输出逐字节相同。
+普通播放器播放基础层文件。扩展文件及其尾部记录绝不放入基础层文件内部（第 10.1 节的 FLAC 形式是另一种单文件形式）。当解码后的基础层有 ncd 个采样且其整轨 MD5 等于尾部记录中的 MD5 时，读取器将这两个文件配对。配对后的音轨重新封装为规范化 v5 WAV，与编码器的输出逐字节相同。`lae_cdx repack` 读取 WAV 或 FLAC（16 位、44.1 kHz、两声道；第 10.8 节）的基础层文件；`liblae` 和各插件只配对 WAV 基础层文件。
 
 **LAE 流。**LAE 流逐条音轨传送 CD 层（逐采样，FLAC、WAV 或原始 PCM）和扩展文件（逐字节）。流中不包含任何头部、索引、位置或偏移。CD 层经过有损重新编码（例如 AAC 或 MP3）的流不是 LAE 流：扩展绝不应用于有损解码的音频，此时只播放基础层。
 
@@ -1073,7 +1073,7 @@ CUE 表不包含 CRC、MD5 或其他哈希。
 
 ### 10.8 读取抓轨与文件
 
-`lae_cdx` 的读取器（读取器代码：`src/lae_cdx_read.h`）以相同方式处理所有输入：整盘抓轨（BIN 或 WAV，带或不带 CUE 表）、逐轨抓轨（带或不带 CUE 表）、单个文件以及 LAE 流。抓轨可来自任何抓轨程序，可采用任何偏移设置。输入必须为 16 位立体声 PCM（WAV，或带 CUE 表的整盘抓轨为 BIN）。
+`lae_cdx` 的读取器（读取器代码：`src/lae_cdx_read.h`）以相同方式处理所有输入：整盘抓轨（BIN、WAV 或 FLAC，带或不带 CUE 表）、逐轨抓轨（带或不带 CUE 表）、单个文件以及 LAE 流。抓轨可来自任何抓轨程序，可采用任何偏移设置。输入必须为 16 位立体声 PCM，存为 WAV 或 FLAC（16 位、44.1 kHz、两声道）；带 CUE 表的整盘抓轨也可以是 BIN。FLAC 文件按内容识别；读取器核对每一帧的 CRC、采样数和 STREAMINFO 块中的音频 MD5（存有该值时）。FLAC 文件未通过检查或为其他格式时，读取器停止，不写出任何内容。
 
 **光盘流与 TOC。**读取器将其输入组装成光盘流。TOC 按以下优先顺序获取：
 
@@ -1717,7 +1717,7 @@ lae_dec track_352k.wav out_cd24.wav cd24                   # 24 bit, 44.1 kHz
 lae_enc plan <master.wav> [<master2.wav> …] <publisher.cue> <out dir> [cdalign=<p1>,<p2>,…] [cdaccept]
 ```
 
-- `<publisher.cue>` 描述发行方的光盘（CUE 加 BIN 或 WAV）。
+- `<publisher.cue>` 描述发行方的光盘（CUE 加 BIN、WAV 或 FLAC）。
 - 未给出 `cdalign=` 时，规划器在整个规划范围内执行两次搜索，打印各位置以及一行 `PLAN_SUGGEST whitened=<status>:<positions> plain=<status>:<positions>`，不写入任何内容，并以退出代码 1 退出。
 - `cdalign=<p1>,<p2>,…` 为每一段给出一个值：该段 CD 帧 0 所在的母带采样位置，允许带小数；对于在 CD 上为数字静音的段，给出 `-`。
 - `cdaccept` 确认落入确认区间的段。
@@ -1766,7 +1766,7 @@ lae_cdx read <output dir> <disc>\LAE <rip>\RIP.CUE
 ```
 lae_cdx pack <v5.wav> <out.lax> [track=N]              # the extension file of one track
 lae_cdx split <v5.wav> <base.wav> <ext.lax> [track=N]  # base-layer WAV + extension file
-lae_cdx repack <base.wav> <ext.lax> <out.v5.wav>       # base-layer file + extension file -> v5 WAV
+lae_cdx repack <base.wav | base.flac> <ext.lax> <out.v5.wav>   # base-layer file + extension file -> v5 WAV
 lae_cdx sim <imagedir> <outdir> <form> [offset=N] [pregap=1] [overread=N] [change=K] [slip=K]   # simulated rips (tests)
 lae_cdx selftest                                       # known answers
 lae_cdx test <fixturedir>                              # the test cases on the test discs
@@ -1950,7 +1950,7 @@ SPEC.md 中定义的比特流对容器版本 5 已冻结。
   - 数据音轨末尾零扇区的数量；
   - 数据区段中 CD-ROM XA 标记的影响，工具目前不写入该标记；
   - 使用真实 CD 播放器的兼容性测试，以及在 Windows、macOS 和 Linux 上读取数据区段的兼容性测试。
-- **lae_cdx。**为一整张 74 分钟光盘生成光盘镜像时，内存峰值约为 3.5–4 GB。规范还定义了 FLAC 基础层文件和从驱动器读取的 TOC；`lae_cdx` 尚未实现这些内容：读取器拒绝 FLAC 输入，并从 CUE 表或文件的顺序和长度获取 TOC。
+- **lae_cdx。**为一整张 74 分钟光盘生成光盘镜像时，内存峰值约为 3.5–4 GB。规范还定义了从驱动器读取的 TOC；`lae_cdx` 尚未实现，TOC 取自 CUE 表或文件的顺序和长度。FLAC 输入方面，读取器只接受 16 位、44.1 kHz、两声道的文件：48 kHz 的 FLAC 基础层文件被拒绝（48 kHz 的 WAV 基础层文件可以读取），流的前面或后面带 ID3 标签的 FLAC 文件、每声道超过 2^28 个采样的 FLAC 文件也被拒绝。`liblae` 和各插件只配对 WAV 基础层文件。FLAC 抓轨的测试用的是 `flac` 1.3.3 和测试工具写出的文件，没有用真实光盘的抓轨。
 - **播放器组件。**该组件尚不能直接打开 CD-Extra 抓轨。
 - **待完成的测量和测试。**
   - 为规范给出半带滤波器的特性描述。

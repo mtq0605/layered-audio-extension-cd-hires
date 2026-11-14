@@ -54,7 +54,7 @@ LAE Lossy (LAEY) allows a single file to carry a high-resolution master, of up t
 
 - **44.1 kHz family.** CD-Extra encapsulation with the tool `lae_cdx` (at present it produces a CD-Extra disc image). The disc carries the CD layer unchanged in its audio session and the extension in its data session, so that every CD player reproduces the CD layer.
 - **48 kHz family (96/192/384 kHz masters).** These masters have a 48 kHz base layer intended for DVD, Blu-ray and file distribution.
-- **Files and streams.** Outside the CD, a track can also be distributed as a base-layer file (FLAC or WAV) with an extension file beside it (defined by the specification; so far, `lae_cdx` reads WAV base-layer files only).
+- **Files and streams.** Outside the CD, a track can also be distributed as a base-layer file (FLAC or WAV) with an extension file beside it (defined by the specification; `lae_cdx` reads WAV base-layer files and FLAC base-layer files of 16-bit, 44.1 kHz, 2 channels).
 
 The high-resolution information is stored entirely outside the PCM signal, in a separate extension. The extension is organised as a three-level pyramid:
 
@@ -482,7 +482,7 @@ The decoder rejects a file whose CD audio length does not match the extension ch
 
 ### 4.5 Whole-disc planner
 
-The planner `lae_enc plan` combines a master with a publisher's complete disc. It reads the publisher's disc as a CUE sheet with BIN or WAV audio. The master may be given as one file or as several files.
+The planner `lae_enc plan` combines a master with a publisher's complete disc. It reads the publisher's disc as a CUE sheet with BIN, WAV or FLAC audio (FLAC: 16-bit, 44.1 kHz, 2 channels). The master may be given as one file or as several files.
 
 **Order of operations.** The planner proceeds in a fixed order:
 
@@ -1065,7 +1065,7 @@ The fields are defined as follows:
 - a **base-layer file**, FLAC [1] or WAV, holding exactly the track's CD layer;
 - an **extension file** with the same name and the extension `.lax`. When the track is also published on CD, this file is byte-identical to `TRACKnn.LAX` on the disc.
 
-Ordinary players play the base-layer file. The extension file and its trailer are never placed inside the base-layer file (the FLAC form of Section 10.1 is a separate, single-file form). A reader pairs the two files when the decoded base layer has ncd samples and its whole-track MD5 equals the MD5 in the trailer. A paired track is repackaged into the canonical v5 WAV, byte-identical to the encoder's output.
+Ordinary players play the base-layer file. The extension file and its trailer are never placed inside the base-layer file (the FLAC form of Section 10.1 is a separate, single-file form). A reader pairs the two files when the decoded base layer has ncd samples and its whole-track MD5 equals the MD5 in the trailer. A paired track is repackaged into the canonical v5 WAV, byte-identical to the encoder's output. `lae_cdx repack` reads the base-layer file as WAV or as FLAC (16-bit, 44.1 kHz, 2 channels; Section 10.8); `liblae` and the plug-ins pair a WAV base-layer file only.
 
 **LAE stream.** An LAE stream delivers, track by track, the CD layer sample for sample (FLAC, WAV or raw PCM) and the extension file byte for byte. A stream carries no header, index, position or offset. A stream whose CD layer has been re-encoded lossily (for example in AAC or MP3) is not an LAE stream: the extension is never applied to lossily decoded audio, and only the base layer is played.
 
@@ -1073,7 +1073,7 @@ The 48 kHz family may be used for all forms described in this section.
 
 ### 10.8 Reading rips and files
 
-The reader of `lae_cdx` (reader code: `src/lae_cdx_read.h`) treats every input in the same way: whole-disc rips (BIN or WAV, with or without a CUE sheet), per-track rips (with or without a CUE sheet), a single file and LAE streams. Rips may come from any ripping program and may be made with any offset setting. The input must be 16-bit stereo PCM (WAV, or BIN for whole-disc rips with a CUE sheet).
+The reader of `lae_cdx` (reader code: `src/lae_cdx_read.h`) treats every input in the same way: whole-disc rips (BIN, WAV or FLAC, with or without a CUE sheet), per-track rips (with or without a CUE sheet), a single file and LAE streams. Rips may come from any ripping program and may be made with any offset setting. The input must be 16-bit stereo PCM, stored as WAV, as FLAC (16-bit, 44.1 kHz, 2 channels) or, for whole-disc rips with a CUE sheet, as BIN. A FLAC file is recognised by its content; the reader checks the CRC of every frame, the sample count and the audio MD5 of the STREAMINFO block (when it is set). A FLAC file that fails a check or has another format stops the reader, and nothing is written.
 
 **Disc stream and TOC.** The reader assembles its input into a disc stream. The TOC is taken, in order of priority, from:
 
@@ -1717,7 +1717,7 @@ lae_dec track_352k.wav out_cd24.wav cd24                   # 24 bit, 44.1 kHz
 lae_enc plan <master.wav> [<master2.wav> …] <publisher.cue> <out dir> [cdalign=<p1>,<p2>,…] [cdaccept]
 ```
 
-- `<publisher.cue>` describes the publisher's disc (CUE with BIN or WAV).
+- `<publisher.cue>` describes the publisher's disc (CUE with BIN, WAV or FLAC).
 - Without `cdalign=`, the planner performs both searches through the whole plan, prints the positions and a line `PLAN_SUGGEST whitened=<status>:<positions> plain=<status>:<positions>`, writes nothing and exits with code 1.
 - `cdalign=<p1>,<p2>,…` gives one value per piece: the master sample at which CD frame 0 of the piece lies, with a fraction allowed, or `-` for a piece that is digital silence on the CD.
 - `cdaccept` confirms pieces that fall into the confirmation band.
@@ -1766,7 +1766,7 @@ The second argument is the folder containing the extension files, for example th
 ```
 lae_cdx pack <v5.wav> <out.lax> [track=N]              # the extension file of one track
 lae_cdx split <v5.wav> <base.wav> <ext.lax> [track=N]  # base-layer WAV + extension file
-lae_cdx repack <base.wav> <ext.lax> <out.v5.wav>       # base-layer file + extension file -> v5 WAV
+lae_cdx repack <base.wav | base.flac> <ext.lax> <out.v5.wav>   # base-layer file + extension file -> v5 WAV
 lae_cdx sim <imagedir> <outdir> <form> [offset=N] [pregap=1] [overread=N] [change=K] [slip=K]   # simulated rips (tests)
 lae_cdx selftest                                       # known answers
 lae_cdx test <fixturedir>                              # the test cases on the test discs
@@ -1950,7 +1950,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - the number of trailing zero sectors of the data track;
   - the effect of the CD-ROM XA marker in the data session, which the tool does not currently write;
   - compatibility tests with real CD players and of reading the data session on Windows, macOS and Linux.
-- **lae_cdx.** The memory peak for an image of a whole 74-minute disc is about 3.5–4 GB. The specification also defines FLAC base-layer files and a TOC read from the drive; `lae_cdx` does not yet implement them: the reader refuses FLAC input, and it takes the TOC from a CUE sheet or from the order and lengths of the files.
+- **lae_cdx.** The memory peak for an image of a whole 74-minute disc is about 3.5–4 GB. The specification also defines a TOC read from the drive; `lae_cdx` does not yet implement it and takes the TOC from a CUE sheet or from the order and lengths of the files. Of FLAC input, the reader accepts only 16-bit, 44.1 kHz, 2-channel files: a 48 kHz FLAC base-layer file is refused (a 48 kHz WAV base-layer file is read), and so are a FLAC file with an ID3 tag before or after the stream and one longer than 2^28 samples per channel. `liblae` and the plug-ins pair a WAV base-layer file only. FLAC rips were tested with files written by `flac` 1.3.3 and by the test tool, not with rips of a real disc.
 - **Player component.** The component cannot yet open CD-Extra rips directly.
 - **Measurements and tests pending.**
   - Characterisation of the half-band filters for the specification.

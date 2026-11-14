@@ -22,6 +22,8 @@ if ($Label -eq '') { $Label = Split-Path -Leaf (Resolve-Path -LiteralPath $Album
 if ($Export -eq '') { $Export = Join-Path $PSScriptRoot '..\build\laes_export.exe' }
 if (-not (Test-Path -LiteralPath $Export)) { throw "laes_export.exe not found ($Export); give -Export" }
 if (Test-Path -LiteralPath $Out) { throw "$Out exists; nothing is overwritten" }
+$partOut = [IO.Path]::GetFullPath($Out) + '.part'   # the image is written here and renamed to -Out only when it is complete
+if (Test-Path -LiteralPath $partOut) { throw "$partOut exists (left by an interrupted run?); nothing is overwritten" }
 
 $tracks = @(Get-ChildItem -LiteralPath $Album -File | Where-Object { $_.Extension -in '.flac', '.wav' } | Sort-Object Name)
 if ($tracks.Count -eq 0) { throw "no .flac or .wav files in $Album" }
@@ -36,6 +38,7 @@ Write-Host ("{0} files, {1:N0} MB of {2:N0} MB ({3})" -f $tracks.Count, ($sizeAl
 if ($sizeAll + 16MB -gt $capBytes) { throw "the album does not fit on $Disc" }
 
 # the small files, made in a folder of their own next to the image and removed at the end
+$partMine = $false
 $work = Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($Out))) ('laes_disc_work_' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
 try {
@@ -75,10 +78,15 @@ public static class LaesIsoWriter {
         finally { Marshal.FreeHGlobal(pRead); } } }
 '@
     }
-    [LaesIsoWriter]::Save($img.ImageStream, [IO.Path]::GetFullPath($Out))
+    $partMine = $true   # from here on a .part file is this run's own
+    [LaesIsoWriter]::Save($img.ImageStream, $partOut)
+    $wantLen = [int64]$img.TotalBlocks * $img.BlockSize; $gotLen = (Get-Item -LiteralPath $partOut).Length
+    if ($gotLen -ne $wantLen) { throw "the image is incomplete ($gotLen of $wantLen bytes); nothing written" }
+    [IO.File]::Move($partOut, [IO.Path]::GetFullPath($Out)); $partMine = $false
     Write-Host ("{0}: {1:N0} MB, {2}, volume {3}" -f $Out, ((Get-Item -LiteralPath $Out).Length / 1MB), $(if ($Disc -like 'BD*') { 'UDF 2.50' } else { 'UDF 1.02 + ISO 9660 + Joliet' }), $volName)
 }
-finally {   # only the three small files this run made, by name
+finally {   # only the three small files this run made, by name, and this run's unfinished image
+    if ($partMine -and (Test-Path -LiteralPath $partOut)) { Remove-Item -LiteralPath $partOut }
     foreach ($nm in 'playlist.m3u8', 'SHA256SUMS.txt', 'README.txt') { $pth = Join-Path $work $nm; if (Test-Path -LiteralPath $pth) { Remove-Item -LiteralPath $pth } }
     Remove-Item -LiteralPath $work
 }

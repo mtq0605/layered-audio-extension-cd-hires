@@ -84,7 +84,7 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 The repository also contains the following programs. The header comment of each file describes its usage.
 
 - `tools/selftest_ref.cpp` prints the self-test fingerprint of a build (Section 2).
-- `tools/gen_halfband.cpp` and `tools/gen_mdct_tables.cpp` generate `src/halfband.h` and `src/mdct_tables.h`, respectively.
+- `tools/gen_halfband.cpp` and `tools/gen_mdct_tables.cpp` generate `src/halfband.h` and `src/mdct_tables.h`, respectively. The committed `src/mdct_tables.h` is the normative table: the generator writes its result into the current folder, only for comparison. Built with x64 MSVC it reproduces the committed table exactly; built for x86 (`/arch:SSE2`), 75 values differ in the last bit (measured 2026-11-14), and other compilers or C libraries may differ as well, because the generator uses the C library's `sin` and `cos`. Never commit a regenerated table: every decoder must use the same constants.
 - `tools/test_mdct_tb.cpp` is a test program for `src/mdct_tb.h`.
 - `tools/lae_math_check.cpp` checks the encoder's functions in `src/lae_math.h` against the C library and prints their platform checksum.
 - `src/gen_suite.cpp` generates the synthetic test signals (optionally a single category).

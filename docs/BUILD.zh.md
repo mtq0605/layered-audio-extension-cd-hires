@@ -84,7 +84,7 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 仓库中还包含以下程序。各文件的头部注释说明了其用法。
 
 - `tools/selftest_ref.cpp` 输出某一构建的自检指纹（第 2 节）。
-- `tools/gen_halfband.cpp` 和 `tools/gen_mdct_tables.cpp` 分别生成 `src/halfband.h` 和 `src/mdct_tables.h`。
+- `tools/gen_halfband.cpp` 和 `tools/gen_mdct_tables.cpp` 分别生成 `src/halfband.h` 和 `src/mdct_tables.h`。仓库里的 `src/mdct_tables.h` 是规范表：生成器把结果写到当前文件夹，只用来对照。用 x64 MSVC 编出的生成器得出的表和它完全相同；按 x86（`/arch:SSE2`）编出的有 75 个值最后一位不同（2026-11-14 实测），别的编译器或 C 库也可能不同，因为生成器用的是 C 库的 `sin` 和 `cos`。重新生成的表一律不要提交：所有解码器必须用同一组常数。
 - `tools/test_mdct_tb.cpp` 是 `src/mdct_tb.h` 的测试程序。
 - `tools/lae_math_check.cpp` 将编码器在 `src/lae_math.h` 中的函数与 C 库进行对比检查，并输出其平台校验和。
 - `src/gen_suite.cpp` 生成合成测试信号（可以只生成一个类别）。

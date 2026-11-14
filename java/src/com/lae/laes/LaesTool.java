@@ -14,10 +14,13 @@ import com.lae.core.LaeException;
  * command-line tool):
  *   enc &lt;out.wav | out.flac&gt; (--core=&lt;core.wav&gt; | --derive-core) [--core-bits=16|24|32] &lt;master.wav&gt;[@T] ... [--mem=&lt;GB&gt;] [--timing]
  *       (Java only: --threads=&lt;n&gt;; the C++ ignores it like every argument starting with '-')
- *   dec &lt;in.wav | in.flac&gt; &lt;out dir&gt; [--levels] | --list | --pick=&lt;n&gt;[,&lt;n&gt;...] | --pick=&lt;rate&gt;:&lt;bits&gt;
+ *   dec &lt;in.wav | in.flac&gt; &lt;out dir&gt; [--levels] [--pick=&lt;sel&gt;[,&lt;sel&gt;...]] | --list | --list=all, where &lt;sel&gt; is an entry of --list
+ *       (&lt;n&gt; or a range &lt;a&gt;-&lt;b&gt;), &lt;rate&gt;:&lt;bits&gt; (the masters of that rate and word length), master:&lt;k&gt; or name:&lt;text&gt; (a master by its
+ *       number or by its exact name); a selection that matches several masters lists them and writes nothing
  *   verify &lt;in.wav | in.flac&gt; &lt;master.wav&gt; ...
  * Environment (test hooks, as the C++): LAES_PIECE, LAES_FORCE_RF64, LAES_SELFCHECK_FLIP, KEEPTMP.
- * Not ported: align, selftest, excerpt, reduce, mkcd (out of scope); enc with master.wav@auto needs LaesEncoder.Options.aligner.
+ * Not ported: align, selftest, excerpt, reduce, mkcd (out of scope). enc with master.wav@auto: this tool uses LAEY's search (LaeyAutoAligner);
+ * an app that calls LaesEncoder sets LaesEncoder.Options.aligner itself.
  */
 public final class LaesTool {
     private LaesTool() {}

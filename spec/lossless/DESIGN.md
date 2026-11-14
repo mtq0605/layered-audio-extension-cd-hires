@@ -4,7 +4,7 @@ Specification text: CC BY 4.0. (c) 2026 mtq0605.
 
 **Design status: planned; the normative specification will follow.**
 
-**Superseded:** the normative description of LAES is now [SPEC.md](SPEC.md) (stable, payload version 1). This document is kept as the design record of 2026-10-18.
+**Superseded:** the normative description of LAES is now [SPEC.md](SPEC.md) (stable, payload version 2; version 1 files remain valid). This document is kept as the design record of 2026-10-18.
 
 This document is informative. It discloses the design of LAE Lossless as of 2026-10-18. The outline is stable, but details may still change. Decisions that have not yet been taken are marked **open** and are collected in Section 11.
 

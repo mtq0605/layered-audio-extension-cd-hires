@@ -6,7 +6,7 @@
 
 - **The core master** is a lossless master in its own right: integer PCM at 44.1 or 48 kHz, 16, 24 or 32 bit. At 16 bit, it can be CD-compatible. A CD player cannot read a core master at 24 or 32 bit, or a core master in the FLAC form.
 - **The other masters** run at 1, 2, 4 or 8 times the base rate (up to 352.8 / 384 kHz), at 16, 24 or 32 bit. Each one is stored either as the difference from a signal already in the file (the core master or an earlier master) or in full, whichever is smaller.
-- **Derived masters** (16 bit) exist for every rate that has no 16-bit master of its own. A derived master is lossless relative to its definition: every decoder reproduces it bit for bit. It is not lossless relative to the master it is derived from: that master is requantised to 16 bits with TPDF dither and cannot be recovered from the derived master. A derived master is not the original master.
+- **Derived masters** (16 bit) are offered one per source above 16 bits: the core master, each master and each of its rate levels, unless the publisher has turned them off ([SPEC.md](SPEC.md), Section 10.1). A derived master is lossless relative to its definition: every decoder reproduces it bit for bit. It is not lossless relative to the master it is derived from: that master is requantised to 16 bits with TPDF dither and cannot be recovered from the derived master. A derived master is not the original master.
 
 Normative text: [SPEC.md](SPEC.md). Which software plays which form without LAE software: [COMPATIBILITY.md](../COMPATIBILITY.md).
 

@@ -151,7 +151,7 @@ LAE addresses this problem under one constraint: **the CD layer is an ordinary, 
 
 **FLAC** [1] is a lossless audio format.
 
-- The CD layer of LAE is an ordinary PCM signal, so it can be carried in an ordinary FLAC stream. The encapsulation specification carries only the CD layer (the base layer) in FLAC; the extension resides in a separate extension file beside it, never inside the FLAC file (Section 10.7).
+- The CD layer of LAE is an ordinary PCM signal, so it can be carried in an ordinary FLAC stream. The encapsulation specification carries only the CD layer (the base layer) in FLAC; the extension resides in a separate extension file beside it, never inside the FLAC file (Section 10.7). The FLAC form of Section 10.1, a single file with the extension in APPLICATION blocks, is a separate form.
 - The whole-track MD5 of the encapsulation specification is defined in the same way as the audio MD5 of the FLAC STREAMINFO block for 16-bit stereo audio.
 - Two aspects of the LAE encoder were inspired by FLAC:
   - the operating modes are numbered like compression levels;

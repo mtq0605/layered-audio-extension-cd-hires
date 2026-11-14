@@ -6,7 +6,7 @@ LAEY 可以省略用户在母带超声频带中标定的噪声。这需要三个
 
 1. **对齐。** `lae_enc plan` 将母带与 CD 层对齐，结果由用户确认。所有标定均须在对齐后的母带上进行。
 2. **标定。** LAE Noise Marker（`lae_noise`、`tools/noise_panel.html`；见 `plugins/lae_noise_marker/`）列出平稳噪声和固定窄线，并由用户选择对哪些进行标定。
-   它写出标定文件（`.laenoise`）。它从不删除声音，也不导出声音。
+   它写出标定文件（`.laenoise`）。它从不删除声音，也不写出清理过的母带；除标定文件外，只写出短的试听片段。
 3. **编码。** `lae_enc <master.wav> <out.wav> [mode] noise=<marks.laenoise> [g | g=b | g=c | g=d]`。
 
 不使用 `noise=` 和 `g` 时，编码器写出的文件与加入这些选项之前（2026-11-04）的编码器写出的文件逐字节完全相同。

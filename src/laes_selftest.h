@@ -32,7 +32,7 @@ static bool roundTrip(std::vector<MasterIn> ms, const std::vector<double>& Ts, i
     if (flac) { const std::vector<uint8_t> f = laesflac::writeFlac(core.c, base, core.bits, body); laesflac::Info fi; bool md5ok;
         const std::string e = laesflac::readFlac(f, fi, core2.c, body2, md5ok); if (!e.empty() || !md5ok) { why = "FLAC read: " + (e.empty() ? std::string("MD5") : e); return false; }
         core2.rate = fi.rate; core2.bits = fi.bps; if (fileOut) *fileOut = f; }
-    else { const std::string path = (fs::temp_directory_path() / "laes_selftest.wav").string(); const std::vector<uint8_t> wb = wavBytes(core, &body);
+    else { const std::string path = (fs::temp_directory_path() / ("laes_selftest_" + std::to_string((unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count()) + ".wav")).string(); const std::vector<uint8_t> wb = wavBytes(core, &body);   // FU14-9: two self-tests at once use different files
         if (!writeAll(path, wb)) { why = "cannot write temp WAV"; return false; } const std::string e = readWav(path, core2, &body2); fs::remove(path); if (!e.empty()) { why = e; return false; } if (fileOut) *fileOut = wb; }
     if (!same(core, core2) || body != body2) { why = "container changed the core master or the LAES block"; return false; }
     std::vector<Pcm> dec; std::vector<MasterInfo> di; std::vector<bool> ok; const std::string de = decodeLaes(body2, core2, base, dec, di, ok); if (!de.empty()) { why = "decode: " + de; return false; }
@@ -73,7 +73,7 @@ static int run() {
         encodeLaes(c0, 44100, bad, bi, e1); report("a name with a control character is refused", !e1.empty(), e1.empty() ? std::string("accepted") : std::string());
         std::vector<MasterIn> many; for (int k = 0; k < 20; k++) many.push_back(M(synth(88200, 24, 0.02, 50 + (uint64_t)k)));
         std::vector<double> Tz(many.size(), 0.0); std::vector<uint8_t> f2; Pcm c2; ok = roundTrip(many, Tz, 44100, 16, true, why, &f2, &c2);
-        if (ok) { bool v2 = false; for (size_t i = 0; i + 6 <= f2.size(); i++) if (!memcmp(&f2[i], "LAE2LAE2", 8)) { v2 = f2[i + 8] == 2; break; } if (!v2) { ok = false; why = "20 masters: not version 2"; } }
+        if (ok) { bool v2 = false; for (size_t i = 0; i + 9 <= f2.size(); i++) if (!memcmp(&f2[i], "LAE2LAE2", 8)) { v2 = f2[i + 8] == 2; break; } if (!v2) { ok = false; why = "20 masters: not version 2"; } }
         report("20 masters (version 2), FLAC form", ok, why); }
     report("odd length (9001 frames at 352.8 kHz)", roundTrip({M(synth(352800, 24, 9001.0 / 352800, 12))}, {0}, 44100, 24, true, why), why);
     report("base-rate master (24-bit / 44.1 kHz, no octave layers)", roundTrip({M(synth(44100, 24, 0.5, 13))}, {0}, 44100, 16, false, why), why);

@@ -230,6 +230,19 @@ static string layoutPublisher(vector<V5> t, const Disc& pd, const cdxr::Layout& 
         if (t[k].rate != 44100) return "track " + to_string(k + 1) + ": CD layer at " + to_string(t[k].rate) + " Hz (L1, P1)";
         if (t[k].ncd() >= (1LL << 28)) return "track " + to_string(k + 1) + ": ncd >= 2^28 (P7)"; }
     P[n] = lay.end; if (P[0] != 0 || P[n] % SECTOR) return "the publisher's program must start at track 1 INDEX 01 and end on a sector boundary";
+    {   // the values that go into IMAGE.CUE as they are: CATALOG 13 digits, ISRC CCOOOYYNNNNN, FLAGS DCP / SCMS (PRE stops above), indexes in order inside the program
+        auto all = [](const string& s, size_t a, size_t b, bool letters, bool digits) { for (size_t i = a; i < b; i++) { const char c = s[i]; if (!((letters && c >= 'A' && c <= 'Z') || (digits && c >= '0' && c <= '9'))) return false; } return true; };
+        if (!lay.catalog.empty() && !(lay.catalog.size() == 13 && all(lay.catalog, 0, 13, false, true))) return "the publisher's CATALOG " + lay.catalog + " is not 13 digits: not supported";
+        long long last = LLONG_MIN; bool zeroBefore = false;   // zeroBefore: the index before is this track's INDEX 00 (INDEX 01 may share its position)
+        for (size_t k = 0; k < n; k++) { const auto& lt = lay.tracks[k]; const string tk = "track " + to_string(k + 1) + ": the publisher's ";
+            if (!lt.isrc.empty() && !(lt.isrc.size() == 12 && all(lt.isrc, 0, 2, true, false) && all(lt.isrc, 2, 5, true, true) && all(lt.isrc, 5, 12, false, true))) return tk + "ISRC " + lt.isrc + " is not 12 characters CCOOOYYNNNNN (2 letters, 3 letters or digits, 7 digits): not supported";
+            for (size_t i = 0; i < lt.flags.size();) { size_t j = lt.flags.find(' ', i); const string w = lt.flags.substr(i, j == string::npos ? string::npos : j - i);
+                if (w != "DCP" && w != "PRE" && w != "SCMS") return tk + "FLAGS " + w + " is not supported (a track's FLAGS can be DCP or SCMS; 4CH is not a stereo track)"; if (j == string::npos) break; i = j + 1; }
+            auto ix = lt.idx; sort(ix.begin(), ix.end()); int want = ix.empty() || ix[0].first != 0 ? 1 : 0;
+            for (auto& i : ix) { if (i.first != want++) return tk + "INDEX numbers are not 00 or 01 followed by 02, 03, ... without a gap or a repeat: not supported";
+                if (k == 0 && i.first == 0) continue;   // the track-1 pregap (not written, L4)
+                if (i.second < last || (i.second == last && !(i.first == 1 && zeroBefore)) || i.second >= P[n]) return tk + "INDEX " + (i.first < 10 ? "0" : "") + to_string(i.first) + " at " + msf(i.second / SECTOR) + " is not after the index before it or not inside the program (which ends at " + msf(P[n] / SECTOR) + "): not supported";
+                last = i.second; zeroBefore = i.first == 0; } } }
     for (long long a = pd.base; a < 0; a++) if (pd.L(a) || pd.R(a)) return "the publisher's track 1 INDEX 00 (pregap) has sound: not supported (L4, P10)";
     for (long long a = 0; a < P[n]; a++) if (!pd.has(a)) return "the publisher's program has an unknown sample at LBA " + to_string(a / SECTOR) + " (a PREGAP, POSTGAP or missing file): give the whole-disc CUE and BIN";
     im = Image(); im.pub = true; im.lay = lay; im.label = label; im.date = date; im.cap = cap; im.noext = noext;

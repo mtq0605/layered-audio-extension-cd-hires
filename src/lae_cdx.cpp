@@ -26,8 +26,11 @@
 //        tracks-gapnext[-nocue] / tracks-gapomit[-nocue] (the INDEX 00 gaps of tracks 2... in the next file / left out)
 //   lae_cdx selftest                                    known answers (C19)
 //   lae_cdx test <fixturedir>                           section-7 cases on the test discs X, Y, S, T (in memory)
-// Every input v5 file of pack, split and image is decoded completely before anything is written (P2; the user's decision of
-// 2026-11-15): LAEY every extension pack to its last frame, LAES every master against its SHA-256; a file that does not decode stops the tool.
+// Every input v5 file of pack, split and image, and every verified track of read and repack, is decoded completely before anything is
+// written (P2, R8; the user's decision of 2026-11-15): LAEY every extension pack to its last frame, LAES every master against its SHA-256
+// (by the stream decoder with temporary files when a block does not fit into memory). An input that does not decode stops the tool; a
+// track the reader cannot decode takes the CD route; one line per file or track says what was decoded.
+// Test switch: LAE_CDX_LAES_STREAM=1 (every LAES check by the stream decoder), only with LAE_TEST_MODE=1.
 // Measured offsets are only printed (R16, P4); no file this tool writes contains a position, offset or shift.
 #include <cstdio>
 #include <cstdlib>
@@ -44,6 +47,7 @@
 #include "wavio.h"
 #include "lae_decoder.h"   // P2: every input v5 file must pass the decoder's own checks
 #include "laes_file.h"     // LAE Lossless blocks (extension type 2)
+#include "laes_stream.h"   // the LAES stream decoder (temporary files), when a block does not fit into memory (2026-11-15)
 #include "lae_cdx_read.h"
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 namespace fs = std::filesystem;
@@ -130,6 +134,35 @@ static string laeyDecodeAll(const vector<int16_t>& cd, const vector<uint8_t>& la
         const bool before = g_streamErr; g_streamErr = false; while (D.read(blk.data(), 4096) > 0) {}
         const bool bad = g_streamErr; g_streamErr = before; if (bad) return at("corrupt stream (values out of range)"); }
     summary = "LAEY, " + (total == 1 ? string("the extension") : "all " + to_string(total) + " extension packs") + " decoded completely"; return ""; }
+// test switch (the user's decision of 2026-11-15, items 38 / 39): only with LAE_TEST_MODE=1 does LAE_CDX_LAES_STREAM=1 take effect; it sends
+// every LAES check through the stream decoder, as when a block does not fit into memory. main() names the active switches.
+static bool laesStreamForced() { const char* m = getenv("LAE_TEST_MODE"); const char* s = getenv("LAE_CDX_LAES_STREAM"); return m && !strcmp(m, "1") && s && !strcmp(s, "1"); }
+// an LAES block decoded completely (items 2 and 9): every master decoded and compared with its SHA-256, in memory; when the memory for
+// that is not there, by the stream decoder of laes (laes_stream.h) with temporary files in a folder this run makes under the system's
+// temporary folder and removes again. Never by the whole-track MD5 alone.
+enum { CHK_OK = 0, CHK_REFUSED = 1, CHK_SHA = 2, CHK_CANNOT = 3 };   // CHK_CANNOT: the check could not run (no memory, no temporary space)
+static int laesDecodeAll(const vector<uint8_t>& block, const vector<int16_t>& cd, int rate, string& why, string& summary) {
+    const size_t n = cd.size() / 2; why.clear();
+    auto masters = [](size_t k) { return k == 1 ? string("the master") : "all " + to_string(k) + " masters"; };
+    if (!laesStreamForced()) {
+        try { laes::Pcm core; core.rate = rate; core.bits = 16; for (int c = 0; c < 2; c++) { core.c[c].resize(n); for (size_t i = 0; i < n; i++) core.c[c][i] = cd[i * 2 + c]; }
+            vector<laes::Pcm> dec; vector<laes::MasterInfo> info; vector<bool> ok; why = laes::decodeLaes(block, core, rate, dec, info, ok);
+            if (!why.empty()) return CHK_REFUSED;
+            for (size_t i = 0; i < ok.size(); i++) if (!ok[i]) { why = "LAES master " + to_string(i + 1) + " does not match its SHA-256"; return CHK_SHA; }
+            summary = "LAES, " + masters(ok.size()) + " decoded, SHA-256 matching"; return CHK_OK; }
+        catch (const std::bad_alloc&) { why.clear(); } }
+    fs::path wd; { std::error_code ec; const fs::path base = fs::temp_directory_path(ec);
+        for (int i = 0; !ec && i < 1000 && wd.empty(); i++) { const fs::path c = base / ("lae_cdx_laes_" + to_string((long long)time(nullptr)) + "_" + to_string(i)); std::error_code cc; if (fs::create_directory(c, cc) && !cc) wd = c; } }
+    if (wd.empty()) { why = "the block does not fit into memory and no temporary folder can be made for the stream decoder"; return CHK_CANNOT; }
+    struct RemoveTmp { fs::path p; ~RemoveTmp() { std::error_code ec; fs::remove_all(p, ec); } } removeTmp{wd};
+    try { const fs::path body = wd / "body.bin"; if (!writeBytes(body, block.data(), block.size())) { why = "cannot write the temporary files of the stream decoder in " + u8(wd); return CHK_CANNOT; }
+        laes::Pcm core; core.rate = rate; core.bits = 16; for (int c = 0; c < 2; c++) { core.c[c].resize(n); for (size_t i = 0; i < n; i++) core.c[c][i] = cd[i * 2 + c]; }
+        vector<laess::DecMaster> dec; why = laess::decodeLaesS(body.string(), core, rate, wd.string(), dec, 4096 * 64, laesfast::defaultThreads());
+        if (!why.empty()) return CHK_REFUSED;
+        for (size_t i = 0; i < dec.size(); i++) if (!dec[i].shaOk) { why = "LAES master " + to_string(i + 1) + " does not match its SHA-256"; return CHK_SHA; }
+        summary = "LAES, " + masters(dec.size()) + " decoded by the stream decoder (temporary files), SHA-256 matching"; return CHK_OK; }
+    catch (const std::bad_alloc&) { why = "not enough memory even for the stream decoder"; return CHK_CANNOT; }
+    catch (const std::exception& ex) { why = string("the stream decoder stopped: ") + ex.what() + " (temporary files in " + u8(wd) + ")"; return CHK_CANNOT; } }
 // reads and checks a v5 WAV: 16-bit stereo, LAE chunk, CD layer 44100 or 48000 Hz (P1), ncd < 2^28 (P7), every decoder check (P2).
 // Only whole stereo frames are kept; canonical = the file is exactly the canonical layout of F1
 static string loadV5(const fs::path& p, V5& v) {
@@ -139,31 +172,29 @@ static string loadV5(const fs::path& p, V5& v) {
     if (rate != 44100 && rate != 48000) return "CD layer at " + to_string(rate) + " Hz: 44100 or 48000 expected (P1)";
     if (pcm.size() / 2 >= (1u << 28)) return "longer than 2^28 CD frames (P7)";
     if (laes::isLaes(lae)) {   // LAE Lossless block (type 2): every master must decode and match its SHA-256 (P2 for LAES)
-        laes::Pcm core; core.rate = rate; core.bits = 16; for (int c = 0; c < 2; c++) { core.c[c].resize(pcm.size() / 2); for (size_t i = 0; i < pcm.size() / 2; i++) core.c[c][i] = pcm[i * 2 + c]; }
-        vector<laes::Pcm> dec; vector<laes::MasterInfo> info; vector<bool> ok; string de = laes::decodeLaes(lae, core, rate, dec, info, ok);
-        if (!de.empty()) return "the LAES decoder refuses this file (P2): " + de;
-        for (size_t i = 0; i < ok.size(); i++) if (!ok[i]) return "LAES master " + to_string(i + 1) + " does not match its SHA-256 (P2)";
-        v.checked = "LAES, " + (ok.size() == 1 ? string("the master") : "all " + to_string(ok.size()) + " masters") + " decoded, SHA-256 matching";
+        string de; const int rc = laesDecodeAll(lae, pcm, rate, de, v.checked);
+        if (rc == CHK_REFUSED) return "the LAES decoder refuses this file (P2): " + de;
+        if (rc == CHK_SHA) return de + " (P2)";
+        if (rc == CHK_CANNOT) return "the decoder check could not run: " + de;
         v.name = u8(p.filename()); v.rate = rate; v.cd.swap(pcm); v.block.swap(lae); v.type = 2; v.canonical = canonOf(v) == b; return ""; }
     { Decoder D; int code = 0; string de = D.openRef(pcm, lae, "full", 0, &code); if (!de.empty()) return "the decoder refuses this file (P2): " + de;
       if (D.base != rate) return "the LAE base rate " + to_string(D.base) + " Hz differs from the WAV sample rate " + to_string(rate) + " Hz (P2, X2)"; }   // the decoder itself does not compare them
     { string de = laeyDecodeAll(pcm, lae, rate, v.checked); if (!de.empty()) return "the decoder refuses this file (P2): " + de; }   // every pack decoded completely (2026-11-15)
     v.name = u8(p.filename()); v.rate = rate; v.cd.swap(pcm); v.block.swap(lae); v.canonical = canonOf(v) == b; return ""; }
-// R8 (2026-11-14): every track that passed the whole-track MD5 goes to the unchanged decoder before anything is written, with the
-// checks loadV5 makes on the packaging side (P2). A track the decoder refuses takes the CD route ("extension layer damaged").
-// An LAES block is decoded whole for this (every master against its SHA-256); when the memory for that is not there, the track
-// stays verified by its MD5 and a line says that the decoder did not check it.
-static void decoderCheck(Report& r) {
+// R8: every track that passed the whole-track MD5 goes to the unchanged decoder before anything is written (P2). The user's decision of
+// 2026-11-15 (item 9): decoded completely, as on the packaging side: LAEY every extension pack to its last frame, LAES every master
+// against its SHA-256 (in memory, or by the stream decoder with temporary files when the memory is not there; never by the MD5 alone).
+// A track the decoder refuses takes the CD route ("extension layer damaged"); each track that passes gets a line saying what was decoded.
+// Returns "" or, when a check could not run at all, the reason the reading stops (nothing written).
+static string decoderCheck(Report& r) {
     for (auto& t : r.tracks) { if (t.state != Track::PASS) continue;
-        const vector<uint8_t> block(t.ext->bytes.begin(), t.ext->bytes.begin() + (ptrdiff_t)t.ext->blockLen); const int rate = (int)t.ext->t.rate; string why;
-        if (laes::isLaes(block)) {
-            try { laes::Pcm core; core.rate = rate; core.bits = 16; for (int c = 0; c < 2; c++) { core.c[c].resize(t.cd.size() / 2); for (size_t i = 0; i < t.cd.size() / 2; i++) core.c[c][i] = t.cd[i * 2 + c]; }
-                vector<laes::Pcm> dec; vector<laes::MasterInfo> info; vector<bool> ok; why = laes::decodeLaes(block, core, rate, dec, info, ok);
-                for (size_t i = 0; why.empty() && i < ok.size(); i++) if (!ok[i]) why = "LAES master " + to_string(i + 1) + " does not match its SHA-256"; }
-            catch (const std::bad_alloc&) { printf("track %02d: not enough memory to decode its LAES block for the check; verified by the whole-track MD5 only\n", t.track); continue; } }
-        else { Decoder D; int code = 0; why = D.openRef(t.cd, block, "full", 0, &code);
-            if (why.empty() && D.base != rate) why = "the LAE base rate " + to_string(D.base) + " Hz differs from the CD layer's " + to_string(rate) + " Hz"; }
-        if (!why.empty()) { t.state = Track::FAIL; t.reason = "extension layer damaged: the decoder refuses it (" + why + ")"; vector<int16_t>().swap(t.cd); } } }
+        const vector<uint8_t> block(t.ext->bytes.begin(), t.ext->bytes.begin() + (ptrdiff_t)t.ext->blockLen); const int rate = (int)t.ext->t.rate; string why, summary;
+        if (laes::isLaes(block)) { const int rc = laesDecodeAll(block, t.cd, rate, why, summary);
+            if (rc == CHK_CANNOT) { char b[16]; snprintf(b, sizeof b, "track %02d", t.track); return string(b) + ": the decoder check could not run (" + why + ")"; } }
+        else why = laeyDecodeAll(t.cd, block, rate, summary);
+        if (!why.empty()) { t.state = Track::FAIL; t.reason = "extension layer damaged: the decoder refuses it (" + why + ")"; vector<int16_t>().swap(t.cd); }
+        else printf("track %02d: decoder check passed: %s\n", t.track, summary.c_str()); }
+    return ""; }
 static vector<uint8_t> laxOf(const V5& v, uint16_t track) {
     cdx::Trailer t = cdx::compute(v.cd.data(), (uint32_t)v.ncd(), (uint32_t)v.rate, track, v.type); vector<uint8_t> o = v.block; auto tr = cdx::serialize(t); o.insert(o.end(), tr.begin(), tr.end()); return o; }
 
@@ -852,7 +883,8 @@ static int realMain(int argc, char** argv) {
         vector<Ext> x(1); x[0].name = pos[1]; if (!cdxr::readBytes(fs::path(pos[1]), x[0].bytes)) { printf("cannot read %s\n", pos[1].c_str()); return 1; } cdxr::check(x[0]);
         if (!x[0].bad.empty()) { printf("%s: %s; only the base layer can be played\n", x[0].name.c_str(), x[0].bad.c_str()); return 3; }
         if ((int)x[0].t.rate != rate) { printf("the base layer is %d Hz, the extension file %u Hz; only the base layer can be played\n", rate, x[0].t.rate); return 3; }
-        Disc d = singleFile(pcm, rate); Report r = cdxr::read(d, x, WDEF); decoderCheck(r); const Track* t = nullptr, *refused = nullptr;
+        Disc d = singleFile(pcm, rate); Report r = cdxr::read(d, x, WDEF); { const string dc = decoderCheck(r); if (!dc.empty()) { printf("%s; nothing written\n", dc.c_str()); return 2; } }
+        const Track* t = nullptr, *refused = nullptr;
         for (auto& q : r.tracks) { if (q.state == Track::PASS) t = &q; else if (q.state == Track::FAIL && q.reason.rfind("extension layer damaged", 0) == 0) refused = &q; }
         if (!t && refused) { printf("%s: %s; only the base layer can be played\n", x[0].name.c_str(), refused->reason.c_str()); return 3; }
         if (!t) { printf("the base layer does not contain this track (%s); only the base layer can be played\n", !r.unused.empty() ? r.unused[0].c_str() : !r.tracks.empty() ? r.tracks[0].reason.c_str() : ""); return 3; }
@@ -943,7 +975,8 @@ static int realMain(int argc, char** argv) {
         if (ws.empty() || W < 0 || W > 441000) { printf("W=%s: give the search radius in samples as a whole number up to 441000 (at least 5880 is used); nothing written\n", ws.c_str()); return 1; }
         W = max(WDEF, W); vector<string> in(pos.begin() + 2, pos.end()); Disc d;
         e = openInputs(in, d); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }
-        Report r = cdxr::read(d, x, W); decoderCheck(r); printReport(d, r); e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem())); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+        Report r = cdxr::read(d, x, W); { const string dc = decoderCheck(r); if (!dc.empty()) { printf("%s; nothing written\n", dc.c_str()); return 2; } }
+        printReport(d, r); e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem())); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         int pass = 0, fail = 0; for (auto& t : r.tracks) { if (t.state == Track::PASS) pass++; if (t.state == Track::FAIL) fail++; }
         printf("read: %d verified, %d CD only; output in %s\n", pass, (int)r.tracks.size() - pass, pos[0].c_str()); return fail ? 3 : 0; }
     if (cmd == "sim" && pos.size() == 3) {
@@ -970,6 +1003,8 @@ static int realMain(int argc, char** argv) {
     printf("unknown command or wrong arguments (see the header of lae_cdx.cpp)\n"); return 1; }
 int main(int argc, char** argv) {
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names; the console shows UTF-8 while the tool runs (win_utf8.h)
+    { const char* m = getenv("LAE_TEST_MODE"); if (m && !strcmp(m, "1")) printf("test mode (LAE_TEST_MODE=1): active test switches: %s; unset LAE_TEST_MODE to return to normal behaviour\n",
+                                                                           laesStreamForced() ? "LAE_CDX_LAES_STREAM=1 (every LAES check by the stream decoder)" : "none"); }
     try { return realMain(argc, argv); }
     catch (const std::bad_alloc&) { printf("out of memory; nothing more written\n"); return 2; }
     catch (const std::exception& ex) { printf("internal error: %s; nothing more written\n", ex.what()); return 2; } }

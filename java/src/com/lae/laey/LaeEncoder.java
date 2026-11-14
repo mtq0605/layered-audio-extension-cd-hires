@@ -552,8 +552,9 @@ public final class LaeEncoder {
         { streamErr[0] = false; new File(x.T("clip.bin")).delete();
           env.set("CLIPMAP", x.T("clip.bin")); int rc = call(env, dec, "dec", partPath, x.T("check.wav"), "full"); env.set("CLIPMAP", "");
           if (rc != 0 || EncIo.testFail(env, "finaldecode")) { env.printf("end-to-end check FAILED: the decoder could not decode the final file (code %d): nothing written\n", rc); x.oldNote(); return 2; }
-          final long wantWav = 44 + x.Lm * 6 + ((x.Lm * 6) & 1), clipB = fileSize(x.T("clip.bin"));
-          if (fileSize(x.T("check.wav")) == wantWav && clipB >= 0 && !EncIo.testFail(env, "clipdecode")) nclip = clipB / 4;
+          final long wantWav = 44 + x.Lm * 6 + ((x.Lm * 6) & 1), clipB = fileSize(x.T("clip.bin")), haveWav = fileSize(x.T("check.wav"));
+          if (haveWav != wantWav) { env.printf("end-to-end check FAILED: the decoded file has %lld bytes, expected %lld: nothing written\n", haveWav, wantWav); x.oldNote(); return 2; }   // the decoder said OK but did not write the whole track (FU07-4)
+          if (clipB >= 0 && !EncIo.testFail(env, "clipdecode")) nclip = clipB / 4;
           if (nclip >= 0) env.printf("samples beyond full scale before the decoder's hard limiter: %ld\n", nclip);
           else env.printf("samples beyond full scale before the decoder's hard limiter: not measured (the check files are incomplete)\n"); }
         new File(x.T("check.wav")).delete();

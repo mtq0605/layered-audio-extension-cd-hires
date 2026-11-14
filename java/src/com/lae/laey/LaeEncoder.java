@@ -306,6 +306,8 @@ public final class LaeEncoder {
         catch (EncEnv.Cancelled c) { throw c; }
         catch (LaeException e) { env.printf("further master: stopped: %s\n", e.getMessage()); rc = 2; }
         catch (OutOfMemoryError e) { env.printf("further master: stopped: out of memory\n"); rc = 2; }
+        catch (RuntimeException e) { env.printf("further master: stopped: %s\n", why(e)); rc = 2; }   // FU07-2 (as lae_enc c45ec8c): any other error stops this run cleanly
+        catch (Error e) { env.printf("further master: stopped: internal error\n"); rc = 2; }
         clearModuleEnv(env); env.set("ZSIGN", zs != null ? zs : ""); env.set("RULE_F", rf != null ? rf : ""); env.set("RULE_D", rd != null ? rd : ""); env.set("DITHERFLAGS", x.T("dither.flags"));   // this run's own module settings again
         if (!hadUnits) env.set("LAE_BLOCKUNITS", "");
         return rc; }

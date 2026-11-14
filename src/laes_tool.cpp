@@ -1088,7 +1088,10 @@ static int laesMain(int argc, char** argv) {
                     for (long long a = 0; a < wi.frames && same; a += P) { const long long e = std::min<long long>(wi.frames, a + P); laess::wavFrames(in, wi, a, e, r); readSrc(s, 0, a, e, x0); readSrc(s, 1, a, e, x1);
                         for (long long q = 0; q < e - a && same; q++) same = r[(size_t)q * 2] == x0[(size_t)q] && r[(size_t)q * 2 + 1] == x1[(size_t)q]; }
                     if (same) hit = (int)k; }
-                if (hit >= 0) { used[(size_t)hit] = true; printf("master %d vs %s: IDENTICAL\n", hit + 1, argv[i]); } else { printf("%s: DIFFERENT (no decoded master equals it)\n", argv[i]); all = false; } }
+                if (hit >= 0) { used[(size_t)hit] = true; printf("master %d vs %s: IDENTICAL\n", hit + 1, argv[i]); }
+                else if (!re.empty()) {   // U14-a (2026-11-14): a file the reader refused is named with the reason (as the Java tool, U14-c)
+                    const std::string pre = std::string(argv[i]) + ": "; printf("%s: DIFFERENT (not compared: %s)\n", argv[i], (re.rfind(pre, 0) == 0 ? re.substr(pre.size()) : re).c_str()); all = false; }
+                else { printf("%s: DIFFERENT (no decoded master equals it)\n", argv[i]); all = false; } }
             for (size_t k = 0; k < dec.size(); k++) if (!used[k] && argc > 3) printf("master %zu: not compared\n", k + 1); }
         return all ? 0 : 2; }
     catch (const std::exception& x) { printf("stopped: %s\n", x.what()); return 2; }

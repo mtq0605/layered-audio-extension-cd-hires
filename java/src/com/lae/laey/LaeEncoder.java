@@ -188,14 +188,15 @@ public final class LaeEncoder {
         final String outPath = argv[2], partPath = outPath + ".part", tmp = workDir != null ? workDir : outPath + ".tmp";
         x.outPath = outPath; x.partPath = partPath; x.tmp = tmp; x.run.out = outPath; x.run.part = partPath; x.run.tmp = tmp; x.run.hadOld = exists(outPath);
         if (!MdctTb.selftestOK() || !AlignHash.md5SelfTest() || EncIo.testFail(env, "selftest")) { env.printf("encoder self-test FAILED: this build does not compute the IMDCT in the IEEE-754 order the format requires, or its MD5 is wrong (see docs/BUILD.md); nothing encoded\n"); return 4; }
-        final String modeName = argc > 3 ? argv[3] : "3"; final int mi = PartitionFormat.modeIndex(modeName); if (mi < 0) { env.printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }
+        // the mode is the third argument and may be left out (default 3): a third argument that is no mode name is read as the first option (FU07-5)
+        final int opt0 = modeOpt0(argv); final String modeName = opt0 == 4 && argc > 3 ? argv[3] : "3"; final int mi = PartitionFormat.modeIndex(modeName);
         x.mi = mi;
         boolean equal = false, zsOpt = false, bits24 = false; int wm = 0, scheme = 1; long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once
-        final int formSel = LaeRetag.outputForm(env, outPath, argv, 4); if (formSel < 0) { env.printf("nothing encoded\n"); return 1; } x.asFlac = formSel == 1;
-        { final com.lae.laes.LaesTags.Tags tags = new com.lae.laes.LaesTags.Tags(); final String e = LaeRetag.tagArgs(argv, 4, tags); if (!e.isEmpty()) { env.printf("%s: nothing encoded\n", e); return 1; }   // read and checked before any work
+        final int formSel = LaeRetag.outputForm(env, outPath, argv, opt0); if (formSel < 0) { env.printf("nothing encoded\n"); return 1; } x.asFlac = formSel == 1;
+        { final com.lae.laes.LaesTags.Tags tags = new com.lae.laes.LaesTags.Tags(); final String e = LaeRetag.tagArgs(argv, opt0, tags); if (!e.isEmpty()) { env.printf("%s: nothing encoded\n", e); return 1; }   // read and checked before any work
           if (x.presetTags != null) { tags.kv.addAll(x.presetTags.kv); tags.pics.addAll(x.presetTags.pics); final String e2 = com.lae.laes.LaesTags.checkAll(tags); if (!e2.isEmpty()) { env.printf("%s: nothing encoded\n", e2); return 1; } }
           x.tagChunks = x.asFlac ? com.lae.laes.LaesTags.flacBlocks(tags, false, LaeRetag.kLaeyEncoder) : com.lae.laes.LaesTags.wavChunks(tags, LaeRetag.kLaeyEncoder); }   // FLAC form: VORBIS_COMMENT + PICTURE blocks, before the "LAE1" blocks
-        for (int i = 4; i < argc; i++) { final String a = argv[i];
+        for (int i = opt0; i < argc; i++) { final String a = argv[i];
             if (LaeRetag.isTagOpt(a) || LaeRetag.isFormOpt(a)) continue;
             if (a.startsWith("master1name=")) { if (utf8(a.substring(12)).length > 255) { env.printf("master1name=: a name has at most 255 bytes\n"); return 1; } x.mainName = a.substring(12); continue; }   // port of lae_enc.cpp: the main body's name
             if (a.equals("equal")) equal = true; else if (a.equals("energy")) wm = 1; else if (a.equals("s2")) scheme = 2; else if (a.equals("s1")) scheme = 1;
@@ -214,6 +215,7 @@ public final class LaeEncoder {
                 if (ni == 0 || !ok || p < v.length() || I > 2000000000L) { env.printf(v.indexOf(',') >= 0 ? "cdalign=%s: write the fraction with a point (for example cdalign=3.5)\n"
                                                                                   : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
                 x.manual = true; x.manualText = v; x.manualSg = sg; x.manualI = I; x.manualF = F; x.manualFs = Fs; }
+            else if (i == 3) { env.printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }   // the mode slot: neither a mode nor an option
             else { env.printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> --form=flac --form=wav resume)\n", a); return 1; } }
         x.run.keepTmp = x.resume;
         if ((x.cdCheck || x.cdAccept || x.manual || x.cdEdge >= 0) && x.cdPath == null) { env.printf("cdcheck, cdalign, cdaccept and cdedge= need cd=<CD.wav>\n"); return 1; }
@@ -295,6 +297,8 @@ public final class LaeEncoder {
     /** the streams of one layer (C++ std::vector&lt;std::vector&lt;uint8_t&gt;&gt;) */
     static final class Streams { List<byte[]> s = new ArrayList<byte[]>(); }
 
+    // the first option's index: 3 when the third argument is no mode name (the mode left out, default 3), else 4 (FU07-5, as lae_enc.cpp)
+    static int modeOpt0(String[] argv) { return argv.length > 3 && PartitionFormat.modeIndex(argv[3]) < 0 ? 3 : 4; }
     // port of lae_enc.cpp:encode lambda nested: one further master, this encoder run as a step of this run with its own work folder
     static int nested(Ctx x, List<String> a, String zs, String rf, String rd, boolean hadUnits) {
         final EncEnv env = x.env; Ctx y = new Ctx(); y.env = env; int rc;
@@ -315,7 +319,7 @@ public final class LaeEncoder {
         final EncEnv env = x.env; final long pbA = P >> stages; short[] core = coreOf(x.T("b16.s16"), pbA); final int n = x.nPacks;
         final String coreW = x.T("core.wav"); writeCore(env, coreW, core, (int) base);
         List<String> common = new ArrayList<String>(); common.add(modeName); common.add(scheme == 2 ? "s2" : "s1");   // the coding options are the same for every pack
-        for (int i = 4; i < argv.length; i++) { final String a = argv[i]; if (a.equals("zs") || a.equals("energy") || a.equals("equal") || a.equals("bits=24") || a.startsWith("mem=") || a.equals("g") || a.startsWith("g=")) common.add(a); }   // g: every pack on its own master (2026-11-11)
+        for (int i = modeOpt0(argv); i < argv.length; i++) { final String a = argv[i]; if (a.equals("zs") || a.equals("energy") || a.equals("equal") || a.equals("bits=24") || a.startsWith("mem=") || a.equals("g") || a.startsWith("g=")) common.add(a); }   // g: every pack on its own master (2026-11-11)
         final boolean hadUnits = env.get("LAE_BLOCKUNITS") != null; boolean stopA = false;
         final String zs = env.get("ZSIGN"), rf = env.get("RULE_F"), rd = env.get("RULE_D");
         final long upM = 1L << stages; final boolean bits24c = common.contains("bits=24");

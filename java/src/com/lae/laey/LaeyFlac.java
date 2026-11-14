@@ -90,6 +90,10 @@ public final class LaeyFlac {
     // port of laey_flac.h:decodeAudio: the audio frames (all of them, n bytes of a) decoded into pcm[0] (interleaved L/R); "" or the reason
     public static String decodeAudio(byte[] a, int n, Flac.Info si, short[][] pcm) {
         if (si.total * 2 > Integer.MAX_VALUE - 8) return "the file is too large for this decoder";   // Java only: an array holds < 2^31 values
+        // FU24-3 (Java side of KA-M1; C++: src/laey_flac.h:24): every FLAC frame has at least 8 bytes and at most maxBs samples, so a
+        // STREAMINFO count beyond (n / 8 + 1) * maxBs cannot be in these n bytes; refused before the array is made (a small crafted file
+        // made the decoder ask for up to 2 GB). Every valid file lies far below the bound.
+        if (si.total > ((long) n / 8 + 1) * Math.max(1, si.maxBs)) return "FLAC CD layer: STREAMINFO gives more samples than the audio frames can hold";
         final short[] o = new short[(int) (si.total * 2)]; pcm[0] = o; long have = 0, frameNo = 0; int p = 0; final Flac.Frame F = new Flac.Frame();
         while (p < n) { Flac.decodeFrame(a, p, n - p, si, frameNo, have, F); if (!F.err.isEmpty()) return "FLAC CD layer: " + F.err;
             final int k = F.n; if (have + k > si.total) return "FLAC CD layer: more samples than STREAMINFO gives";

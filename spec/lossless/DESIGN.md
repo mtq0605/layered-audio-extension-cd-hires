@@ -2,7 +2,7 @@
 
 Specification text: CC BY 4.0. (c) 2026 mtq0605.
 
-**Design status: planned; the normative specification will follow.**
+**Design status (2026-10-18): planned. The normative specification has since been published (see below).**
 
 **Superseded:** the normative description of LAES is now [SPEC.md](SPEC.md) (stable, payload version 2; version 1 files remain valid). This document is kept as the design record of 2026-10-18.
 

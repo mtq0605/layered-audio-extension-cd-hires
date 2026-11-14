@@ -370,7 +370,7 @@ For each block, the encoder computes two quantities:
 
 A block whose residual is above −3 dB does not match.
 
-**Drift check.** Each block is also compared at two CD samples on either side of the offset, with the gains kept. A better fit at either place indicates a different speed, an edit or another take, and the encoder stops. This comparison only stops the encoder; it never moves anything.
+**Drift check.** Each block is also compared at two CD samples on either side of the offset, with the gains kept. A better fit at either place indicates a different speed, an edit or another take. The result is never used to adjust anything: the encoder does not move the position, does not continue the search, and neither estimates nor compensates a speed. In the automatic search, the result is reported as a failed alignment. With an offset given by hand, it is shown as a warning, and the encode continues only after the user's confirmation (see the table below).
 
 The thresholds are defined in `src/cd_align.cpp` (structure `Th`).
 
@@ -381,7 +381,8 @@ The thresholds are defined in `src/cd_align.cpp` (structure `Th`).
 | ≤ −40 dB | Aligned |
 | −40 to −33 dB | Confirmation required |
 | above −33 dB | Confirmation required, with a warning that the file may become much larger |
-| No fit (a check block whose residual is above −3 dB re the CD; drift, that is, a better fit two CD samples to either side; or no position found) | Never encoded; cannot be overridden |
+| Drift (a better fit two CD samples to either side), or some but not all check blocks do not match (residual above −3 dB re the CD) | The automatic search reports "alignment failed". With an offset given by hand (`cdalign=`): a warning that one position cannot fit the whole piece, and confirmation required as above −33 dB. Nothing is compensated |
+| No fit (no check block matches, or no position found) | Never encoded; cannot be confirmed |
 
 Confirmation is handled as follows:
 
@@ -516,7 +517,7 @@ If the master's sound starts less than one CD sample before track 1, one frame o
 - the order of the pieces differs;
 - the CD carries the pre-emphasis flag (FLAGS PRE);
 - track 1 has sound in INDEX 00;
-- any stop condition of the single-piece alignment (Section 4.3) occurs.
+- any stop condition of the single-piece alignment (Section 4.3) occurs; in the planner, drift and check blocks that do not match always stop, and cannot be confirmed.
 
 **Output.** For each piece, the planner writes:
 
@@ -1614,7 +1615,7 @@ The output name decides the form: `.wav` the WAV form, `.flac` the FLAC form, `.
 | `cd=<file>` | Independent CD: a 16-bit stereo WAV at the base rate of the master's family (44.1/48 kHz); its samples are written unchanged as the CD layer. The CD is aligned as described in Section 4.3. Without `cdalign=`, the encoder reports both searches and writes nothing. |
 | `cdalign=<offset>` | The confirmed offset in master samples; positive means that the CD starts later. A whole number, or a number with up to 9 decimals and `.` as the decimal point (`cdalign=1,5` is rejected). The offset printed by the encoder yields the same file. |
 | `cdcheck` | Performs the alignment checks without encoding (exit code 0). Without `cdalign=`, it reports both searches; with `cdalign=`, its last line states "would encode", "would ask for confirmation" or "would not encode". |
-| `cdaccept` | Continue without asking when the remaining time difference lies beyond −40 dB (the confirmation bands of Section 4.3) |
+| `cdaccept` | Continue without asking when the remaining time difference lies beyond −40 dB and, with `cdalign=`, after a warning about drift or check blocks that do not match (the confirmation cases of Section 4.3) |
 | `cdedge=pad` | For sound that only the master has at the start or end: add digital silence to the CD layer there and keep the master whole (the CD layer is longer than the given CD) |
 | `cdedge=cut` | For sound that only the master has at the start or end: cut the master to the length of the CD; its sound beyond the CD is not kept (the CD layer is exactly the given CD) |
 | `bits=24` | For a 32-bit master whose lowest 8 bits are not all zero: use the upper 24 bits without asking (Section 3.1) |
@@ -1628,7 +1629,7 @@ The output name decides the form: `.wav` the WAV form, `.flac` the FLAC form, `.
 | `--cover=<image>` | The front cover, JPEG or PNG, stored byte for byte |
 | `--picture=<type>:<image>` | Any other picture, with the ID3 / FLAC picture type (4 back cover, 5 leaflet, 6 medium, 8 artist, …) |
 | `--form=wav`, `--form=flac` | The form of the output file (Section 10.1). It must agree with a `.wav` or `.flac` name; only `.lae` leaves the choice open. Without it, the WAV form is byte-identical to the output of earlier versions. |
-| `master2=<file>` … `master9=<file>` | Further masters, each coded as an extension pack against the same CD layer as the main body (the CD layer derived from the first master or, with `cd=`, the given CD; [spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 5.6). Each needs its position on the CD layer, `master<n>align=<offset>` (written like `cdalign=`); without it, both searches are reported and nothing is written. `master<n>accept` and `master<n>edge=pad|cut` act like `cdaccept` and `cdedge=` for that master. A master whose speed drifts against the CD (for example, tape wow and flutter) is not continued without a position given by hand and a confirmation. Further masters cannot yet be combined with `noise=`, `resume` or `cdcheck`. |
+| `master2=<file>` … `master9=<file>` | Further masters, each coded as an extension pack against the same CD layer as the main body (the CD layer derived from the first master or, with `cd=`, the given CD; [spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 5.6). Each needs its position on the CD layer, `master<n>align=<offset>` (written like `cdalign=`); without it, both searches are reported and nothing is written. `master<n>accept` and `master<n>edge=pad|cut` act like `cdaccept` and `cdedge=` for that master. A master whose speed drifts against the CD (for example, tape wow and flutter), or some of whose check blocks do not match it, is not continued without a position given by hand and a confirmation. Further masters cannot yet be combined with `noise=`, `resume` or `cdcheck`. |
 | `master<n>name=<name>` | The name of pack n, shown where a pack is chosen (UTF-8, at most 255 bytes); `master1name=` names the main body. Names are for display only. Without them, the output is unchanged. |
 | `lae_enc tag` | New tags for an existing LAE file without re-encoding: writes a new file with the given tags (if none are given, with no tags), the same CD audio and the same `LAE ` chunk, and checks that both are byte-identical; the input is not changed. |
 

@@ -28,7 +28,7 @@ lae_enc master1.wav out.wav 3 s1 master1name="original master" master2=master2.w
 | `master<n>align=<offset>` | The position of the master on the time line of the CD layer, written like `cdalign=` (in its own samples; fractions are allowed). |
 | `master<n>name=<name>` | The name that a player shows for this pack; at most 255 bytes. Without it, the pack has no name. |
 | `master1name=<name>` | The name that a player shows for the main body (the first master, pack 0); at most 255 bytes. Without it, the output is unchanged. |
-| `master<n>accept` | Like `cdaccept`: continue when the remaining time difference lies beyond −40 dB. |
+| `master<n>accept` | Like `cdaccept`: continue when the remaining time difference lies beyond −40 dB, or after a warning about drift or check blocks that do not match. |
 | `master<n>edge=pad` or `cut` | What to do when this master has sound outside the CD layer, like `cdedge=`. Without a choice, nothing is encoded. |
 
 Where the CD layer comes from:
@@ -44,7 +44,7 @@ The mode, the scheme (`s1` / `s2`), `zs` and the other coding options are the sa
 - The samples of the CD layer are never changed. Where alignment needs it (a master moved by a fraction of a sample, or `…edge=pad`), digital silence is added at the ends of the CD layer: the largest need of all masters is taken and added once, and the same silence is added to every master.
 - Every further master costs one more alignment and one more complete encode.
 - Size: each pack adds only its own extension. The more a master differs from the CD layer, the larger its pack. On 10-second excerpts of the demonstration pieces, the CD layer took about 1.76 MB and each pack 0.6–1.1 MB.
-- If the speed of a master drifts against the CD layer (for example, tape wow and flutter), the encoder warns; it continues only with a position given by hand and a confirmation (`master<n>accept`, or the answer at the console), never on its own search.
+- If the speed of a master drifts against the CD layer (for example, tape wow and flutter), or some of its check blocks do not match the CD layer, the encoder warns; it continues only with a position given by hand and a confirmation (`master<n>accept`, or the answer at the console), never on its own search.
 - `g` can be used with further masters (each pack on its own master). Further masters cannot be combined with `noise=`, `resume` or `cdcheck`, and the whole-disc planner `lae_enc plan` cannot add further masters directly.
 
 ## 2. Decoding

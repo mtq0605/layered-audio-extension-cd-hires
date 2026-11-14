@@ -79,7 +79,10 @@ inline bool readMarks(const char* path, Marks& mk, std::string* why = nullptr) {
         else if (t[0] == "pos") {
             if (!haveMaster || !haveGrid) return bad(ln, "a pos line before the master and grid lines");
             if (t.size() != 5 || !digits(t[1], 18) || !digits(t[2], 18) || !digits(t[3], 9) || !digits(t[4], 9)) return bad(ln, "expected \"pos <m0> <m1> <c0> <c1>\" with whole numbers");
-            mk.pos.push_back({(long)atoll(t[1].c_str()), (long)atoll(t[2].c_str()), atoi(t[3].c_str()), atoi(t[4].c_str())}); } }
+            // FU17-1 (2026-11-14): a frame number above 2^31 - 1 lies outside every grid; it is kept as 2^31 - 1, so that it fails the grid
+            // check on every platform (a 32-bit long, Windows, cut 4294967297 to 1 and accepted it; Linux and Java refuse it)
+            auto frameNo = [](const std::string& s) { return (long)std::min<long long>(atoll(s.c_str()), 2147483647LL); };
+            mk.pos.push_back({frameNo(t[1]), frameNo(t[2]), atoi(t[3].c_str()), atoi(t[4].c_str())}); } }
     if (!magic) return bad(0, "not a marking file (no \"LAENOISE 1\" line)");
     if (!haveMaster) return bad(0, "no master line");
     if (!haveGrid) return bad(0, "no grid line");

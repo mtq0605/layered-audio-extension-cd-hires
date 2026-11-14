@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
+// Reference only (FU08-3, 2026-11-14): the whole-track version, not compiled into lae_enc (the encoder uses the block-wise *_blk.cpp).
 // Range coding of a partitioned layer (dump written by lossy_v2 PART=<level> DUMP=...).
 // Encodes the cut tree and the leaves, decodes them again, rebuilds the coefficient plane exactly as a decoder would,
 // and compares it with the encoder's plane. Reports actual bytes.

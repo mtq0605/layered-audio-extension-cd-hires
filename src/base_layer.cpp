@@ -1,5 +1,7 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
+// lae_enc compiles this file only for decimate() (the independent-CD alignment); the CD layer itself comes from base_blk.cpp, and main()
+// below is the former whole-track tool (FU08-3, 2026-11-14).
 // Deterministic base (CD) layer derivation. Integer only; tables from halfband.h.
 // usage: base_layer <raw s32le stereo, 24-bit left-aligned> <rate> <base_rate> <out s16le raw> [ref s16le raw]
 #include <cstdio>

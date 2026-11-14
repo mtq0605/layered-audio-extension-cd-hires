@@ -1,5 +1,7 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
+// Reference only (FU08-3, 2026-11-14): the whole-track version, not compiled into lae_enc (the encoder uses the block-wise *_blk.cpp). It calls the
+// C library's math (log2 / cos / sin / log10, and std::sort): its results may differ between platforms, so it is no byte-for-byte reference.
 // Adaptive sustained-tone detector (encoder-side analysis, HF region above the base Nyquist).
 // No sensitivity setting: thresholds come from the noise statistics of averaged periodograms (Gamma quantile at a fixed
 // false-alarm rate per test), evaluated at several time scales (W = 1,2,4,8,16 long-FFT frames), local floor from medians of

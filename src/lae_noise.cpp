@@ -193,6 +193,7 @@ static int doLevel(int argc, char** argv) {
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
     Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (mk.frames != ws.frames || fabs(mk.rate - ws.rate) > 0.5) { printf("length or rate differ from the marking file\n"); return 1; }
+    if (!checkGrid(ws.frames, mk)) return 1;   // FU17-4: a position outside the grid was read past the 512 bins (or looped for ever)
     WavStream wr; const bool ref = argc > 4; if (ref && (!wr.open(argv[4]) || wr.frames != ws.frames)) { printf("cannot read the reference %s, or its length differs\n", argv[4]); return 1; }
     const double fsPow = 0.5 * 70368744177664.0; double eAll = 0; long long nAll = 0; double cm[NM], cs[NM];
     for (size_t pi = 0; pi < mk.pos.size(); pi++) { const Pos& p = mk.pos[pi]; double e = 0; const long CH = 2048;

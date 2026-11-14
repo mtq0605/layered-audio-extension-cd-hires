@@ -84,12 +84,16 @@ inline bool readMarks(const char* path, Marks& mk, std::string* why = nullptr) {
     if (!haveMaster) return bad(0, "no master line");
     if (!haveGrid) return bad(0, "no grid line");
     return true; }
+// every position must lie inside the grid of a master of this length (FU17-4, 2026-11-14: a function of its own, so that
+// lae_noise level, which compares length and rate but no SHA-256, checks it too)
+inline bool checkGrid(long long frames, const Marks& mk) {
+    long K = mdct::frames((long)frames);
+    for (size_t i = 0; i < mk.pos.size(); i++) { const Pos& p = mk.pos[i];
+        if (p.m0 < 0 || p.m1 > K || p.m0 >= p.m1 || p.c0 < 0 || p.c1 > NCOL || p.c0 >= p.c1) { printf("position %zu lies outside the grid: nothing done\n", i + 1); return false; } }
+    return true; }
 // the marking file must belong to this master, and every position must lie inside its grid
 inline bool checkMarks(WavStream& ws, const Marks& mk) {
     if (mk.frames != ws.frames || fabs(mk.rate - ws.rate) > 0.5) { printf("the marking file is for another master (length or rate differ): nothing done\n"); return false; }
     if (masterSha(ws) != mk.sha) { printf("the marking file is for another master (SHA-256 differs): nothing done\n"); return false; }
-    long K = mdct::frames((long)ws.frames);
-    for (size_t i = 0; i < mk.pos.size(); i++) { const Pos& p = mk.pos[i];
-        if (p.m0 < 0 || p.m1 > K || p.m0 >= p.m1 || p.c0 < 0 || p.c1 > NCOL || p.c0 >= p.c1) { printf("position %zu lies outside the grid: nothing done\n", i + 1); return false; } }
-    return true; }
+    return checkGrid(ws.frames, mk); }
 }  // namespace nmk

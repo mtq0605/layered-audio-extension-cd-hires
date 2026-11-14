@@ -59,16 +59,22 @@ public final class LaeDecoder {
         // Java: a Mark is never changed after it is made (seekTo copies its state), so decoders of the same stream share Mark objects.
         static final class Mark { final long M0; final PartStream.Dec dc; final PartStream.Walker w; Mark(long m, PartStream.Dec d, PartStream.Walker ww) { M0 = m; dc = d; w = ww; } }
         final List<Mark> marks = new ArrayList<Mark>(); long every = 1;
+        // F05-2 (2026-11-14): the stream header's rate and K are the file's own statement and have no upper limit, so nothing that costs
+        // memory or time follows them alone. srate = the sample rate of this stream's layer from the main header (base for the depth layer,
+        // the master rate for the frequency layer): the checkpoint spacing is counted with it. lim = min(K, frames of the layer): rows from
+        // frame lim on are never requested (spec 5.3) and are not decoded. The decoded samples of every file are the same as before.
+        int srate = 0; long lim = 0;
         public PlaneStream(PartStream.Err e) { err = e; }
         // port of lae_decoder.h:PlaneStream::open (p[off ..] = the stream's bytes)
-        public boolean open(byte[] p, int off, int nbytes) { if (nbytes < 40) return false; Rd s = new Rd(p, off, nbytes); int[] f = new int[10]; for (int i = 0; i < 10; i++) f[i] = s.i32v();
+        public boolean open(byte[] p, int off, int nbytes, int layerRate, long layerFrames) { if (nbytes < 40) return false; Rd s = new Rd(p, off, nbytes); int[] f = new int[10]; for (int i = 0; i < 10; i++) f[i] = s.i32v();
             h = new PartStream.Hdr(); h.K = f[0]; h.N = f[1]; h.k0 = f[2]; h.k1 = f[3]; h.rate = f[4]; h.L = f[5]; h.cw = f[6]; h.lv = f[7]; h.eq = f[8];
             if (h.N != N || f[9] != nbytes - 40 || h.K <= 0 || h.k0 < 0 || h.k1 > N || h.k0 >= h.k1) return false;
             dc.p = p; dc.off = off + 40; dc.n = f[9]; dc.init(); w = new PartStream.Walker(h, err); rowBuf = new int[PartitionFormat.ROOTT * N];
-            every = h.rate > 0 ? Math.max(1L, (long) Cv.d2i(4.0 * h.rate / ((double) PartitionFormat.ROOTT * N))) : 64; return true; }   // (long)double: 32-bit long on MSVC
+            srate = layerRate; lim = Math.min(h.K, layerFrames);
+            every = srate > 0 ? Math.max(1L, (long) Cv.d2i(4.0 * srate / ((double) PartitionFormat.ROOTT * N))) : 64; return true; }   // (long)double: 32-bit long on MSVC
         // port of lae_decoder.h:PlaneStream::frame (returns the offset of frame m in rowBuf, or -1 for the C++ nullptr)
         public int frame(long m) {   // frames are requested in increasing order (seekTo excepted)
-            while (!(m >= row0 && m < row0 + rows)) { if (w.done()) return -1;
+            while (!(m >= row0 && m < row0 + rows)) { if (w.M0 >= lim) return -1;
                 if ((w.M0 / PartitionFormat.ROOTT) % every == 0 && (marks.isEmpty() || marks.get(marks.size() - 1).M0 < w.M0)) marks.add(new Mark(w.M0, dc.copy(), new PartStream.Walker(w)));
                 row0 = w.M0; rows = w.rowFrames(); Arrays.fill(rowBuf, 0); w.row(dc, rowBuf, row0); }
             return (int) ((m - row0) * N); }
@@ -269,14 +275,14 @@ public final class LaeDecoder {
             d = 0; while (d <= stages && (rate >> d) > orate) d++;
             if (!mode.equals("cd24") && ((rate >> d) != orate || d >= stages)) { if (code != null) code[0] = 1; return "output rate must be " + rate + " / 2^n and above " + base; }
             // streams: depth L, depth R, then n segments for M, n for S
-            for (int c = 0; c < 2; c++) if (!take(r, dS[c], !mode.equals("16"))) return fail(code, 3, "corrupt depth stream");
+            for (int c = 0; c < 2; c++) if (!take(r, dS[c], !mode.equals("16"), base, MdctTb.frames(nb))) return fail(code, 3, "corrupt depth stream");
             nseg = r.i32v(); if (nseg < 1 || nseg > 8) return fail(code, 3, "corrupt frequency layer");
             final int kcut = (int) Cv.llround((double) N * (orate / 2.0) / (rate / 2.0)); nused = 0;   // C++ (int)lround: 32-bit long, the value is <= N here
             fS = new PlaneStream[2 * nseg]; for (int k = 0; k < fS.length; k++) fS[k] = new PlaneStream(err); boolean[] used = new boolean[2 * nseg];
             for (int c = 0; c < 2; c++) for (int sg = 0; sg < nseg; sg++) { int k0s = 0; if (r.i + 4 + 12 <= r.n) k0s = Le.i32(lae, r.off + (int) (r.i + 4 + 8));   // header field 3 = start bin
                 boolean use = !mode.equals("cd24") && k0s < kcut;
                 used[c * nseg + sg] = use; if (use && c == 0) nused++;
-                if (!take(r, fS[c * nseg + sg], use)) return fail(code, 3, "corrupt frequency stream"); }
+                if (!take(r, fS[c * nseg + sg], use, rate, MdctTb.frames(Lm + 2L * P))) return fail(code, 3, "corrupt frequency stream"); }
             Lp = Lm + 2 * P;
             for (int c = 0; c < 2; c++) { dI[c].init(nb); if (!mode.equals("16")) dI[c].parts.add(dS[c]); }
             mI.init(Lp); sI.init(Lp); for (int sg = 0; sg < nseg; sg++) { if (used[sg]) mI.parts.add(fS[sg]); if (used[nseg + sg]) sI.parts.add(fS[nseg + sg]); }
@@ -291,8 +297,8 @@ public final class LaeDecoder {
             if (mode.equals("cd24")) { Po = pb; Lo = nb - 2 * pb; wrate = base; } else { Po = P >> d; Lo = Lm >> d; wrate = orate; }
             pos = 0; clip = 0; if (code != null) code[0] = 0; return ""; }
         // port of lae_decoder.h:Decoder::openRef lambda take
-        private static boolean take(Rd r, PlaneStream ps, boolean use) { int nbytes = r.i32v(); long start = r.i; if (nbytes < 40 || start + nbytes > r.n) return false;
-            if (use && !ps.open(r.p, r.off + (int) start, nbytes)) return false; r.i = start + nbytes; return true; }
+        private static boolean take(Rd r, PlaneStream ps, boolean use, int layerRate, long layerFrames) { int nbytes = r.i32v(); long start = r.i; if (nbytes < 40 || start + nbytes > r.n) return false;
+            if (use && !ps.open(r.p, r.off + (int) start, nbytes, layerRate, layerFrames)) return false; r.i = start + nbytes; return true; }
 
         // port of lae_decoder.h:Decoder::adoptMarks
         // the entropy checkpoints of another decoder of the same chunk (another route): a stream's checkpoints depend only on its bytes, so

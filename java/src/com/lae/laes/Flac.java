@@ -146,6 +146,7 @@ public final class Flac {
         final int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return "frame bit depth differs from STREAMINFO";
         if (r.fail || (r.pos & 7) != 0) return "frame header truncated"; final int hb = (int) (r.pos / 8); final int c8 = (int) r.get(8); if (r.fail || c8 != crc8(buf, fp, hb)) return "frame header CRC-8 mismatch";
         if (strategy == 0 && num != frameNo) return "frame number out of order";
+        if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the first sample's number (FU12-6, as laes_flac.h)
         F.n = (int) n; for (int c = 0; c < 2; c++) { if (!reuse || F.ch[c] == null || F.ch[c].length < n) F.ch[c] = new long[(int) n]; if (!readSubframe(r, F.ch[c], 0, (int) n, bps, F)) return "damaged subframe"; }
         r.pos = (r.pos + 7) & ~7L; final long fb = r.pos / 8; if (fb + 2 > r.n) return "frame truncated";
         if (crc16(buf, fp, (int) fb) != (((buf[fp + (int) fb] & 0xFF) << 8) | (buf[fp + (int) fb + 1] & 0xFF))) return "frame CRC-16 mismatch";
@@ -178,7 +179,7 @@ public final class Flac {
         long p = 4; boolean last = false, haveSi = false;
         while (!last) { if (p + 4 > f.length) return "metadata truncated"; last = (f[(int) p] & 0x80) != 0; final int type = f[(int) p] & 0x7F; final long len = (long) (f[(int) p + 1] & 0xFF) << 16 | (f[(int) p + 2] & 0xFF) << 8 | (f[(int) p + 3] & 0xFF); p += 4;
             if (p + len > f.length) return "metadata truncated"; if (!haveSi && type != 0) return "STREAMINFO is not the first metadata block";
-            if (type == 0) { if (len != 34) return "bad STREAMINFO"; BR r = new BR(f, (int) p, 34); in.minBs = (int) r.get(16); in.maxBs = (int) r.get(16); r.get(24); r.get(24); in.rate = (int) r.get(20); in.channels = (int) r.get(3) + 1; in.bps = (int) r.get(5) + 1; in.total = r.get(36);
+            if (type == 0) { if (haveSi) return "two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return "bad STREAMINFO"; BR r = new BR(f, (int) p, 34); in.minBs = (int) r.get(16); in.maxBs = (int) r.get(16); r.get(24); r.get(24); in.rate = (int) r.get(20); in.channels = (int) r.get(3) + 1; in.bps = (int) r.get(5) + 1; in.total = r.get(36);
                 System.arraycopy(f, (int) p + 18, in.md5, 0, 16); haveSi = true; }
             else if (type == 2 && len >= 4 && f[(int) p] == 'L' && f[(int) p + 1] == 'A' && f[(int) p + 2] == 'E' && f[(int) p + 3] == '2') app.write(f, (int) p + 4, (int) len - 4);
             p += len; }

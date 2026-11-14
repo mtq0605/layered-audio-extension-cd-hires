@@ -342,7 +342,7 @@ public final class Play {
                 long p = 4; boolean last = false, haveSi = false; boolean lae1 = false;
                 while (!last) { if (p + 4 > n) return "FLAC metadata truncated"; byte[] bh = new byte[4]; src.read(p, bh, 0, 4); last = (bh[0] & 0x80) != 0; final int type = bh[0] & 0x7F; final long len = (long) (bh[1] & 0xFF) << 16 | (bh[2] & 0xFF) << 8 | (bh[3] & 0xFF); p += 4;
                     if (p + len > n) return "FLAC metadata truncated";
-                    if (type == 0) { if (len != 34) return "bad STREAMINFO"; byte[] s = new byte[34]; src.read(p, s, 0, 34); Flac.BR r = new Flac.BR(s, 0, 34); fi.minBs = (int) r.get(16); fi.maxBs = (int) r.get(16); r.get(24); r.get(24);
+                    if (type == 0) { if (haveSi) return "two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return "bad STREAMINFO"; byte[] s = new byte[34]; src.read(p, s, 0, 34); Flac.BR r = new Flac.BR(s, 0, 34); fi.minBs = (int) r.get(16); fi.maxBs = (int) r.get(16); r.get(24); r.get(24);
                         fi.rate = (int) r.get(20); fi.channels = (int) r.get(3) + 1; fi.bps = (int) r.get(5) + 1; fi.total = r.get(36); System.arraycopy(s, 18, fi.md5, 0, 16); haveSi = true; }
                     else if (type == 2 && len >= 4) { byte[] id = new byte[4]; src.read(p, id, 0, 4); if (eq4(id, 0, "LAE2")) payload.add(p + 4, len - 4); else if (eq4(id, 0, "LAE1")) lae1 = true; }
                     else if (type == 4 && len >= 8 && len < (1L << 24)) { byte[] b = new byte[(int) len]; src.read(p, b, 0, b.length); long q = 0;

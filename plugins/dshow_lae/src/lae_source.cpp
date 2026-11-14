@@ -153,8 +153,9 @@ struct Decoder {
         char err[512] = ""; if (!lae_selftest()) return false; track = lae_open_reader(&Decoder::read, this, size, err, sizeof err); if (!track) return false;
         // LAEY extension packs: the pack number the user set (registry value "pack", 0 = the main body); a file without that pack plays pack 0
         { const int pk = (int)setting(L"pack", 0); if (pk > 0 && pk < lae_pack_count(track)) lae_select_pack(track, pk); }
-        const DWORD layers = setting(L"layers", 0); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : layers == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL;
-        lae_info li; lae_get_info(track, &li); int out = 0; const int cap = (int)setting(L"maxrate", 0); if ((route == LAE_ROUTE_FULL || route == LAE_ROUTE_16) && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
+        const DWORD layers = setting(L"layers", 0); int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : layers == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL;
+        lae_info li; lae_get_info(track, &li); int out = 0; const int cap = (int)setting(L"maxrate", 0); if ((route == LAE_ROUTE_FULL || route == LAE_ROUTE_16) && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2;
+            if (out == li.base_rate) { route = route == LAE_ROUTE_FULL ? LAE_ROUTE_CD24 : LAE_ROUTE_CD; out = 0; } }   // the cap reaches the base rate: all layers = CD layer + depth layer (24-bit); route 16 has no depth layer
         if (lae_start(track, route, out, err, sizeof err) != 0 && lae_start(track, LAE_ROUTE_CD, 0, err, sizeof err) != 0) return false;
         int r, b; uint64_t fr; lae_output_format(track, &r, &b, &fr); rate = r; bits = b == 16 ? 16 : 24; frames = fr; pos = 0; return true; }
     bool seek(uint64_t frame) { FpPin pin; char err[256]; if (frame > frames) frame = frames;

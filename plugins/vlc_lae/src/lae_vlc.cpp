@@ -156,9 +156,10 @@ bool startLaey(demux_t* d, Sys* sy) {
     sy->track = lae_open_reader(&Src::read, &sy->src, sy->src.size, err, sizeof err); if (!sy->track) { msg_Err(d, "LAE: %s", err); return false; }
     // LAEY extension packs: the pack number the user set (0 = the main body); a file without that pack plays pack 0. Never chosen automatically.
     { const int pk = (int)var_InheritInteger(d, "lae-pack"); if (pk > 0 && pk < lae_pack_count(sy->track) && lae_select_pack(sy->track, pk) != 0) msg_Warn(d, LT("LAEY: extension pack %d unavailable; playing pack 1", "LAEY：扩展包 %d 不可用；播放扩展包 1"), pk + 1); }
-    const int layers = (int)var_InheritInteger(d, "lae-layers"); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : layers == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL;
+    const int layers = (int)var_InheritInteger(d, "lae-layers"); int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : layers == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL;
     lae_info li; lae_get_info(sy->track, &li); int out = 0; const int cap = (int)var_InheritInteger(d, "lae-maxrate");
-    if ((route == LAE_ROUTE_FULL || route == LAE_ROUTE_16) && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
+    if ((route == LAE_ROUTE_FULL || route == LAE_ROUTE_16) && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2;
+        if (out == li.base_rate) { route = route == LAE_ROUTE_FULL ? LAE_ROUTE_CD24 : LAE_ROUTE_CD; out = 0; } }   // the cap reaches the base rate: all layers = CD layer + depth layer (24-bit); route 16 has no depth layer
     if (lae_start(sy->track, route, out, err, sizeof err) != 0 && lae_start(sy->track, LAE_ROUTE_CD, 0, err, sizeof err) != 0) { msg_Err(d, "LAE: %s", err); return false; }
     int r, b; uint64_t fr; lae_output_format(sy->track, &r, &b, &fr); sy->rate = r; sy->bits = b == 16 ? 16 : 24; sy->frames = fr; sy->pos = 0; return true; }
 

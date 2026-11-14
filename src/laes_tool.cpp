@@ -73,6 +73,16 @@
 #include "laes_tags.h"   // tags and pictures (2026-11-05)
 #include "laes_pick.h"   // the tick list for several masters that fit one --pick (2026-11-11)
 #ifdef _WIN32
+#include <fcntl.h>      // DEC 30: the lock file of the work folder (_sopen_s, _SH_DENYRW)
+#include <share.h>
+#include <io.h>
+#include <sys/stat.h>
+#else
+#include <fcntl.h>
+#include <sys/file.h>   // flock
+#include <unistd.h>
+#endif
+#ifdef _WIN32
 static const char* kLaeEnc = "lae_enc.exe"; static const char* kQ = "\"";   // cmd.exe needs the whole command line quoted once more
 static const char* kShellBad = "%\"";   // FU15-1: characters cmd.exe changes inside the quotes (%NAME% is expanded)
 #else   // POSIX names of the same calls
@@ -385,6 +395,28 @@ static void diskNotice(const std::string& cmd, const std::string& dir, double ne
     std::error_code ec; const fs::space_info sp = fs::space(fs::absolute(fs::path(dir), ec), ec); if (ec || need <= (double)sp.available) return;
     printf("note: laes %s needs about %.1f GB of disk (temporary files and the new file) in %s, %.1f GB free on that disk: it goes on, and stops if the disk is full\n", cmd.c_str(), need / 1073741824.0, dir.c_str(), sp.available / 1073741824.0);
     printf("%s%s%s%.1f%s%s%s%.1f%s\n", u8"  注意：laes ", cmd.c_str(), u8" 大约需要 ", need / 1073741824.0, u8" GB 磁盘空间（临时文件和新文件），放在 ", dir.c_str(), u8"，这块磁盘剩 ", sp.available / 1073741824.0, u8" GB；照样开始，磁盘满时会停下"); }
+// DEC 30 (FU15-7 (3), 2026-11-15): the work folder holds a file "lock" that a run keeps open with an exclusive lock of the system
+// (Windows: opened with no sharing; POSIX: flock) until it ends; the system frees it when the process ends in any way, so a folder kept
+// for a resume or left by a crash is never locked. A second run of the same command (same work folder) is refused at once and touches
+// nothing of the first. lockWork: true when locked; unlockWork before the folder is removed.
+static std::vector<std::pair<std::string, int>> gWorkLocks;
+static bool lockWork(const std::string& wd) {
+    const std::string lp = wd + "/lock"; int fd = -1;
+#ifdef _WIN32
+    if (_sopen_s(&fd, lp.c_str(), _O_RDWR | _O_CREAT | _O_BINARY, _SH_DENYRW, _S_IREAD | _S_IWRITE) != 0) return false;
+#else
+    fd = open(lp.c_str(), O_RDWR | O_CREAT, 0644); if (fd < 0) return false;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) { close(fd); return false; }
+#endif
+    gWorkLocks.push_back({wd, fd}); return true; }
+static void unlockWork(const std::string& wd) {
+    for (size_t i = 0; i < gWorkLocks.size(); i++) if (gWorkLocks[i].first == wd) {
+#ifdef _WIN32
+        _close(gWorkLocks[i].second);
+#else
+        close(gWorkLocks[i].second);
+#endif
+        gWorkLocks.erase(gWorkLocks.begin() + (long)i); return; } }
 static bool gOverwrite = false;   // DEC 21: --overwrite given
 static int laesMain(int argc, char** argv);
 int main(int argc, char** argv) { lae_u8::init(argc, argv); return laesMain(argc, argv); }   // UTF-8 arguments and file names on Windows (win_utf8.h)
@@ -431,13 +463,23 @@ static int laesMain(int argc, char** argv) {
                 printf("note: the work folder cannot be made at %s; it goes to the system temp folder: %s\n", wd.c_str(), alt.c_str());
                 printf("%s%s%s%s\n", u8"  注意：工作文件夹不能建在 ", wd.c_str(), u8"，改放在系统临时文件夹：", alt.c_str()); wd = alt; }
             else fs::remove(wd, ec); }
-        if (fs::exists(wd, ec) && !fs::exists(wd + "/laes.tmp", ec)) laess::fail(wd + " exists and is not a laes work folder: remove it or choose another output name");
-        if (resumed) { *resumed = false; std::string old; if (!job.empty() && laess::getState(wd + "/job.txt", old) && old == job) { *resumed = true; return wd; } }
-        fs::remove_all(wd, ec); fs::create_directories(wd, ec); if (ec || !fs::exists(wd)) laess::fail("cannot create the work folder " + wd);
-        { laess::Out o(wd + "/laes.tmp"); const char* t = "laes work folder (removed when the run ends; kept when an encoding stops, for the same command to continue)\n"; o.put(t, strlen(t)); o.close(); }
-        if (!job.empty()) laess::putState(wd + "/job.txt", job); return wd; };
+        if (fs::exists(wd, ec) && !fs::exists(wd + "/laes.tmp", ec) && !fs::exists(wd + "/lock", ec)) laess::fail(wd + " exists and is not a laes work folder: remove it or choose another output name");
+        fs::create_directories(wd, ec); const bool hadLock = fs::exists(wd + "/lock", ec);
+        if (!lockWork(wd)) {   // DEC 30: another run uses this work folder: stop at once, nothing of it touched (no exception: no clean-up runs)
+            if (!hadLock) laess::fail("cannot create the work folder " + wd);
+            printf("another laes run is using the work folder %s (the same command started twice?): this run stops, nothing written; run it again when the other has ended\n", wd.c_str());
+            fflush(stdout); lae_u8::restoreConsole(); std::exit(2); }
+        try {
+            if (resumed) { *resumed = false; std::string old; if (!job.empty() && laess::getState(wd + "/job.txt", old) && old == job) { *resumed = true; return wd; } }
+            std::vector<fs::path> old; for (fs::directory_iterator it(wd, ec), end; !ec && it != end; it.increment(ec)) if (it->path().filename() != "lock") old.push_back(it->path());
+            for (auto& q : old) fs::remove_all(q, ec);   // DEC 30: emptied, the lock stays
+            if (!fs::exists(wd)) laess::fail("cannot create the work folder " + wd);
+            { laess::Out o(wd + "/laes.tmp"); const char* t = "laes work folder (removed when the run ends; kept when an encoding stops, for the same command to continue)\n"; o.put(t, strlen(t)); o.close(); }
+            if (!job.empty()) laess::putState(wd + "/job.txt", job); }
+        catch (...) { unlockWork(wd); throw; }
+        return wd; };
     // the work folder goes at the end; keep: not when the run is stopped by an exception (disk full, closed: the same command continues)
-    struct Gone { std::string p; bool keep = false; ~Gone() { if (!p.empty() && !getenv("KEEPTMP") && !(keep && std::uncaught_exceptions())) { std::error_code ec; fs::remove_all(p, ec); } } };
+    struct Gone { std::string p; bool keep = false; ~Gone() { unlockWork(p); if (!p.empty() && !getenv("KEEPTMP") && !(keep && std::uncaught_exceptions())) { std::error_code ec; fs::remove_all(p, ec); } } };   // DEC 30: unlocked first
     auto pieceFor = [&](int maxStages) -> int64_t {   // base-level samples per piece, a multiple of 4096
         if (const char* e = laes::testEnv("LAES_PIECE")) return std::max<int64_t>(4096, atoll(e) / 4096 * 4096);   // test hook
         unsigned long long total = physMemory(); const std::string mm = arg(argc, argv, "--mem"); const unsigned long long G28 = 28ull << 30;

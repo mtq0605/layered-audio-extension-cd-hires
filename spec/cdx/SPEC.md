@@ -422,7 +422,7 @@ This section applies to every form other than CD: ordinary file downloads, files
 
 **[F1]** In a single v5 WAV file, the CD layer is in the data chunk, and the `LAE ` chunk follows the audio ([SPEC] 3.1).
 
-- A v5 WAV written by the encoder or by a re-encapsulation tool MUST have the canonical layout below.
+- A v5 WAV written by the encoder without tags, and every v5 WAV written by a re-encapsulation tool, MUST have the canonical layout below. An encoder given tags (for example `lae_enc --tag=` or `--cover=`) writes a `LIST`/`INFO` and an `id3 ` chunk between `fmt ` and `data`; such a file is a valid v5 WAV ([SPEC] 3.1), but not in this layout.
 - This layout is the same as the output of wavio::writeCD ([WV]).
 - Let D = ncd × 4.
 
@@ -478,7 +478,7 @@ When pairing succeeds, no offset needs to be found, and S1 and S2 are not used.
 - Input: a verified CD layer, plus the extension block from the extension file. The CD layer comes from one of the following:
   - a rip or an LAE stream ([R8]);
   - a successfully paired base-layer file ([F3]).
-- Output: a v5 WAV in the canonical layout of 4.1. The result MUST be byte-identical to the file originally written by the encoder.
+- Output: a v5 WAV in the canonical layout of 4.1. The result MUST be byte-identical to the file originally written by the encoder when that file carried no tags. Tags are not part of the extension file: from a tagged file, re-encapsulation gives the canonical layout without the tags, whose `data` chunk (the CD layer) and `LAE ` chunk are byte-identical to those of the tagged file.
 
 ### 4.5 LAE Stream
 

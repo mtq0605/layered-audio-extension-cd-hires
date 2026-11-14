@@ -64,6 +64,8 @@ public final class LaesTool {
     // port of laes_tool.cpp:main ("dec" / "verify")
     static int decVerify(String[] args) {
         final boolean isDec = args[0].equals("dec"); final String inPath = args[1];
+        if (isDec && args[2].startsWith("-") && !args[2].startsWith("--list")) {   // FU16-9 (as laes_tool.cpp 5af9e2b): an option is not taken as the output folder
+            System.out.println("give the output folder: laes dec <in> <out dir> [--levels] [--pick=...] (or laes dec <in> --list)"); return 1; }
         final String wd = LaesEncoder.workDir(inPath + (isDec ? ".dec" : ".verify"));
         try { return decVerifyIn(args, isDec, inPath, wd); } finally { if (System.getenv("KEEPTMP") == null) LaesEncoder.removeAll(new File(wd)); } }
     private static int decVerifyIn(String[] args, boolean isDec, String inPath, String wd) {

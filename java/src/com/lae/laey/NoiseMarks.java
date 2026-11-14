@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
 package com.lae.laey;
 
 import java.io.BufferedReader;

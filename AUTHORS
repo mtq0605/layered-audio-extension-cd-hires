@@ -77,16 +77,19 @@ java/src/com/lae/laey/EncEnv.java          | mtq0605 | original (port of src/lae
 java/src/com/lae/laey/EncIo.java           | mtq0605 | original (port of src/enc_io.h) | -
 java/src/com/lae/laey/Fmt.java             | mtq0605 | original (text formatting for the port) | -
 java/src/com/lae/laey/LaeCd.java           | mtq0605 | original (port of src/lae_enc.cpp, independent CD) | -
+java/src/com/lae/laey/LaeDec.java          | mtq0605 | original (port of src/lae_dec.cpp with the encoder hooks: the encoder's own decode check and its two exports; used only by the encoder, encoder licence since 2026-11-15) | -
 java/src/com/lae/laey/LaeEncTool.java      | mtq0605 | original (port of src/lae_enc.cpp, command line) | -
 java/src/com/lae/laey/LaeEncoder.java      | mtq0605 | original (port of src/lae_enc.cpp) | -
 java/src/com/lae/laey/LaeRetag.java        | mtq0605 | original (port of src/lae_enc.cpp, lae_enc tag) | -
 java/src/com/lae/laey/LaeyEncoder.java     | mtq0605 | original (encoder front end for the port) | -
 java/src/com/lae/laey/LossyBlk.java        | mtq0605 | original (port of src/lossy_blk.cpp) | -
+java/src/com/lae/laey/NoiseMarks.java      | mtq0605 | original (port of the encoder's reader of noise marking files; used only by the encoder, encoder licence since 2026-11-15) | -
 java/src/com/lae/laey/PadBlk.java          | mtq0605 | original (port of src/pad_blk.cpp) | -
 java/src/com/lae/laey/PartBlk.java         | mtq0605 | original (port of src/part_blk.cpp) | -
 java/src/com/lae/laey/Partition.java       | mtq0605 | original (port of src/partition.h) | -
 java/src/com/lae/laey/RoutesBlk.java       | mtq0605 | original (port of src/routes_blk.cpp) | -
 java/src/com/lae/laey/WavIn.java           | mtq0605 | original (port of src/wav_in.h) | -
+java/src/com/lae/laey/WavIo.java           | mtq0605 | original (port of src/wavio.h, the WAV code the encoder uses; used only by the encoder, encoder licence since 2026-11-15) | -
 
 ## Use of AI tools
 

@@ -62,4 +62,4 @@ Java 移植有两处行为不同：
 
 ## 许可
 
-许可与 C++ 代码相同。解码器和公共工具采用 Apache-2.0 许可。编码器文件采用 GPL-3.0-or-later 许可或商业许可（见 [COMMERCIAL.md](../COMMERCIAL.zh.md)）。播放器前端 `Play` 属于解码器文件（Apache-2.0）；标签和图片代码（`LaesTags`、`LaeRetag`）以及命令行工具（`LaesTool`、`LaeEncTool`）属于编码器文件。每个文件在其 SPDX 文件头中写明其许可。`com.lae.laey` 中有三个 Apache-2.0 文件调用编码器文件，只能与它们一起编译：`WavIo`（编码器使用的 WAV 代码）和 `LaeDec`（编码器对自己的输出运行的解码器）调用 `EncIo`、`EncEnv`、`Fmt` 和 `WavIn`，`NoiseMarks`（编码器读取标定文件的代码）调用 `WavIn`。只有编码器（`LaeEncoder`、`LaeCd`、`LossyBlk`）使用这三个文件。其余 Apache-2.0 文件，包括解码器 `LaeyDecoder`、`LaeDecoder`、`LaesDecoder` 和播放器前端 `Play`，不需要任何编码器文件即可编译（2026-11-14 用 javac 17 检查）。
+许可与 C++ 代码相同。解码器和公共工具采用 Apache-2.0 许可。编码器文件采用 GPL-3.0-or-later 许可或商业许可（见 [COMMERCIAL.md](../COMMERCIAL.zh.md)）。播放器前端 `Play` 属于解码器文件（Apache-2.0）；标签和图片代码（`LaesTags`、`LaeRetag`）以及命令行工具（`LaesTool`、`LaeEncTool`）属于编码器文件。每个文件在其 SPDX 文件头中写明其许可。`com.lae.laey` 中只有编码器使用的三个文件也属于编码器文件（2026-11-15 的决定）：`WavIo`（编码器使用的 WAV 代码）、`LaeDec`（编码器对自己的输出运行的解码器，带有给编码器的两项导出）和 `NoiseMarks`（编码器读取标定文件的代码）。所有 Apache-2.0 文件，包括解码器 `LaeyDecoder`、`LaeDecoder`、`LaesDecoder` 和播放器前端 `Play`，不需要任何编码器文件即可编译（2026-11-15 用 javac 17 检查）。

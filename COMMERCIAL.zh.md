@@ -32,7 +32,7 @@ SPDX-License-Identifier: CC0-1.0
     和 `laes_export.cpp`（LAE Lossless (LAES) 的编码器端，
     包括工具 `laes` 和 `laes_export`）
 - 位于 `tools/reference/` 中：`routes.cpp`、`tone_scan.cpp`、`part_coder.cpp` 和 `pad_mirror.cpp`（以前的整轨编码模块，只作对照保留；`lae_enc` 不编译它们）。
-- 位于 `java/src/com/lae/` 中：Java 库的 27 个编码器文件（即上述文件及其辅助文件的移植版本，位于 `laey/` 和 `laes/` 中）。
+- 位于 `java/src/com/lae/` 中：Java 库的 30 个编码器文件（即上述文件及其辅助文件的移植版本，位于 `laey/` 和 `laes/` 中）。
   其中每个文件均在其 SPDX 文件头中注明该表达式，且 `AUTHORS` 逐一列出了这些文件的名称。
 
 您可以依据 GNU GPL v3 或更高版本使用这些文件。或者，您也可以依据与作者 mtq0605 另行签订的商业许可协议使用这些文件。

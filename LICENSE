@@ -69,7 +69,7 @@ Encoder-side reference modules in             GPL-3.0-or-later OR
   tone_scan.cpp, part_coder.cpp, pad_mirror.cpp
 Java library, java/src/com/lae/:
   decoders and shared helpers                 Apache-2.0
-  the 27 encoder files, listed in AUTHORS     GPL-3.0-or-later OR
+  the 30 encoder files, listed in AUTHORS     GPL-3.0-or-later OR
                                               LicenseRef-LAE-Commercial
 Player plug-ins: plugins/ (sources, build     Apache-2.0
   scripts and resource files). The built

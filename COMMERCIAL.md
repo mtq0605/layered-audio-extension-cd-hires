@@ -34,7 +34,7 @@ The encoder-side sources carry the SPDX expression
 - in `tools/reference/`: `routes.cpp`, `tone_scan.cpp`, `part_coder.cpp` and
   `pad_mirror.cpp` (the former whole-track encoder modules, kept only as a
   reference; `lae_enc` does not compile them)
-- in `java/src/com/lae/`: the 27 encoder files of the Java library (the
+- in `java/src/com/lae/`: the 30 encoder files of the Java library (the
   ports of the files above and their helpers, in `laey/` and `laes/`).
   Each of them names this expression in its SPDX header, and `AUTHORS`
   lists them by name.

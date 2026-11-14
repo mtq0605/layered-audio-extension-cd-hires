@@ -116,7 +116,7 @@ LAE addresses this problem under one constraint: **the CD layer is an ordinary, 
 3. **Reduce precision, not content (LAE Lossy).** LAE Lossy may represent content with reduced precision. It must not discard meaningful content.
    - Sustained tones, transients, musical tones, harmonics and reverberation tails are all retained.
    - Noise present in the master is treated as part of the music and coded like any other content. This includes the noise floor, inaudible random noise and deliberately added noise.
-   - Only content that is certainly not information is zeroed automatically: digital silence, and rounding-level residue below one 24-bit LSB.
+   - Only content that is certainly not information is zeroed automatically: digital silence, and rounding-level residue of about one to two 24-bit LSB (the exact threshold is given in Section 7.3).
 
    LAE Noise Marker and the encoder option `noise=` let the user mark noise regions, which the encoder then codes as silence (Section 8.6).
 
@@ -706,18 +706,19 @@ Each leaf is assigned one of four classes.
 
 | Class | Meaning | Coded |
 |---|---|---|
-| A | Certainly not information: digital silence, and rounding-level residue below one 24-bit LSB. Also: noise explicitly marked by the user (`noise=`, Section 8.6). | Nothing; reconstructed as exact zero |
+| A | Certainly not information: digital silence, and rounding-level residue (threshold below). Also: noise explicitly marked by the user (`noise=`, Section 8.6). | Nothing; reconstructed as exact zero |
 | B | Content requiring the lowest precision tier | Exponent + coefficients at TB = 2 |
 | C | Intermediate | TB = 4 |
 | D | Content requiring the highest depth | TB = 8 |
 
 The following rules govern class assignment.
 
-- **Noise is coded.** Noise in the master is not class A. It is coded like other content, mostly at class B and sometimes at class C.
+- **Noise is coded.** Noise in the master above the threshold of class A is not class A. It is coded like other content, mostly at class B and sometimes at class C.
 - **A is determined first.** Class A is fixed before the first compression pass and does not change afterwards.
 - **Mixed blocks.** A block can be class A only if all of its cells are class A. Any block containing retained content is at least class B. Mixing A cells into a B leaf costs B bytes, so the partition search separates A from retained content of its own accord.
 - **Spanning cells.** A cell that spans two analysis groups is class A only if both groups are A. In that case, the lower of the two noise floors is used.
 - **Noise-floor estimate.** The noise floor of a cell group is the smaller of two values: the 10th percentile over time, and the spectral median across the cells of the group. Sustained tones are therefore not mistaken for a noise floor.
+- **Threshold of class A.** The noise floor is estimated for each cell group and each second, as the RMS of the MDCT coefficients in units of the 24-bit LSB. A cell group in one frame is class A when this floor is at most 1.5, its largest coefficient in that frame is at most 8, and no sustained tone or transient is marked there. Measured on white noise in the frequency layer of an 88.2 kHz, 24-bit master: steady noise with an RMS of up to about 1.2 LSB of 24 bits (peaks of about 2 LSB), that is, about −137 dBFS, is class A and is not coded; at an RMS of 1.78 LSB, 28 % of the noise above 22 kHz is kept, and at ±16 LSB, 70 %. Tones are kept at every level tested (35 kHz, amplitudes 0.7 to 64 LSB). The threshold is therefore wider than "below one 24-bit LSB". Changing it would change the encoded files.
 
 ### 7.4 Labelling and closed loop (encoder)
 
@@ -736,7 +737,7 @@ The labels are then refined in a closed loop:
 3. it runs the detectors on the error;
 4. it raises only the cells that are still damaged at their own tier.
 
-The sustained-tone detector (`src/tone_scan.cpp`) has no sensitivity setting. Its thresholds follow from the noise statistics of averaged periodograms:
+The sustained-tone detector (in `src/lossy_blk.cpp`; its whole-track form is `tools/reference/tone_scan.cpp`) has no sensitivity setting. Its thresholds follow from the noise statistics of averaged periodograms:
 
 - **Periodograms.** They are obtained from a Hann-windowed long FFT with 50 % overlap. The FFT length is the smallest power of two that is not shorter than 0.09 s.
 - **Time scales.** The periodograms are averaged over 1, 2, 4, 8 and 16 long-FFT frames, so that structures are tested at five time scales.
@@ -863,7 +864,7 @@ Class-A leaves carry no coefficients. All of their coefficients are reconstructe
 Two optional encoder settings use class A; the format and the decoders are unchanged ([docs/NOISE.md](docs/NOISE.md)).
 
 - **`noise=<marking file>`.** The user marks noise in the aligned master with LAE Noise Marker (`plugins/lae_noise_marker/`), which only identifies and marks it. In the frequency layer, the encoder treats the master as zero in the marked cells; a cell marked in all of its bins is class A. Marks below the frequency layer (in the CD band) are listed and left unchanged.
-- **G** (ground noise of imaging; [docs/NOISE.md](docs/NOISE.md)). In a class-A cell, the decoded output is the up-converted CD layer alone, that is, its image components, about 120 dB below the music (the stopband of the half-band filters). Elsewhere, the frequency layer cancels them. `g` codes the frequency layer a second time with −G, only in first-pass class-A cells that were deleted or in which the master itself is silent; the second streams are summed with the first (Section 9.5 of the specification allows the overlap). `g=b`, `g=c` and `g=d` select the step of that pass.
+- **G** (ground noise of imaging; [docs/NOISE.md](docs/NOISE.md)). In a class-A cell, the decoded output is the up-converted CD layer alone, that is, its image components, about 120 dB below the music (the stopband of the half-band filters). Elsewhere, the frequency layer cancels them. `g` codes the frequency layer a second time with −G, only in first-pass class-A cells that were deleted or in which the master itself is silent; the second streams are summed with the first (Section 9.5 of the specification allows the overlap). `g=b`, `g=c` and `g=d` select the step of that pass. With `zs`, the leaves of this second pass also get a zero level, like every other leaf: where a coefficient that the pass is responsible for quantises to zero, the image of the up-converted CD layer would remain, and the zero level counteracts it. `g` itself sets no zero level.
 - Without either setting, the encoder output is unchanged, byte for byte.
 
 ---
@@ -1005,7 +1006,7 @@ The two modes of the CD layer lead to different layouts:
 
 - the file system is ISO 9660 Level 1 [5] with Joliet [15]; Rock Ridge, UDF and El Torito are not used;
 - the data track starts at the next writable address reported by the drive. For an image written in one pass, the start is precomputed as A2 + 11,400 sectors, where A2 is the start of the lead-out of session 1 and the 11,400 sectors include the 150-sector pregap of the data track. This value is to be confirmed by a burn (Section 17.3);
-- the disc contains `/README.TXT`, a plain-text description in Chinese and English that contains no hashes, positions, offsets or length tables;
+- the disc contains `/README.TXT`, a plain-text description in Chinese and English that contains no hashes, positions, offsets or length tables; it says, as `BURN.TXT` does, to rip the audio tracks as WAV or FLAC, 16 bit, 44.1 kHz (a lossy format such as MP3 cannot be used);
 - the directory `/LAE/` contains only `TRACKnn.LAX`, one extension file for each audio track that carries an extension, where nn is the two-digit track number in the TOC;
 - the data session contains no CUE sheet, no TOC copy, no report, no program and no `autorun.inf`. Other files, such as a booklet, are at the publisher's discretion and are ignored by readers;
 - the data track ends with zero sectors (150 by default, to be confirmed by a burn) and is at least 300 sectors long.
@@ -1095,7 +1096,7 @@ A slip within a track, such as a lost or duplicated sample, changes only that tr
 
 **Output and failure.** The reader writes its output as follows:
 
-- **Accepted tracks.** Each accepted track is rebuilt as `TRACKnn.lae.wav`, byte-identical to the file written by the encoder. Before it is written, the track is handed to the decoder: for LAEY, the checks that the decoder makes when it opens a file; for LAES, a complete decode in which every master is compared with its SHA-256. A track that the decoder refuses is written as CD, with the reason "extension layer damaged: the decoder refuses it". If the memory for the LAES decode is missing, the track stays accepted by its MD5, and a line states that the decoder check was not made.
+- **Accepted tracks.** Each accepted track is rebuilt as `TRACKnn.lae.wav`, byte-identical to the file written by the encoder. Before it is written, the track is decoded completely (since 2026-11-15): an LAEY track every extension pack to its last frame (every entropy stream must end exactly at its last byte), an LAES track every master against its SHA-256; an LAES block that does not fit into memory is decoded by the stream decoder with temporary files, never accepted by the whole-track MD5 alone. A track that the decoder refuses is written as CD, with the reason "extension layer damaged: the decoder refuses it". A check that cannot run (for example, for lack of memory or temporary space) stops the reading. One line per passing track says what was decoded (`track nn: decoder check passed: …`).
 - **Other tracks.** Every other track is written as `TRACKnn.cd.wav`, which contains the ripped CD audio unchanged, together with the reason. The reason categories are: unknown samples (a missing or truncated file), file too short, no match, no trailer, damaged trailer, unrecognised version or extension block type, invalid trailer field, track number not in the TOC, damaged extension, and lossy base layer.
 - **No track accepted.** If no track is accepted, the reader reports that the input may be another disc or another edition.
 - **Track without an extension.** A track in the TOC without an extension file is output as CD; this is not a failure.
@@ -1537,8 +1538,9 @@ The command-line tool `lae_udec` (`src/lae_udec.cpp`) is built on the `lae_any_*
 - A seek forwards past the decoded part continues from the player's own checkpoints (see below) and catches up from there, with all entropy streams in parallel. v5 defines no random-access points (Section 9), and none are added: the checkpoints come only from the player's own decoding.
 - **The player's checkpoints (2026-11-06).** The first time `lae_open_*` encounters a file, it checks the whole file once:
   - it computes the SHA-256 of every byte of the file;
-  - it decodes every entropy stream from its start to its end, with one thread per stream. A stream that does not end exactly at its last byte causes the open to fail, as a damaged chunk does; the CD audio still plays. Such a file is not a conforming file ([SPEC.md](spec/lossy/SPEC.md), Section 6.7); `lae_dec` does not check this and decodes it.
-  - During this check, a checkpoint is kept every 30 s in the player's own folder, under that SHA-256: `%APPDATA%\LAE\lae_index\<sha256>.idx` on Windows, and `$XDG_CACHE_HOME/lae/lae_index` or `~/.cache/lae/lae_index` elsewhere. The environment variable `LAE_INDEX_DIR` names a different folder; the value `off` selects no folder. The Java library used on Android keeps no such record: it does not decode the entropy streams at open, and its checkpoints exist only in memory, shared with the copies made by `lae_dup` (java/README.md).
+  - it decodes every entropy stream of the main body from its start to its end, with one thread per stream; a further extension pack is checked in the same way the first time it is selected. A stream that does not end exactly at its last byte causes the open (or the selection) to fail, as a damaged chunk does; the CD audio still plays. Such a file is not a conforming file ([SPEC.md](spec/lossy/SPEC.md), Section 6.7); since 2026-11-15, `lae_dec` and the Java decoder refuse it as well (Section 14.3).
+  - During this check, a checkpoint is kept every 30 s in the player's own folder, under that SHA-256: `%APPDATA%\LAE\lae_index\<sha256>.idx` on Windows, and `$XDG_CACHE_HOME/lae/lae_index` or `~/.cache/lae/lae_index` elsewhere. The environment variable `LAE_INDEX_DIR` names a different folder; the value `off` selects no folder. The Java library used on Android keeps no such record: it checks the entropy streams at every open (and a further pack when it is first selected), and its checkpoints exist only in memory, shared with the copies made by `lae_dup` (java/README.md).
+  - The record (version 2, since 2026-11-15) holds the result of every extension pack checked so far: passed, with its checkpoints, or failed. A second open decodes no pack again. Records of up to 256 MB are read; a version 1 record is checked again and replaced by a version 2 record.
   - Subsequent opens read this record and skip the check. A missing, damaged or foreign record only causes the next open to check the file again; the output never depends on the record.
   - The folder holds at most 256 MB; the least recently used records are deleted first. Only the library's own records are counted and deleted (`<sha256>.idx` files that begin with `LAEYIDX1`), and its own unfinished `.idx.tmp…` files once they are more than an hour old; other files in the folder are left alone (since 2026-11-14).
   - Nothing is written into, appended to or sent with the media file.
@@ -1561,6 +1563,8 @@ Four player plug-ins and a Java library decode both LAE formats: LAEY (container
 
 - **Files.** A WAV or FLAC file without an LAE extension is left to the host's own decoder. Players without LAE support play the CD layer of an LAEY file and the core master of an LAES file.
 - **Choices.** LAEY extension packs are listed by the names stored in the file, each with its own layers; LAES masters are listed with their numbers and names in the menu order of the file, with rate levels and derived versions in each master's submenu ([spec/lossless/SPEC.md](spec/lossless/SPEC.md), Section 10.3). When nothing is chosen, the default master of the file plays (otherwise the core master), and the main body of an LAEY file. A choice is kept by the player per file and never written into the file.
+- **Checks.** A master plays only after it and its chain have matched their SHA-256 values. When the core master plays instead (the master did not pass, could not be checked, or its first check was cancelled), the plug-in says so: foobar2000 in its status bar and console, DirectShow in a message box, VLC in an error dialog, Kodi in a notification. The first check can be cancelled in foobar2000 (playback stops), DirectShow and VLC (the core master plays this time; nothing is recorded, so the check runs again on the next open).
+- **Sample-rate limit.** A maximum sample rate below twice the base rate (for example 48 kHz for a 44.1 kHz file) leaves no rate above the base rate: "All layers" then plays the bit-depth layer (24-bit at the base rate) and "Frequency layer only" the CD/core layer (16-bit), in foobar2000, DirectShow and VLC alike.
 - **Languages.** Each plug-in is built in two standalone versions, English (`-en`) and Chinese (`-zh`).
 - **Tags.** The plug-ins read the tags of both forms: Vorbis comments in FLAC, and RIFF `LIST/INFO` and `id3 ` chunks in WAV.
 - **VLC.** VLC may shorten the end of a track by about 40 ms; this is VLC's own behaviour.
@@ -1577,11 +1581,11 @@ CD-Extra rips must first be restored with `lae_cdx read` (Section 10.8).
 The code is standard C++17 and uses no third-party libraries. The encoder is built from `src/lae_enc.cpp` and the decoder from `src/lae_dec.cpp`.
 
 - **Decoder sources.** The decoder uses `src/lae_dec.cpp`, `src/lae_decoder.h`, `src/part_stream.h`, `src/partition_format.h`, `src/mdct_tb.h`, `src/mdct_tables.h`, `src/halfband.h` and `src/wavio.h` ([SPEC.md](spec/lossy/SPEC.md)).
-- **Encoder sources.** The encoder compiles the decoder into the same executable. It additionally uses `src/partition.h`, `src/fft.h`, the block-wise modules `src/blk_io.h`, `src/wav_in.h`, `src/pad_blk.cpp`, `src/base_blk.cpp`, `src/routes_blk.cpp`, `src/lossy_blk.cpp` and `src/part_blk.cpp`, as well as `src/base_layer.cpp` (its decimation, for the alignment) and `src/cd_align.cpp`. The former whole-track modules `src/pad_mirror.cpp`, `src/routes.cpp`, `src/lossy_v2.cpp` (with `src/tone_scan.cpp`) and `src/part_coder.cpp` remain in the repository as stand-alone programs and as the reference against which the block-wise modules are compared; the encoder no longer uses them.
+- **Encoder sources.** The encoder compiles the decoder into the same executable. It additionally uses `src/partition.h`, `src/fft.h`, the block-wise modules `src/blk_io.h`, `src/wav_in.h`, `src/pad_blk.cpp`, `src/base_blk.cpp`, `src/routes_blk.cpp`, `src/lossy_blk.cpp` and `src/part_blk.cpp`, as well as `src/base_layer.cpp` (its decimation, for the alignment) and `src/cd_align.cpp`. The former whole-track modules `tools/reference/pad_mirror.cpp`, `tools/reference/routes.cpp`, `src/lossy_v2.cpp` (with `tools/reference/tone_scan.cpp`) and `tools/reference/part_coder.cpp` remain in the repository as stand-alone programs and as the reference against which the block-wise modules are compared; the encoder does not use them, and they use the C library's math functions, so their results may differ between platforms.
 - **Encapsulation tool sources.** `lae_cdx` is built from `src/lae_cdx.cpp` with `src/lae_cdx.h` (trailer and checksums), `src/lae_cdx_read.h` (reader code) and `src/iso9660.h` (ISO 9660 and Joliet).
 - **Decoder library.** `liblae` consists of `src/lae_api.h` and `src/lae_api.cpp`, built on `src/lae_decoder.h`. Define `LAE_API_BUILD` when building it as a DLL, and define `LAE_STATIC` in both the host and the library when linking it statically.
 
-`lae_enc` and `lae_dec` build on Windows with MSVC and on Linux with GCC and Clang; `lae_cdx` has been built and tested on Windows with MSVC. Example commands:
+`lae_enc` and `lae_dec` build on Windows with MSVC and on Linux with GCC and Clang; `lae_cdx` has been built and tested on Windows with MSVC, and its reader (`read`, `repack`) has also been run on Linux (GCC 13). Example commands:
 
 ```
 cl /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES src\lae_dec.cpp
@@ -1596,6 +1600,7 @@ Further build notes:
 - For the MSVC encoder, add `/bigobj`.
 - On 32-bit x86 with GCC or Clang, add `-msse2 -mfpmath=sse`.
 - Do not use `-ffast-math`, `/fp:fast` or any option that permits FMA contraction (Section 13.1).
+- On Windows, file names and tags outside the system code page need Windows 10 version 1803 or later (the tools use the UTF-8 locale). On an older Windows, the tools print a warning and work in the system code page.
 
 All options, the verified builds and the check scripts are given in [docs/BUILD.md](docs/BUILD.md).
 
@@ -1633,9 +1638,11 @@ The output name decides the form: `.wav` the WAV form, `.flac` the FLAC form, `.
 | `--form=wav`, `--form=flac` | The form of the output file (Section 10.1). It must agree with a `.wav` or `.flac` name; only `.lae` leaves the choice open. Without it, the WAV form is byte-identical to the output of earlier versions. |
 | `master2=<file>` … `master9=<file>` | Further masters, each coded as an extension pack against the same CD layer as the main body (the CD layer derived from the first master or, with `cd=`, the given CD; [spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 5.6). Each needs its position on the CD layer, `master<n>align=<offset>` (written like `cdalign=`); without it, both searches are reported and nothing is written. `master<n>accept` and `master<n>edge=pad|cut` act like `cdaccept` and `cdedge=` for that master. A master whose speed drifts against the CD (for example, tape wow and flutter), or some of whose check blocks do not match it, is not continued without a position given by hand and a confirmation. Further masters cannot yet be combined with `noise=`, `resume` or `cdcheck`. |
 | `master<n>name=<name>` | The name of pack n, shown where a pack is chosen (UTF-8, at most 255 bytes); `master1name=` names the main body. Names are for display only. Without them, the output is unchanged. |
-| `lae_enc tag` | New tags for an existing LAE file without re-encoding: writes a new file with the given tags (if none are given, with no tags), the same CD audio and the same `LAE ` chunk, and checks that both are byte-identical; the input is not changed. |
+| `lae_enc tag` | New tags for an existing LAE file without re-encoding: writes a new file with the given tags (if none are given, with no tags), the same CD audio and the same `LAE ` chunk, and checks that both are byte-identical; the input is not changed. It first runs the decoder's open check on the input: a damaged file is refused, and so is a file that is cut off (a decoder plays such a file up to its end, but `lae_enc tag` copies only complete files). Blocks and chunks of other software (SEEKTABLE, CUESHEET, other APPLICATION blocks, `cue ` and other chunks) are kept in their order; only the tags (VORBIS_COMMENT, PICTURE and PADDING in the FLAC form; `LIST/INFO` and `id3 ` in the WAV form) are replaced. Tags are refused when a VORBIS_COMMENT or PICTURE block would reach 16 MB, or the ID3v2 tag of the WAV form (text and pictures together) 256 MB. |
 
 The tag options may also be written without the leading `--` (`tag=`, `cover=`, `picture=`). Without them, the output is unchanged.
+
+An existing output file is replaced only after two "yes" answers at a console, or with `--overwrite` (also `overwrite`); without a console, `lae_enc` (encode and `tag`) refuses it and writes nothing. A resumed unfinished run is not a replacement. The prompts are given in Section 14.11.
 
 Notes on the encoder:
 
@@ -1643,7 +1650,7 @@ Notes on the encoder:
 - An unrecognised argument is reported as an error, and the encoder stops.
 - With `cd=`, the encoder prints the alignment results. Without `cdalign=`, these are the two search results and the line `ALIGN_SUGGEST …`, and the exit code is 1. With `cdalign=`, it prints the lines `PLACE …`, `ALIGN_RECHECK …` and `PHASE t=<whole> phi=0 move=<move> offset=<offset>`. After a successful encode, it writes the movement report `<output>.align.txt` (Section 4.3).
 - The first 4 bytes of the `LAE ` chunk identify the format: `LAE1` = LAEY (this tier), `LAE2` = LAES (the lossless tier, with a separate specification). `lae_dec` reports the format it finds: it decodes `LAE1` and, for `LAE2`, states that the file is an LAES file and names the tool to use.
-- The encoder uses as many threads as there are logical cores. The environment variable `PARTTHREADS` overrides this; `PARTTHREADS=1` makes the whole encoder single-threaded. The thread count does not affect the result.
+- The encoder uses as many threads as there are logical cores. The test switch `PARTTHREADS` overrides this (only with `LAE_TEST_MODE=1`, Section 14.11); `PARTTHREADS=1` makes the whole encoder single-threaded. The thread count does not affect the result.
 - **Memory plan.** At start-up, the encoder reads the physical memory once and, from the track length, decides whether the two layers of a pair (depth L and R, frequency M and S) are coded simultaneously or one after the other; it prints the plan (`memory plan: …`) and follows it for the whole encode. Simultaneous coding is chosen only on 64-bit builds and only when it fits within the memory limit. By default, the limit is min(1/2 × physical memory, max(1/4 × physical memory, physical memory − 28 GB)), so that the system and other programs retain room: 4 GB on a 16 GB machine, 8 GB on 32 GB, 20 GB on 48 GB and 32 GB on 64 GB. `mem=<GB>` sets the limit manually, for example `mem=20` on a 32 GB machine used only for audio. The block length follows from the limit and is at most about 32 s: longer blocks are not faster and only consume memory. The output file does not depend on the plan, the limit or the block length.
 - **Block-wise encoding (2026-10-29).** The encoder reads the master and codes the track block by block (about 32 s per block); the decisions that depend on the whole track (floors, tone and transient marks, mean energies, code-length statistics, mode proportions) are accumulated from all blocks before any block is coded. The output is byte-identical to that of the former whole-track encoder. Memory use does not grow with track length, apart from small per-cell records (3 bytes per cell): a 10-minute 352.8 kHz master needs about 0.5 GB. Large intermediate data are written to the work folder on disk (see disk space below).
 - **Disk space (measured 2026-10-30; the `lae_enc` figure 2026-11-05).** The work folders are on the drive of the output file and are removed at the end; keep the following amount of free space there, in addition to the space for the output itself:
@@ -1667,13 +1674,20 @@ Encoder performance, measured during development:
 ### 14.3 Decoding
 
 ```
-lae_dec <input.wav | input.flac | input.lae> <output.wav> [full | 16 | cd24] [output rate] [pack=<n>]
+lae_dec <input.wav | input.flac | input.lae> <output.wav> [full | 16 | cd24] [output rate] [pack=<n>] [--overwrite]
 lae_udec info <file>
-lae_udec dec <file> <output.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>]
+lae_udec dec <file> <output.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>] [--overwrite]
 lae_udec verify <file>
 ```
 
 `lae_dec` reads both forms and tells them apart by content. `pack=<n>` decodes extension pack n (0, the default, is the main body); a file without that pack is refused. If the output cannot be written completely (for example, on a full disk), `lae_dec` removes it, reports the reason and exits with code 1. `lae_udec` reads LAEY and LAES files alike: `info` lists every choice the file offers, with its number, name and the checks of its format; `dec` decodes one choice, given by its number or its name (for example `full_352800`, `pack1_full_176400`, `master_2_352800_32`), and without `--pick` the full route at the master rate (LAEY) or the default master of the file (LAES); `verify` runs every check of the format and writes nothing. In an LAEY file with extension packs, `--pick=<rate>:<bits>` chooses among the choices of the main body only; another pack is chosen with `--pick=pack:<k>` or by the name of one of its choices. When several LAES masters match, a tick list is shown, as in `laes dec`.
+
+Since 2026-11-15:
+
+- `lae_dec` refuses a file whose entropy streams do not each end exactly at their last byte, as the player library does (exit code 3, message "LAE chunk damaged (entropy stream <i> does not end at its last byte): refusing to decode; the CD audio itself still plays"). It checks every stream of the chosen pack before it writes anything.
+- `lae_udec verify` on an LAEY file decodes every extension pack (the main body and each further pack) to its end on the route `full` at its master rate, and prints one result line per pack.
+- An existing output file of `lae_dec` or `lae_udec dec` is not replaced silently: on a console the tool asks twice, and only two answers `yes` replace it; without a console it refuses unless `--overwrite` is given (Section 14.11).
+- `lae_dec` keeps no seek checkpoints (it never seeks); the player library keeps them as before.
 
 | Route | Layers | Output |
 |---|---|---|
@@ -1683,7 +1697,7 @@ lae_udec verify <file>
 
 In the `full` and `16` routes, the output rate may be the master rate or any lower octave down to twice the base rate; other rates are rejected. Frequency streams above the selected octave are neither read nor decoded.
 
-The decoder (`lae_dec`, `src/lae_decoder.h`) is single-threaded and streaming (the player library `liblae` adds the multithreaded first-open check and catch-up of Section 13.6):
+The decoder (`lae_dec`, `src/lae_decoder.h`) is single-threaded and streaming; before it decodes, `lae_dec` runs the stream check of the player library, with the streams checked in parallel (the player library `liblae` also adds the catch-up of Section 13.6):
 
 - it decodes one row of root blocks (8 frames) at a time and overlap-adds frame by frame;
 - the resampling stages pull samples through short sliding windows;
@@ -1755,15 +1769,15 @@ lae_cdx image <image dir> <track1.v5.wav> <track2.v5.wav> … [label=<album>] [d
 - `layout=` selects the independent-CD layout of a publisher's disc (Section 10.5).
 - **CD-Text** (album title, performer and track titles, shown by CD players) is written as `TITLE` / `PERFORMER` lines in `IMAGE.CUE` and `SESSION1.CUE`, which the burner writes as CD-Text. The text is taken from the files' tags (`TITLE`, `ARTIST`, `ALBUM`), in independent-CD mode from the publisher's CUE, and from the options `album=`, `performer=`, `cdtitle=<n>:<text>` and `cdperformer=<n>:<text>` (several tracks separated by commas). CD-Text accepts only printable ASCII: a text in Chinese or with other characters is never converted; instead, the tool stops, lists each such text together with the option with which it can be typed (for example in pinyin), and writes nothing. `cdtext=off` writes no CD-Text. AUDIO.BIN, DATA.ISO and the extension files do not depend on the text.
 
-Each input v5 file must first pass all checks of the decoder. The image is delivered only after the closed-loop self-check (Section 10.9). The burning instructions `BURN.TXT` describe two routes: route A writes `IMAGE.CUE` in one pass; route B writes in two steps, and the second step uses `lae_cdx data` to generate session 2 for the start address actually reported by the drive.
+Each input v5 file must first pass all checks of the decoder: before anything is written, `pack`, `split` and `image` decode every input file completely (since 2026-11-15), an LAEY file every extension pack to its last frame (every entropy stream must end exactly at its last byte), an LAES file every master against its SHA-256. A file that does not decode is refused and no image is written. The image is delivered only after the closed-loop self-check (Section 10.9). The burning instructions `BURN.TXT` describe two routes: route A writes `IMAGE.CUE` in one pass; route B writes in two steps, and the second step uses `lae_cdx data` to generate session 2 for the start address actually reported by the drive.
 
 **Reading.**
 
 ```
-lae_cdx read <output dir> <disc>\LAE <rip>\RIP.CUE [W=<n>]
+lae_cdx read <output dir> <disc>\LAE <rip>\RIP.CUE [W=<n>] [a2=<A2>]
 ```
 
-The second argument is the folder containing the extension files, for example the `LAE` folder of the disc's data session or a copy of it. The last argument is the rip: a whole-disc or per-track rip, with or without a CUE sheet, made with any offset setting. `W=` sets the search radius in samples (default 5880, at most 441000). The output is described in Section 10.8.
+The second argument is the folder containing the extension files, for example the `LAE` folder of the disc's data session or a copy of it. The last argument is the rip: a whole-disc or per-track rip, with or without a CUE sheet, made with any offset setting. `W=` sets the search radius in samples (default 5880, at most 441000). The output folder must be new or empty, as for `image` (since 2026-11-15). The output is described in Section 10.8.
 
 **Other commands.** The commands `pack`, `split` and `repack` convert between v5 WAV files, base-layer files and extension files (Section 10.7). `sim`, `selftest` and `test` are used for testing. Their arguments are:
 
@@ -1776,7 +1790,9 @@ lae_cdx selftest                                       # known answers
 lae_cdx test <fixturedir>                              # the test cases on the test discs
 ```
 
-An argument with `=` that is neither an existing file nor an option of the command stops `lae_cdx` (since 2026-11-14), so that a mistyped option is not ignored. `pack`, `split` and `repack` refuse an output that is one of their inputs (or, for `split`, one name for both outputs). After `read`, a note names the files in the output folder that this reading did not write; they are not part of the result and are not removed.
+An argument with `=` that is neither an existing file nor an option of the command stops `lae_cdx` (since 2026-11-14), so that a mistyped option is not ignored. `pack`, `split` and `repack` refuse an output that is one of their inputs (or, for `split`, one name for both outputs). `pack`, `split`, `repack`, `data` and `sim` do not replace an existing output file: on a console they ask twice, without a console they refuse; `--overwrite` replaces it (Section 14.11). Every output name is checked before any work starts.
+
+`lae_cdx data <laxdir> <startLba> <out.iso> [label=…] [date=…] [a2=<A2>]` and `read iso:…@N` stop when the start address is not A2 + 11400 (spec/cdx, P15). A2 is taken from the option `a2=`, otherwise from the `BURN.TXT` of the image (beside or in the folder of the `.lax` files; beside `DATA.ISO`); when neither is there, the tool stops. Start address 0 makes a copy for mounting on a computer (C34) and is not checked.
 
 ### 14.7 Decoder library (liblae)
 
@@ -1817,17 +1833,19 @@ Building requires third-party SDKs or headers that are not part of this reposito
 
 ```
 laes_export <in> --list
-laes_export <in> <choice> <out.flac> [--from=<s>] [--len=<s>] [--index=<record>] [--unverified]
-laes_export <in> <choice> --seg=<s> --dir=<folder> [--index=<record>] [--unverified]
+laes_export <in> <choice> <out.flac> [--from=<s>] [--len=<s>] [--index=<record>] [--unverified] [--overwrite]
+laes_export <in> <choice> --seg=<s> --dir=<folder> [--index=<record>] [--unverified] [--overwrite]
 ```
 
-A master is given out only after it has matched its SHA-256 ([spec/lossless/SPEC.md](spec/lossless/SPEC.md), Section 1.3). A run that decodes the whole track is this check: a whole-track export, and `--seg` over the whole track. Each output is first written as `<out>.part` (with `--seg`, each piece) and receives its name only when it is complete and the SHA-256 has matched; if the SHA-256 does not match, nothing is left and the exit code is 2. With `--index=<record>`, such a run notes the masters that matched in the text file `<record>.verified`. A part of a track (`--from`, `--len`), or pieces of such a part, of a master, of a rate level or of a derived 16-bit version is exported only when that note exists; without it, the export is refused with exit code 2 and the tool says how to obtain the note. `--unverified` exports without the check and adds the tag `LAES_UNVERIFIED=1`. The core master needs no note, because it is checked when the file is opened. Every write is checked: if an output cannot be written (for example, on a full disk), its `.part` file is removed and the exit code is 2. Every output is an ordinary FLAC file whose samples are exactly those of the chosen version, with their MD5 in STREAMINFO and with tags that identify the source (`LAES_CHOICE`, `LAES_FILE_SHA256`, `LAES_MASTER_SHA256`, `LAES_FIRST_FRAME`). `laes_export` contains the FLAC writer of the encoder and is licensed in the same way as the encoder.
+A master is given out only after it has matched its SHA-256 ([spec/lossless/SPEC.md](spec/lossless/SPEC.md), Section 1.3). A run that decodes the whole track is this check: a whole-track export, and `--seg` over the whole track. Each output is first written as `<out>.part` (with `--seg`, each piece) and receives its name only when it is complete and the SHA-256 has matched; if the SHA-256 does not match, nothing is left and the exit code is 2. With `--index=<record>`, such a run notes the masters that matched in the text file `<record>.verified`. A part of a track (`--from`, `--len`), or pieces of such a part, of a master, of a rate level or of a derived 16-bit version is exported only when that note exists; without it, the export is refused with exit code 2 and the tool says how to obtain the note. `--unverified` exports without the check and adds the tag `LAES_UNVERIFIED=1`. The core master needs no note, because it is checked when the file is opened. Every write is checked: if an output cannot be written (for example, on a full disk), its `.part` file is removed and the exit code is 2. Every output is an ordinary FLAC file whose samples are exactly those of the chosen version, with their MD5 in STREAMINFO and with tags that identify the source (`LAES_CHOICE`, `LAES_FILE_SHA256`, `LAES_MASTER_SHA256`, `LAES_FIRST_FRAME`). For a WAV-form file, the RIFF INFO tags are written under their Vorbis names (INAM → TITLE, IART → ARTIST, IPRD → ALBUM, ICRD → DATE, ICOP → COPYRIGHT, ICMT → COMMENT, IGNR → GENRE, ITRK → TRACKNUMBER, IENG → ENGINEER, ISBJ → DESCRIPTION, ISFT → ENCODER; other INFO names are kept as they are); tags held only in the `id3 ` chunk are not exported. An existing output (the file, or a piece of `--seg`) is not replaced silently (Section 14.11). `laes_export` contains the FLAC writer of the encoder and is licensed in the same way as the encoder.
 
 `tools/laes_disc.ps1` (Windows) creates a DVD or BD data-disc image of an album of LAES files, using the disc-image service of Windows (IMAPI2). The image contains the unchanged files, a playlist and a SHA-256 list. It is a data disc, not BD-Video or DVD-Audio. Any player that reads FLAC or WAV files from a disc plays the core master of each file; an LAES player plays the masters.
 
 ```
-powershell -ExecutionPolicy Bypass -File tools\laes_disc.ps1 -Album <folder> -Out <image.iso> -Disc DVD5|DVD9|BD25|BD50|BD100 [-Label <name>] [-Export <laes_export.exe>]
+powershell -ExecutionPolicy Bypass -File tools\laes_disc.ps1 -Album <folder> -Out <image.iso> -Disc DVD5|DVD9|BD25|BD50|BD100 [-Label <name>] [-Export <laes_export.exe>] [--overwrite | -Overwrite]
 ```
+
+Files of any size are taken; only the total size is checked against the capacity of the disc type. A DVD with a file larger than 2 GiB is made as UDF 1.02 only, because ISO 9660 and Joliet cannot hold such a file (the tool says so); a player that reads only ISO 9660 does not see the files of such a disc. An existing image is not replaced silently: on a console the tool asks twice and replaces it only after two yes answers; otherwise it is refused unless `--overwrite` is given (Section 14.11).
 
 ### 14.10 Demonstration audio and verification
 
@@ -1850,6 +1868,39 @@ laes verify Grand_LAES.flac Grand_352k8_32bit.wav Grand_352k8_24bit.wav Grand_17
 **LAEY.** The CD layer of an LAEY file derived from a master is the encoder's own derivation; the full decode is compared with the master by measurement (`cmp_wav`). The disc images are restored to the LAEY files with `lae_cdx read` (Section 10.8), and the restored files are compared with the included LAEY files: their `data` chunk (the CD layer) and `LAE ` chunk are identical byte for byte (the tags are not stored on the disc).
 
 The audio is not covered by the code or documentation licences: it may be downloaded, listened to and used to test and verify the formats, and for no other purpose ([AUDIO_LICENSE.md](AUDIO_LICENSE.md)).
+
+### 14.11 Existing output files and test switches
+
+**Existing output files (since 2026-11-15).** No tool replaces an existing output file silently. This holds for `lae_enc` (encode and `tag`), `lae_dec`, `lae_udec dec`, `lae_cdx` (`pack`, `split`, `repack`, `data`, `sim`), `laes` (`enc`, `dec`, `tag`, `add`, `extract`, `names`), `laes_export`, `lae_noise` (`mark`, `spectro`, `scan`, `preview`, `preview-all`), the table generators `gen_halfband`, `gen_mdct_tables` and `gen_noise_test`, `lae_abx --prepare`, `tools/laes_disc.ps1` and the Java tools (java/README.md).
+
+- At a console (input and output both a terminal), the tool asks twice, and only two answers `yes` replace the file:
+
+  ```
+  "<file>" already exists. Replace it? Type yes to continue:
+  "<file>" 已经存在。要替换吗？输入 yes 继续：
+  Really replace "<file>"? It cannot be undone. Type yes again:
+  确定要替换 "<file>" 吗？替换后无法恢复。再输入一次 yes：
+  ```
+
+- Without a console, or after any other answer, the file is left as it is, nothing is written, and the tool exits with code 1 after these lines:
+
+  ```
+  "<file>" already exists; it was not replaced (give --overwrite to replace it).
+  "<file>" 已经存在，没有替换（加 --overwrite 才替换）。
+  ```
+
+- `--overwrite` replaces the file without asking (`laes_disc.ps1` also takes `-Overwrite`). `lae_abx` is a window program without console input, so `lae_abx --prepare` replaces an existing output only with `--overwrite`.
+- Every output of a command is checked before any work starts. A resumed unfinished run (`lae_enc … resume`, or `laes enc` with a matching work folder) is not a replacement and goes on as before. `lae_cdx image` and `lae_cdx read` require a new or empty output folder instead.
+
+**Test switches (since 2026-11-15).** Environment variables that only tests use act only when the master switch `LAE_TEST_MODE=1` is set; without it, they have no effect. With it, every run prints one line that names the active test switches and says that unsetting `LAE_TEST_MODE` returns to normal behaviour. Test scripts set the master switch.
+
+| Tool | Test switches | Line printed with `LAE_TEST_MODE=1` |
+|---|---|---|
+| `lae_enc`, Java `LaeEncTool` | `LAEY_TEST_PIECE`, `LAE_TESTMAXFRAMES`, `LAE_TESTFAIL`, `LAE_BLOCKUNITS`, `LAE_TESTSEQUENTIAL`, `PARTTHREADS` | `TEST MODE (LAE_TEST_MODE=1): active test switches: <switches or none>. Unset LAE_TEST_MODE to return to normal behaviour.` |
+| `laes`, `laes_export`, Java `LaesTool` | `LAES_TEST_KEYS`, `LAES_NO_SHORTLIST`, `LAES_FORCE_RF64`, `LAES_PIECE`, `LAES_SELFCHECK_FLIP`, `LAES_DISK_RESERVE` | `LAE_TEST_MODE=1: test switches active: <switches or none> (unset LAE_TEST_MODE for normal behaviour)` |
+| `lae_cdx` | `LAE_CDX_LAES_STREAM=1` (every LAES check by the stream decoder) | `test mode (LAE_TEST_MODE=1): active test switches: <switch or none>; unset LAE_TEST_MODE to return to normal behaviour` |
+
+Diagnostics that change no output byte act without the master switch: `TIMING`, `KEEPTMP` and `TIERSTAT` of `lae_enc`, `KEEPTMP` of `laes`, and the Java folder choice `LAE_WORKDIR`. `lae_cdx` has no such diagnostic.
 
 ---
 
@@ -1897,7 +1948,7 @@ The alignment of an independent CD and the encapsulation use the following publi
 | Reference decoder and the other decoder-side sources in `src/`, including the decoder library `src/lae_decoder.h` and `liblae` (`src/lae_api.*`); tools in `tools/` | Apache License 2.0 |
 | Encapsulation tool `lae_cdx` (`src/lae_cdx.*`, `src/lae_cdx_read.h`, `src/iso9660.h`) | Apache License 2.0 |
 | Player plug-in sources (`plugins/`) | Apache License 2.0. The built Kodi add-on is distributed under GPL-3.0-or-later, because it is built with Kodi's GPL headers. Third-party code in built packages: [THIRD_PARTY.md](THIRD_PARTY.md). |
-| Java library (`java/`) | As for the C++ sources: decoders and shared helpers Apache-2.0; encoder files GPL-3.0-or-later or a commercial licence. Three Apache-2.0 files (`WavIo`, `LaeDec`, `NoiseMarks`) call encoder files, compile only together with them and are used only by the encoder; the decoders and `Play` compile without any encoder file ([java/README.md](java/README.md), Licence) |
+| Java library (`java/`) | As for the C++ sources: decoders and shared helpers Apache-2.0; encoder files GPL-3.0-or-later or a commercial licence. The three files only the encoder uses (`WavIo`, `LaeDec`, `NoiseMarks`) are encoder files; every Apache-2.0 file, the decoders and `Play` among them, compiles without any encoder file ([java/README.md](java/README.md), Licence) |
 | Demonstration audio and masters included in releases | All rights reserved: listening and verification only ([AUDIO_LICENSE.md](AUDIO_LICENSE.md)). The code and documentation licences do not apply. |
 | Reference encoder (encoder-side sources in `src/`, including the alignment `src/cd_align.cpp`, the planner `src/cd_plan.cpp`, the LAES tool `src/laes_tool.cpp` and the streaming export `src/laes_export.cpp`) | GNU General Public License v3.0 or later (GPL-3.0-or-later), or a commercial licence from the author ([COMMERCIAL.md](COMMERCIAL.md)) |
 | Test scripts, build files, CI configuration | Apache License 2.0 |
@@ -1943,7 +1994,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - When the sound is longer than about 3.6 minutes, level 0 of the search uses a lower sampling rate; an improvement is planned.
   - Beyond about 1 hour 55 minutes of sound, no search is performed, and the position must be given with `cdalign=`.
 - **Differing content.** Sound that only the master has, at the start or the end, is encoded only after the user chooses `cdedge=pad` or `cdedge=cut` (Section 4.3, Placement). Sound that only the CD has stops the encoder. The planner (`lae_enc plan`) still stops on sound that only one side has. Combining other differing material is future work.
-- **Noise marking.** Implemented since v5-2026-11-07: LAE Noise Marker (`plugins/lae_noise_marker/`) presents spectrum views and short previews and writes a marking file, and the encoder codes the marked cells of the frequency layer as class A (`noise=`, Section 8.6; [docs/NOISE.md](docs/NOISE.md)). Without `noise=`, all noise in the master is retained.
+- **Noise marking.** Implemented since v5-2026-11-07: LAE Noise Marker (`plugins/lae_noise_marker/`) presents spectrum views and short previews (no command writes a cleaned excerpt longer than 30 s) and writes a marking file, and the encoder codes the marked cells of the frequency layer as class A (`noise=`, Section 8.6; [docs/NOISE.md](docs/NOISE.md)). Without `noise=`, all noise in the master is retained.
 - **Closed-loop re-validation.** The structure-preservation tests of the label closed loop, using injected tones and clicks, are to be repeated on v5.
 - **Detector documentation.** The statistics of the transient detector are to be documented (Section 7.4).
 
@@ -1970,7 +2021,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - `src/mdct_tables.h` as a normative annex;
   - whether a decoder must reject a `fmt ` sample rate that differs from the base rate;
   - the values of the stream-header fields `rate` and `L`;
-  - a guaranteed bound against 64-bit overflow in the half-band accumulators;
+  - a guaranteed bound against 64-bit overflow in the half-band accumulators (a result beyond it wraps modulo 2^64 since 2026-11-15, so that every decoder gives the same value);
   - whether corrupt-stream conditions must be detected in the whole stream or only in the parts that a route needs;
   - the encoder's edge padding and its definition of the leaf exponent.
 

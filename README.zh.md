@@ -116,7 +116,7 @@ LAE 在以下约束下解决这一问题：**CD 层是一张普通的、未经�
 3. **降低精度，而非丢弃内容（LAE Lossy）。**LAE Lossy 可以降低内容的表示精度，但不得丢弃有意义的内容。
    - 持续音、瞬态、乐音、谐波和混响尾音均予以保留。
    - 母带中存在的噪声被视为音乐的一部分，并与其他内容一样编码。这包括噪声底、不可闻的随机噪声和有意添加的噪声。
-   - 只有确定不承载信息的内容才会被自动置零：数字静音，以及低于一个 24 位 LSB 的舍入级残留。
+   - 只有确定不承载信息的内容才会被自动置零：数字静音，以及约一到两个 24 位 LSB 的舍入级残留（确切的门限见第 7.3 节）。
 
    借助 LAE Noise Marker 和编码器选项 `noise=`，用户可以标记噪声区域，编码器随后将其编码为静音（第 8.6 节）。
 
@@ -706,18 +706,19 @@ $$w_n = \exp\left(-i \frac{2\pi (n + 1/8)}{2N}\right), \qquad n = 0, \dots, N/2 
 
 | 类别 | 含义 | 编码内容 |
 |---|---|---|
-| A | 确定不是信息：数字静音，以及低于一个 24 位 LSB 的舍入级残留。此外：由用户显式标记的噪声（`noise=`，第 8.6 节）。 | 无；重建为精确的零 |
+| A | 确定不是信息：数字静音，以及舍入级残留（门限见下文）。此外：由用户显式标记的噪声（`noise=`，第 8.6 节）。 | 无；重建为精确的零 |
 | B | 需要最低精度等级的内容 | 指数 + 系数，TB = 2 |
 | C | 中间 | TB = 4 |
 | D | 需要最高位深的内容 | TB = 8 |
 
 类别分配遵循以下规则。
 
-- **噪声予以编码。**母带中的噪声不属于 A 类。它像其他内容一样编码，大多为 B 类，有时为 C 类。
+- **噪声予以编码。**母带中高于 A 类门限的噪声不属于 A 类。它像其他内容一样编码，大多为 B 类，有时为 C 类。
 - **先确定 A 类。**A 类在第一次压缩之前确定，之后不再改变。
 - **混合块。**只有所有单元均为 A 类的块才能为 A 类。任何包含保留内容的块至少为 B 类。将 A 类单元混入 B 类叶节点会产生 B 类字节开销，因此分区搜索会自行将 A 类与保留内容分开。
 - **跨组单元。**跨越两个分析组的单元，只有在两个组均为 A 类时才为 A 类。在这种情况下，使用两个噪声底中较低者。
 - **噪声底估计。**单元组的噪声底取两个值中的较小者：时间方向的第 10 百分位数，以及该组各单元间的频谱中位数。因此，持续音不会被误认为噪声底。
+- **A 类的门限。**噪声底按单元组、每秒估计一次，单位是 24 位 LSB，取 MDCT 系数的均方根。某一帧的一个单元组，噪声底不超过 1.5、这一帧里最大的系数不超过 8、并且那里没有标出持续音或瞬态时，属于 A 类。在一个 88.2 kHz、24 位母带的频率层上用白噪声实测：均方根不超过约 1.2 个 24 位 LSB（峰值约 2 个 LSB）的稳定噪声，即约 −137 dBFS，归为 A 类，不编码；均方根 1.78 个 LSB 时，22 kHz 以上的噪声保留 28 %，±16 个 LSB 时保留 70 %。纯音在测过的每个电平上都保留（35 kHz，幅度 0.7 到 64 个 LSB）。所以实际门限比“不到一个 24 位 LSB”宽。改门限会改变编码出的文件。
 
 ### 7.4 标记与闭环（编码器）
 
@@ -736,7 +737,7 @@ $$w_n = \exp\left(-i \frac{2\pi (n + 1/8)}{2N}\right), \qquad n = 0, \dots, N/2 
 3. 在误差上运行检测器；
 4. 只提升在其自身等级下仍受损的单元。
 
-持续音检测器（`src/tone_scan.cpp`）没有灵敏度设置。其阈值由平均周期图的噪声统计得出：
+持续音检测器（在 `src/lossy_blk.cpp` 中；整轨形式是 `tools/reference/tone_scan.cpp`）没有灵敏度设置。其阈值由平均周期图的噪声统计得出：
 
 - **周期图。**由汉宁窗长 FFT 以 50 % 重叠计算得到。FFT 长度为不短于 0.09 s 的最小二次幂。
 - **时间尺度。**周期图分别在 1、2、4、8 和 16 个长 FFT 帧上取平均，因此在五种时间尺度上检验结构。
@@ -863,7 +864,7 @@ A 类叶节点不携带系数。其所有系数都重建为精确的零。
 两个可选的编码器设置使用 A 类；格式和解码器均不变（[docs/NOISE.md](docs/NOISE.zh.md)）。
 
 - **`noise=<marking file>`。**用户使用 LAE Noise Marker（`plugins/lae_noise_marker/`）在对齐后的母带中标记噪声，该工具只识别并标记噪声。在频率层中，编码器在被标记的单元中将母带视为零；所有频率箱均被标记的单元为 A 类。频率层以下（CD 频带中）的标记只列出，不作改动。
-- **G**（镜像的本底噪声；[docs/NOISE.md](docs/NOISE.zh.md)）。在 A 类单元中，解码输出仅为升采样后的 CD 层，即其镜像分量，比音乐低约 120 dB（半带滤波器的阻带）。在其他位置，频率层将其抵消。`g` 以 −G 对频率层进行第二次编码，仅在第一遍中为 A 类、且已被删除或母带本身为静音的单元中进行；第二组数据流与第一组相加（规范第 9.5 节允许这种重叠）。`g=b`、`g=c` 和 `g=d` 选择该遍的步长。
+- **G**（镜像的本底噪声；[docs/NOISE.md](docs/NOISE.zh.md)）。在 A 类单元中，解码输出仅为升采样后的 CD 层，即其镜像分量，比音乐低约 120 dB（半带滤波器的阻带）。在其他位置，频率层将其抵消。`g` 以 −G 对频率层进行第二次编码，仅在第一遍中为 A 类、且已被删除或母带本身为静音的单元中进行；第二组数据流与第一组相加（规范第 9.5 节允许这种重叠）。`g=b`、`g=c` 和 `g=d` 选择该遍的步长。开了 `zs` 时，这第二遍的叶子也和其他叶子一样有零电平：这一遍负责的系数量化成零的地方，会留下升采样后 CD 层的镜像，零电平抵消它。`g` 本身不设零电平。
 - 不使用任一设置时，编码器输出逐字节不变。
 
 ---
@@ -1005,7 +1006,7 @@ CD 层的两种模式对应不同的布局：
 
 - 文件系统为 ISO 9660 Level 1 [5] 加 Joliet [15]；不使用 Rock Ridge、UDF 和 El Torito；
 - 数据音轨从驱动器报告的下一个可写地址开始。对于一次写入的镜像，起点预先计算为 A2 + 11,400 个扇区，其中 A2 为区段 1 lead-out 的起点，11,400 个扇区包括数据音轨的 150 扇区 pregap。该数值有待通过刻录确认（第 17.3 节）；
-- 光盘包含 `/README.TXT`，为中英文纯文本说明，不含哈希、位置、偏移或长度表；
+- 光盘包含 `/README.TXT`，为中英文纯文本说明，不含哈希、位置、偏移或长度表；它和 `BURN.TXT` 一样说明要把音轨抓成 WAV 或 FLAC（16 位、44.1 kHz），MP3 之类的有损格式不能用；
 - 目录 `/LAE/` 仅包含 `TRACKnn.LAX`，即每条带扩展的音频音轨各一个扩展文件，其中 nn 为 TOC 中两位数的音轨编号；
 - 数据区段不包含 CUE 表、TOC 副本、报告、程序和 `autorun.inf`。其他文件（例如小册子）由发行方自行决定，读取器忽略这些文件；
 - 数据音轨以零扇区结尾（默认 150 个，有待通过刻录确认），且长度至少为 300 个扇区。
@@ -1095,7 +1096,7 @@ CUE 表不包含 CRC、MD5 或其他哈希。
 
 **输出与失败。**读取器按以下方式写入输出：
 
-- **已接受的音轨。**每条已接受的音轨重建为 `TRACKnn.lae.wav`，与编码器写出的文件逐字节相同。写出之前，该音轨先交给解码器：LAEY 做解码器打开文件时的各项检查；LAES 完整解码，每个母带与其 SHA-256 比较。解码器拒绝的音轨作为 CD 写出，原因为“extension layer damaged: the decoder refuses it”。LAES 解码所需的内存不够时，该音轨仍按 MD5 算作已接受，并有一行说明没有做解码器检查。
+- **已接受的音轨。**每条已接受的音轨重建为 `TRACKnn.lae.wav`，与编码器写出的文件逐字节相同。写出之前，该音轨先完整解一遍（自 2026-11-15 起）：LAEY 音轨的每个扩展包解到最后一帧（每个熵编码流必须正好在最后一个字节结束），LAES 音轨的每个母带都和它的 SHA-256 比对；内存放不下的 LAES 块用流式解码器加临时文件来解，绝不只凭整轨 MD5 通过。解码器拒绝的音轨作为 CD 写出，原因为“extension layer damaged: the decoder refuses it”。检查无法进行时（例如内存或临时空间不够），读取停止。每一条通过的音轨打印一行，说明解了什么（`track nn: decoder check passed: …`）。
 - **其他音轨。**其他每条音轨写为 `TRACKnn.cd.wav`，其中包含未经改动的抓轨 CD 音频，并附上原因。原因类别包括：未知采样（文件缺失或被截断）、文件过短、无匹配、无尾部记录、尾部记录损坏、无法识别的版本或扩展块类型、尾部记录字段无效、音轨编号不在 TOC 中、扩展损坏，以及有损基础层。
 - **没有音轨被接受。**若没有任何音轨被接受，读取器报告输入可能是另一张光盘或另一个版本。
 - **无扩展的音轨。**TOC 中没有扩展文件的音轨作为 CD 输出；这不属于失败。
@@ -1537,8 +1538,9 @@ LAE Lossy 的可听频带由 CD 层加上波形编码的细化组成。尚未发
 - 向前定位越过已解码部分时，从播放器自身的检查点（见下文）继续，并从该处追赶到目标位置，所有熵编码流并行处理。v5 未定义随机访问点（第 9 节），此处也不添加：检查点仅来自播放器自身的解码。
 - **播放器的检查点（2026-11-06）。**`lae_open_*` 首次遇到一个文件时，对整个文件检查一次：
   - 计算文件全部字节的 SHA-256；
-  - 将每条熵编码流从头解码到尾，每条流一个线程。若某条流未恰好在其最后一个字节处结束，则打开失败，与数据块损坏时相同；CD 音频仍可播放。这样的文件不是符合规范的文件（[SPEC.md](spec/lossy/SPEC.zh.md)，第 6.7 节）；`lae_dec` 不检查这一点，照常解码。
-  - 检查期间，每 30 s 保存一个检查点，以该 SHA-256 为名存放在播放器自身的文件夹中：Windows 上为 `%APPDATA%\LAE\lae_index\<sha256>.idx`，其他系统上为 `$XDG_CACHE_HOME/lae/lae_index` 或 `~/.cache/lae/lae_index`。环境变量 `LAE_INDEX_DIR` 指定其他文件夹；取值 `off` 表示不使用任何文件夹。Android 上用的 Java 库不保存这种记录：它打开文件时不解码熵编码流，检查点只在内存里，由 `lae_dup` 做出的副本共用（见 java/README.md）。
+  - 将主体的每条熵编码流从头解码到尾，每条流一个线程；其他扩展包在第一次选中时同样检查。若某条流未恰好在其最后一个字节处结束，则打开（或选择）失败，与数据块损坏时相同；CD 音频仍可播放。这样的文件不是符合规范的文件（[SPEC.md](spec/lossy/SPEC.zh.md)，第 6.7 节）；自 2026-11-15 起，`lae_dec` 和 Java 解码器也拒绝它（第 14.3 节）。
+  - 检查期间，每 30 s 保存一个检查点，以该 SHA-256 为名存放在播放器自身的文件夹中：Windows 上为 `%APPDATA%\LAE\lae_index\<sha256>.idx`，其他系统上为 `$XDG_CACHE_HOME/lae/lae_index` 或 `~/.cache/lae/lae_index`。环境变量 `LAE_INDEX_DIR` 指定其他文件夹；取值 `off` 表示不使用任何文件夹。Android 上用的 Java 库不保存这种记录：它每次打开文件时检查熵编码流（其他扩展包在第一次选中时检查），检查点只在内存里，由 `lae_dup` 做出的副本共用（见 java/README.md）。
+  - 记录（第 2 版，自 2026-11-15 起）保存已经检查过的每个扩展包的结果：通过的连同检查点，或不通过。第二次打开不再解任何扩展包。记录最大可读 256 MB；第 1 版的记录会重新检查并换成第 2 版。
   - 之后的打开读取该记录并跳过检查。记录缺失、损坏或属于其他文件，只会使下一次打开重新检查该文件；输出从不依赖该记录。
   - 该文件夹最多占用 256 MB；最久未使用的记录最先删除。只统计和删除库自己的记录（以 `LAEYIDX1` 开头的 `<sha256>.idx` 文件），以及库自己未写完、超过一小时的 `.idx.tmp…` 文件；文件夹中的其他文件不动（自 2026-11-14 起）。
   - 不向媒体文件写入或附加任何内容，也不随媒体文件发送任何内容。
@@ -1561,6 +1563,8 @@ LAE Lossy 的可听频带由 CD 层加上波形编码的细化组成。尚未发
 
 - **文件。**不带 LAE 扩展的 WAV 或 FLAC 文件交由宿主自身的解码器处理。不支持 LAE 的播放器播放 LAEY 文件的 CD 层和 LAES 文件的核心母带。
 - **选择。**LAEY 扩展包按文件中存储的名称列出，各带自己的层；LAES 母带按文件的菜单顺序列出编号和名称，采样率级别和派生版本放在各母带的子菜单中（[spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md) 第 10.3 节）。没有选择时，播放文件的默认母带（没有时为核心母带），LAEY 文件播放主体。选择由播放器按文件保存，从不写入文件。
+- **校验。**母带及其参照链的 SHA-256 全部相符后才播放该母带。改为播放核心母带时（母带没有通过校验、无法校验，或首次校验被取消），插件会说明：foobar2000 在状态栏和控制台，DirectShow 用提示框，VLC 用错误对话框，Kodi 用通知。首次校验在 foobar2000（停止播放）、DirectShow 和 VLC（这一次播放核心母带；不记录结果，下次打开时重新校验）中可以取消。
+- **采样率上限。**最高采样率低于基础采样率的 2 倍时（例如 44.1 kHz 的文件设为 48 kHz），没有高于基础采样率的采样率可用：“全部层”改为播放位深层（基础采样率下 24 位），“仅频率层”改为播放 CD 层 / 核心层（16 位），foobar2000、DirectShow 和 VLC 相同。
 - **语言。**每个插件都有英文（`-en`）和中文（`-zh`）两个独立版本。
 - **标签。**这些插件读取两种形式的标签：FLAC 中的 Vorbis 注释，以及 WAV 中的 RIFF `LIST/INFO` 块和 `id3 ` 块。
 - **VLC。**VLC 可能将音轨末尾缩短约 40 ms；这是 VLC 自身的行为。
@@ -1577,11 +1581,11 @@ CD-Extra 抓轨必须先用 `lae_cdx read` 还原（第 10.8 节）。
 代码为标准 C++17，不使用任何第三方库。编码器由 `src/lae_enc.cpp` 构建，解码器由 `src/lae_dec.cpp` 构建。
 
 - **解码器源文件。**解码器使用 `src/lae_dec.cpp`、`src/lae_decoder.h`、`src/part_stream.h`、`src/partition_format.h`、`src/mdct_tb.h`、`src/mdct_tables.h`、`src/halfband.h` 和 `src/wavio.h`（[SPEC.md](spec/lossy/SPEC.zh.md)）。
-- **编码器源文件。**编码器将解码器编译进同一可执行文件。此外还使用 `src/partition.h`、`src/fft.h`，分块模块 `src/blk_io.h`、`src/wav_in.h`、`src/pad_blk.cpp`、`src/base_blk.cpp`、`src/routes_blk.cpp`、`src/lossy_blk.cpp` 和 `src/part_blk.cpp`，以及 `src/base_layer.cpp`（对齐用到其抽取）和 `src/cd_align.cpp`。以前的整轨模块 `src/pad_mirror.cpp`、`src/routes.cpp`、`src/lossy_v2.cpp`（含 `src/tone_scan.cpp`）和 `src/part_coder.cpp` 作为独立程序保留在仓库中，并作为与分块模块进行对比的参考；编码器不再使用它们。
+- **编码器源文件。**编码器将解码器编译进同一可执行文件。此外还使用 `src/partition.h`、`src/fft.h`，分块模块 `src/blk_io.h`、`src/wav_in.h`、`src/pad_blk.cpp`、`src/base_blk.cpp`、`src/routes_blk.cpp`、`src/lossy_blk.cpp` 和 `src/part_blk.cpp`，以及 `src/base_layer.cpp`（对齐用到其抽取）和 `src/cd_align.cpp`。以前的整轨模块 `tools/reference/pad_mirror.cpp`、`tools/reference/routes.cpp`、`src/lossy_v2.cpp`（含 `tools/reference/tone_scan.cpp`）和 `tools/reference/part_coder.cpp` 作为独立程序保留在仓库中，并作为与分块模块进行对比的参考；编码器不使用它们。它们用 C 库的数学函数，结果可能随平台不同。
 - **封装工具源文件。**`lae_cdx` 由 `src/lae_cdx.cpp` 构建，并使用 `src/lae_cdx.h`（尾部记录与校验和）、`src/lae_cdx_read.h`（读取器代码）和 `src/iso9660.h`（ISO 9660 和 Joliet）。
 - **解码器库。**`liblae` 由 `src/lae_api.h` 和 `src/lae_api.cpp` 组成，基于 `src/lae_decoder.h` 构建。将其构建为 DLL 时定义 `LAE_API_BUILD`；静态链接时，在宿主和库中均定义 `LAE_STATIC`。
 
-`lae_enc` 和 `lae_dec` 可在 Windows 上用 MSVC 构建，也可在 Linux 上用 GCC 和 Clang 构建；`lae_cdx` 已在 Windows 上用 MSVC 构建并测试。示例命令：
+`lae_enc` 和 `lae_dec` 可在 Windows 上用 MSVC 构建，也可在 Linux 上用 GCC 和 Clang 构建；`lae_cdx` 已在 Windows 上用 MSVC 构建并测试，它的读取器（`read`、`repack`）也在 Linux 上运行过（GCC 13）。示例命令：
 
 ```
 cl /O2 /EHsc /std:c++17 /utf-8 /D_USE_MATH_DEFINES src\lae_dec.cpp
@@ -1596,6 +1600,7 @@ g++ -O2 -std=c++17 -ffp-contract=off -D_USE_MATH_DEFINES -pthread -o lae_enc src
 - 使用 MSVC 构建编码器时，添加 `/bigobj`。
 - 在使用 GCC 或 Clang 的 32 位 x86 上，添加 `-msse2 -mfpmath=sse`。
 - 不得使用 `-ffast-math`、`/fp:fast` 或任何允许 FMA 收缩的选项（第 13.1 节）。
+- 在 Windows 上，系统代码页以外的文件名和标签需要 Windows 10 1803 或更新的版本（各工具使用 UTF-8 区域设置）。在更旧的 Windows 上，工具打印一条警告，按系统代码页工作。
 
 所有选项、已验证的构建和检查脚本见 [docs/BUILD.md](docs/BUILD.zh.md)。
 
@@ -1633,9 +1638,11 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 | `--form=wav`、`--form=flac` | 输出文件的形式（第 10.1 节）。必须与 `.wav` 或 `.flac` 的文件名一致；只有 `.lae` 可以自由选择。不写时，WAV 形式与以前版本的输出逐字节相同。 |
 | `master2=<file>` … `master9=<file>` | 另加的母带，每个都对着与主体相同的 CD 层（由第一个母带派生，或用 `cd=` 给出的 CD）编成一个扩展包（[spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md) 第 5.6 节）。每个都需要给出它在 CD 层上的位置 `master<n>align=<offset>`（写法同 `cdalign=`）；不给时报告两次搜索的结果，不写出任何文件。`master<n>accept` 和 `master<n>edge=pad|cut` 对该母带的作用与 `cdaccept`、`cdedge=` 相同。相对 CD 有速度漂移的母带（例如磁带的抖晃），或部分检查块与 CD 不匹配的母带，没有手动给出的位置和确认就不继续。另加的母带目前还不能与 `noise=`、`resume` 或 `cdcheck` 同时使用。 |
 | `master<n>name=<name>` | 包 n 的名称，在选择包的地方显示（UTF-8，最多 255 字节）；`master1name=` 给主体起名。名称只用于显示。不写时输出不变。 |
-| `lae_enc tag` | 无需重新编码即可为已有 LAE 文件设置新标签：写出一个新文件，带有给定的标签（若未给出则不带标签）、相同的 CD 音频和相同的 `LAE ` 块，并检查两者逐字节相同；输入不变。 |
+| `lae_enc tag` | 无需重新编码即可为已有 LAE 文件设置新标签：写出一个新文件，带有给定的标签（若未给出则不带标签）、相同的 CD 音频和相同的 `LAE ` 块，并检查两者逐字节相同；输入不变。它先对输入做一次解码器的打开检查：损坏的文件被拒绝，不完整的文件也被拒绝（解码器把这种文件播到它的末尾，但 `lae_enc tag` 只复制完整的文件）。别的软件加的块（SEEKTABLE、CUESHEET、别的 APPLICATION 块、`cue ` 等）按原顺序保留；只替换标签（FLAC 形式的 VORBIS_COMMENT、PICTURE 和 PADDING；WAV 形式的 `LIST/INFO` 和 `id3 `）。VORBIS_COMMENT 块或 PICTURE 块会达到 16 MB，或 WAV 形式的 ID3v2 标签（文字和图片合计）会达到 256 MB 时，拒绝这些标签。 |
 
 标签选项也可以不带前导 `--` 书写（`tag=`、`cover=`、`picture=`）。不使用这些选项时，输出不变。
+
+已有的输出文件只有在控制台上两次输入 yes 后，或者加了 `--overwrite`（也可写 `overwrite`）时才会被替换；没有控制台时，`lae_enc`（编码和 `tag`）拒绝并且不写任何文件。续做未完成的运行不算替换。提示的原文见第 14.11 节。
 
 编码器说明：
 
@@ -1643,7 +1650,7 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 - 无法识别的参数会报告为错误，编码器随即停止。
 - 使用 `cd=` 时，编码器打印对齐结果。未给出 `cdalign=` 时，打印两次搜索的结果以及 `ALIGN_SUGGEST …` 行，退出代码为 1。给出 `cdalign=` 时，打印 `PLACE …`、`ALIGN_RECHECK …` 和 `PHASE t=<whole> phi=0 move=<move> offset=<offset>` 行。编码成功后，写出移动报告 `<output>.align.txt`（第 4.3 节）。
 - `LAE ` 块的前 4 个字节标识格式：`LAE1` = LAEY（本层级），`LAE2` = LAES（无损层级，另有规范）。`lae_dec` 报告其识别出的格式：解码 `LAE1`；对于 `LAE2`，说明该文件为 LAES 文件，并指出应使用的工具。
-- 编码器使用与逻辑核心数相同的线程数。环境变量 `PARTTHREADS` 可覆盖此值；`PARTTHREADS=1` 使整个编码器单线程运行。线程数不影响结果。
+- 编码器使用与逻辑核心数相同的线程数。测试开关 `PARTTHREADS` 可覆盖此值（只在设了 `LAE_TEST_MODE=1` 时起作用，第 14.11 节）；`PARTTHREADS=1` 使整个编码器单线程运行。线程数不影响结果。
 - **内存计划。**启动时，编码器读取一次物理内存，并根据音轨长度决定一对中的两层（位深 L 和 R、频率 M 和 S）是同时编码还是先后编码；它打印该计划（`memory plan: …`），并在整个编码过程中遵循该计划。仅在 64 位构建上、且在内存上限之内时才选择同时编码。默认上限为 min(1/2 × 物理内存, max(1/4 × 物理内存, 物理内存 − 28 GB))，使系统和其他程序保有空间：16 GB 机器上为 4 GB，32 GB 上为 8 GB，48 GB 上为 20 GB，64 GB 上为 32 GB。`mem=<GB>` 手动设置上限，例如在仅用于音频的 32 GB 机器上设为 `mem=20`。块长由上限决定，最长约 32 s：更长的块不会更快，只会占用更多内存。输出文件不依赖于计划、上限或块长。
 - **分块编码（2026-10-29）。**编码器逐块读取母带并逐块编码音轨（每块约 32 s）；依赖整条音轨的决定（噪声底、音调和瞬态标记、平均能量、码长统计、模式比例）在编码任何块之前从所有块累积得到。输出与以前的整轨编码器逐字节相同。除每个单元的小记录（每个单元 3 字节）外，内存占用不随音轨长度增长：10 分钟、352.8 kHz 的母带约需 0.5 GB。大型中间数据写入磁盘上的工作文件夹（见下文的磁盘空间）。
 - **磁盘空间（2026-10-30 实测；`lae_enc` 数据为 2026-11-05 实测）。**工作文件夹位于输出文件所在的驱动器上，并在结束时删除；除输出文件本身所需空间外，应在该驱动器上保留以下可用空间：
@@ -1667,13 +1674,20 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 ### 14.3 解码
 
 ```
-lae_dec <input.wav | input.flac | input.lae> <output.wav> [full | 16 | cd24] [output rate] [pack=<n>]
+lae_dec <input.wav | input.flac | input.lae> <output.wav> [full | 16 | cd24] [output rate] [pack=<n>] [--overwrite]
 lae_udec info <file>
-lae_udec dec <file> <output.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>]
+lae_udec dec <file> <output.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bits> | --pick=master:<k> | --pick=name:<text> | --pick=pack:<k>] [--overwrite]
 lae_udec verify <file>
 ```
 
 `lae_dec` 读取两种形式，按内容区分。`pack=<n>` 解码扩展包 n（默认 0 为主体）；文件中没有该包时拒绝。输出无法完整写出时（例如磁盘已满），`lae_dec` 删除该输出，报告原因，并以退出代码 1 结束。`lae_udec` 同样读取 LAEY 和 LAES 文件：`info` 列出文件提供的每一项及其编号、名称和该格式的各项检查；`dec` 解码一项，用编号或名称给出（例如 `full_352800`、`pack1_full_176400`、`master_2_352800_32`），不给 `--pick` 时解码母带采样率的 full 路径（LAEY）或文件的默认母带（LAES）；`verify` 执行该格式的全部检查，不写出任何内容。对带扩展包的 LAEY 文件，`--pick=<rate>:<bits>` 只在主体的各项中选择；其他包用 `--pick=pack:<k>` 或该包某一项的名称选择。有多个 LAES 母带符合时显示勾选列表，与 `laes dec` 相同。
+
+自 2026-11-15 起：
+
+- `lae_dec` 也拒绝熵编码流没有正好在最后一个字节结束的文件，和播放库一样（退出代码 3，提示 "LAE chunk damaged (entropy stream <i> does not end at its last byte): refusing to decode; the CD audio itself still plays"）。它在写出任何内容之前检查所选扩展包的每条流。
+- `lae_udec verify` 对 LAEY 文件把每个扩展包（主体和其余各包）都按 `full` 路线、在它自己的母带采样率上解到最后，每包打一行结果。
+- `lae_dec` 或 `lae_udec dec` 的输出文件已经存在时不直接替换：在控制台上问两次，两次都输入 yes 才替换；不在控制台上就拒绝，除非加 `--overwrite`（第 14.11 节）。
+- `lae_dec` 不再保存跳转用的检查点（它不跳转）；播放库照旧保存。
 
 | 路径 | 使用的层 | 输出 |
 |---|---|---|
@@ -1683,7 +1697,7 @@ lae_udec verify <file>
 
 在 `full` 和 `16` 路径中，输出采样率可以是母带采样率，或低至基础采样率两倍的任一较低倍频程；其他采样率会被拒绝。所选倍频程以上的频率数据流既不读取也不解码。
 
-解码器（`lae_dec`、`src/lae_decoder.h`）采用单线程流式处理（播放器库 `liblae` 另外提供第 13.6 节所述的多线程首次打开检查和追赶）：
+解码器（`lae_dec`、`src/lae_decoder.h`）采用单线程流式处理；解码之前，`lae_dec` 先做播放器库的码流检查，各条流并行检查（播放器库 `liblae` 另外提供第 13.6 节所述的追赶）：
 
 - 每次解码一行根块（8 帧），并逐帧执行重叠相加；
 - 重采样级通过短滑动窗口提取采样；
@@ -1755,15 +1769,15 @@ lae_cdx image <image dir> <track1.v5.wav> <track2.v5.wav> … [label=<album>] [d
 - `layout=` 选择发行方光盘的独立 CD 布局（第 10.5 节）。
 - **CD-Text**（专辑名、演唱者和曲名，由 CD 播放器显示）写为 `IMAGE.CUE` 和 `SESSION1.CUE` 中的 `TITLE` / `PERFORMER` 行，刻录软件将其写为 CD-Text。文字取自文件的标签（`TITLE`、`ARTIST`、`ALBUM`），在独立 CD 模式下取自发行方的 CUE，也取自选项 `album=`、`performer=`、`cdtitle=<n>:<text>` 和 `cdperformer=<n>:<text>`（多条音轨以逗号分隔）。CD-Text 仅接受可打印 ASCII：含中文或其他字符的文字绝不转换；工具会停止，逐项列出此类文字以及可用于输入它的选项（例如以拼音输入），且不写入任何内容。`cdtext=off` 不写入 CD-Text。AUDIO.BIN、DATA.ISO 和扩展文件不依赖于这些文字。
 
-每个输入 v5 文件必须先通过解码器的全部检查。光盘镜像仅在闭环自检（第 10.9 节）之后交付。刻录说明 `BURN.TXT` 描述两种路线：路线 A 一次写入 `IMAGE.CUE`；路线 B 分两步写入，第二步使用 `lae_cdx data` 按驱动器实际报告的起始地址生成区段 2。
+每个输入 v5 文件必须先通过解码器的全部检查：自 2026-11-15 起，`pack`、`split` 和 `image` 在写出任何文件之前把每个输入文件完整解一遍，LAEY 文件的每个扩展包解到最后一帧（每个熵编码流必须正好在最后一个字节结束），LAES 文件的每个母带都和它的 SHA-256 比对。解不出的文件被拒绝，不写光盘映像。光盘镜像仅在闭环自检（第 10.9 节）之后交付。刻录说明 `BURN.TXT` 描述两种路线：路线 A 一次写入 `IMAGE.CUE`；路线 B 分两步写入，第二步使用 `lae_cdx data` 按驱动器实际报告的起始地址生成区段 2。
 
 **读取。**
 
 ```
-lae_cdx read <output dir> <disc>\LAE <rip>\RIP.CUE [W=<n>]
+lae_cdx read <output dir> <disc>\LAE <rip>\RIP.CUE [W=<n>] [a2=<A2>]
 ```
 
-第二个参数是包含扩展文件的文件夹，例如光盘数据区段中的 `LAE` 文件夹或其副本。最后一个参数是抓轨：整盘或逐轨抓轨，带或不带 CUE 表，可采用任意偏移设置。`W=` 设置以采样计的查找半径（默认 5880，最大 441000）。输出见第 10.8 节。
+第二个参数是包含扩展文件的文件夹，例如光盘数据区段中的 `LAE` 文件夹或其副本。最后一个参数是抓轨：整盘或逐轨抓轨，带或不带 CUE 表，可采用任意偏移设置。`W=` 设置以采样计的查找半径（默认 5880，最大 441000）。输出文件夹必须是新的或空的，和 `image` 一样（自 2026-11-15 起）。输出见第 10.8 节。
 
 **其他命令。**命令 `pack`、`split` 和 `repack` 在 v5 WAV 文件、基础层文件和扩展文件之间转换（第 10.7 节）。`sim`、`selftest` 和 `test` 用于测试。其参数如下：
 
@@ -1776,7 +1790,9 @@ lae_cdx selftest                                       # known answers
 lae_cdx test <fixturedir>                              # the test cases on the test discs
 ```
 
-参数中带 `=`、既不是已有文件也不是该命令的选项时，`lae_cdx` 停止（自 2026-11-14 起），以免打错的选项被忽略。`pack`、`split` 和 `repack` 拒绝与某个输入同名的输出（`split` 的两个输出同名时也拒绝）。`read` 结束后，有一行提示列出输出文件夹中不是本次读取写出的文件；这些文件不属于本次结果，也不会被删除。
+参数中带 `=`、既不是已有文件也不是该命令的选项时，`lae_cdx` 停止（自 2026-11-14 起），以免打错的选项被忽略。`pack`、`split` 和 `repack` 拒绝与某个输入同名的输出（`split` 的两个输出同名时也拒绝）。`pack`、`split`、`repack`、`data` 和 `sim` 不会替换已有的输出文件：在控制台上问两次，没有控制台时拒绝；加 `--overwrite` 才替换（第 14.11 节）。开始工作之前先核对每个输出文件名。
+
+`lae_cdx data <laxdir> <startLba> <out.iso> [label=…] [date=…] [a2=<A2>]` 和 `read iso:…@N` 在起始地址不等于 A2 + 11400 时停下（spec/cdx，P15）。A2 取自选项 `a2=`，没有时取自映像的 `BURN.TXT`（在 `.lax` 文件夹旁边或里面；在 `DATA.ISO` 旁边）；两者都没有时工具停下。起始地址 0 做的是在电脑上挂载用的副本（C34），不核对。
 
 ### 14.7 解码器库（liblae）
 
@@ -1817,17 +1833,19 @@ lae_close(t);
 
 ```
 laes_export <in> --list
-laes_export <in> <choice> <out.flac> [--from=<s>] [--len=<s>] [--index=<record>] [--unverified]
-laes_export <in> <choice> --seg=<s> --dir=<folder> [--index=<record>] [--unverified]
+laes_export <in> <choice> <out.flac> [--from=<s>] [--len=<s>] [--index=<record>] [--unverified] [--overwrite]
+laes_export <in> <choice> --seg=<s> --dir=<folder> [--index=<record>] [--unverified] [--overwrite]
 ```
 
-母带与其 SHA-256 相符之后才能给出（[spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md) 第 1.3 节）。解码整条音轨的运行就是这项检查：整轨导出，以及对整条音轨使用 `--seg`。每个输出先写成 `<out>.part`（使用 `--seg` 时为每一片），只有写完整并且 SHA-256 相符后才改成正式的文件名；SHA-256 不相符时不留下任何文件，退出代码为 2。带 `--index=<record>` 时，这样的运行把相符的母带记在文本文件 `<record>.verified` 中。母带、采样率档位或派生 16 位版本的一段（`--from`、`--len`）或这一段的分片，只有存在这条记录时才导出；没有记录时拒绝导出，退出代码为 2，并说明怎样得到记录。`--unverified` 不经检查直接导出，并加上标签 `LAES_UNVERIFIED=1`。核心母带不需要记录，因为它在打开文件时已经核对。每次写入都经过检查：输出无法写出时（例如磁盘已满），删除它的 `.part` 文件，退出代码为 2。每个输出都是普通 FLAC 文件，其采样与所选版本的采样完全相同，STREAMINFO 中带有其 MD5，并带有标识来源的标签（`LAES_CHOICE`、`LAES_FILE_SHA256`、`LAES_MASTER_SHA256`、`LAES_FIRST_FRAME`）。`laes_export` 包含编码器的 FLAC 写入器，其许可方式与编码器相同。
+母带与其 SHA-256 相符之后才能给出（[spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md) 第 1.3 节）。解码整条音轨的运行就是这项检查：整轨导出，以及对整条音轨使用 `--seg`。每个输出先写成 `<out>.part`（使用 `--seg` 时为每一片），只有写完整并且 SHA-256 相符后才改成正式的文件名；SHA-256 不相符时不留下任何文件，退出代码为 2。带 `--index=<record>` 时，这样的运行把相符的母带记在文本文件 `<record>.verified` 中。母带、采样率档位或派生 16 位版本的一段（`--from`、`--len`）或这一段的分片，只有存在这条记录时才导出；没有记录时拒绝导出，退出代码为 2，并说明怎样得到记录。`--unverified` 不经检查直接导出，并加上标签 `LAES_UNVERIFIED=1`。核心母带不需要记录，因为它在打开文件时已经核对。每次写入都经过检查：输出无法写出时（例如磁盘已满），删除它的 `.part` 文件，退出代码为 2。每个输出都是普通 FLAC 文件，其采样与所选版本的采样完全相同，STREAMINFO 中带有其 MD5，并带有标识来源的标签（`LAES_CHOICE`、`LAES_FILE_SHA256`、`LAES_MASTER_SHA256`、`LAES_FIRST_FRAME`）。WAV 形式文件的 RIFF INFO 标签按 Vorbis 名字写出（INAM → TITLE、IART → ARTIST、IPRD → ALBUM、ICRD → DATE、ICOP → COPYRIGHT、ICMT → COMMENT、IGNR → GENRE、ITRK → TRACKNUMBER、IENG → ENGINEER、ISBJ → DESCRIPTION、ISFT → ENCODER；其他 INFO 名字原样保留）；只在 `id3 ` 块里的标签不导出。已有的输出（文件，或 `--seg` 的分片）不会被悄悄替换（第 14.11 节）。`laes_export` 包含编码器的 FLAC 写入器，其许可方式与编码器相同。
 
 `tools/laes_disc.ps1`（Windows）利用 Windows 的光盘镜像服务（IMAPI2），为一张由 LAES 文件组成的专辑创建 DVD 或 BD 数据光盘镜像。该镜像包含原样的文件、一个播放列表和一个 SHA-256 列表。它是数据光盘，而非 BD-Video 或 DVD-Audio。任何能从光盘读取 FLAC 或 WAV 文件的播放器都会播放每个文件的核心母带；LAES 播放器则播放各母带。
 
 ```
-powershell -ExecutionPolicy Bypass -File tools\laes_disc.ps1 -Album <folder> -Out <image.iso> -Disc DVD5|DVD9|BD25|BD50|BD100 [-Label <name>] [-Export <laes_export.exe>]
+powershell -ExecutionPolicy Bypass -File tools\laes_disc.ps1 -Album <folder> -Out <image.iso> -Disc DVD5|DVD9|BD25|BD50|BD100 [-Label <name>] [-Export <laes_export.exe>] [--overwrite | -Overwrite]
 ```
+
+任何大小的文件都可以放入，只按光盘类型的容量核对总大小。DVD 上有大于 2 GiB 的文件时，镜像只用 UDF 1.02，因为 ISO 9660 和 Joliet 放不下这样的文件（工具会说明）；只读 ISO 9660 的播放器看不到这种光盘上的文件。已有的镜像文件不会被悄悄替换：在控制台上工具问两次，两次都回答 yes 才替换；不在控制台时拒绝，除非给了 `--overwrite`（第 14.11 节）。
 
 ### 14.10 演示音频与验证
 
@@ -1850,6 +1868,39 @@ laes verify Grand_LAES.flac Grand_352k8_32bit.wav Grand_352k8_24bit.wav Grand_17
 **LAEY。**由母带派生的 LAEY 文件的 CD 层是编码器自身的派生结果；完整解码通过测量（`cmp_wav`）与母带比较。光盘镜像用 `lae_cdx read`（第 10.8 节）还原为 LAEY 文件，并将还原所得文件与随附的 LAEY 文件比较：二者的 `data` 块（CD 层）和 `LAE ` 块逐字节相同（标签不存储在光盘上）。
 
 这些音频不受代码或文档许可证的约束：可以下载、收听，并用于测试和验证这些格式，不得用于其他用途（[AUDIO_LICENSE.md](AUDIO_LICENSE.zh.md)）。
+
+### 14.11 已有的输出文件和测试开关
+
+**已有的输出文件（自 2026-11-15 起）。**任何工具都不会悄悄替换已有的输出文件。适用于 `lae_enc`（编码和 `tag`）、`lae_dec`、`lae_udec dec`、`lae_cdx`（`pack`、`split`、`repack`、`data`、`sim`）、`laes`（`enc`、`dec`、`tag`、`add`、`extract`、`names`）、`laes_export`、`lae_noise`（`mark`、`spectro`、`scan`、`preview`、`preview-all`）、表生成器 `gen_halfband`、`gen_mdct_tables` 和 `gen_noise_test`、`lae_abx --prepare`、`tools/laes_disc.ps1`，以及各 Java 工具（java/README.zh.md）。
+
+- 在控制台上（输入和输出都是终端），工具问两次，两次都回答 `yes` 才替换：
+
+  ```
+  "<file>" already exists. Replace it? Type yes to continue:
+  "<file>" 已经存在。要替换吗？输入 yes 继续：
+  Really replace "<file>"? It cannot be undone. Type yes again:
+  确定要替换 "<file>" 吗？替换后无法恢复。再输入一次 yes：
+  ```
+
+- 不在控制台上，或者回答了别的内容，文件保持原样，不写任何文件，工具打印下面两行后以退出代码 1 结束：
+
+  ```
+  "<file>" already exists; it was not replaced (give --overwrite to replace it).
+  "<file>" 已经存在，没有替换（加 --overwrite 才替换）。
+  ```
+
+- 加 `--overwrite` 时直接替换，不问（`laes_disc.ps1` 也接受 `-Overwrite`）。`lae_abx` 是窗口程序，没有控制台输入，所以 `lae_abx --prepare` 只有加 `--overwrite` 才替换已有的输出。
+- 一条命令的每个输出都在开始工作之前核对。续做未完成的运行（`lae_enc … resume`，或带着对应工作文件夹的 `laes enc`）不算替换，照旧进行。`lae_cdx image` 和 `lae_cdx read` 则要求输出文件夹是新的或空的。
+
+**测试开关（自 2026-11-15 起）。**只有测试才用的环境变量，只在设了总开关 `LAE_TEST_MODE=1` 时起作用；不设时不起任何作用。设了时，每次运行打印一行，列出起作用的测试开关，并说明取消 `LAE_TEST_MODE` 就回到正常行为。测试脚本设置这个总开关。
+
+| 工具 | 测试开关 | 设了 `LAE_TEST_MODE=1` 时打印的一行 |
+|---|---|---|
+| `lae_enc`、Java 的 `LaeEncTool` | `LAEY_TEST_PIECE`、`LAE_TESTMAXFRAMES`、`LAE_TESTFAIL`、`LAE_BLOCKUNITS`、`LAE_TESTSEQUENTIAL`、`PARTTHREADS` | `TEST MODE (LAE_TEST_MODE=1): active test switches: <switches or none>. Unset LAE_TEST_MODE to return to normal behaviour.` |
+| `laes`、`laes_export`、Java 的 `LaesTool` | `LAES_TEST_KEYS`、`LAES_NO_SHORTLIST`、`LAES_FORCE_RF64`、`LAES_PIECE`、`LAES_SELFCHECK_FLIP`、`LAES_DISK_RESERVE` | `LAE_TEST_MODE=1: test switches active: <switches or none> (unset LAE_TEST_MODE for normal behaviour)` |
+| `lae_cdx` | `LAE_CDX_LAES_STREAM=1`（每个 LAES 检查都用流式解码器） | `test mode (LAE_TEST_MODE=1): active test switches: <switch or none>; unset LAE_TEST_MODE to return to normal behaviour` |
+
+不改变输出任何字节的诊断开关不受总开关管：`lae_enc` 的 `TIMING`、`KEEPTMP` 和 `TIERSTAT`，`laes` 的 `KEEPTMP`，以及 Java 选择文件夹用的 `LAE_WORKDIR`。`lae_cdx` 没有这样的诊断开关。
 
 ---
 
@@ -1897,7 +1948,7 @@ LAE Lossy 基于以下已公开技术构建：
 | 参考解码器及 `src/` 中其他解码器端源文件，包括解码器库 `src/lae_decoder.h` 和 `liblae`（`src/lae_api.*`）；`tools/` 中的工具 | Apache License 2.0 |
 | 封装工具 `lae_cdx`（`src/lae_cdx.*`、`src/lae_cdx_read.h`、`src/iso9660.h`） | Apache License 2.0 |
 | 播放器插件源文件（`plugins/`） | Apache License 2.0。构建出的 Kodi 附加组件以 GPL-3.0-or-later 分发，因为它使用 Kodi 的 GPL 头文件构建。已构建软件包中的第三方代码：[THIRD_PARTY.md](THIRD_PARTY.zh.md)。 |
-| Java 库（`java/`） | 与 C++ 源文件相同：解码器和共享辅助代码为 Apache-2.0；编码器文件为 GPL-3.0-or-later 或商业许可证。有三个 Apache-2.0 文件（`WavIo`、`LaeDec`、`NoiseMarks`）调用编码器文件，只能与它们一起编译，也只有编码器使用；解码器和 `Play` 不需要任何编码器文件即可编译（[java/README.md](java/README.zh.md) 的“许可”一节） |
+| Java 库（`java/`） | 与 C++ 源文件相同：解码器和共享辅助代码为 Apache-2.0；编码器文件为 GPL-3.0-or-later 或商业许可证。只有编码器使用的三个文件（`WavIo`、`LaeDec`、`NoiseMarks`）属于编码器文件；所有 Apache-2.0 文件（包括解码器和 `Play`）不需要任何编码器文件即可编译（[java/README.md](java/README.zh.md) 的“许可”一节） |
 | 发布中包含的演示音频和母带 | 保留所有权利：仅供收听和验证（[AUDIO_LICENSE.md](AUDIO_LICENSE.zh.md)）。代码和文档许可证不适用。 |
 | 参考编码器（`src/` 中编码器端源文件，包括对齐 `src/cd_align.cpp`、规划器 `src/cd_plan.cpp`、LAES 工具 `src/laes_tool.cpp` 和流媒体导出 `src/laes_export.cpp`） | GNU General Public License v3.0 或更高版本（GPL-3.0-or-later），或作者提供的商业许可证（[COMMERCIAL.md](COMMERCIAL.zh.md)） |
 | 测试脚本、构建文件、CI 配置 | Apache License 2.0 |
@@ -1943,7 +1994,7 @@ SPEC.md 中定义的比特流对容器版本 5 已冻结。
   - 当声音长于约 3.6 分钟时，搜索的第 0 级使用较低的采样率；计划对此加以改进。
   - 声音超过约 1 小时 55 分钟时，不执行搜索，必须通过 `cdalign=` 给出位置。
 - **内容不同。**只有母带在开头或结尾具有的声音，仅在用户选择 `cdedge=pad` 或 `cdedge=cut` 之后才会编码（第 4.3 节，放置）。只有 CD 具有的声音会使编码器停止。规划器（`lae_enc plan`）遇到只有一方具有的声音时仍会停止。组合其他内容不同的材料属于未来工作。
-- **噪声标记。**自 v5-2026-11-07 起已实现：LAE Noise Marker（`plugins/lae_noise_marker/`）提供频谱视图和短试听并写出标记文件，编码器将频率层中被标记的单元编码为 A 类（`noise=`，第 8.6 节；[docs/NOISE.md](docs/NOISE.zh.md)）。不使用 `noise=` 时，母带中的所有噪声都会保留。
+- **噪声标记。**自 v5-2026-11-07 起已实现：LAE Noise Marker（`plugins/lae_noise_marker/`）提供频谱视图和短试听（没有哪条命令写出长于 30 秒的清理后片段）并写出标记文件，编码器将频率层中被标记的单元编码为 A 类（`noise=`，第 8.6 节；[docs/NOISE.md](docs/NOISE.zh.md)）。不使用 `noise=` 时，母带中的所有噪声都会保留。
 - **闭环重新验证。**使用注入音调和点击声的标记闭环结构保留测试，将在 v5 上重新进行。
 - **检测器文档。**瞬态检测器的统计特性将补充文档说明（第 7.4 节）。
 
@@ -1970,7 +2021,7 @@ SPEC.md 中定义的比特流对容器版本 5 已冻结。
   - 将 `src/mdct_tables.h` 作为规范性附录；
   - 解码器是否必须拒绝采样率与基础采样率不同的 `fmt `；
   - 数据流头部字段 `rate` 和 `L` 的取值；
-  - 针对半带累加器 64 位溢出的保证上界；
+  - 针对半带累加器 64 位溢出的保证上界（自 2026-11-15 起，超出的结果对 2^64 取模回绕，各家解码器给出同一个值）；
   - 损坏数据流的情况是否必须在整个数据流中检测，还是只需在某条路径所需的部分中检测；
   - 编码器的边界填充及其叶节点指数的定义。
 

@@ -78,7 +78,8 @@ std::vector<uint8_t> packIndex(const Sha& key, Decoder& D, const std::vector<std
         for (const SavedMark& s : saved[i]) { putU(b, (uint64_t)s.M0, 8); putU(b, s.i, 8); putU(b, s.width, 4); putU(b, s.code, 4); putU(b, s.pos, 8);
             putU(b, (uint32_t)s.prevTier, 4); putU(b, (uint32_t)s.prevE, 4); putU(b, s.diff.size(), 4); for (uint32_t x : s.diff) putU(b, x, 4); } }
     putU(b, crc32(b.data(), b.size()), 4); return b; }
-// fills saved when the record belongs to this file and to these streams; any mismatch or damage: false (nothing used)
+// fills saved when the record belongs to this file and to these streams; any mismatch or damage: false (nothing used). F06-4: a model value
+// lies in 1 ... 2047 and the range decoder's code below its width, as the decoder itself never leaves them
 bool unpackIndex(const std::vector<uint8_t>& b, const Sha& key, Decoder& D, std::vector<std::vector<SavedMark>>& saved) {
     if (b.size() < 56 || memcmp(b.data(), "LAEYIDX1", 8)) return false;
     uint32_t stored = 0; memcpy(&stored, b.data() + b.size() - 4, 4); if (crc32(b.data(), b.size() - 4) != stored) return false;
@@ -93,8 +94,8 @@ bool unpackIndex(const std::vector<uint8_t>& b, const Sha& key, Decoder& D, std:
         const uint64_t nm = get(4); if (nm > (uint64_t)h.K) return false; long last = 0;
         for (uint64_t j = 0; j < nm && ok; j++) { SavedMark s; s.M0 = (long)get(8); s.i = (size_t)get(8); s.width = (uint32_t)get(4); s.code = (uint32_t)get(4); s.pos = get(8);
             s.prevTier = (int)(int32_t)get(4); s.prevE = (int)(int32_t)get(4); const uint64_t nv = get(4); if (!ok || nv > nModel) return false;
-            if (s.M0 <= last || s.M0 >= h.K || s.M0 % part::ROOTT || s.i > ps[i]->dc0.n || s.width < RC_TOP || s.prevTier < 0 || s.prevTier > 3 || s.prevE < 0 || s.prevE > 34) return false;
-            for (uint64_t v = 0; v < nv && ok; v++) { const uint32_t x = (uint32_t)get(4); if ((x >> 16) >= nModel) return false; s.diff.push_back(x); }
+            if (s.M0 <= last || s.M0 >= h.K || s.M0 % part::ROOTT || s.i > ps[i]->dc0.n || s.width < RC_TOP || s.code >= s.width || s.prevTier < 0 || s.prevTier > 3 || s.prevE < 0 || s.prevE > 34) return false;
+            for (uint64_t v = 0; v < nv && ok; v++) { const uint32_t x = (uint32_t)get(4); if ((x >> 16) >= nModel || (x & 0xFFFF) < 1 || (x & 0xFFFF) > 2047) return false; s.diff.push_back(x); }
             last = s.M0; out[i].push_back(std::move(s)); } }
     if (!ok || at != end) return false; saved.swap(out); return true; }
 bool readPath(const std::filesystem::path& p, std::vector<uint8_t>& b) {

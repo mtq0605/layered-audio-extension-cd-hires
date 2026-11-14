@@ -18,7 +18,8 @@ param([Parameter(Mandatory = $true)][string]$Album, [Parameter(Mandatory = $true
 $ErrorActionPreference = 'Stop'
 $blocksOf = @{ DVD5 = 2295104; DVD9 = 4173824; BD25 = 12219392; BD50 = 24438784; BD100 = 48878592 }   # 2048-byte sectors (single / dual layer)
 if (-not (Test-Path -LiteralPath $Album -PathType Container)) { throw "no folder $Album" }
-if ($Label -eq '') { $Label = Split-Path -Leaf (Resolve-Path -LiteralPath $Album) }
+if ($Label -eq '') { $Label = Split-Path -Leaf (Resolve-Path -LiteralPath $Album)
+    if ($Label -match '[:\\/]') { throw "$Album is the root of a drive: give the disc's name with -Label <name>" } }   # FU20-6: 'C:\' is no folder name
 if ($Export -eq '') { $Export = Join-Path $PSScriptRoot '..\build\laes_export.exe' }
 if (-not (Test-Path -LiteralPath $Export)) { throw "laes_export.exe not found ($Export); give -Export" }
 if (Test-Path -LiteralPath $Out) { throw "$Out exists; nothing is overwritten" }
@@ -58,7 +59,9 @@ try {
     $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
     $fsi.FreeMediaBlocks = $blocksOf[$Disc]
     if ($Disc -like 'BD*') { $fsi.FileSystemsToCreate = 4; $fsi.UDFRevision = 0x250 } else { $fsi.FileSystemsToCreate = 7; $fsi.UDFRevision = 0x102 }   # 4 UDF; 7 ISO 9660 + Joliet + UDF
-    $volName = ($Label -replace '[^A-Za-z0-9_]', '_'); if ($volName.Length -gt 32) { $volName = $volName.Substring(0, 32) }
+    # volume name: DVD (ISO 9660) only letters, digits and _; BD (UDF only) keeps the name as it is (FU20-6: a Chinese name was '___')
+    if ($Disc -like 'BD*') { $volName = $Label } else { $volName = ($Label -replace '[^A-Za-z0-9_]', '_') }
+    if ($volName.Length -gt 32) { $volName = $volName.Substring(0, 32) }
     $fsi.VolumeName = $volName
     $root = $fsi.Root; $root.AddDirectory($Label); $dirItem = $root.Item($Label)
     foreach ($tr in $tracks) { $dirItem.AddTree($tr.FullName, $false) }

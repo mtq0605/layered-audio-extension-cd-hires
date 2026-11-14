@@ -9,7 +9,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * The LAEY (lossy LAE v5) encoder for the apps: pure Java, byte-identical to the standard C++ encoder (bin\lae_enc.exe, commit 1d96a60).
+ * The LAEY (lossy LAE v5) encoder for the apps: pure Java, byte-identical to the standard C++ encoder (bin\lae_enc.exe; checked against
+ * the C++ build of the same source state, tests/vectors). Options covers the common options; extension packs, master1name= and
+ * --form=flac are reached through {@link #run} with the lae_enc arguments.
  * Options mirror the command line of lae_enc; the encoder writes &lt;out&gt;.part, reads it back, decodes it end to end and only then renames it
  * to &lt;out&gt;; on any failure or cancellation nothing is left behind. Block-wise work happens in a work folder (default &lt;out&gt;.tmp; on
  * Android give a folder in the app's cache dir), which bounds the memory.
@@ -38,7 +40,7 @@ public final class LaeyEncoder {
         public double memGB = 0;
         /** worker threads (C++ PARTTHREADS); 0: the processors of the device. The output does not depend on it */
         public int threads = 0;
-        /** the work folder (null: &lt;out&gt;.tmp) */
+        /** the work folder (null: &lt;out&gt;.tmp). Give every encoding its own folder: a folder in use by another run is refused (FU22-8) */
         public String workDir;
         /** independent CD (part 2 of the port): cd=, cdcheck, cdalign=, cdaccept, cdedge= */
         public String cd, cdAlign, cdEdge; public boolean cdCheck = false, cdAccept = false;
@@ -65,16 +67,18 @@ public final class LaeyEncoder {
         public final int rc; public final String log;
         public EncodeException(String m, int r, String l) { super(m); rc = r; log = l; } }
 
-    private final AtomicBoolean cancel = new AtomicBoolean(false);
-    /** stops a running encode (from any thread): nothing is written, the work folder is removed */
-    public void cancel() { cancel.set(true); }
+    // FU22-7: every encode() has its own flag (a cancel() once stopped every later encode() of the object at once); cancel() stops all running ones
+    private final List<AtomicBoolean> running = new ArrayList<AtomicBoolean>();
+    /** stops the encodes of this object that are running (from any thread): nothing is written, the work folder is removed */
+    public void cancel() { synchronized (running) { for (AtomicBoolean c : running) c.set(true); } }
 
     /** encodes; returns the log. Throws {@link EncodeException} when no file was written */
     public String encode(Options o, Listener l) {
         if (o.master == null || o.out == null) throw new LaeException("master and out are required");
         Map<String, String> vars = new java.util.HashMap<String, String>(); if (o.threads > 0) vars.put("PARTTHREADS", Integer.toString(o.threads));
         final StringBuilder log = new StringBuilder();
-        int rc = run(o.toArgs(), l, log, o.workDir, vars, cancel, o.tags);
+        final AtomicBoolean cancel = new AtomicBoolean(false); synchronized (running) { running.add(cancel); }
+        int rc; try { rc = run(o.toArgs(), l, log, o.workDir, vars, cancel, o.tags); } finally { synchronized (running) { running.remove(cancel); } }
         if (rc != 0) throw new EncodeException(lastLines(log.toString()), rc, log.toString());
         return log.toString(); }
 
@@ -92,5 +96,6 @@ public final class LaeyEncoder {
 
     // the message of a failed run: the last printed line (and the one before it when that line is indented, as "  nothing encoded ...")
     static String lastLines(String log) { String[] ls = log.split("\n"); int i = ls.length - 1; while (i > 0 && ls[i].trim().isEmpty()) i--;
-        if (i < 0) return "nothing encoded"; String m = ls[i].trim(); if (ls[i].startsWith("  ") && i > 0) m = ls[i - 1].trim() + " " + m; return m; }
+        if (ls[i].trim().isEmpty()) return "nothing encoded";   // FU22-7: an empty log (the former test i < 0 was never true)
+        String m = ls[i].trim(); if (ls[i].startsWith("  ") && i > 0) m = ls[i - 1].trim() + " " + m; return m; }
 }

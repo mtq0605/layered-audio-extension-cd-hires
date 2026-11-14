@@ -47,7 +47,7 @@ final class CdAlign {
     static String dur(double sec) { double a = Math.abs(sec); return a < 1e-3 ? fmt("%.1f us", sec * 1e6) : a < 1.0 ? fmt("%.2f ms", sec * 1e3) : fmt("%.3f s", sec); }
     // port of cd_align.cpp:detail::fdiv (floor division)
     static long fdiv(long a, long b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
-    // port of cd_align.cpp:detail::Th: the user's limits (2026-10-21/22) and the check blocks (2026-10-22)
+    // port of cd_align.cpp:detail::Th: the limits of the alignment check and the check blocks
     static final double timingErrDb = -40, timingGainDb = 1, confirmDb = -33, matchResidDb = -3, quietDbfs = -60, blockSec = 5, edgeSec = 10, minSpanSec = 40, singleSec = 3;
     // port of cd_align.cpp:detail::lp2: one fixed linear low-pass for each halving of the search pyramid (windowed sinc, Kaiser beta 8, 47 taps, cut-off 0.22)
     private static double[] LP2;

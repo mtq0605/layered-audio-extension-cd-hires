@@ -10,11 +10,16 @@ import java.io.IOException;
 /**
  * Port of src/lae_enc.cpp encode(), the independent-CD block (lines 308-492; part 2 of the port), installed as {@link LaeEncoder.CdHook}.
  * Independent CD: it becomes the CD layer bit for bit; the extension codes master - CD. No dither of ours to regenerate. The position is
- * always confirmed by the user (2026-10-23): without cdalign= the encoder searches twice (whitened and plain), measures each result's
+ * always confirmed by the person encoding: without cdalign= the encoder searches twice (whitened and plain), measures each result's
  * fraction, tries each like a hand-given offset and reports both, then stops: nothing is encoded. With cdalign=&lt;offset&gt; the master is
  * placed on the CD's time line by whole master samples, moved by the fraction, checked again, and the remaining time difference decides.
  * The C++ console questions (cdedge, cdaccept) are never asked here (no console): the run stops with the C++ text for scripts, and the
  * app passes the user's choice back as the option (cdedge=pad / cdedge=cut / cdaccept). The report lines are the printed text.
+ * <p>
+ * Memory (FU24-1): the alignment ({@link CdAlign}) holds the CD and the base level as double arrays with their pyramids, about 170 MB of
+ * Java heap per minute of CD, plus up to about 340 MB for the FFT arrays of the search; the CD (short[]) and the 24-bit base level (int[])
+ * stay in memory too (about 17 MB per minute). A 5-minute piece needs about 0.85 GB of heap and the FFT arrays (estimated from the code, not measured): on a phone (heap often 256-512 MB) cd= ends
+ * with "out of memory" in the alignment step (nothing is written); on a PC give -Xmx accordingly.
  */
 final class LaeCd implements LaeEncoder.CdHook {
     /** port of lae_enc.cpp:encode struct Att: kind 0 aligned, 1 asks, 2 stops (the reason in why), 3 fatal (derivation, disk) */
@@ -75,7 +80,7 @@ final class LaeCd implements LaeEncoder.CdHook {
                     env.printf("  nothing encoded. Add cdedge=pad or cdedge=cut to choose.\n"); x.oldNote(); return 1; }   // C++: a console asks; the app asks and passes the option
                 if (A.kind == 2) { env.printf("independent CD rejected: %s%s; nothing encoded\n", A.why, r.found ? "" : CdAlign.fmt(" (at the offset given by hand, cdalign=%s: check the value, or run without cdalign= to see both searches' positions)", x.manualText));
                     if (x.cdCheck) return 0; x.oldNote(); return 1; } }
-            // the user's bands (2026-10-22): <= -40 dB on, -40..-33 dB and beyond -33 dB only after a confirmation, no fit at all never
+            // the bands of the alignment check: <= -40 dB on, -40..-33 dB and beyond -33 dB only after a confirmation, no fit at all never
             final boolean large = rep.band == CdAlign.BAND_CONFIRM_LARGE, ask = rep.band == CdAlign.BAND_CONFIRM || large || rep.mapDiff;   // a channel swap or inverted polarity also needs your confirmation (2026-10-24)
             if (x.cdCheck) { if (ask) env.printf("cdcheck: it would ask: %s%s\n", rep.why, rep.hint.startsWith("still shifted") ? "; " + rep.hint : "");   // the hint helps stepping by hand
                 env.printf("cdcheck: alignment checked%s, nothing encoded (%s)\n", placed, rep.band == CdAlign.BAND_OK ? "would encode" : (ask ? "would ask for confirmation" : "would not encode")); return 0; }
@@ -136,7 +141,7 @@ final class LaeCd implements LaeEncoder.CdHook {
         masterReplace(); }
     // inserts n zero frames at the start (front) or the end of the CD
     void cdInsert(boolean front, long n) { short[] o = new short[(int) (cd.length + 2 * n)]; System.arraycopy(cd, 0, o, front ? (int) (2 * n) : 0, cd.length); cd = o; have = cd.length / 2; }
-    // port of lae_enc.cpp:encode lambda edgeText: the two choices, said plainly (the user, 2026-11-03: both must be told clearly)
+    // port of lae_enc.cpp:encode lambda edgeText: the two choices, said plainly (both must be told clearly)
     String edgeText() {
         final CdAlign.Place q = edgeQ; final double r = (double) rate; String s = "the master has sound that the CD does not have:";
         if (q.onlyLead != 0) s += CdAlign.fmt(" %s before the CD starts;", CdAlign.dur(q.onlyLead / r));

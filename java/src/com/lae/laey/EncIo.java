@@ -27,14 +27,16 @@ final class EncIo {
     static long size(RandomAccessFile f) { try { return f.length(); } catch (IOException e) { return -1; } }
     // port of enc_io.h:open
     static RandomAccessFile open(String p, String mode) {
+        if (p == null) throw fail("cannot open (no path)");   // FU22-10: was a NullPointerException
         try { if (mode.startsWith("w")) { new FileOutputStream(p).close(); }   // "wb" / "w+b": created empty
               return new RandomAccessFile(p, mode.startsWith("r") && !mode.contains("+") ? "r" : "rw"); }
-        catch (IOException e) { throw fail("cannot open " + (p != null ? p : "(no path)")); } }
+        catch (IOException e) { throw fail("cannot open " + p); } }
     static void close(RandomAccessFile f) { if (f != null) try { f.close(); } catch (IOException e) { /* the C++ fclose result of a reader is not checked */ } }
     // port of enc_io.h:readAll<uint8_t> (whole file as bytes)
     static byte[] readAll(String p) {
         RandomAccessFile f = open(p, "rb");
-        try { long n = size(f); if (n < 0 || n > Integer.MAX_VALUE - 8) { throw fail("cannot read the size of " + p); }
+        try { long n = size(f); if (n < 0) { throw fail("cannot read the size of " + p); }
+              if (n > Integer.MAX_VALUE - 8) throw fail(p + ": the file is too large for the Java port (a work file of 2 GiB or more is read whole)");   // FU22-9: said as such (the C++ has no such limit)
               byte[] v = new byte[(int) n]; try { f.readFully(v); } catch (IOException e) { throw fail("read failed: " + p); } return v; }
         finally { close(f); } }
     // port of enc_io.h:readAll<int32_t> / <int16_t> / <char> (size must be a multiple of the element size)

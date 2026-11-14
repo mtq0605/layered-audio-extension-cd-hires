@@ -20,9 +20,9 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Port of src/lae_enc.cpp (encode(), the run state encrun, call(), env()): the LAE standalone encoder (lossy tier), part 1 of the port:
- * everything except the independent CD (cd=, cdcheck, cdalign=, cdaccept, cdedge=: part 2, {@link CdHook}) and the planner (lae_enc plan:
- * excluded). Every module runs as in the C++ (its own main with arguments and module variables), so the Java runs the same steps in the
+ * Port of src/lae_enc.cpp (encode(), the run state encrun, call(), env()): the LAE standalone encoder (lossy tier) with everything of the
+ * C++ except the planner (lae_enc plan): the independent CD (cd=, cdcheck, cdalign=, cdaccept, cdedge=: {@link LaeCd}, installed as
+ * {@link CdHook}), the extension packs (master2= .. master9=, master1name=), noise= and g, the tags, the FLAC form and resume. Every module runs as in the C++ (its own main with arguments and module variables), so the Java runs the same steps in the
  * same order and writes the same files in its work folder.
  *   input : PCM WAV master, stereo, 16/24/32-bit integer, rate = 44.1k or 48k family x 2, 4 or 8
  *   output: WAV whose audio is the CD layer (16 bit at 44.1/48 kHz, plays everywhere) + a "LAE " chunk with the depth layer (L, R) and the
@@ -50,7 +50,15 @@ public final class LaeEncoder {
     public static volatile CdHook cdHook = new LaeCd();
 
     /** port of lae_enc.cpp:encrun: run state for the cleanup (what this run created and must remove) */
-    static final class Run { String out, part, tmp; boolean hadOld = false, partMine = false, tmpMine = false, cleaned = false, finished = false, keepTmp = false; }
+    static final class Run { String out, part, tmp; boolean hadOld = false, partMine = false, tmpMine = false, cleaned = false, finished = false, keepTmp = false;
+        // FU22-8 (Java only): the work folder is locked while this run uses it (lae_enc.lock, an OS file lock: released when the run ends or
+        // the process dies), so a second encoder given the same folder stops at once instead of writing the same files and removing the folder
+        private java.io.RandomAccessFile lockFile; private java.nio.channels.FileLock lock;
+        boolean lockWork() { try { lockFile = new java.io.RandomAccessFile(new File(tmp, "lae_enc.lock"), "rw"); lock = lockFile.getChannel().tryLock(); }
+            catch (java.nio.channels.OverlappingFileLockException e) { lock = null; } catch (IOException e) { lock = null; }
+            if (lock == null) { closeLock(); return false; } return true; }
+        void unlockWork() { if (lock != null) try { lock.release(); } catch (IOException e) { /* closing releases it too */ } lock = null; closeLock(); }
+        private void closeLock() { if (lockFile != null) try { lockFile.close(); } catch (IOException e) { /* nothing written */ } lockFile = null; } }
 
     /** the state of one encode() (the C++ locals the lambdas capture); public for part 2 */
     public static final class Ctx {
@@ -111,11 +119,11 @@ public final class LaeEncoder {
         catch (EncEnv.Cancelled c) { throw c; }   // not a module failure: the run stops (C++: the signal handler)
         catch (LaeException e) { env.printf("ENCODER STOPPED in module %s: %s\n", a[0], e.getMessage()); return 90; }
         catch (OutOfMemoryError e) { env.printf("ENCODER STOPPED in module %s: out of memory\n", a[0]); return 91; }
-        catch (RuntimeException e) { env.printf("ENCODER STOPPED in module %s: %s\n", a[0], String.valueOf(e.getMessage())); return 92; }
+        catch (RuntimeException e) { env.printf("ENCODER STOPPED in module %s: %s\n", a[0], why(e)); return 92; }
         catch (Throwable e) { env.printf("ENCODER STOPPED in module %s: internal error\n", a[0]); return 93; } }
 
     // port of lae_enc.cpp:encrun::cleanup: the .part only while it is unfinished; the work folder always (it holds only this run's files)
-    static void cleanup(Ctx x) { Run r = x.run; if (r.cleaned) return; r.cleaned = true;
+    static void cleanup(Ctx x) { Run r = x.run; if (r.cleaned) return; r.cleaned = true; r.unlockWork();   // the lock first: an open lock file could not be removed
         if (r.partMine) new File(r.part).delete();
         if (r.tmpMine && x.env.get("KEEPTMP") == null && !r.keepTmp) removeAll(new File(r.tmp)); }
     // std::filesystem::remove_all of the work folder (created and marked by this run, see the marker check in encode())
@@ -133,10 +141,12 @@ public final class LaeEncoder {
         catch (EncEnv.Cancelled c) { emergency(x, "interrupted"); return 130; }
         catch (LaeException e) { emergency(x, e.getMessage()); return 2; }
         catch (OutOfMemoryError e) { emergency(x, "out of memory"); return 2; }
-        catch (RuntimeException e) { emergency(x, String.valueOf(e.getMessage())); return 2; }
+        catch (RuntimeException e) { emergency(x, why(e)); return 2; }
         catch (Error e) { emergency(x, "internal error"); return 2; }
         x.run.finished = true; return rc; }
 
+    // FU22-9: the message of an exception, or its class name when it has none (was "null", e.g. for a NullPointerException)
+    static String why(Throwable e) { final String m = e.getMessage(); return m != null ? m : "internal error (" + e.getClass().getSimpleName() + ")"; }
     static boolean exists(String p) { return new File(p).exists(); }
     static long fileSize(String p) { File f = new File(p); return f.isFile() ? f.length() : -1; }
     static byte[] slurp(String p) { return EncIo.readAll(p); }   // a missing or unreadable file stops the encoder
@@ -269,6 +279,7 @@ public final class LaeEncoder {
         if (x.gOpt) env.printf("g: on, strength %c (%s) - deleted or silent A cells code -G where G lies above the 24-bit rounding floor (docs/NOISE.md)\n",
                                x.gLevel, x.gLevel == 'd' ? "step 1, down to the 24-bit floor" : x.gLevel == 'c' ? "C steps: block peak - 4 bit" : "B steps: block peak - 2 bit");
         { File td = new File(tmp); boolean made = td.mkdirs(); if (!td.isDirectory()) { env.printf("cannot create the work folder %s: nothing encoded\n", tmp); x.oldNote(); return 2; }
+          if (!x.run.lockWork()) { env.printf("the work folder %s is in use by another encoder run: give every encoding its own work folder; nothing encoded\n", tmp); x.oldNote(); return 1; }   // FU22-8: before this run counts the folder as its own
           if (made || exists(marker)) x.run.tmpMine = true; EncIo.writeText(env, marker, "lae_enc work folder (removed at the end of each run)\n"); }
         try {   // struct Guard: removes the work folder always, the .part on failure
             return encodeBody(x, argv, T0, base, stages, P, wm, equal, scheme, memBudget, modeName, note32); }
@@ -333,9 +344,10 @@ public final class LaeEncoder {
         long maxL = 0, maxT = 0; for (int k = 0; k < n; k++) { maxL = Math.max(maxL, leads[k]); maxT = Math.max(maxT, tails[k]); }
         if (maxL != 0 || maxT != 0) {   // the largest need on each side: the core gets that digital silence once, and the master and every further master the same
             env.printf("further masters: the core gets %ld frame(s) of digital silence before and %ld after (the largest need of any master); the master and every further master get the same\n", maxL, maxT);
+            // FU22-9: the length check comes before the core's new array (a very long time line gave a negative array size first)
+            if (!x.fitsLength(x.Lm + (maxL + maxT) * upM)) { env.printf("further masters: the time line (%lld frames) is outside this encoder's length limits: nothing encoded\n", x.Lm + (maxL + maxT) * upM); x.oldNote(); return 1; }
             { short[] o = new short[(int) (core.length + 2 * maxL + 2 * maxT)]; System.arraycopy(core, 0, o, (int) (2 * maxL), core.length); core = o; }
             padRawFile(env, x.T("m0.raw"), maxL * upM, maxT * upM); x.Lm += (maxL + maxT) * upM;
-            if (!x.fitsLength(x.Lm)) { env.printf("further masters: the time line (%lld frames) is outside this encoder's length limits: nothing encoded\n", x.Lm); x.oldNote(); return 1; }
             if (!x.derive()) return 2;
             if (x.cdPath != null) {   // the given CD with its digital silence is the CD layer again, as after the master's own alignment
                 byte[] b = slurp(x.T("b16.s16")); if (b.length / 4 != core.length / 2 + 2 * pbA) throw EncIo.fail("internal error: core length after padding");
@@ -419,7 +431,7 @@ public final class LaeEncoder {
             EncIo.writeText(env, x.alignOut + ".txt", x.Lm + " " + x.cdAddLead + " " + x.cdAddTail + " " + wrate + "\n");
             env.printf("further master aligned: %lld frames on the core's time line (digital silence added to the core: %ld frame(s) before, %ld after)\n", x.Lm, x.cdAddLead, x.cdAddTail); return 0; }
         if (x.nPacks != 0) { final int rp = packPhase(x, argv, base, stages, P, scheme, modeName); if (rp >= 0) return rp; }
-        if (x.noisePath != null && (x.placeT != 0 || x.Lm != x.LmIn)) {   // the user (2026-11-04): alignment and its confirmation come first, the marking is made on the aligned master
+        if (x.noisePath != null && (x.placeT != 0 || x.Lm != x.LmIn)) {   // alignment and its confirmation come first, the marking is made on the aligned master
             env.printf("noise=: the master was placed on the CD's time line here (whole offset %+lld master samples, length %lld -> %lld frames), so the marked cells no longer lie on the grid they were marked on.\n"
                      + "  Make the marking on the aligned master (lae_enc plan writes it) and encode that one with cdalign=0; nothing encoded\n", x.placeT, x.LmIn, x.Lm); x.oldNote(); return 1; }
         env.set("CDEXT", x.cdPath != null ? "1" : "");   // cut-off detection by coherence for an independent CD (routes.cpp)
@@ -478,7 +490,7 @@ public final class LaeEncoder {
         final boolean skipD1 = x.isDone("leak"); Streams[] dL = {new Streams()}, dR = {new Streams()}; if (!skipD1) layerPair(env, layer, ok, "T.s32", (int) base, "L", "dL", "R", "dR", dL, dR, planD[0]); stamp(env, T0, "depth layers");
         env.set("FULLBAND", ""); env.set("MASTERREF", ""); env.set("DEPTHADAPT", "");
         final String kf = Fmt.c("%.6f", (fc - 1000.0) / (base / 2)); env.set("K0FRAC", kf); env.set("OCTSPLIT", "1");
-        if (x.noisePath != null) {   // cells below k0 lie in the CD layer: listed, not deleted (the user, 2026-11-04: the default stays as before)
+        if (x.noisePath != null) {   // cells below k0 lie in the CD layer: listed, not deleted (the default stays as before)
             final double k0f = Fmt.atof(kf); int k0b = Cv.d2i(Math.floor(k0f * (base / 2) / (wrate / 2.0 / MdctTb.N))); k0b -= k0b % NoiseMarks.CW; long below = 0;   // as lossy_blk.cpp computes k0 with noise=
             for (int i = 0; i < x.noiseMk.pos.size(); i++) { final NoiseMarks.Pos p = x.noiseMk.pos.get(i); if (p.c0 * NoiseMarks.CW >= k0b) continue; below++; final boolean whole = p.c1 * NoiseMarks.CW <= k0b;
                 env.printf("noise: position %zu (%.3f-%.3f s, %.1f-%.1f Hz) lies %s below %.1f Hz, the frequency layer's start: in the CD layer, not deleted%s\n", (long) (i + 1),
@@ -550,7 +562,7 @@ public final class LaeEncoder {
             for (int k = 0; k < x.nPacks; k++) { final PackOpt q = x.pk[k]; env.printf("  pack %d: %s%s%s%s, %zu B\n", k + 1, q.path, q.name.isEmpty() ? "" : " (\"", q.name, q.name.isEmpty() ? "" : "\")", (long) x.packRecs.get(k).length); }
             if (!x.packReport.isEmpty()) { if (x.alignReport.isEmpty()) x.alignReport = "LAE alignment report (further masters)\noutput: " + outPath + "\n"; x.alignReport += x.packReport; } }
         if (!x.alignReport.isEmpty()) { final String rp = outPath + ".align.txt"; boolean okr = true;
-            try { FileOutputStream f = new FileOutputStream(rp); try { f.write(EncIo.latin1(x.alignReport)); } finally { f.close(); } } catch (IOException e) { okr = false; }
+            try { FileOutputStream f = new FileOutputStream(rp); try { f.write(x.alignReport.getBytes(java.nio.charset.StandardCharsets.UTF_8)); } finally { f.close(); } } catch (IOException e) { okr = false; }   // FU22-5: UTF-8, as lae_enc (Latin-1 kept only the low 8 bits of each character)
             env.printf(okr ? "alignment report: %s\n" : "WARNING: the alignment report %s could not be written (the LAE file itself is complete)\n", rp); }
         long sd = dL[0].s.get(0).length + dR[0].s.get(0).length, sf = 0; for (byte[] s : fM[0].s) sf += s.length; for (byte[] s : fS[0].s) sf += s.length;
         String extra = ""; if (!note32.isEmpty()) extra += " | " + note32; if (!x.alignNote.isEmpty()) extra += " | " + x.alignNote;

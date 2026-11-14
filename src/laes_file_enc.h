@@ -65,7 +65,7 @@ inline std::vector<uint8_t> encodeLaes(const Pcm& core, int baseRate, const std:
         Cand& B = cs[best];
         for (int c = 0; c < 2; c++) { bool big = B.e[c].size() > 0xFFFFFFFFull; for (int k = B.j + 1; k <= st; k++) big |= d[c][k].size() > 0xFFFFFFFFull;   // the u32 layer length (FU12-5)
             if (big) { err = mn + ": a layer is larger than 4 GiB, more than an LAES layer can hold"; return {}; } }
-        I.storage =B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? 0 : B.whole; I.frac = B.storage == 1 ? 0 : B.frac; I.layerBits = B.bits;
+        I.storage =B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? ms[mi].whole : B.whole; I.frac = B.storage == 1 ? ms[mi].frac : B.frac; I.layerBits = B.bits;   // DEC 15: a master stored in full keeps its T (relative to the core master)
         I.name = ms[mi].name; I.flags = ms[mi].flags; I.menu = ms[mi].menu;
         o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? I.name.size() : 0, 1); o.u(ver == 2 ? (uint64_t)I.flags : 0, 1); o.u(ver == 2 ? (uint64_t)I.menu : 0, 1); o.u((uint64_t)I.rate, 4); o.u(0, 4); o.u((uint64_t)I.frames, 8);
         o.u((uint64_t)I.whole, 8); o.u(I.frac, 4); o.u(0, 4); o.raw(I.sha, 32); if (ver == 2) o.raw((const uint8_t*)I.name.data(), I.name.size());

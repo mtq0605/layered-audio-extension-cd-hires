@@ -419,7 +419,9 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
         if (!cs[(size_t)best].coded) { Cand& B = cs[(size_t)best]; double lb[2]; if (!code(B, lb)) return cerr; double b = above(B.j); for (int c = 0; c < 2; c++) b += lb[c];
             if (b != B.bits) return "internal error: a candidate coded again differs in size"; }   // its files were removed in the other order
         if (kept && !restored) { const Cand& B = cs[(size_t)best]; StateW w; w.i(best); w.i(B.storage == 1 ? 0 : B.whole); w.i(B.storage == 1 ? 0 : B.frac); w.d(B.bits); w.str(B.e[0]); w.i(sizeOrMinus(B.e[0])); w.str(B.e[1]); w.i(sizeOrMinus(B.e[1])); putState(stP, w.s); }
-        Cand& B = cs[(size_t)best]; I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? 0 : B.whole; I.frac = B.storage == 1 ? 0 : B.frac; I.layerBits = B.bits;
+        // DEC 15 (2026-11-15): a master stored in full keeps its own T (relative to the core master, its tier 0) in the record; decoders
+        // do not use it (Section 6.6), but laes add / extract read it, so a master referring to it keeps its T relative to the core master
+        Cand& B = cs[(size_t)best]; I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? sel[mi].whole : B.whole; I.frac = B.storage == 1 ? sel[mi].frac : B.frac; I.layerBits = B.bits;
         I.name = sel[mi].name; I.flags = sel[mi].flags; I.menu = sel[mi].menu;
         o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? I.name.size() : 0, 1); o.u(ver == 2 ? (uint64_t)I.flags : 0, 1); o.u(ver == 2 ? (uint64_t)I.menu : 0, 1); o.u((uint64_t)I.rate, 4); o.u(0, 4); o.u((uint64_t)I.frames, 8);
         o.u((uint64_t)I.whole, 8); o.u(I.frac, 4); o.u(0, 4); o.put(I.sha, 32); if (ver == 2) o.put((const uint8_t*)I.name.data(), I.name.size());

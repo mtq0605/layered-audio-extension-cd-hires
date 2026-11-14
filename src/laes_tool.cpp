@@ -143,17 +143,21 @@ static void setT(MasterIn& m, double T) { m.whole = (int64_t)std::floor(T); m.fr
 // FU15-3 (2026-11-14): "<master>[@T]" of enc / add. The text after the last @ is T only when all of it is a finite decimal number
 // below 2^40 base samples (or "auto" for enc); otherwise the whole argument is the file name when that file exists (a name with
 // an @), else it is refused with the reason. Before, atof took any text: "m.wav@0,37" or "m.wav@abc" gave T = 0 without a word.
-// FU15-5 / FU16-1 (3) (2026-11-14): T of each master relative to the core master in 2^-32 base samples, through its chain (a master
-// stored in full has none: 0). |whole| below 2^30 and each sum below 2^62, so that nothing overflows (the spec allows up to 2^40:
+// FU15-5 / FU16-1 (3) (2026-11-14): T of each master relative to the core master in 2^-32 base samples, through its chain. A master
+// stored in full: its own T from its record, relative to the core master (DEC 15, 2026-11-15: written by the encoder since then; a
+// file from before holds 0 there, the value this function took before). |whole| below 2^30 and each sum below 2^62, so that nothing overflows (the spec allows up to 2^40:
 // such a file is refused by add / extract with the reason, never computed wrongly); a reference to a later master is refused too.
 static std::string absTimes(const std::vector<MasterInfo>& ms, std::vector<int64_t>& absT) {
     absT.assign(ms.size(), 0); const int64_t lim = 1LL << 62;
-    for (size_t i = 0; i < ms.size(); i++) { const MasterInfo& I = ms[i]; if (I.storage == 1) continue;
+    for (size_t i = 0; i < ms.size(); i++) { const MasterInfo& I = ms[i];
         if ((size_t)I.refTier > i) return "master " + std::to_string(i + 1) + " refers to a later master";
         const int64_t ref = I.refTier ? absT[(size_t)I.refTier - 1] : 0;
         if (I.whole >= (1LL << 30) || I.whole <= -(1LL << 30) || ref >= lim || ref <= -lim) return "master " + std::to_string(i + 1) + ": a time offset of 2^30 base samples or more is not supported by this command";
         absT[i] = I.whole * 4294967296LL + (int64_t)I.frac + ref; }
     return ""; }
+// DEC 15 (2026-11-15): laes extract hands the T of each master to its inner enc as the exact number (2^-32 base samples, relative to
+// the core master), never as text: the master's path and its T. Empty outside extract.
+static std::vector<std::pair<std::string, int64_t>> gExactT;
 static std::string masterArg(const std::string& a, bool allowAuto, std::string& path, double& T, bool& au) {
     path = a; T = 0; au = false; const size_t at = a.rfind('@'); if (at == std::string::npos || at <= 2) return "";
     const std::string t = a.substr(at + 1); if (allowAuto && t == "auto") { au = true; path = a.substr(0, at); return ""; }
@@ -641,8 +645,9 @@ static int laesMain(int argc, char** argv) {
         std::vector<int64_t> absT; { const std::string te = absTimes(mi, absT); if (!te.empty()) { printf("%s: %s; nothing written\n", src.c_str(), te.c_str()); return 2; } }   // FU16-1 (3)
         const std::string tmpOut = g.p + (L.flac ? "/new.flac" : "/new.wav");
         std::vector<std::string> av = {"laes", "enc", tmpOut, "--core=" + dd + "/core.wav"};
-        for (size_t q = 0; q < chosen.size(); q++) { const size_t i = chosen[q]; char tb[64]; snprintf(tb, sizeof tb, "@%.17g", (double)absT[i] / 4294967296.0);
-            av.push_back(dd + "/master_" + std::to_string(laesc::displayNo(mi, i)) + "_" + std::to_string(mi[i].rate) + "_" + std::to_string(mi[i].bits) + ".wav" + (absT[i] ? std::string(tb) : std::string()));
+        gExactT.clear(); struct ClearT { ~ClearT() { gExactT.clear(); } } clearT;
+        for (size_t q = 0; q < chosen.size(); q++) { const size_t i = chosen[q];   // DEC 15 (2026-11-15): T as the exact number (gExactT); before, as "@<%.17g text>", which lost bits above 2^21 samples
+            av.push_back(dd + "/master_" + std::to_string(laesc::displayNo(mi, i)) + "_" + std::to_string(mi[i].rate) + "_" + std::to_string(mi[i].bits) + ".wav"); gExactT.push_back({av.back(), absT[i]});
             if (!mi[i].name.empty()) av.push_back("--name=" + std::to_string(q + 1) + ":" + mi[i].name);
             if (mi[i].flags & laes::kNoDerive) av.push_back("--no-derive=" + std::to_string(q + 1));
             if (pf.head.def == (int)i + 1) av.push_back("--default=" + std::to_string(q + 1)); }   // the default goes with its master; not chosen: the core master (2026-11-12)
@@ -833,6 +838,7 @@ static int laesMain(int argc, char** argv) {
         for (int i = 2; i < argc; i++) { const std::string a = argv[i]; if (a == "--timing" || a == "--disk-stop" || a == "--disk-stop-remove" || a == "--force-disk" || a.rfind("--mem", 0) == 0 || laestag::isTagArg(a)) continue; job += a + "\n"; }
         for (const std::string& p : paths) { std::error_code ec; const auto sz = fs::file_size(p, ec); const auto tm = fs::last_write_time(p, ec).time_since_epoch().count();
             job += p + "\t" + std::to_string((unsigned long long)sz) + "\t" + std::to_string((long long)tm) + "\n"; }
+        for (const auto& x : gExactT) job += "T\t" + x.first + "\t" + std::to_string((long long)x.second) + "\n";   // DEC 15: T from extract
         bool anyAuto = false; for (bool au : autoT) anyAuto |= au;
         for (const std::string& p : {corePath, anyAuto ? std::string(laeEncPath(argc, argv)) : std::string()}) if (!p.empty()) { std::error_code ec; const auto sz = fs::file_size(p, ec); if (ec) continue;   // the core and LAEY's encoder (@auto) too
             job += p + "\t" + std::to_string((unsigned long long)sz) + "\t" + std::to_string((long long)fs::last_write_time(p, ec).time_since_epoch().count()) + "\n"; }
@@ -883,7 +889,8 @@ static int laesMain(int argc, char** argv) {
             if (!acceptAlign(A, paths[i], flag(argc, argv, "--accept"))) { printf("alignment not accepted; nothing written\n"); return 2; } Ts[i] = A.T; }
         stage("core master, alignment");
         if (!corePath.empty()) core32 = laess::toCore32(core);   // from here on the core as int32 (memory, 2026-11-05: half of the int64 copy)
-        std::vector<laess::MasterSel> sel(paths.size()); for (size_t i = 0; i < paths.size(); i++) { MasterIn t; setT(t, Ts[i]); sel[i].storage = -1; sel[i].whole = t.whole; sel[i].frac = t.frac; sel[i].name = names[i]; sel[i].flags = mflags[i]; }
+        std::vector<laess::MasterSel> sel(paths.size()); for (size_t i = 0; i < paths.size(); i++) { MasterIn t; setT(t, Ts[i]); sel[i].storage = -1;
+            for (const auto& x : gExactT) if (x.first == paths[i]) { t.whole = x.second >> 32; t.frac = (uint32_t)(x.second & 0xFFFFFFFFLL); }   /* DEC 15: from extract, exact */ sel[i].whole = t.whole; sel[i].frac = t.frac; sel[i].name = names[i]; sel[i].flags = mflags[i]; }
         if (!menuList.empty()) for (size_t i = 0; i < paths.size(); i++) for (size_t p = 0; p < menuList.size(); p++) if (menuList[p] == given[i]) sel[i].menu = (int)p + 1;
         // file order, tried two ways, the smaller kept: (a) more bits first; (b) the master the core was derived from first, then the others more bits first.
         // More than 16 masters (2026-11-11): order (a) only.

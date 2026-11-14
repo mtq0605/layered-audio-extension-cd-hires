@@ -15,7 +15,8 @@
 #include "align_hash.h"
 namespace wavin {
 struct Info { int rate = 0, ch = 0, bits = 0, fmt = 0; long long dataOff = -1, dataBytes = 0; std::string kind;
-    bool badLen = false; };   // the header gives a data length of 2^63 bytes or more (RF64 / W64): no file has that; probe() refuses it
+    bool badLen = false;      // the header gives a data length of 2^63 bytes or more (RF64 / W64): no file has that; probe() refuses it
+    unsigned long long hdrLen = 0; };   // not 0: the header gives this data length (below 2^63), more than the file holds; dataBytes = what is there, and the caller says so (2026-11-14)
 inline uint32_t le32(const uint8_t* b) { return (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24; }
 inline uint64_t le64(const uint8_t* b) { return (uint64_t)le32(b) | (uint64_t)le32(b + 4) << 32; }
 // reads the header chunks; false if the file is not a WAV / RF64 / W64 with a fmt and a data chunk
@@ -31,7 +32,7 @@ inline bool probe(const char* path, Info& in) {
             if (rf64 && !memcmp(c, "ds64", 4)) { uint8_t d[24]; if (n >= 24 && at(body, d, 24)) ds64Data = le64(d + 8); }
             if (rf64 && !memcmp(c, "data", 4) && n == 0xFFFFFFFFull) n = ds64Data;
             if (!memcmp(c, "data", 4) && n >> 63) { in.badLen = true; break; }   // 2^63 or more: as a signed length it would be negative (2026-11-14)
-            if (n > (uint64_t)(sz - body)) n = (uint64_t)(sz - body);   // a truncated last chunk is tolerated (as wavio::read); compared unsigned, so p only moves forward
+            if (n > (uint64_t)(sz - body)) { if (!memcmp(c, "data", 4)) in.hdrLen = n; n = (uint64_t)(sz - body); }   // a truncated last chunk is tolerated (as wavio::read); compared unsigned, so p only moves forward
             if (!memcmp(c, "fmt ", 4)) { if (!fmtChunk(body, n)) break; haveFmt = true; }
             else if (!memcmp(c, "data", 4)) { in.dataOff = body; in.dataBytes = (long long)n; }
             p = body + (long long)n + (long long)(n & 1); }
@@ -42,7 +43,7 @@ inline bool probe(const char* path, Info& in) {
         if (!memcmp(h, riff, 16) && !memcmp(h + 24, "wave", 4) && !memcmp(h + 28, tail, 12)) { in.kind = "W64"; bool haveFmt = false; long long p = 40;
             while (p + 24 <= sz) { uint8_t c[24]; if (!at(p, c, 24)) break; uint64_t n = le64(c + 16); if (n < 24) break; const long long body = p + 24; uint64_t len = n - 24;
                 if (!memcmp(c + 4, tail, 12) && !memcmp(c, "data", 4) && len >> 63) { in.badLen = true; break; }
-                if (len > (uint64_t)(sz - body)) len = (uint64_t)(sz - body);
+                if (len > (uint64_t)(sz - body)) { if (!memcmp(c + 4, tail, 12) && !memcmp(c, "data", 4)) in.hdrLen = len; len = (uint64_t)(sz - body); }
                 if (!memcmp(c + 4, tail, 12)) { if (!memcmp(c, "fmt ", 4)) { if (!fmtChunk(body, len)) break; haveFmt = true; } else if (!memcmp(c, "data", 4)) { in.dataOff = body; in.dataBytes = (long long)len; } }
                 p = body + (long long)((len + 7) & ~7ull); }
             ok = haveFmt && in.dataOff >= 0 && !in.badLen; } }

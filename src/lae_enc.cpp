@@ -193,6 +193,11 @@ static long long low8Count(const char* path) {
         if (!memcmp(&b[p], "data", 4)) { for (size_t i = body; i + 4 <= body + len; i += 4) if (b[i]) cnt++; return cnt; }
         p = body + len + (len & 1); }
     return -1; }
+// An input WAV / RF64 / W64 whose header gives a data length beyond the end of the file (2026-11-14): the file is read to its end as
+// before (wavin::probe, wavio::read, wavio::readCD and the CUE reader all limit the length to the file), and the user is told.
+static void longHeaderNote(const char* path, const wavin::Info& in) {
+    if (in.hdrLen) printf("NOTE: the header of %s gives a data length of %llu bytes, but the file holds only %lld bytes of it: the file may be cut off (incomplete). It is read to its end and the run continues.\n", path, in.hdrLen, in.dataBytes); }
+static void longHeaderNote(const char* path) { wavin::Info in; wavin::probe(path, in); longHeaderNote(path, in); }   // for a file another reader has just read
 
 namespace m_plan {
 #include "cd_plan.cpp"
@@ -417,6 +422,7 @@ static int encode(int argc, char** argv) {
         if (wi.badLen) printf("the header of %s gives a data length of 2^63 bytes or more: the file is damaged or not a valid %s file; nothing encoded\n", argv[1], wi.kind.c_str());
         else printf("need a stereo integer PCM WAV\n");
         oldNote(); return 1; }
+    longHeaderNote(argv[1], wi);   // rawin=: nothing (hdrLen is 0)
     w.rate = wi.rate; w.ch = wi.ch; w.bits = wi.bits;
     std::string note32;
     if (w.bits == 32) {   // LAE v5 carries at most 24 bit: say what reducing the master would drop, then end or continue as the user chooses
@@ -536,6 +542,7 @@ static int encode(int argc, char** argv) {
     long long placeT = 0;   // the whole offset the master was placed at (noise= needs 0: the marking was made on the aligned master)
     if (cdPath) {   // independent CD: it becomes the CD layer bit for bit; the extension codes master - CD. No dither of ours to regenerate.
         wavio::Wav c; if (!wavio::readCD(cdPath, c) || c.bits != 16 || c.ch != 2 || c.rate != (int)base) { printf("independent CD must be a 16-bit stereo WAV at %d Hz\n", (int)base); oldNote(); return 1; }
+        longHeaderNote(cdPath);
         std::vector<uint8_t> b = slurp(T("b16.s16")); long nb0 = (long)b.size() / 4, pb0 = P >> stages, need = nb0 - 2 * pb0, have = (long)c.pcm16.size() / 2;
         auto lengthMsg = [&]() { printf("independent CD has %ld samples, the master needs %ld at %d Hz: the lengths do not match; nothing encoded\n", have, need, (int)base); };
         {   // alignment (design D and A, 2026-10-22 / 10-23): with cdalign=<offset> the position is the user's: check in three blocks, place the

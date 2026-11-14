@@ -66,7 +66,9 @@ static void posParse(const std::string& v, double x, long long& whole, double& f
 
 struct Pub { cdxr::Disc d; cdxr::Layout lay; std::vector<long long> p; long long end = 0; };
 static std::string readPublisher(const std::string& cue, Pub& P) {
-    std::string e = cdxr::loadCue(fsp::path(cue), P.d, cdxr::diskSource(), &P.lay); if (!e.empty()) return e;
+    const cdxr::PcmSource src = [](const fsp::path& p, const std::string& t, std::vector<int16_t>& pcm, int& rate) {   // cdxr::diskSource(), and a WAV whose header gives more data than the file holds is said (2026-11-14)
+        std::string le = cdxr::loadPcm(p, t, pcm, rate, 44100); if (le.empty() && t == "WAVE") longHeaderNote(cdxr::u8(p).c_str()); return le; };
+    std::string e = cdxr::loadCue(fsp::path(cue), P.d, src, &P.lay); if (!e.empty()) return e;
     if (!P.d.notes.empty()) return P.d.notes[0];
     if (P.d.conflicts) return fmt("%lld samples conflict between the files of the sheet", P.d.conflicts);
     if (P.lay.tracks.empty()) return "no audio track";
@@ -106,6 +108,7 @@ static int planRun(int argc, char** argv) {
     // and each piece's position goes into T (base samples) for laes enc, instead of moving the master by the fraction.
     wavio::Wav w; std::vector<long long> fileStart; std::vector<int32_t> full; int fullBits = 0;   // full: the joined master as plain integers, all bits
     for (size_t f = 0; f < mfiles.size(); f++) { wavio::Wav part; if (!wavio::read(mfiles[f].c_str(), part) || part.ch != 2 || (part.bits != 16 && part.bits != 24 && (!laes || part.bits != 32))) { printf("%s: the master must be a 16- or 24-bit%s stereo PCM WAV\n", mfiles[f].c_str(), laes ? " (or 32-bit)" : ""); return 1; }
+        longHeaderNote(mfiles[f].c_str());
         if (f == 0) w.rate = part.rate; else if (part.rate != w.rate) { printf("%s is at %d Hz, %s at %d Hz: the master files must have one rate\n", mfiles[f].c_str(), part.rate, mfiles[0].c_str(), w.rate); return 1; }
         if (f == 0) fullBits = part.bits; else if (laes && part.bits != fullBits) { printf("%s is %d-bit, %s %d-bit: for laes the master files must have one bit depth\n", mfiles[f].c_str(), part.bits, mfiles[0].c_str(), fullBits); return 1; }
         if (part.s.size() & 1) { part.s.pop_back(); if (!part.raw32.empty()) part.raw32.pop_back(); printf("plan: %s ends with half a sample frame (a cut-off data chunk): dropped\n", mfiles[f].c_str()); }   // else every later file's channels would swap

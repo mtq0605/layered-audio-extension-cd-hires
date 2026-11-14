@@ -40,7 +40,9 @@ The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IAN
   platform (the builds listed in [BUILD.md](BUILD.md), Section 3). Encoder versions are therefore identified by commit. A change of encoder commit can change the encoded bytes, but it
   never changes the format version.
 - The Java library contains encoders and decoders for LAEY and LAES. It produces the same encoded files and the same decoded samples
-  as the C++ tools (`lae_enc`, `lae_dec`, `laes`) of the same commit.
+  as the C++ tools (`lae_enc`, `lae_dec`, `laes`) of the same commit. One limit is its own: the LAES format and the C++ tools allow
+  255 masters in one file, while the Java player front end offers the masters of files with at most 16 masters and the Java LAES
+  encoder refuses more than 16.
 - A format change that existing decoders cannot read raises the format version. For CDX, this rule applies from its first stable
   version; version 0 is a draft and may still change.
 - An LAEY file with extension packs is still container version 5. A decoder from before v5-2026-11-14 plays the CD layer with the

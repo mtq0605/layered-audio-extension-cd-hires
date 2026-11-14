@@ -1562,7 +1562,7 @@ Four player plug-ins and a Java library decode both LAE formats: LAEY (container
 - **Languages.** Each plug-in is built in two standalone versions, English (`-en`) and Chinese (`-zh`).
 - **Tags.** The plug-ins read the tags of both forms: Vorbis comments in FLAC, and RIFF `LIST/INFO` and `id3 ` chunks in WAV.
 - **VLC.** VLC may shorten the end of a track by about 40 ms; this is VLC's own behaviour.
-- **Java.** The Java library is a pure-Java port of the encoders and decoders, without native code. Its results are byte-identical to those of the C++ tools of the same commit.
+- **Java.** The Java library is a pure-Java port of the encoders and decoders, without native code. Its results are byte-identical to those of the C++ tools of the same commit. The LAES format and the PC tools allow up to 255 masters in one file; the Java library is limited to 16 for phones: its player front end offers the masters of a file with at most 16 masters (a file with more plays its core master, and the reason is reported), and its LAES encoder refuses more than 16 masters before it starts ([java/README.md](java/README.md)).
 
 CD-Extra rips must first be restored with `lae_cdx read` (Section 10.8).
 

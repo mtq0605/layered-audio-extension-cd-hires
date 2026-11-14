@@ -12,19 +12,22 @@ import com.lae.core.LaeException;
 /**
  * Port of src/laes_tool.cpp main for the commands enc, dec and verify (the same arguments and messages as `laes_tool`; for tests and as a
  * command-line tool):
- *   enc &lt;out.wav | out.flac&gt; (--core=&lt;core.wav&gt; | --derive-core) [--core-bits=16|24|32] &lt;master.wav&gt;[@T] ... [--mem=&lt;GB&gt;] [--timing]
+ *   enc &lt;out.wav | out.flac&gt; (--core=&lt;core.wav&gt; | --derive-core) [--core-bits=16|24|32] &lt;master.wav&gt;[@T] ... [--mem=&lt;GB&gt;] [--timing] [--overwrite]
  *       (Java only: --threads=&lt;n&gt;; the C++ ignores it like every argument starting with '-')
- *   dec &lt;in.wav | in.flac&gt; &lt;out dir&gt; [--levels] [--pick=&lt;sel&gt;[,&lt;sel&gt;...]] | --list | --list=all, where &lt;sel&gt; is an entry of --list
+ *   dec &lt;in.wav | in.flac&gt; &lt;out dir&gt; [--levels] [--pick=&lt;sel&gt;[,&lt;sel&gt;...]] [--overwrite] | --list | --list=all, where &lt;sel&gt; is an entry of --list
  *       (&lt;n&gt; or a range &lt;a&gt;-&lt;b&gt;), &lt;rate&gt;:&lt;bits&gt; (the masters of that rate and word length), master:&lt;k&gt; or name:&lt;text&gt; (a master by its
  *       number or by its exact name); a selection that matches several masters lists them and writes nothing
  *   verify &lt;in.wav | in.flac&gt; &lt;master.wav&gt; ...
  * Environment (test hooks, as the C++): LAES_PIECE, LAES_FORCE_RF64, LAES_SELFCHECK_FLIP, KEEPTMP.
+ * An existing output (enc: the file, dec: each WAV) is replaced only after two "yes" at a console, or with --overwrite (decision 21).
  * Not ported: align, selftest, excerpt, reduce, mkcd (out of scope). enc with master.wav@auto: this tool uses LAEY's search (LaeyAutoAligner);
  * an app that calls LaesEncoder sets LaesEncoder.Options.aligner itself.
  */
 public final class LaesTool {
     private LaesTool() {}
 
+    // the texts of decision 21 (questions without a new line at the end)
+    static final com.lae.core.Replace.Out OUT = new com.lae.core.Replace.Out() { public void print(String s) { System.out.print(s); System.out.flush(); } };
     public static void main(String[] args) { System.out.flush(); final int code = run(args); System.out.flush(); System.exit(code); }
 
     // port of laes_tool.cpp:main  (args = the C++ argv[1..])
@@ -150,6 +153,8 @@ public final class LaesTool {
                         for (int j : hit) System.out.println(String.format("  %4d  %6d Hz %2d-bit  %s", j + 1, ch.get(j).s.rate, ch.get(j).s.bits, Choices.masterLabel(ch.get(j).no, infos.get(ch.get(j).s.m))));
                         System.out.println("Not in a console: give the numbers with --pick=<n>, several --pick=<n>,<n>, a range --pick=<a>-<b>. Nothing written."); return 1; }
                     for (int j : hit) if (!pick.contains(j)) pick.add(j); if (b < 0) break; a = b + 1; } }
+            // decision 21 (as laes_tool.cpp): an existing WAV only after two "yes" at a console, or with --overwrite; asked before anything is written
+            for (int j : pick) if (!com.lae.core.Replace.mayReplace(new File(args[2], ch.get(j).name + ".wav").getPath(), LaesEncoder.Options.flag(args, "--overwrite"), OUT)) return 1;
             {   // FU16-5 (2026-11-14, as laes_tool.cpp): the WAVs' size against the free space, before anything is written (as enc does for its work folder)
                 long need = 0; for (int j : pick) { final long db = ch.get(j).s.n * 2 * (ch.get(j).s.bits / 8); need += 128 + db + (db & 1); }
                 File fsAt = new File(args[2]).getAbsoluteFile(); while (fsAt != null && !fsAt.exists()) fsAt = fsAt.getParentFile();   // the folder may not exist yet

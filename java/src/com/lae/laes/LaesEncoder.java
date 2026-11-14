@@ -105,6 +105,9 @@ public final class LaesEncoder {
         public long diskReserve = 2L << 30;
         /** the work folder (null: &lt;out&gt;.laes.tmp; Java only, the app's cache folder) */
         public String workDir = null;
+        /** --overwrite (decision 21, 2026-11-15): an existing output is replaced without asking; without it an existing output is replaced
+         *  only after two "yes" at a console (System.console() != null), otherwise refused. A resume of the same job is not a replacement. */
+        public boolean overwrite = false;
 
         // port of laes_tool.cpp:arg  (args: the C++ argv without argv[0], i.e. args[0] = "enc")
         static String arg(String[] args, String key) { final String k = key + "="; for (String a : args) if (a.startsWith(k)) return a.substring(k.length()); return ""; }
@@ -116,6 +119,7 @@ public final class LaesEncoder {
             final String cb = arg(args, "--core-bits"); if (!cb.isEmpty()) { o.coreBits = CStd.atoi(cb); if (o.coreBits == 0) o.coreBits = -1; }
             final String mm = arg(args, "--mem"); if (!mm.isEmpty()) o.memGB = Math.max(0.0, CStd.atof(mm));
             o.timing = flag(args, "--timing"); o.accept = flag(args, "--accept"); o.laeEnc = arg(args, "--lae-enc"); o.form = arg(args, "--form");
+            o.overwrite = flag(args, "--overwrite");
             o.smallDisk = flag(args, "--small-disk"); o.diskStopRemove = flag(args, "--disk-stop-remove"); o.diskStop = o.diskStopRemove || flag(args, "--disk-stop"); o.forceDisk = flag(args, "--force-disk");
             { final String r = System.getenv("LAES_DISK_RESERVE"); if (r != null) o.diskReserve = CStd.atoll(r); }
             o.tagError = LaesTags.parseArgs(args, o.tags);
@@ -219,6 +223,8 @@ public final class LaesEncoder {
         if (new File(wd + "/job.txt").exists()) { say(L, "the work folder " + wd + " is kept: run the same command again to continue (--disk-stop-remove: removed instead)");
             say(L, "  工作文件夹 " + wd + " 已保留：再运行同一条命令，就从停下的地方接着做（加 --disk-stop-remove 时改为删除）"); } }
     static void say(Listener l, String s) { if (l != null) l.message(s); }
+    // a text that may hold several lines, or end without a new line (the questions of decision 21): one message per line; an unfinished last line is given as it is
+    static void sayRaw(Listener l, String s) { if (l == null) return; int a = 0; for (int b; (b = s.indexOf('\n', a)) >= 0; a = b + 1) l.message(s.substring(a, b)); if (a < s.length()) l.message(s.substring(a)); }
     // port of laes_tool.cpp:longHeaderNote: a master or core master WAV whose header gives a data length beyond the end of the file
     // (2026-11-14, as lae_enc and laes): told once per file, the file is read to its end
     static void longHeaderNote(Listener l, String path, long hdrLen, long have) {
@@ -311,7 +317,9 @@ public final class LaesEncoder {
         if (coreBits != 16 && coreBits != 24 && coreBits != 32) { say(L, "--core-bits must be 16, 24 or 32"); return 1; }
         if (corePath.isEmpty() && !derive) { say(L, "give --core=<core.wav> or --derive-core"); return 1; }
         final String wdPath = workDirOf(opt), job = jobOf(opt, paths);
-        long oldWork = 0; { final String old = StreamEnc.getState(wdPath + "/job.txt"); if (old != null && old.equals(job)) oldWork = StreamEnc.folderBytes(wdPath); }   // counts as free
+        long oldWork = 0; boolean sameJob = false; { final String old = StreamEnc.getState(wdPath + "/job.txt"); if (old != null && old.equals(job)) { oldWork = StreamEnc.folderBytes(wdPath); sameJob = true; } }   // counts as free
+        // decision 21 (as laes_tool.cpp): an existing output only after two "yes" at a console, or with --overwrite; a resume of an unfinished run is not a replacement
+        if (!sameJob && !com.lae.core.Replace.mayReplace(out, opt.overwrite, new com.lae.core.Replace.Out() { public void print(String s) { sayRaw(L, s); } })) return 1;
         final int[] stOf = new int[wis.size()]; for (int i = 0; i < wis.size(); i++) { int st = 0; while ((base << st) < wis.get(i).rate && st < 4) st++; stOf[i] = st; }
         {   // disk needed by the work folder, estimated before it is made (2026-11-05): a FLAC master's decoded copy and the kept rate levels
             // (4 bytes per value, 8 for a 32-bit master; one more level while the next is made) exactly; then two candidates of the largest

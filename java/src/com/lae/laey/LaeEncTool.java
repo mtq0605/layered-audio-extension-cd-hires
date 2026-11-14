@@ -13,7 +13,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * usage: java com.lae.laey.LaeEncTool &lt;master.wav&gt; &lt;out.wav&gt; [mode] [s1 | s2] [zs] [energy] [equal] [bits=24] [mem=&lt;GB&gt;] [resume]
  *        [cd=&lt;CD.wav&gt; [cdcheck] [cdalign=&lt;offset&gt;] [cdaccept] [cdedge=pad | cut]] [master2=&lt;master.wav&gt; .. master9=, master&lt;k&gt;align=,
  *        master&lt;k&gt;name=, master&lt;k&gt;edge=, master&lt;k&gt;accept, master1name=] [noise=&lt;marks.laenoise&gt;] [g | g=b | g=c | g=d]
- *        [--tag=KEY=VALUE] [--cover=&lt;image&gt;] [--picture=&lt;type&gt;:&lt;image&gt;] [--form=flac | --form=wav]; lae_enc tag ... (LaeRetag)
+ *        [--tag=KEY=VALUE] [--cover=&lt;image&gt;] [--picture=&lt;type&gt;:&lt;image&gt;] [--form=flac | --form=wav] [--overwrite]; lae_enc tag ... (LaeRetag)
+ * An existing output is replaced only after two "yes" at a console (System.console() != null), or with --overwrite (decision 21).
  * The environment variables of the C++ test hooks are read from the process (LAE_TESTFAIL, LAE_BLOCKUNITS, LAE_TESTSEQUENTIAL,
  * LAE_TESTMAXFRAMES, PARTTHREADS, KEEPTMP, TIMING); LAE_WORKDIR (Java only) sets the work folder.
  */

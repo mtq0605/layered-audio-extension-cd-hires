@@ -192,12 +192,13 @@ public final class LaeEncoder {
         final int opt0 = modeOpt0(argv); final String modeName = opt0 == 4 && argc > 3 ? argv[3] : "3"; final int mi = PartitionFormat.modeIndex(modeName);
         x.mi = mi;
         boolean equal = false, zsOpt = false, bits24 = false; int wm = 0, scheme = 1; long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once
+        boolean overwrite = false;   // --overwrite (decision 21, 2026-11-15): replace an existing output without asking
         final int formSel = LaeRetag.outputForm(env, outPath, argv, opt0); if (formSel < 0) { env.printf("nothing encoded\n"); return 1; } x.asFlac = formSel == 1;
         { final com.lae.laes.LaesTags.Tags tags = new com.lae.laes.LaesTags.Tags(); final String e = LaeRetag.tagArgs(argv, opt0, tags); if (!e.isEmpty()) { env.printf("%s: nothing encoded\n", e); return 1; }   // read and checked before any work
           if (x.presetTags != null) { tags.kv.addAll(x.presetTags.kv); tags.pics.addAll(x.presetTags.pics); final String e2 = com.lae.laes.LaesTags.checkAll(tags); if (!e2.isEmpty()) { env.printf("%s: nothing encoded\n", e2); return 1; } }
           x.tagChunks = x.asFlac ? com.lae.laes.LaesTags.flacBlocks(tags, false, LaeRetag.kLaeyEncoder) : com.lae.laes.LaesTags.wavChunks(tags, LaeRetag.kLaeyEncoder); }   // FLAC form: VORBIS_COMMENT + PICTURE blocks, before the "LAE1" blocks
         for (int i = opt0; i < argc; i++) { final String a = argv[i];
-            if (LaeRetag.isTagOpt(a) || LaeRetag.isFormOpt(a)) continue;
+            if (LaeRetag.isTagOpt(a) || LaeRetag.isFormOpt(a) || isOverwriteOpt(a)) { if (isOverwriteOpt(a)) overwrite = true; continue; }
             if (a.startsWith("master1name=")) { if (utf8(a.substring(12)).length > 255) { env.printf("master1name=: a name has at most 255 bytes\n"); return 1; } x.mainName = a.substring(12); continue; }   // port of lae_enc.cpp: the main body's name
             if (a.equals("equal")) equal = true; else if (a.equals("energy")) wm = 1; else if (a.equals("s2")) scheme = 2; else if (a.equals("s1")) scheme = 1;
             else if (a.equals("zs")) zsOpt = true; else if (a.startsWith("cd=") && a.length() > 3) x.cdPath = a.substring(3); else if (a.equals("cdcheck")) x.cdCheck = true;
@@ -225,6 +226,9 @@ public final class LaeEncoder {
             x.nPacks++; }
         if (x.alignOut != null && (x.cdPath == null || x.nPacks != 0 || x.resume || x.cdCheck)) { env.printf("alignout= is an internal step of the extension packs: nothing encoded\n"); return 1; }
         if (x.nPacks != 0 && (x.noisePath != null || x.resume || x.cdCheck)) { env.printf("further masters (master2= ...) cannot be combined with noise=, resume or cdcheck in this version: nothing encoded\n"); return 1; }
+        // decision 21 (2026-11-15, as lae_enc.cpp): an existing output only after two "yes" at a console, or with --overwrite (not for the
+        // internal steps alignout= / rawin=; cdcheck writes nothing)
+        if (x.alignOut == null && x.rawRate == 0 && !x.cdCheck && !com.lae.core.Replace.mayReplace(outPath, overwrite, new com.lae.core.Replace.Out() { @Override public void print(String s) { env.print(s); } })) return 1;
         if (mi >= PartitionFormat.MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
         x.partLeft = exists(partPath);   // with resume, decided once the work folder's notes are read (port of lae_enc.cpp, 2026-11-05)
         if (x.partLeft && !x.resume) { env.printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath); return 1; }
@@ -297,6 +301,8 @@ public final class LaeEncoder {
     /** the streams of one layer (C++ std::vector&lt;std::vector&lt;uint8_t&gt;&gt;) */
     static final class Streams { List<byte[]> s = new ArrayList<byte[]>(); }
 
+    // port of lae_enc.cpp:isOverwriteOpt (decision 21)
+    static boolean isOverwriteOpt(String a) { return a.equals("--overwrite") || a.equals("overwrite"); }
     // the first option's index: 3 when the third argument is no mode name (the mode left out, default 3), else 4 (FU07-5, as lae_enc.cpp)
     static int modeOpt0(String[] argv) { return argv.length > 3 && PartitionFormat.modeIndex(argv[3]) < 0 ? 3 : 4; }
     // port of lae_enc.cpp:encode lambda nested: one further master, this encoder run as a step of this run with its own work folder
@@ -398,7 +404,7 @@ public final class LaeEncoder {
         // no finished step is reused (see below, after the alignment).
         x.manifest = x.T("resume.txt");
         if (x.resume) { StringBuilder key = new StringBuilder("lae_enc java-port " + LaeyEncoder.VERSION + " | options");
-            for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i]) && !argv[i].startsWith("mem=")) key.append(" ").append(argv[i]);   // mem=: only the block length, which changes no result (FU07-9)
+            for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i]) && !isOverwriteOpt(argv[i]) && !argv[i].startsWith("mem=")) key.append(" ").append(argv[i]);   // mem=: only the block length, which changes no result (FU07-9)
             key.append(" | master ").append(masterMd5);
             if (x.noisePath != null) { final byte[] t = EncIo.readAll(x.noisePath); long h = 0xcbf29ce484222325L;   // FNV-1a of the marking file's bytes (1469598103934665603)
                 for (int i = 0; i < t.length; i++) { h ^= (t[i] & 0xFF); h *= 1099511628211L; }

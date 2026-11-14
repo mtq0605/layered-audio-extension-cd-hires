@@ -138,16 +138,23 @@ public final class LaeRetag {
                 if (!ok) env.printf("check FAILED: the new file's CD audio frames or LAE1 blocks differ from the input's\n"); }
             else env.printf("cannot write %s\n", part);
         } catch (IOException e) { ok = false; env.printf("cannot read %s\n", in); }
-        if (ok) { ok = new File(part).renameTo(new File(out)); if (!ok) env.printf("cannot rename %s to %s\n", part, out); }
+        if (ok) { ok = LaeEncoder.rename(part, out); if (!ok) env.printf("cannot rename %s to %s\n", part, out); }   // also replaces an output agreed to (decision 21)
         if (!ok) { new File(part).delete(); env.printf("nothing written\n"); return 2; }
         env.printf("written: %s (FLAC form, %zu tag(s), %zu picture(s)); CD audio frames and LAE1 blocks byte-identical to %s\n", out, (long) tags.kv.size(), (long) tags.pics.size(), in); return 0; }
 
+    // std::filesystem::equivalent: both exist and are the same file (Java: the same canonical path)
+    static boolean sameFile(String a, String b) { final File x = new File(a), y = new File(b); if (!x.exists() || !y.exists()) return false;
+        try { return x.getCanonicalFile().equals(y.getCanonicalFile()); } catch (IOException e) { return false; } }
     // port of lae_enc.cpp:m_tag::retag; presetTags: tags the app gives as objects (added after those in argv; null = none)
     static int retag(EncEnv env, String[] argv, LaesTags.Tags presetTags) {
-        if (argv.length < 4) { env.printf("usage: lae_enc tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   (WAV or FLAC form, the output keeps the input's form; no tags given: the tags are removed)\n"); return 1; }
+        if (argv.length < 4) { env.printf("usage: lae_enc tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [--overwrite]   (WAV or FLAC form, the output keeps the input's form; no tags given: the tags are removed)\n"); return 1; }
         final String in = argv[2], out = argv[3], part = out + ".part";
-        for (int i = 4; i < argv.length; i++) if (!isTagOpt(argv[i])) { env.printf("unknown option '%s': nothing written (options: --tag=KEY=VALUE --cover=<image> --picture=<type>:<image>)\n", argv[i]); return 1; }
-        if (new File(out).exists()) { env.printf("%s already exists: choose another output name (the input is never changed); nothing written\n", out); return 1; }
+        boolean overwrite = false;
+        for (int i = 4; i < argv.length; i++) { if (LaeEncoder.isOverwriteOpt(argv[i])) { overwrite = true; continue; }
+            if (!isTagOpt(argv[i])) { env.printf("unknown option '%s': nothing written (options: --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> --overwrite)\n", argv[i]); return 1; } }
+        if (sameFile(in, out)) { env.printf("%s is the input: choose another output name (the input is never changed); nothing written\n", out); return 1; }
+        // decision 21 (2026-11-15, as lae_enc.cpp): an existing output only after two "yes" at a console, or with --overwrite
+        if (!com.lae.core.Replace.mayReplace(out, overwrite, new com.lae.core.Replace.Out() { @Override public void print(String s) { env.print(s); } })) return 1;
         if (new File(part).exists()) { env.printf("%s already exists: remove it or choose another output name; nothing written\n", part); return 1; }
         LaesTags.Tags tags = new LaesTags.Tags(); { final String e = tagArgs(argv, 4, tags); if (!e.isEmpty()) { env.printf("%s: nothing written\n", e); return 1; } }
         if (presetTags != null) { tags.kv.addAll(presetTags.kv); tags.pics.addAll(presetTags.pics); final String e = LaesTags.checkAll(tags); if (!e.isEmpty()) { env.printf("%s: nothing written\n", e); return 1; } }
@@ -180,7 +187,7 @@ public final class LaeRetag {
             else env.printf("cannot write %s\n", part);
         } catch (IOException e) { ok = false; env.printf("cannot read %s\n", in);
         } finally { if (fi != null) try { fi.close(); } catch (IOException e) { /* read only */ } }
-        if (ok) { ok = new File(part).renameTo(new File(out)); if (!ok) env.printf("cannot rename %s to %s\n", part, out); }
+        if (ok) { ok = LaeEncoder.rename(part, out); if (!ok) env.printf("cannot rename %s to %s\n", part, out); }   // also replaces an output agreed to (decision 21)
         if (!ok) { new File(part).delete(); env.printf("nothing written\n"); return 2; }
         env.printf("written: %s (%zu tag(s), %zu picture(s)); CD audio and LAE chunk byte-identical to %s\n", out, (long) tags.kv.size(), (long) tags.pics.size(), in); return 0; }
 }

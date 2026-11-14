@@ -13,6 +13,7 @@
 #include <cctype>
 #include <string>
 #include <vector>
+#include "laes_file.h"   // laes::testEnv (DEC 39: test switches only with LAE_TEST_MODE=1)
 #ifdef _WIN32
 #include <conio.h>
 #include <io.h>

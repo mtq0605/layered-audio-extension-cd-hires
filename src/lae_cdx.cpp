@@ -433,13 +433,13 @@ static vector<pair<long long, long long>> leftovers(const Disc& d, const Report&
     long long a = d.base; cov.push_back({d.end(), d.end()});
     for (auto& c : cov) { if (c.first > a) { bool zero = true; for (long long x = a; x < c.first && zero; x++) if (d.L(x) || d.R(x)) zero = false; if (!zero) out.push_back({a, c.first}); } a = max(a, c.second); }
     return out; }
-static string writeOutputs(const fs::path& out, const Disc& d, const Report& r, const string& stem) {
+static string writeOutputs(const fs::path& out, const Disc& d, const Report& r, const string& stem, set<string>* names = nullptr) {   // names: the files written
     std::error_code ec; fs::create_directories(out, ec); char nm[300]; string e; const int rate = d.rate > 0 ? d.rate : 44100;
     auto cdFile = [&](const string& name, long long a, long long b) { vector<int16_t> pc; pc.reserve((size_t)max(0LL, b - a) * 2); for (long long x = a; x < b; x++) { pc.push_back(d.L(x)); pc.push_back(d.R(x)); }
-        auto by = canonV5(rate, pc, {}); if (!writeBytes(out / fs::u8path(name), by.data(), by.size())) e = "cannot write " + name; };
+        auto by = canonV5(rate, pc, {}); if (!writeBytes(out / fs::u8path(name), by.data(), by.size())) e = "cannot write " + name; else if (names) names->insert(name); };
     for (auto& t : r.tracks) {
         if (t.state == Track::PASS) { snprintf(nm, sizeof nm, "TRACK%02d.lae.wav", t.track); auto by = canonV5((int)t.ext->t.rate, t.cd, vector<uint8_t>(t.ext->bytes.begin(), t.ext->bytes.begin() + (ptrdiff_t)t.ext->blockLen));
-            if (!writeBytes(out / nm, by.data(), by.size())) e = string("cannot write ") + nm; }
+            if (!writeBytes(out / nm, by.data(), by.size())) e = string("cannot write ") + nm; else if (names) names->insert(nm); }
         else if (d.toc) {   // CD route: only the ripped samples (R11, R15): nothing for a track in a missing file, unknown edges trimmed
             if (d.missing.count(t.track)) { printf("track %02d: no CD output (its file is missing)\n", t.track); continue; }
             auto it = d.p.find(t.track); auto nx = next(it); long long a = it->second, b = nx == d.p.end() ? d.end() : nx->second;
@@ -869,7 +869,12 @@ static int realMain(int argc, char** argv) {
         if (!e.empty()) { printf("%s\n", e.c_str()); return 1; } if (x.empty()) printf("no extension files in %s: everything plays as CD\n", src.c_str());
         long long W = max(WDEF, atoll(arg(argc, argv, "W", to_string(WDEF)).c_str())); vector<string> in(pos.begin() + 2, pos.end()); Disc d;
         e = openInputs(in, d); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }
-        Report r = cdxr::read(d, x, W); decoderCheck(r); printReport(d, r); e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem())); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+        Report r = cdxr::read(d, x, W); decoderCheck(r); printReport(d, r); set<string> names; e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem()), &names); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+        {   // files of an earlier reading in the output folder are not part of this result: said, never removed (2026-11-14)
+            set<string> mine; for (auto& n : names) mine.insert(cdxr::lower(n)); vector<string> other; std::error_code ec;
+            for (auto it = fs::directory_iterator(out, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) { std::error_code fe; if (it->is_regular_file(fe) && !mine.count(cdxr::lower(u8(it->path().filename())))) other.push_back(u8(it->path().filename())); }
+            sort(other.begin(), other.end());
+            if (!other.empty()) printf("note: %s also holds %zu file(s) this reading did not write (%s%s): they are not part of this result\n", pos[0].c_str(), other.size(), other[0].c_str(), other.size() > 1 ? ", ..." : ""); }
         int pass = 0, fail = 0; for (auto& t : r.tracks) { if (t.state == Track::PASS) pass++; if (t.state == Track::FAIL) fail++; }
         printf("read: %d verified, %d CD only; output in %s\n", pass, (int)r.tracks.size() - pass, pos[0].c_str()); return fail ? 3 : 0; }
     if (cmd == "sim" && pos.size() == 3) {

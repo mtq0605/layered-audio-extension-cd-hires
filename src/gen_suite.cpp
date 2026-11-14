@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
         for (long i = 0; i < n; i++) { pk = max(pk, max(fabs(L[i]), fabs(R[i]))); }
         double g = pk > 1.0 ? dB(-0.5) / pk : 1.0;   // never clip the test material: a clip that would exceed full scale is scaled to -0.5 dBFS peak
         for (long i = 0; i < n; i++) { s[i * 2] = (int32_t)lround(L[i] * g * FS); s[i * 2 + 1] = (int32_t)lround(R[i] * g * FS); } pk *= g;
-        string p = (std::filesystem::path(dir) / (name + "_" + to_string(fs) + ".wav")).string(); wavio::write24(p.c_str(), fs, s); printf("%-40s peak %.2f dBFS\n", p.c_str(), 20 * lmath::log10(pk + 1e-12)); };
+        string p = (std::filesystem::path(dir) / (name + "_" + to_string(fs) + ".wav")).string(); if (!wavio::write24(p.c_str(), fs, s)) { fprintf(stderr, "gen_suite: cannot write %s\n", p.c_str()); exit(2); } printf("%-40s peak %.2f dBFS\n", p.c_str(), 20 * lmath::log10(pk + 1e-12)); };
     vector<double> L(n), R(n);
     // levels: 1 kHz at 0, -20, -60, -100, -120 dBFS (2 s each), then 30 kHz and 60 kHz tones at -40 dBFS, then silence with TPDF dither
     if (want("levels")) { Rng r{7}; for (long i = 0; i < n; i++) { double t = (double)i / fs, v = 0; int seg = (int)(t / 2);

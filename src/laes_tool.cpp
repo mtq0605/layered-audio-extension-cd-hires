@@ -634,7 +634,8 @@ static int laesMain(int argc, char** argv) {
                   if (got.empty()) return 1; hit.clear(); for (long x : got) hit.push_back(mo[(size_t)x - 1]); }
               for (size_t h : hit) if (std::find(chosen.begin(), chosen.end(), h) == chosen.end()) chosen.push_back(h);
               if (b == std::string::npos) break; a = b + 1; } }
-        { std::vector<std::string> av = {"laes", "dec", src, dd}; std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr);   // every master, checked
+        const std::string userMem = arg(argc, argv, "--mem");   // FU16-2 (2026-11-14): the user's --mem and --small-disk go to the inner dec / enc (they change no byte)
+        { std::vector<std::string> av = {"laes", "dec", src, dd}; if (!userMem.empty()) av.push_back("--mem=" + userMem); std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr);   // every master, checked
           if (laesMain((int)av.size(), ap.data()) != 0) { printf("%s: the masters could not be decoded and checked; nothing written\n", src.c_str()); return 2; } }
         // T relative to the core master (from each chain; a master stored in full has none: 0) in base samples
         std::vector<int64_t> absT; { const std::string te = absTimes(mi, absT); if (!te.empty()) { printf("%s: %s; nothing written\n", src.c_str(), te.c_str()); return 2; } }   // FU16-1 (3)
@@ -646,6 +647,7 @@ static int laesMain(int argc, char** argv) {
             if (mi[i].flags & laes::kNoDerive) av.push_back("--no-derive=" + std::to_string(q + 1));
             if (pf.head.def == (int)i + 1) av.push_back("--default=" + std::to_string(q + 1)); }   // the default goes with its master; not chosen: the core master (2026-11-12)
         if (pf.head.coreFlags & laes::kNoDerive) av.push_back("--no-derive=core");
+        if (!userMem.empty()) av.push_back("--mem=" + userMem); if (flag(argc, argv, "--small-disk")) av.push_back("--small-disk");
         av.push_back("--menu-order");
         { std::vector<char*> ap; for (auto& s : av) ap.push_back(&s[0]); ap.push_back(nullptr); if (laesMain((int)av.size(), ap.data()) != 0) { printf("encoding the chosen masters failed; nothing written\n"); return 2; } }
         // the new payload in the old file's layout (tags, pictures and the core master's audio bytes as they were)

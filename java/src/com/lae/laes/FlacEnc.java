@@ -135,6 +135,7 @@ public final class FlacEnc {
         final long n = ch[0].n();
         if (bps != 16 && bps != 24 && bps != 32) throw new LaeException("laesflac: the core master must be 16, 24 or 32 bit");
         if (rate < 1 || rate >= (1 << 20) || ch[1].n() != n || n >= (1L << 36)) throw new LaeException("laesflac: bad rate or length");
+        if (n == 0) throw new LaeException("laesflac: no samples (an LAES core master has at least one frame)");   // FU12-5 (as laes_flac_enc.h): the reader refuses a total of 0
         { final long lim = 1L << (bps - 1); for (int c = 0; c < 2; c++) for (long i = 0; i < n; i++) { final long v = ch[c].at(i); if (v < -lim || v >= lim) throw new LaeException("laesflac: a sample does not fit the bit depth"); } } }
     /**
      * the audio frames of writeFlac, coded in parallel threads a group at a time and written in order to o (the same bytes as the C++

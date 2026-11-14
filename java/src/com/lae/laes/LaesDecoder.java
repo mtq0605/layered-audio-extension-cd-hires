@@ -11,7 +11,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   - out-parameters (lae_magic, err, key / value) are String[1] arrays (may be null); strings are not truncated to errlen;
  *   - laes_index_layers takes an AtomicBoolean as the cancel flag (C++: const volatile int*, polled every 20 ms by a watcher thread);
  *   - laes_read writes into an int[] from index 0 and returns -1 when the array is shorter than 2 x frames;
- *   - laes_stop / laes_close also end the decoder's threads (the C++ destructors do that).
+ *   - laes_stop ends a player's threads, laes_close those of every player of the file not stopped (the C++ destructors do that); a
+ *     player is not usable after laes_close of its file.
  *   - Java only: a memory budget (laes_open_reader with memory_bytes, laes_set_memory; default 64 MB) bounds the heap of a file and its players.
  * Threads: one laes_file must not be used by two threads at once (as in C++).
  */
@@ -23,9 +24,10 @@ public final class LaesDecoder {
     /** port of lae_api.h:laes_choice_info */
     public static final class ChoiceInfo { public int kind, master, level, rate, bits; public long frames; public String name, what; }
     /** port of laes_api.cpp:laes_file */
-    public static final class LaesFileH { final Play.FnSrc src = new Play.FnSrc(); final Play.File f = new Play.File(); }
+    public static final class LaesFileH { final Play.FnSrc src = new Play.FnSrc(); final Play.File f = new Play.File();
+        final java.util.List<LaesPlayH> players = new java.util.ArrayList<LaesPlayH>(); }   // FU25-4: the players started and not stopped (laes_close stops them)
     /** port of laes_api.cpp:laes_play */
-    public static final class LaesPlayH { final Play.Player p = new Play.Player(); }
+    public static final class LaesPlayH { final Play.Player p = new Play.Player(); LaesFileH owner = null; }
 
     static void setErrS(String[] err, String m) { if (err != null && err.length > 0) err[0] = m; }
 
@@ -91,7 +93,8 @@ public final class LaesDecoder {
         if (h == null) { setErrS(err, "no file"); return null; }
         LaesPlayH p = null;
         try { p = new LaesPlayH(); if (threads <= 0) threads = Math.max(1, Lift.defaultThreads() / 2);
-            final String e = p.p.start(h.f, choice, threads, all, frame); if (!e.isEmpty()) { setErrS(err, e); p.p.close(); return null; } return p; }
+            final String e = p.p.start(h.f, choice, threads, all, frame); if (!e.isEmpty()) { setErrS(err, e); p.p.close(); return null; }
+            p.owner = h; synchronized (h.players) { h.players.add(p); } return p; }
         catch (OutOfMemoryError x) { setErrS(err, "out of memory"); }
         catch (RuntimeException x) { setErrS(err, String.valueOf(x.getMessage())); }
         if (p != null) p.p.close(); return null; }
@@ -128,7 +131,9 @@ public final class LaesDecoder {
     // port of laes_api.cpp:laes_master_ok
     public static int laes_master_ok(LaesPlayH p, int m) { return p != null && p.p.err.isEmpty() ? p.p.masterOk(m) : -1; }
     // port of laes_api.cpp:laes_stop
-    public static void laes_stop(LaesPlayH p) { if (p != null) p.p.close(); }
+    public static void laes_stop(LaesPlayH p) { if (p != null) { p.p.close(); final LaesFileH o = p.owner; if (o != null) { synchronized (o.players) { o.players.remove(p); } p.owner = null; } } }
     // port of laes_api.cpp:laes_close
-    public static void laes_close(LaesFileH h) { /* nothing held but memory */ }
+    // FU25-4: also stops the players of this file that were not stopped (the C++ destructors end their threads; here they would wait for ever)
+    public static void laes_close(LaesFileH h) { if (h == null) return; final LaesPlayH[] ps; synchronized (h.players) { ps = h.players.toArray(new LaesPlayH[0]); h.players.clear(); }
+        for (LaesPlayH p : ps) { p.p.close(); p.owner = null; } }
 }

@@ -11,7 +11,9 @@
 // cross-correlation: those decoders add a delay; a lag other than 0 is shown during the test).
 // The program assigns the two sources to the buttons A and B at random and does not tell which is which until the test ends.
 // In every trial X and Y are A and B in a random order; the listener says whether X is A or X is B. At the end it shows the score,
-// the one-sided binomial p-value and which source was A, and writes a log (with the SHA-256 of both source files) to results\.
+// the one-sided binomial p-value and which source was A. The log (results\, with the SHA-256 of both source files) is written from the
+// start of a pair with one line per answer; the assignment and the results are added at the end (DEC 44, 2026-11-15). The session
+// summary gives the test rate of every pair.
 // The ABX method itself goes back to Munson & Gardner (1950) and Clark (JAES 30(5), 1982).
 //
 // Command line (for checks, no window):  lae_abx --prepare <pair number, 1-based> <48000|44100> <out folder>
@@ -363,6 +365,7 @@ static double pValue(int k, int n) { double s = 0; for (int i = k; i <= n; i++) 
 struct Test {
     Pair pair; int rate = 48000, trials = 16, done = 0, correct = 0; int aIs = 0;   // aIs: which source (0/1 = line order) is button A
     std::vector<int> xIsA; std::vector<std::string> lines; Source s[2]; long long lag = 0; std::string startedAt; float peak[2] = { 0, 0 };   // peak: largest |sample| per source (FU20-11)
+    std::wstring logPath; std::string logText; bool logOk = true;   // DEC 44: the log of this pair, written from its start
     int xSource(int t) const { return xIsA[(size_t)t] ? aIs : 1 - aIs; } };
 
 // ---------------------------------------------------------------- window
@@ -384,28 +387,44 @@ static void showTrial() {
     std::string st = b; for (int i = 0; i < 2; i++) if (gTest.peak[i] > 1.0f) { char pk[200]; snprintf(pk, sizeof pk, "\r\nNote: %s peaks %.1f dB above full scale; the system may limit it while playing.", i ? "the second source" : "the first source", 20 * std::log10(gTest.peak[i])); st += pk; }
     if (gTest.lag) { char lg[160]; snprintf(lg, sizeof lg, "\r\nLined up: the second source of the pair is moved by %lld samples (%.1f ms).", gTest.lag, 1000.0 * (double)gTest.lag / gTest.rate); st += lg; }
     setStatus(st); }
+// DEC 44 (2026-11-15): the log of a pair is written from its start, and every answer adds a line at once, so a test that is not
+// finished still leaves its trace. Which source was button A, and whether each answer was right, is written only when the test ends
+// (or the window is closed during it), so the open log does not give the result away.
+static void logAdd(const std::string& s) {
+    gTest.logText += s; if (gTest.logPath.empty()) return;
+    FILE* f = _wfopen(gTest.logPath.c_str(), L"ab"); bool ok = f != nullptr; if (f) { ok = fwrite(s.data(), 1, s.size(), f) == s.size(); if (fclose(f) != 0) ok = false; } if (!ok) gTest.logOk = false; }
+static void logStart() {
+    const std::wstring dir = exeDir() + L"\\results"; CreateDirectoryW(dir.c_str(), nullptr);
+    std::string safe = gTest.pair.name; for (auto& c : safe) if (strchr("\\/:*?\"<>| ", c)) c = '_';
+    const std::wstring stem = dir + L"\\" + widen(safe) + L"_" + widen(nowStamp()); gTest.logPath = stem + L".txt";
+    for (int k = 2; PathFileExistsW(gTest.logPath.c_str()) && k < 100; k++) gTest.logPath = stem + L"_" + std::to_wstring(k) + L".txt";   // never over an earlier log
+    gTest.logText.clear(); gTest.logOk = true; { FILE* f = _wfopen(gTest.logPath.c_str(), L"wb"); if (!f || fclose(f) != 0) gTest.logOk = false; }
+    std::string h = std::string(kVersion) + "\r\n" + "test started " + gTest.startedAt + "\r\n\r\n" + "pair: " + gTest.pair.name + "\r\n" +
+        "first source: " + gTest.s[0].name + "\r\n  SHA-256 " + gTest.s[0].sha + "\r\n" + "second source: " + gTest.s[1].name + "\r\n  SHA-256 " + gTest.s[1].sha + "\r\n" +
+        "test rate: " + std::to_string(gTest.rate) + " Hz, both sides through the same resampler; lag of the second source: " + std::to_string(gTest.lag) + " samples\r\n";
+    for (int i = 0; i < 2; i++) if (gTest.peak[i] > 1.0f) { char pk[200]; snprintf(pk, sizeof pk, "%s source peaks %.1f dB above full scale (the system may limit it while playing)\r\n", i ? "second" : "first", 20 * std::log10(gTest.peak[i])); h += pk; }
+    h += std::to_string(gTest.trials) + " trials; which source is button A is written when the test ends\r\n\r\n";
+    logAdd(h); }
+static void logKey(const char* why) {   // the end of a log: the assignment, every trial with its result, and the total
+    const Source& A = gTest.s[gTest.aIs]; const Source& B = gTest.s[1 - gTest.aIs];
+    std::string k = std::string("\r\n") + why + " " + nowText() + "\r\nbutton A was: " + A.name + "\r\nbutton B was: " + B.name + "\r\n\r\n";
+    for (auto& l : gTest.lines) k += l + "\r\n";
+    const double p = pValue(gTest.correct, gTest.done > 0 ? gTest.done : 1);
+    char t[200]; snprintf(t, sizeof t, "\r\nTotal: %d/%d%s\r\np-value (one-sided binomial): %.4f (%.2f %%)\r\n", gTest.correct, gTest.done, gTest.done < gTest.trials ? " (not finished)" : "", p, 100 * p); k += t;
+    logAdd(k);
+    Sha256 h; h.add(gTest.logText.data(), gTest.logText.size()); const char salt[] = "lae_abx log 2026-11-12"; h.add(salt, sizeof salt - 1); logAdd("\r\nchecksum (shows accidental edits; not a signature): " + h.hex() + "\r\n"); }
 static void finish() {
     gPlayer.pause(); enableTest(false); const double p = pValue(gTest.correct, gTest.trials);
     const Source& A = gTest.s[gTest.aIs]; const Source& B = gTest.s[1 - gTest.aIs];
-    std::string log = std::string(kVersion) + "\r\n" + "test started " + gTest.startedAt + ", finished " + nowText() + "\r\n\r\n" + "pair: " + gTest.pair.name + "\r\n" +
-        "button A was: " + A.name + "\r\n  SHA-256 " + A.sha + "\r\n" + "button B was: " + B.name + "\r\n  SHA-256 " + B.sha + "\r\n" +
-        "test rate: " + std::to_string(gTest.rate) + " Hz, both sides through the same resampler; lag of the second source: " + std::to_string(gTest.lag) + " samples\r\n";
-    for (int i = 0; i < 2; i++) if (gTest.peak[i] > 1.0f) { char pk[200]; snprintf(pk, sizeof pk, "%s source peaks %.1f dB above full scale (the system may limit it while playing)\r\n", i ? "second" : "first", 20 * std::log10(gTest.peak[i])); log += pk; }
-    log += "\r\n";
-    for (auto& l : gTest.lines) log += l + "\r\n";
-    char t[160]; snprintf(t, sizeof t, "\r\nTotal: %d/%d\r\np-value (one-sided binomial): %.4f (%.2f %%)\r\n", gTest.correct, gTest.trials, p, 100 * p); log += t;
-    Sha256 h; h.add(log.data(), log.size()); const char salt[] = "lae_abx log 2026-11-12"; h.add(salt, sizeof salt - 1); log += "\r\nchecksum (shows accidental edits; not a signature): " + h.hex() + "\r\n";
-    const std::wstring dir = exeDir() + L"\\results"; CreateDirectoryW(dir.c_str(), nullptr);
-    std::string safe = gTest.pair.name; for (auto& c : safe) if (strchr("\\/:*?\"<>| ", c)) c = '_';
-    const std::wstring path = dir + L"\\" + widen(safe) + L"_" + widen(nowStamp()) + L".txt"; FILE* f = _wfopen(path.c_str(), L"wb"); bool logOk = f != nullptr; if (f) { logOk = fwrite(log.data(), 1, log.size(), f) == log.size(); if (fclose(f) != 0) logOk = false; }
+    logKey("test finished"); const std::wstring dir = exeDir() + L"\\results", path = gTest.logPath; const bool logOk = gTest.logOk;
     char b[1024]; snprintf(b, sizeof b, "Finished: %d of %d correct, p = %.4f (%s).\r\nA was: %s\r\nB was: %s\r\n%s%s",
         gTest.correct, gTest.trials, p, p < 0.05 ? "below 5 %: a difference was heard" : "not below 5 %: no reliable difference", A.name.c_str(), B.name.c_str(),
         logOk ? "Log: " : "THE LOG COULD NOT BE WRITTEN (note the result shown here): ", narrow(path).c_str());
-    char sl[400]; snprintf(sl, sizeof sl, "%-48s %2d/%-2d  p = %.4f  (A was %s)", gTest.pair.name.c_str(), gTest.correct, gTest.trials, p, A.name.c_str()); gSummary.push_back(sl);
+    char sl[400]; snprintf(sl, sizeof sl, "%-48s %2d/%-2d  p = %.4f  %d Hz  (A was %s)", gTest.pair.name.c_str(), gTest.correct, gTest.trials, p, gTest.rate, A.name.c_str()); gSummary.push_back(sl);   // DEC 44: the rate of every pair
     std::string msg = b; gQueuePos++;
     if (gQueuePos < gQueue.size()) { msg += "\r\n\r\nNext: " + gSet[(size_t)gQueue[gQueuePos]].name + ".  Press \"Next pair\" when you are ready."; SetWindowTextW(gPrepare, (L"Next pair (" + std::to_wstring(gQueue.size() - gQueuePos) + L" left)").c_str()); }
     else {   // the whole session in one summary file
-        std::string sum = std::string(kVersion) + "\r\nsession " + gSessionStart + " - " + nowText() + ", test rate " + std::to_string(gTest.rate) + " Hz\r\n\r\n"; for (auto& l : gSummary) sum += l + "\r\n";
+        std::string sum = std::string(kVersion) + "\r\nsession " + gSessionStart + " - " + nowText() + " (the test rate of each pair is in its line)\r\n\r\n"; for (auto& l : gSummary) sum += l + "\r\n";
         const std::wstring sp = dir + L"\\session_" + widen(nowStamp()) + L".txt"; FILE* g = _wfopen(sp.c_str(), L"wb"); bool sumOk = g != nullptr; if (g) { sumOk = fwrite(sum.data(), 1, sum.size(), g) == sum.size(); if (fclose(g) != 0) sumOk = false; }
         msg = "All ticked pairs done (" + std::to_string(gSummary.size()) + "). " + (sumOk ? "Summary: " : "THE SUMMARY COULD NOT BE WRITTEN: ") + narrow(sp) + "\r\nLast pair: " + msg; SetWindowTextW(gPrepare, L"Start ticked pairs"); gQueue.clear(); gQueuePos = 0; }
     setStatus(msg); }
@@ -414,6 +433,7 @@ static void choose(bool saysXisA) {
     const bool truth = gTest.xIsA[(size_t)gTest.done] != 0, ok = truth == saysXisA; if (ok) gTest.correct++;
     char b[160]; snprintf(b, sizeof b, "%s trial %2d: answered \"X is %s\", X was %s: %s", nowText().c_str() + 11, gTest.done + 1, saysXisA ? "A" : "B", truth ? "A" : "B", ok ? "correct" : "wrong");
     gTest.lines.push_back(b); gTest.done++;
+    { char ab[120]; snprintf(ab, sizeof ab, "%s trial %2d: answered \"X is %s\"\r\n", nowText().c_str() + 11, gTest.done, saysXisA ? "A" : "B"); logAdd(ab); }   // DEC 44: at once, without the result
     if (gTest.done >= gTest.trials) finish(); else showTrial(); }
 static void playButton(int b) {   // 0 A, 1 B, 2 X, 3 Y
     if (!gReady) return; int s; const int t = std::min(gTest.done, gTest.trials - 1);
@@ -459,10 +479,11 @@ static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
     case WM_APP_READY: gBusy = false; EnableWindow(gPrepare, TRUE); SendMessageW(gProgress, PBM_SETPOS, wp ? 1000 : 0, 0);
         if (!wp) { std::lock_guard<std::mutex> g(gMsgMu); setStatus(gMsg); return 0; }
         for (int i = 0; i < 2; i++) { float pk = 0; for (const auto* ch : { &gTest.s[i].L, &gTest.s[i].R }) for (float v : *ch) pk = std::max(pk, std::fabs(v)); gTest.peak[i] = pk; }
-        gTest.aIs = (int)(rnd32() & 1); gTest.xIsA.clear(); for (int i = 0; i < gTest.trials; i++) gTest.xIsA.push_back((int)(rnd32() & 1)); gTest.startedAt = nowText();
+        gTest.aIs = (int)(rnd32() & 1); gTest.xIsA.clear(); for (int i = 0; i < gTest.trials; i++) gTest.xIsA.push_back((int)(rnd32() & 1)); gTest.startedAt = nowText(); logStart();
         gPlayer.set(gTest.s, gTest.rate); gReady = true; enableTest(true); updateRange(); showTrial(); return 0;
     case WM_APP_AUDIO: { char ab[300]; snprintf(ab, sizeof ab, "No sound: the default playback device could not be opened or was removed (error 0x%08lX). Check the playback device in Windows, then press Play again.", (unsigned long)wp); setStatus(ab); } return 0;
     case WM_DESTROY: gPlayer.stop(); gQuit = true;   // FU20-12: end the decoders, let the preparation stop (at most 30 s), then remove the work folder
+        if (gReady && gTest.done < gTest.trials) logKey("test abandoned (the window was closed)");   // DEC 44: the log of a test that was not finished
         if (gPrepRunning) { if (decodeJob()) TerminateJobObject(decodeJob(), 1); for (int k = 0; k < 600 && gPrepRunning; k++) Sleep(50); }
         removeWorkDir(); PostQuitMessage(0); return 0; }
     return DefWindowProcW(w, m, wp, lp); }

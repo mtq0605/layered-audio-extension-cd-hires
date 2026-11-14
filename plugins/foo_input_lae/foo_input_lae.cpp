@@ -638,9 +638,11 @@ private:
         rd.locateCore(size); const double ckRtf = g_speed.get(kMachine, "check_rtf"); const double ckAll = ckRtf > 0 && secs > 0 ? secs / ckRtf : -1;
         auto bar = [&](double left, double share) { int p; if (left >= 0) { const double el = (nowMs() - pr->t0.load()) / 1000.0; p = (int)(1000.0 * (el + left > 0 ? el / (el + left) : 0)); } else p = (int)(1000.0 * share);
             p = (std::min)(990, p); if (p > pr->permille.load()) pr->permille = p; };
-        std::atomic<bool> reading{true}; std::thread ticker([&] { while (reading) { bar(ckAll >= 0 ? rd.remaining() + ckAll : -1, rd.fraction() * kReadShare / 1000.0); Sleep(100); } });
+        // the ticker also stops the read at once on Cancel or when foobar2000 quits (the read of a large file can take minutes)
+        std::atomic<bool> reading{true}; std::thread ticker([&] { while (reading) { if (pr->cancel || stopping()) rd.abort.abort();
+            bar(ckAll >= 0 ? rd.remaining() + ckAll : -1, rd.fraction() * kReadShare / 1000.0); Sleep(100); } });
         laes_file* f = laes_open_reader(&OwnReader::read, &rd, size, 0, mg, err, sizeof err); reading = false; ticker.join(); if (f) rd.remember();
-        if (!f) { closeProgress(pr); return; }   // not LAES (or unreadable): nothing to do
+        if (!f) { if (pr->cancel) say("LAES " + name + T(": verification cancelled", "：校验已取消")); closeProgress(pr); return; }   // not LAES (or unreadable): nothing to do
         laes_file_info fi; laes_get_info(f, &fi);
         if (!fi.payload_ok) { closeProgress(pr); say("LAES " + name + ": " + laes_file_problem(f) + T("; playing the core master", "；播放核心母带")); laes_close(f); return; }
         const int nm = mastersOf(f); pr->masters = nm; noteFailed(path, fi.file_sha256, nm); bool todo = false; for (int m = 0; m < nm; m++) todo |= g_verified.get(fi.file_sha256, m) == 0;

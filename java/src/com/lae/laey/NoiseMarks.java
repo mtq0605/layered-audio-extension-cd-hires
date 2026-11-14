@@ -36,12 +36,15 @@ final class NoiseMarks {
     // both before the first pos line. A line that begins with LAENOISE, master, grid or pos must have exactly its fields (a second
     // LAENOISE line is an error); any other line is ignored. why[0]: the reason when the file is refused (as noise_marks.h).
     static boolean readMarks(String path, Marks mk) { return readMarks(path, mk, null); }
+    // the next line up to (not including) LF; a CR stays in it (a separator, as in noise_marks.h); null at the end of the file
+    private static String lfLine(BufferedReader r) throws IOException { StringBuilder b = new StringBuilder(); int c; boolean any = false;
+        while ((c = r.read()) >= 0) { any = true; if (c == '\n') return b.toString(); b.append((char) c); } return any ? b.toString() : null; }
     static boolean readMarks(String path, Marks mk, String[] why) {
         BufferedReader r = null; boolean magic = false, haveMaster = false, haveGrid = false; long ln = 0;
         try {
             r = new BufferedReader(new InputStreamReader(new FileInputStream(path), "ISO-8859-1"));
             String line;
-            while ((line = r.readLine()) != null) {
+            while ((line = lfLine(r)) != null) {   // FU24-4: lines end at LF only, as noise_marks.h (readLine also ended one at a lone CR)
                 ln++; int h = line.indexOf('#'); if (h >= 0) line = line.substring(0, h);
                 List<String> tl = new ArrayList<String>(); for (String x : line.split("[ \\t\\r]+")) if (!x.isEmpty()) tl.add(x);
                 if (tl.isEmpty()) continue;

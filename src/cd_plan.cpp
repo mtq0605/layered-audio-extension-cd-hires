@@ -336,9 +336,10 @@ static int planRun(int argc, char** argv) {
             if (!r.found) { printf("plan: piece %02zu: the check of the cut piece finds no position: %s; nothing written\n", k + 1, r.why.c_str()); return 1; }
             std::string pl; const double meas = -(double)m_align::measurePhase(sl[k].c, sl[k].m, sl[k].len, stages, w.rate, 0, r, pl) / U1; const size_t pp = pl.find("pooled residual ");
             const double e = pp == std::string::npos ? 0.0 : atof(pl.c_str() + pp + 16);
-            printf("plan: piece %02zu: check of the cut piece (not moved): fraction measured %+.7f master samples, confirmed %+.7f; alignment error after the fraction %.1f dB\n", k + 1, meas, fr[k], e);
+            // FU09-7: the error is the one at the measured fraction, not at the confirmed one (laes enc checks the confirmed T itself): the text says so
+            printf("plan: piece %02zu: check of the cut piece (not moved): fraction measured %+.7f master samples, confirmed %+.7f; alignment error at the measured fraction %.1f dB (the confirmed fraction is checked by laes enc)\n", k + 1, meas, fr[k], e);
             if (pp == std::string::npos || e > -60) { needsAccept[k] = true; anyAsk = true; if (pp == std::string::npos || e > -54) anyLarge = true;
-                printf("plan: piece %02zu needs your confirmation: alignment error %.1f dB (%s -54 dB)\n", k + 1, e, e <= -54 ? "between -60 and" : "worse than"); }
+                printf("plan: piece %02zu needs your confirmation: alignment error at the measured fraction %.1f dB (%s -54 dB)\n", k + 1, e, e <= -54 ? "between -60 and" : "worse than"); }
             continue; }
         printf("plan: piece %02zu: check of the cut piece: %s\n", k + 1, r.alignLine.c_str());
         if (!r.found || r.band == m_align::BAND_STOP) { printf("plan: piece %02zu: the encoder's check of the cut piece does not pass: %s%s; nothing written\n", k + 1, r.why.c_str(), r.hint.empty() ? "" : ("; " + r.hint).c_str()); return 1; }

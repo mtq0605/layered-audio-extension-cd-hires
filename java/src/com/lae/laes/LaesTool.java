@@ -147,8 +147,15 @@ public final class LaesTool {
                     for (int j : hit) if (!pick.contains(j)) pick.add(j); if (b < 0) break; a = b + 1; } }
             new File(args[2]).mkdirs(); final String d = args[2] + "/";
             for (int j : pick) { final Choice C = ch.get(j); final Src S = C.derived ? ch.get(C.from).s : C.s; final int by = C.s.bits / 8; final long n = C.s.n, db = n * 2 * by;
-                final byte[] h = LaesEncoder.wavHeader(C.s.rate, C.s.bits); final long fmtLen = C.s.bits > 16 ? 40 : 16;
+                byte[] h = LaesEncoder.wavHeader(C.s.rate, C.s.bits); final long fmtLen = C.s.bits > 16 ? 40 : 16;
                 com.lae.core.Le.put32(h, 4, (int) (4 + 8 + fmtLen + 8 + db + (db & 1))); com.lae.core.Le.put32(h, h.length - 4, (int) db);
+                // FU28-1: beyond 4 GB RF64 as the encoder writes it (ds64 with the 64-bit RIFF and data sizes, no table; 32-bit fields
+                // 0xFFFFFFFF), as laes_tool.cpp dec (2026-11-04); the header lengths wrapped before. Test hook LAES_FORCE_RF64 as the C++
+                final long riff = 4 + 8 + fmtLen + 8 + db + (db & 1);
+                if (riff > 0xFFFFFFFFL || System.getenv("LAES_FORCE_RF64") != null) { final byte[] r = new byte[20 + 28 + h.length - 12];
+                    final byte[] r0 = {'R', 'F', '6', '4', (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, 'W', 'A', 'V', 'E', 'd', 's', '6', '4', 28, 0, 0, 0}; System.arraycopy(r0, 0, r, 0, 20);
+                    com.lae.core.Le.put64(r, 20, riff + 36); com.lae.core.Le.put64(r, 28, db); com.lae.core.Le.put64(r, 36, n);   // then the table length 0
+                    System.arraycopy(h, 12, r, 48, h.length - 12); for (int i = r.length - 4; i < r.length; i++) r[i] = (byte) 0xFF; h = r; }   // the data size: in ds64
                 boolean okw = true; Stream.Out o = null;
                 try { o = new Stream.Out(d + C.name + ".wav"); o.put(h, 0, h.length); final long P = 1 << 18;
                     final long[] stc = {20261029L + 0x9E3779B97F4A7C15L * 1, 20261029L + 0x9E3779B97F4A7C15L * 2}; final int sft = C.derived ? S.bits - 16 : 0;   // derive16: one stream per channel

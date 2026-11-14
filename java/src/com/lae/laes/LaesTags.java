@@ -62,6 +62,7 @@ public final class LaesTags {
     // port of laes_tags.h:readImage (the file read)
     public static String readImage(String path, Picture p) {
         byte[] d; InputStream in = null;
+        if (new java.io.File(path).length() >= (1L << 24)) return path + ": too large for a FLAC metadata block (16 MB)";   // FU28-3: before reading it all (a large file by mistake ran out of memory); the message of checkPicture
         try { in = new FileInputStream(path); ByteArrayOutputStream bo = new ByteArrayOutputStream(); byte[] b = new byte[1 << 16]; int k; while ((k = in.read(b)) > 0) bo.write(b, 0, k); d = bo.toByteArray(); }
         catch (IOException e) { return "cannot read " + path; }
         finally { if (in != null) try { in.close(); } catch (IOException ig) { /* read only */ } }

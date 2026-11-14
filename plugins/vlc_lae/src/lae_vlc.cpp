@@ -14,7 +14,8 @@
 #define MODULE_NAME lae
 #define MODULE_STRING "lae"
 #define __PLUGIN__
-#define VLC_MODULE_LICENSE VLC_LICENSE_LGPL_2_1_PLUS
+// the licence the module reports to VLC: the module binary's (LGPL-3.0-or-later, see above), in the wording of VLC's own strings
+#define VLC_MODULE_LICENSE "Licensed under the terms of the GNU Lesser General Public License, version 3 or later."
 #include <windows.h>
 #include <xmmintrin.h>
 #include <atomic>

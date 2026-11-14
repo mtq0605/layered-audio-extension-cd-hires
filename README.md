@@ -1929,7 +1929,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
 ### 17.1 Format and tiers
 
 - **LAE Lossless (LAES).** Specified in [spec/lossless/SPEC.md](spec/lossless/SPEC.md) (stable, payload version 2, 2026-11-12); reference tool `laes`. Every master (16, 24 or 32 bit, at the base rate × 1, 2, 4 or 8) and each of its rate levels is reconstructed bit for bit. The carriers are a WAV file, a FLAC file (APPLICATION blocks with ID `LAE2`) and CD-Extra (extension block type 2). How many masters fit on a CD-Extra disc depends on the album length. Files larger than 4 GiB use the RF64 form (spec/lossless/SPEC.md, Section 7). Streaming export for services is implemented (`laes_export`, Section 14.9).
-- **Containers.** The WAV container and CD-Extra packaging are implemented. The encapsulation specification is a draft; it is to be revised after the measurements of a real burn (Section 17.3). The `.lae` file layout of LAEY remains unspecified; an LAES `.lae` file is an LAES file in the FLAC or WAV form (`laes enc --form`).
+- **Containers.** The WAV container, the single-file FLAC form (Section 10.1) and CD-Extra packaging are implemented. The encapsulation specification is a draft; it is to be revised after the measurements of a real burn (Section 17.3). An LAEY `.lae` file is an LAEY file in the WAV form, or in the FLAC form with `--form=flac` ([spec/lossy/SPEC.md](spec/lossy/SPEC.md), Section 3.4); an LAES `.lae` file is an LAES file in the FLAC or WAV form (`laes enc --form`).
 - **Channels.** Only stereo is supported.
 
 ### 17.2 Encoder
@@ -1964,13 +1964,11 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - Listening tests.
 - **Quality estimators.** The exact definitions of the quality measures of Section 12.1 are to be given in the test documentation.
 - **Normative text.** SPEC.md specifies the M/S lifting, the dither generator and its seeds, the entropy-coder binarisation, the stream header field K and the filter tables. Its open items ([SPEC.md](spec/lossy/SPEC.md), Appendix C) include:
-  - the full SHA-256 values of the test vectors;
   - `src/mdct_tables.h` as a normative annex;
   - whether a decoder must reject a `fmt ` sample rate that differs from the base rate;
-  - the values of the stream-header fields `rate` and `L`, and whether bytes may follow the last stream;
+  - the values of the stream-header fields `rate` and `L`;
   - a guaranteed bound against 64-bit overflow in the half-band accumulators;
   - whether corrupt-stream conditions must be detected in the whole stream or only in the parts that a route needs;
-  - the `.lae` file layout and carriage in FLAC (the encapsulation specification answers the FLAC question within its scope: the base layer in FLAC, the extension in a separate file; Section 10.7);
   - the encoder's edge padding and its definition of the leaf exponent.
 
 ### 17.4 Known operating limits

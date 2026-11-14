@@ -350,7 +350,7 @@ static int laesMain(int argc, char** argv);
 int main(int argc, char** argv) { lae_u8::init(argc, argv); return laesMain(argc, argv); }   // UTF-8 arguments and file names on Windows (win_utf8.h)
 // laes add / extract (2026-11-11) run the dec and enc commands of this same program through laesMain
 static int laesMain(int argc, char** argv) {
-    if (argc < 2) { printf("laes enc | tag | parts | dec | verify | align | selftest | excerpt | mkcd  (see the source header)\n"); return 1; }
+    if (argc < 2) { printf("laes enc | add | extract | names | tag | parts | dec | verify | align | selftest | excerpt | mkcd | reduce  (see the source header)\n"); return 1; }
     const std::string cmd = argv[1];
     bool madePart = false;   // FU16-3 (2026-11-14): tag / add / extract / names remove <out>.part and <out>.body.part on an error only when this run made them
     if (cmd == "selftest") return selftest::run() ? 2 : 0;
@@ -362,9 +362,10 @@ static int laesMain(int argc, char** argv) {
                 const int64_t r1 = (int64_t)(r.next() >> (64 - s)), r2 = (int64_t)(r.next() >> (64 - s)); q.c[c][i] = std::max<int64_t>(mn, std::min<int64_t>(mx, (p.c[c][i] + r1 - r2 + (1LL << (s - 1))) >> s)); } }
         return writeAll(argv[3], wavBytes(q, nullptr)) ? 0 : 2; }
     if (cmd == "excerpt" && argc >= 7) { Pcm p; std::string e = readWav(argv[2], p); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
-        int64_t s0 = (int64_t)(atof(argv[4]) * p.rate), L = (int64_t)(atof(argv[5]) * p.rate); int bits = atoi(argv[6]); if (s0 < 0 || s0 + L > p.frames()) { printf("excerpt outside the file\n"); return 2; }
+        int64_t s0 = (int64_t)(atof(argv[4]) * p.rate), L = (int64_t)(atof(argv[5]) * p.rate); int bits = atoi(argv[6]); if (s0 < 0 || L < 0 || s0 + L > p.frames()) { printf("excerpt outside the file\n"); return 2; }
+        if (bits != 16 && bits != 24 && bits != 32) { printf("excerpt: <bits> must be 16, 24 or 32 (given: %s)\n", argv[6]); return 1; }   // FU15-6: a negative length ran past the samples, other bits wrote a WAV of the wrong word length
         Pcm q; q.rate = p.rate; q.bits = bits; Rng r(12345); for (int c = 0; c < 2; c++) { q.c[c].assign(p.c[c].begin() + s0, p.c[c].begin() + s0 + L);
-            for (auto& v : q.c[c]) { int64_t x = v >> (p.bits - 24) << 0; if (p.bits != 24) x = v; if (bits == 32) v = (x << 8) | (int64_t)(r.next() & 0xFF); else if (bits == 16) { const double u1 = r.uni(), u2 = r.uni(); v = std::max<int64_t>(-32768, std::min<int64_t>(32767, (int64_t)std::floor(x / 256.0 + u1 + u2 + 0.5))); } else v = x; } }
+            for (auto& v : q.c[c]) { const int64_t x = v; if (bits == 32) v = (x << 8) | (int64_t)(r.next() & 0xFF); else if (bits == 16) { const double u1 = r.uni(), u2 = r.uni(); v = std::max<int64_t>(-32768, std::min<int64_t>(32767, (int64_t)std::floor(x / 256.0 + u1 + u2 + 0.5))); } else v = x; } }
         if (argc >= 8) { const int64_t pz = (int64_t)(atof(argv[7]) * p.rate), fd = std::min<int64_t>(L / 2, p.rate / 20); for (int c = 0; c < 2; c++) { for (int64_t i = 0; i < fd; i++) { const double g = 0.5 - 0.5 * std::cos(3.14159265358979323846 * i / fd); q.c[c][i] = (int64_t)std::llround(q.c[c][i] * g); q.c[c][L - 1 - i] = (int64_t)std::llround(q.c[c][L - 1 - i] * g); } q.c[c].insert(q.c[c].begin(), pz, 0); q.c[c].insert(q.c[c].end(), pz, 0); } }   // [pad s]: 50 ms fades, then digital silence at both ends
         return writeAll(argv[3], wavBytes(q, nullptr)) ? 0 : 2; }
     if (cmd == "mkcd" && argc >= 5) {   // test helper: laes mkcd <master.wav> <cd.wav> <tau> [gain] [noise]: a 16-bit CD whose sample i is the master's base level at time i + tau (base samples)

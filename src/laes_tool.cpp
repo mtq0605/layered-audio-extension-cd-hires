@@ -177,6 +177,7 @@ static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::stri
     AutoT A; int st = 0; while ((cd.rate << st) < m.rate && st < 4) st++;
     if ((cd.rate << st) != m.rate || st > 3) { A.why = "master rate must be the core master rate times 1, 2, 4 or 8"; return A; }
     if (st == 0) { A.why = "LAEY's search needs a master at 2, 4 or 8 times the core master rate; give T by hand (master.wav@T)"; return A; }
+    if (cd.frames() < 1 || m.frames < 1) { A.why = std::string(cd.frames() < 1 ? "the core master" : "the master") + " has no samples: there is nothing to align"; return A; }   // FU15-4: the own check below needs samples on both sides
     if (!fs::exists(enc)) { A.why = "lae_enc not found: " + enc + " (give --lae-enc=<path>)"; return A; }
     const std::string dummy = (fs::temp_directory_path() / "laes_align_unused.lae").string();   // cdcheck encodes nothing
     for (const std::string* p : {&enc, &mPath, &cdPath, &dummy}) if (p->find_first_of(kShellBad) != std::string::npos) {   // FU15-1 (2026-11-14): the command goes through the shell

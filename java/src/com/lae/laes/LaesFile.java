@@ -44,6 +44,12 @@ public final class LaesFile {
     // port of laes_file.h:testEnv / testModeLine (decision 39, 2026-11-15): the test switches of the LAES code act only when the master
     // switch LAE_TEST_MODE=1 is set; testEnv gives the value then, else null. KEEPTMP (keep the work folder) changes no output byte and acts
     // without it. testModeLine gives, once per program run, the line naming the active test switches ("" when LAE_TEST_MODE is not 1).
+    // port of laes_file.h:tWithinTrack (DEC 11, 2026-11-15): T (whole + frac / 2^32 base samples) of a master lies within the length of the
+    // track: -N <= T <= N, N = the core master frames (an offset beyond the track is meaningless). Decoders refuse a record with a larger T;
+    // the encoder writes none. (n and the comparisons unsigned, as the C++ uint64_t.)
+    public static boolean tWithinTrack(long whole, int frac, long n) {
+        if (whole >= 0) return U.lt(whole, n) || (whole == n && frac == 0);
+        return U.le(-(whole + 1) + 1, n); }
     static final String[] TEST_SWITCHES = {"LAES_TEST_KEYS", "LAES_NO_SHORTLIST", "LAES_FORCE_RF64", "LAES_PIECE", "LAES_SELFCHECK_FLIP", "LAES_DISK_RESERVE"};
     public static String testEnv(String name) { return "1".equals(System.getenv("LAE_TEST_MODE")) ? System.getenv(name) : null; }
     private static boolean testLineDone = false;
@@ -171,7 +177,7 @@ public final class LaesFile {
                 if (!validMasterName(body, np, (int) nl)) return "invalid master name"; I.name = nameOf(body, np, (int) nl); I.flags = (int) fl; I.menu = (int) mp; }
             if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                 || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))   // all in uint64
-                || I.whole <= -(1L << 40) || I.whole >= (1L << 40)) return "invalid master record";
+                || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
             if (I.storage != 1 && I.refTier == 0 && core.frames() < 1) return "invalid master record: it refers to a core master of no samples";   // FU12-2 (as laes_file.h): the reference needs core samples (refLen, mir)
             if (U.gt(F64, WHOLE_MAX_FRAMES) || F64 > Integer.MAX_VALUE - 8) return "master too long for this decoder";   // FU27-1: a Java array holds at most 2^31 - 9 values I.frames = F64;
             System.arraycopy(body, sha, I.sha, 0, 32); final int j = I.storage == 2 ? Math.min(I.stages, info.get(I.refTier - 1).stages) : 0; final long nj = levLen(I.frames, I.stages - j);

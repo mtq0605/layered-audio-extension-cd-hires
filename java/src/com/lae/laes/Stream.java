@@ -346,7 +346,7 @@ public final class Stream {
                 I.name = LaesFile.nameOf(nb, 0, nb.length); I.flags = (int) fl; I.menu = (int) mp; }
             if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                 || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))
-                || I.whole <= -(1L << 40) || I.whole >= (1L << 40)) return "invalid master record";
+                || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !LaesFile.tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
             if (F64 < 0) return "master too long for this decoder"; I.frames = F64;   // F64 > INT64_MAX: as laes_play.h / laes_stream.h since 635019a
             System.arraycopy(sha, 0, I.sha, 0, 32); final int j = I.storage == 2 ? Math.min(I.stages, out.get(I.refTier - 1).I.stages) : 0; final long nj = LaesFile.levLen(I.frames, I.stages - j);
             final String stem = wd + "/d" + mi;

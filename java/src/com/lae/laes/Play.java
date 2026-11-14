@@ -499,7 +499,7 @@ public final class Play {
                     I.name = LaesFile.nameOf(nb, 0, nb.length); I.flags = (int) fl; I.menu = (int) mp; }
                 if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                     || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))
-                    || I.whole <= -(1L << 40) || I.whole >= (1L << 40)) return "invalid master record";
+                    || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !LaesFile.tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
                 if (F64 < 0) return "master too long for this decoder"; I.frames = F64;   // F64 > INT64_MAX: as laes_play.h / laes_stream.h since 635019a
                 M.j = I.storage == 2 ? Math.min(I.stages, ms.get(I.refTier - 1).I.stages) : 0;
                 for (int c = 0; c < 2; c++) for (int k = M.j; k <= I.stages; k++) { final long l = R.u(4); if (trunc[0] || pos[0] + l > end) return "LAES block truncated"; M.layOff[c][k - M.j] = pos[0]; M.layLen[c][k - M.j] = l; pos[0] += l; }

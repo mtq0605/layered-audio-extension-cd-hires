@@ -468,6 +468,7 @@ public final class StreamEnc {
                 if (m.frames < 1) return mn + " has no samples";
                 if (LaesFile.levLen(m.frames, st) > core.frames() + (1L << 24)) return mn + " is too long: its base level may exceed the core master by at most 2^24 samples";
                 if (sel.get(mi).storage >= 0 && (sel.get(mi).whole <= -(1L << 40) || sel.get(mi).whole >= (1L << 40))) return mn + ": T must lie within +-2^40 base samples";
+                if (!LaesFile.tWithinTrack(sel.get(mi).whole, sel.get(mi).frac, core.frames())) return mn + ": T must not exceed the length of the core master (" + core.frames() + " base samples) either way";   // DEC 11
                 I.bits = m.bits; I.stages = st; I.w = m.w; I.rate = m.rate; I.frames = m.frames; System.arraycopy(m.sha, 0, I.sha, 0, 32);
                 final List<Cand> cs = new ArrayList<Cand>(); final boolean autoSel = sel.get(mi).storage < 0;
                 if (autoSel || sel.get(mi).storage == 1) cs.add(new Cand(1, 0, 0));
@@ -480,13 +481,13 @@ public final class StreamEnc {
                 final String stT = kept != null ? getState(stP) : null;
                 if (stT != null) {   // resume: this master's choice was made before (its two layer files kept)
                     final StateR r = new StateR(stT); final long q = r.i(); final long rWhole = r.i(); final int rFrac = (int) r.i(); final double rBits = r.d(); final String e0 = r.str(); final long n0 = r.i(); final String e1 = r.str(); final long n1 = r.i();
-                    boolean tOk = false; if (!r.bad && q >= 0 && q < cs.size()) { final Cand C = cs.get((int) q); if (C.storage == 1) tOk = rWhole == 0 && rFrac == 0; else { final long[] wf = relT(sel, mi, autoSel, C.tier); tOk = wf != null && wf[0] == rWhole && (int) wf[1] == rFrac; } }   // the T of this run
+                    boolean tOk = false; if (!r.bad && q >= 0 && q < cs.size()) { final Cand C = cs.get((int) q); if (C.storage == 1) tOk = rWhole == 0 && rFrac == 0; else { final long[] wf = relT(sel, mi, autoSel, C.tier, core.frames()); tOk = wf != null && wf[0] == rWhole && (int) wf[1] == rFrac; } }   // the T of this run
                     if (tOk && n0 >= 0 && sizeOrMinus(e0) == n0 && n1 >= 0 && sizeOrMinus(e1) == n1) {   // the files whole, as they were written
                         final Cand C = cs.get((int) q); C.whole = rWhole; C.frac = rFrac; C.bits = rBits; C.e[0] = e0; C.e[1] = e1; C.coded = true; best = (int) q; restored = true; } }
                 final boolean[] inShort = best < 0 ? makeShort(autoSel, cs, mi, m, st, I, core, info, ms, sel, stem, ctx) : null;
                 if (best < 0) for (int q = 0; q < cs.size(); q++) { if (inShort != null && !inShort[q]) continue; final Cand C = cs.get(q); C.bits = above(m, st, C.j);
                     for (int c = 0; c < 2; c++) C.e[c] = stem + "_m" + mi + "_k" + q + "_c" + c + ".lay";
-                    if (C.storage != 1) { final long[] wf = relT(sel, mi, autoSel, C.tier); if (wf == null) { C.e[0] = ""; continue; } C.whole = wf[0]; C.frac = (int) wf[1]; }
+                    if (C.storage != 1) { final long[] wf = relT(sel, mi, autoSel, C.tier, core.frames()); if (wf == null) { C.e[0] = ""; continue; } C.whole = wf[0]; C.frac = (int) wf[1]; }
                     String key = ""; if (cache != null) { key = m.raw + "|" + C.storage + "|" + (C.storage == 1 ? "-" : C.tier == 0 ? "core" : ms.get(C.tier - 1).raw) + "|" + C.j;
                         if (C.storage != 1) key += "|" + C.whole + "|" + (C.frac & 0xFFFFFFFFL); }
                     final CachedCand hit = cache != null ? cache.get(key) : null;
@@ -524,7 +525,7 @@ public final class StreamEnc {
         final int kShort = 3;
         if (!(autoSel && ms.size() > 16 && cs.size() > kShort) || LaesFile.testEnv("LAES_NO_SHORTLIST") != null) return null;
         final List<double[]> est = new ArrayList<double[]>();   // {estimate, q}
-        for (int q = 0; q < cs.size(); q++) { final Cand C = cs.get(q); long wh = 0; int fr = 0; if (C.storage != 1) { final long[] wf = relT(sel, mi, autoSel, C.tier); if (wf == null) continue; wh = wf[0]; fr = (int) wf[1]; }
+        for (int q = 0; q < cs.size(); q++) { final Cand C = cs.get(q); long wh = 0; int fr = 0; if (C.storage != 1) { final long[] wf = relT(sel, mi, autoSel, C.tier, core.frames()); if (wf == null) continue; wh = wf[0]; fr = (int) wf[1]; }
             final int j = C.j; final long nj = LaesFile.levLen(I.frames, st - j), B = 4096L << j, L = (1L << 15) << j;
             final List<long[]> segs = new ArrayList<long[]>(); if (nj <= 4 * L) segs.add(new long[] {0, nj});
             else for (int s = 0; s < 4; s++) { long a = (2 * s + 1) * (nj / 8) + ((2 * s + 1) * (nj % 8)) / 8 - L / 2; a = a / B * B; a = Math.max(0L, Math.min(a, nj - L) / B * B); segs.add(new long[] {a, a + L}); }
@@ -569,11 +570,13 @@ public final class StreamEnc {
     static double above(Prep m, int st, int j) { double b = 0; for (int c = 0; c < 2; c++) for (int k = j + 1; k <= st; k++) b += (double) m.dbits[c][k]; return b; }
     // T relative to the tier, from the absolute T of both (2^-32 base samples, int64); null when out of range
     // port of laes_stream_enc.h:encodeLaesS::relT (the lambda); returns {whole, frac as uint32}
-    static long[] relT(List<MasterSel> sel, int mi, boolean autoSel, int tier) {
+    static long[] relT(List<MasterSel> sel, int mi, boolean autoSel, int tier, long nCore) {   // nCore: the core master frames (DEC 11)
         if (!autoSel) return new long[] {sel.get(mi).whole, sel.get(mi).frac & 0xFFFFFFFFL};
         final long lim = 1L << 30;
         if (sel.get(mi).whole <= -lim || sel.get(mi).whole >= lim || (tier != 0 && (sel.get(tier - 1).whole <= -lim || sel.get(tier - 1).whole >= lim))) return null;
-        final long x = X(sel, mi) - (tier != 0 ? X(sel, tier - 1) : 0); return new long[] {x >> 32, x & 0xFFFFFFFFL}; }
+        final long x = X(sel, mi) - (tier != 0 ? X(sel, tier - 1) : 0);
+        if (!LaesFile.tWithinTrack(x >> 32, (int) x, nCore)) return null;   // DEC 11: T relative to the tier within the track too
+        return new long[] {x >> 32, x & 0xFFFFFFFFL}; }
     // port of laes_stream_enc.h:encodeLaesS::relT::X (the lambda)
     static long X(List<MasterSel> sel, int k) { return sel.get(k).whole * 4294967296L + (sel.get(k).frac & 0xFFFFFFFFL); }
 }

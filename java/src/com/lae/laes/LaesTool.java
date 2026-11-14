@@ -112,7 +112,8 @@ public final class LaesTool {
         final LaesEncoder.Options po = LaesEncoder.Options.fromArgs(args); final long piece = LaesEncoder.pieceFor(po, maxSt); final int threads = Par.threadsOr(po.threads);
         final List<Stream.DecMaster> dec = new ArrayList<Stream.DecMaster>(); final LaesFile.Head head = new LaesFile.Head(); final String de = Stream.decodeLaesS(bodyPath, core, core.rate, wd, dec, piece, threads, head);
         if (!de.isEmpty()) { System.out.println(inPath + ": " + de + " (the core master is still playable)"); return 2; }
-        boolean all = true; { final List<LaesFile.MasterInfo> mi0 = new ArrayList<LaesFile.MasterInfo>(); for (Stream.DecMaster D : dec) mi0.add(D.I); final int[] mo = Choices.menuOrder(mi0);   // in the menu order, numbered as in menus
+        boolean all = true; final List<LaesFile.MasterInfo> mi0 = new ArrayList<LaesFile.MasterInfo>(); for (Stream.DecMaster D : dec) mi0.add(D.I); {   // DEC 24: every master line below gives the menu number (Choices.displayNo)
+          final int[] mo = Choices.menuOrder(mi0);   // in the menu order, numbered as in menus
           for (int p = 0; p < mo.length; p++) { final int i = mo[p]; final LaesFile.MasterInfo I = dec.get(i).I;
               System.out.println("master " + (p + 1) + (I.name.length() == 0 ? "" : " \"" + I.name + "\"") + ": " + I.rate + " Hz " + I.bits + "-bit, " + I.frames + " frames, SHA-256 " + (dec.get(i).shaOk ? "ok" : "MISMATCH")
                                  + (mo[p] != p ? " (master " + (i + 1) + " in the file)" : "")); all &= dec.get(i).shaOk; }
@@ -124,7 +125,7 @@ public final class LaesTool {
             // own group - the master, its rate levels (lossless), its derived 16-bit versions (unless the file turns them off for it)
             final List<LaesFile.MasterInfo> infos = new ArrayList<LaesFile.MasterInfo>(); final boolean[] offered = new boolean[dec.size()];
             for (int i = 0; i < dec.size(); i++) { infos.add(dec.get(i).I); offered[i] = dec.get(i).shaOk;
-                if (!dec.get(i).shaOk) System.out.println("master " + (i + 1) + ": SHA-256 mismatch: not offered (nor its rate levels or derived versions)"); }
+                if (!dec.get(i).shaOk) System.out.println("master " + Choices.displayNo(mi0, i) + ": SHA-256 mismatch: not offered (nor its rate levels or derived versions)"); }
             final List<Choice> ch = new ArrayList<Choice>();
             final List<Choices.Spec> specs = Choices.build(core.rate, core.bits, core.frames(), infos, offered, head); final int defJ = Choices.defaultIndex(specs, head);
             for (Choices.Spec sp : specs) { Src s = new Src(); s.kind = sp.kind == 3 ? 0 : sp.kind; s.rate = sp.rate; s.bits = sp.bits; s.n = sp.frames; if (sp.m >= 0) s.m = sp.m; s.k = sp.level;
@@ -202,9 +203,9 @@ public final class LaesTool {
                     finally { in.close(); }
                     if (same) hit = k; }
                 // U14-c: a file the WAV reader refused is named with the reason (it was only "DIFFERENT (no decoded master equals it)")
-                if (hit >= 0) { used[hit] = true; System.out.println("master " + (hit + 1) + " vs " + args[i] + ": IDENTICAL"); }
+                if (hit >= 0) { used[hit] = true; System.out.println("master " + Choices.displayNo(mi0, hit) + " vs " + args[i] + ": IDENTICAL"); }
                 else if (!re.isEmpty()) { System.out.println(args[i] + ": DIFFERENT (not compared: " + (re.startsWith(args[i] + ": ") ? re.substring(args[i].length() + 2) : re) + ")"); all = false; }
                 else { System.out.println(args[i] + ": DIFFERENT (no decoded master equals it)"); all = false; } }
-            for (int k = 0; k < dec.size(); k++) if (!used[k] && args.length > 2) System.out.println("master " + (k + 1) + ": not compared"); }
+            for (int k = 0; k < dec.size(); k++) if (!used[k] && args.length > 2) System.out.println("master " + Choices.displayNo(mi0, k) + ": not compared"); }
         return all ? 0 : 2; }
 }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: Apache-2.0
-// lae_abx - a stand-alone ABX listening test for the LAE demo files (Windows, x64).
+// lae_abx - a stand-alone ABX listening test for the LAE demo files (Windows 10 version 1703 or later, x64: it uses the per-monitor DPI functions of that version).
+// FU20-14 (2026-11-14): runProcess and expectedFromLog, unused since decoding moved to startDecode and riffTotal, removed.
 //
 // The kit folder holds lae_abx.exe, lae_udec.exe (the LAE decoder), abx_set.txt and the audio files. abx_set.txt lists the pairs:
 //   <name> | <file A> | <pick A> | <file B> | <pick B>
@@ -134,14 +135,6 @@ struct Resampler {
 // ---------------------------------------------------------------- one prepared source
 struct Source { std::string name, file, pick, sha; std::vector<float> L, R; };
 
-static bool runProcess(const std::wstring& cmd, const std::wstring& logPath, std::string& err, const std::function<void()>& tick = nullptr) {
-    SECURITY_ATTRIBUTES sa{ sizeof sa, nullptr, TRUE }; HANDLE log = CreateFileW(logPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS, 0, nullptr);
-    STARTUPINFOW si{ sizeof si }; si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE; si.hStdOutput = log; si.hStdError = log; si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    PROCESS_INFORMATION pi{}; std::wstring c = cmd;
-    if (!CreateProcessW(nullptr, &c[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) { if (log != INVALID_HANDLE_VALUE) CloseHandle(log); err = "cannot start lae_udec.exe"; return false; }
-    while (WaitForSingleObject(pi.hProcess, 250) == WAIT_TIMEOUT) if (tick) tick();
-    DWORD code = 1; GetExitCodeProcess(pi.hProcess, &code); CloseHandle(pi.hProcess); CloseHandle(pi.hThread); if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
-    if (code) { err = "lae_udec.exe failed (exit code " + std::to_string(code) + "), see " + narrow(logPath); return false; } return true; }
 
 // reads a WAV in pieces, resamples each channel to the test rate; progress runs from base to base + span
 static bool loadWav(const std::wstring& path, int rate, Source& s, std::string& err, const Say& say, double base, double span) {
@@ -222,11 +215,6 @@ static void cacheSave(const std::wstring& path, const Source& x) {
     for (int c = 0; c < 2; c++) { const char* p = (const char*)(c ? x.R.data() : x.L.data()); size_t left = x.L.size() * 4; while (left > 0) { const DWORD part = (DWORD)std::min<size_t>(left, 1u << 30); WriteFile(f, p, part, &put, nullptr); p += part; left -= part; } }
     CloseHandle(f); }
 static long long fileSize(const std::wstring& path) { WIN32_FILE_ATTRIBUTE_DATA a; return GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a) ? ((long long)a.nFileSizeHigh << 32) | a.nFileSizeLow : 0; }
-// the size of the WAV lae_udec will write, from the line of the chosen choice it prints at its start ("> n  name  rate Hz bits-bit frames frames")
-static long long expectedFromLog(const std::wstring& log, const std::string& pick) {
-    FILE* f = _wfopen(log.c_str(), L"rb"); if (!f) return 0; std::string all; char b[4096]; size_t n; while ((n = fread(b, 1, sizeof b, f)) > 0 && all.size() < 65536) all.append(b, n); fclose(f);
-    const size_t k = all.find(" " + pick + " "); if (k == std::string::npos) return 0; long long rate = 0, bits = 0, frames = 0;
-    return sscanf(all.c_str() + k + pick.size() + 2, " %lld Hz %lld-bit %lld frames", &rate, &bits, &frames) == 3 ? frames * 2 * (bits / 8) + 44 : 0; }
 
 struct Job;
 static long long riffTotal(const std::wstring& path) {   // the final file size a WAV header announces (RIFF size + 8; RF64: from ds64), 0 if not there yet

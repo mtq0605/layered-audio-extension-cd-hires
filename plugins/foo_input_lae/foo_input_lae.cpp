@@ -333,12 +333,14 @@ private:
 struct LaesProgress {   // one progress bar for the whole wait: permille 0..1000, what is being done, since when
     enum { kIdle = 0, kReading = 1, kChecking = 2, kBuffering = 3 };
     std::atomic<int> phase{kIdle}, masters{0}; std::atomic<int> permille{0}; std::atomic<uint64_t> t0{0};
-    std::atomic<unsigned> episode{0}; std::atomic<bool> cancel{false}, shown{false}; std::string name;
+    std::atomic<unsigned> episode{0}; std::atomic<bool> cancel{false}; std::string name;
+    std::atomic<unsigned> shownEp{~0u};   // the episode whose window is open (~0u: none)
 };
 std::string mmss(double s) { if (s < 0) s = 0; char b[16]; snprintf(b, sizeof b, "%d:%02d", (int)s / 60, (int)s % 60); return b; }
 class laes_progress_cb : public threaded_process_callback {
 public:
-    laes_progress_cb(std::shared_ptr<LaesProgress> p, bool stopPlayback) : m_p(std::move(p)), m_stopPlayback(stopPlayback), m_ep(m_p->episode.load()) {}
+    // ep: the episode the window was asked for (not the one current when the main thread gets to it: that one may already be the next)
+    laes_progress_cb(std::shared_ptr<LaesProgress> p, bool stopPlayback, unsigned ep) : m_p(std::move(p)), m_stopPlayback(stopPlayback), m_ep(ep) {}
     void run(threaded_process_status& st, abort_callback& a) {
         while (m_p->episode.load() == m_ep) {
             if (a.is_aborting()) { m_p->cancel = true; if (m_stopPlayback) fb2k::inMainThread([] { playback_control::get()->stop(); }); break; }
@@ -352,14 +354,14 @@ public:
             char pct[96]; snprintf(pct, sizeof pct, "%.0f %%", f * 100.0);
             t += std::string("\n") + pct + T(" · elapsed ", " · 已用 ") + mmss(el) + (f > 0.02 ? std::string(T(" · remaining about ", " · 剩余约 ")) + mmss(el * (1.0 - f) / f) : std::string());
             st.set_item((m_p->name + "\n" + t).c_str()); st.set_progress_float((std::min)(1.0, f)); Sleep(200); }
-        m_p->shown = false; }
+        unsigned mine = m_ep; m_p->shownEp.compare_exchange_strong(mine, ~0u); }   // a window of a newer episode stays marked as open
 private:
     std::shared_ptr<LaesProgress> m_p; bool m_stopPlayback; unsigned m_ep;
 };
 // opens the window for the current episode of p (once); closeProgress ends the episode and the window
 void showProgress(const std::shared_ptr<LaesProgress>& p, bool stopPlayback) {
-    if (p->shown.exchange(true)) return; std::shared_ptr<LaesProgress> q = p;
-    fb2k::inMainThread([q, stopPlayback] { threaded_process::g_run_modeless(new service_impl_t<laes_progress_cb>(q, stopPlayback),
+    const unsigned ep = p->episode.load(); if (p->shownEp.exchange(ep) == ep) return; std::shared_ptr<LaesProgress> q = p;
+    fb2k::inMainThread([q, stopPlayback, ep] { threaded_process::g_run_modeless(new service_impl_t<laes_progress_cb>(q, stopPlayback, ep),
         threaded_process::flag_show_abort | threaded_process::flag_show_progress | threaded_process::flag_show_item | threaded_process::flag_show_delayed,
         core_api::get_main_window(), T("LAE decoder: LAES", "LAE 解码器：LAES")); }); }
 void closeProgress(const std::shared_ptr<LaesProgress>& p) { p->episode++; p->phase = LaesProgress::kIdle; }

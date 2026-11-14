@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
-#include "enc_io.h"
+#include "../../src/enc_io.h"
 int main(int argc, char** argv) {
     std::vector<int32_t> x = encio::readAll<int32_t>(argv[1]); long n = encio::count(x.size()) / 2; long P = atol(argv[3]);
     std::vector<int32_t> y((n + 2 * P) * 2);

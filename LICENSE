@@ -54,10 +54,8 @@ Decoder-side and other sources in src/:       Apache-2.0
   the noise tool lae_noise (lae_noise.cpp,
   noise_*.h, noise_*.cpp), win_utf8.h
 Encoder-side sources in src/:                 GPL-3.0-or-later OR
-  lae_enc.cpp, pad_mirror.cpp,                LicenseRef-LAE-Commercial
-  base_layer.cpp, routes.cpp,
-  lossy_v2.cpp, part_coder.cpp,
-  tone_scan.cpp, partition.h,
+  lae_enc.cpp, base_layer.cpp,                LicenseRef-LAE-Commercial
+  lossy_v2.cpp, partition.h,
   cd_align.cpp, cd_plan.cpp, enc_io.h,
   blk_io.h, wav_in.h, pad_blk.cpp,
   base_blk.cpp, routes_blk.cpp,
@@ -66,6 +64,9 @@ Encoder-side sources in src/:                 GPL-3.0-or-later OR
   laes_flac_enc.h, laes_stream_enc.h,
   laes_tags.h, laes_selftest.h,
   laes_tool.cpp, laes_export.cpp
+Encoder-side reference modules in             GPL-3.0-or-later OR
+  tools/reference/: routes.cpp,                LicenseRef-LAE-Commercial
+  tone_scan.cpp, part_coder.cpp, pad_mirror.cpp
 Java library, java/src/com/lae/:
   decoders and shared helpers                 Apache-2.0
   the 27 encoder files, listed in AUTHORS     GPL-3.0-or-later OR

@@ -16,8 +16,8 @@
 #include <algorithm>
 #include <functional>
 #include <type_traits>
-#include "part_stream.h"
-#include "enc_io.h"
+#include "../../src/part_stream.h"
+#include "../../src/enc_io.h"
 using namespace std;
 
 int main(int argc, char** argv) {

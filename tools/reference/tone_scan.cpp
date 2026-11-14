@@ -15,8 +15,8 @@
 #include <cmath>
 #include <vector>
 #include <complex>
-#include "fft.h"
-#include "enc_io.h"
+#include "../../src/fft.h"
+#include "../../src/enc_io.h"
 #include <algorithm>
 #include <string>
 #include <chrono>

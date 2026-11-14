@@ -22,7 +22,7 @@ using namespace std;
 typedef int32_t i32; typedef int64_t i64; static const int N = mdct::N;
 using mdct::forward; using mdct::inverse;
 #define TONE_NO_MAIN
-#include "tone_scan.cpp"
+#include "../tools/reference/tone_scan.cpp"   // reference module (moved 2026-11-15)
 #include <map>
 #include <cstring>
 #include "partition.h"

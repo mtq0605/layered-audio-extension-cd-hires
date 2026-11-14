@@ -14,12 +14,8 @@ The encoder-side sources carry the SPDX expression
 
 - in `src/`:
   - `lae_enc.cpp`
-  - `pad_mirror.cpp`
   - `base_layer.cpp`
-  - `routes.cpp`
   - `lossy_v2.cpp`
-  - `part_coder.cpp`
-  - `tone_scan.cpp`
   - `partition.h`
   - `cd_align.cpp`
   - `cd_plan.cpp`
@@ -35,6 +31,9 @@ The encoder-side sources carry the SPDX expression
     `laes_stream_enc.h`, `laes_tags.h`, `laes_selftest.h`, `laes_tool.cpp`
     and `laes_export.cpp` (the encoder side of LAE Lossless (LAES),
     including the tools `laes` and `laes_export`)
+- in `tools/reference/`: `routes.cpp`, `tone_scan.cpp`, `part_coder.cpp` and
+  `pad_mirror.cpp` (the former whole-track encoder modules, kept only as a
+  reference; `lae_enc` does not compile them)
 - in `java/src/com/lae/`: the 27 encoder files of the Java library (the
   ports of the files above and their helpers, in `laey/` and `laes/`).
   Each of them names this expression in its SPDX header, and `AUTHORS`

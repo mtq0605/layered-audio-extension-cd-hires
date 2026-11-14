@@ -18,10 +18,10 @@
 #include <thread>
 #include <exception>
 #include <complex>
-#include "fft.h"
+#include "../../src/fft.h"
 #include <algorithm>
-#include "halfband.h"
-#include "enc_io.h"
+#include "../../src/halfband.h"
+#include "../../src/enc_io.h"
 using namespace std; using namespace lae;
 static const int32_t* tab(int s, int& half) { switch (s) { case 0: half = kHalfLen0; return kHalf0; case 1: half = kHalfLen1; return kHalf1; case 2: half = kHalfLen2; return kHalf2; default: half = kHalfLen3; return kHalf3; } }
 // runs f(0) here and f(1) in a second thread (the two channels); an exception in either is re-thrown here after both have finished

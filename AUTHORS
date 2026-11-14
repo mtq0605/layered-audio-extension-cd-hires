@@ -32,12 +32,8 @@ mtq0605 | @mtq0605 | design of the LAE format, LAE Lossy (LAEY) specification, L
 # of the author.
 
 src/lae_enc.cpp      | mtq0605 | original | -
-src/pad_mirror.cpp   | mtq0605 | original | -
 src/base_layer.cpp   | mtq0605 | original | -
-src/routes.cpp       | mtq0605 | original | -
 src/lossy_v2.cpp     | mtq0605 | original | -
-src/part_coder.cpp   | mtq0605 | original | -
-src/tone_scan.cpp    | mtq0605 | original | -
 src/partition.h      | mtq0605 | original | -
 src/cd_align.cpp     | mtq0605 | original | -
 src/cd_plan.cpp      | mtq0605 | original | -
@@ -57,6 +53,10 @@ src/laes_tool.cpp    | mtq0605 | original | -
 src/laes_selftest.h  | mtq0605 | original | -
 src/laes_tags.h      | mtq0605 | original | -
 src/laes_export.cpp  | mtq0605 | original (streaming export; contains the FLAC writer of src/laes_flac_enc.h) | -
+tools/reference/pad_mirror.cpp | mtq0605 | original | -
+tools/reference/routes.cpp     | mtq0605 | original | -
+tools/reference/part_coder.cpp | mtq0605 | original | -
+tools/reference/tone_scan.cpp  | mtq0605 | original | -
 
 # Java library (java/src/com/lae/): ports of the encoder files above, same licence. Delivered and checked byte-identical with the C++ tools.
 

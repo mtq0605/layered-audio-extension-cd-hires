@@ -129,10 +129,14 @@ inline std::vector<uint8_t> flacBlocks(const Tags& t, bool lastBlock, const char
     return o; }
 
 // Vorbis name -> RIFF INFO id / ID3v2.4 text frame; "" = none (ID3: TXXX)
+static const char* const kInfoIds[][2] = {{"TITLE", "INAM"}, {"ARTIST", "IART"}, {"ALBUM", "IPRD"}, {"DATE", "ICRD"}, {"COPYRIGHT", "ICOP"}, {"COMMENT", "ICMT"},
+                                           {"GENRE", "IGNR"}, {"TRACKNUMBER", "ITRK"}, {"ENGINEER", "IENG"}, {"DESCRIPTION", "ISBJ"}};
 inline const char* infoId(const std::string& k) {
-    static const char* m[][2] = {{"TITLE", "INAM"}, {"ARTIST", "IART"}, {"ALBUM", "IPRD"}, {"DATE", "ICRD"}, {"COPYRIGHT", "ICOP"}, {"COMMENT", "ICMT"},
-                                 {"GENRE", "IGNR"}, {"TRACKNUMBER", "ITRK"}, {"ENGINEER", "IENG"}, {"DESCRIPTION", "ISBJ"}};
-    for (auto& e : m) if (k == e[0]) return e[1]; return ""; }
+    for (auto& e : kInfoIds) if (k == e[0]) return e[1]; return ""; }
+// DEC 29 (FU14-7 (4)): the other way, RIFF INFO id -> Vorbis name (laes_export writes FLAC tags from a WAV file's LIST/INFO); ISFT (the
+// encoder) -> ENCODER; "" = not one of these (the id is kept as it is)
+inline const char* vorbisName(const std::string& id) {
+    for (auto& e : kInfoIds) if (id == e[1]) return e[0]; return id == "ISFT" ? "ENCODER" : ""; }
 inline const char* id3Frame(const std::string& k) {
     static const char* m[][2] = {{"TITLE", "TIT2"}, {"ARTIST", "TPE1"}, {"ALBUM", "TALB"}, {"ALBUMARTIST", "TPE2"}, {"DATE", "TDRC"}, {"COPYRIGHT", "TCOP"},
                                  {"GENRE", "TCON"}, {"TRACKNUMBER", "TRCK"}, {"DISCNUMBER", "TPOS"}, {"COMPOSER", "TCOM"}, {"LYRICIST", "TEXT"}, {"ISRC", "TSRC"}};

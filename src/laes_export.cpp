@@ -30,6 +30,7 @@
 #include "laes_play.h"
 #include "laes_flac_enc.h"
 #include "laes_pick.h"   // DEC 21: mayReplace (an existing output is not replaced silently)
+#include "laes_tags.h"   // DEC 29: vorbisName (RIFF INFO id -> Vorbis name)
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 namespace fs = std::filesystem;
 
@@ -140,7 +141,8 @@ static int run(int argc, char** argv) {
     std::vector<std::string> tags = {"LAES_CHOICE=" + C.name, "LAES_FILE_SHA256=" + hex(f.fileSha, 32)};
     if (C.m >= 0) tags.push_back("LAES_MASTER_SHA256=" + hex(f.ms[(size_t)C.m].I.sha, 32));
     if (ofMaster && !marked && unverified && !whole) tags.push_back("LAES_UNVERIFIED=1");   // FU14-2: given out without the SHA-256 check
-    for (auto& t : f.tags) tags.push_back(t.first + "=" + t.second);
+    for (auto& t : f.tags) {   // DEC 29: a WAV file's LIST/INFO ids become the Vorbis names (INAM -> TITLE, ...); a FLAC file's names are kept
+        const char* vn = f.flac ? "" : laestag::vorbisName(t.first); tags.push_back((*vn ? std::string(vn) : t.first) + "=" + t.second); }
     const int thr = (int)std::max(1u, std::thread::hardware_concurrency());
     if (seg > 0) {   // consecutive pieces of seg seconds from --from on
         if (dir.empty()) { printf("--seg needs --dir\n"); return 1; }

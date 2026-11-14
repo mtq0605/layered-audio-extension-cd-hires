@@ -188,7 +188,10 @@ public final class LaesTool {
                             for (long q = 0; q < e - a && same; q++) same = r[(int) q * 2] == x0[(int) q] && r[(int) q * 2 + 1] == x1[(int) q]; } }
                     finally { in.close(); }
                     if (same) hit = k; }
-                if (hit >= 0) { used[hit] = true; System.out.println("master " + (hit + 1) + " vs " + args[i] + ": IDENTICAL"); } else { System.out.println(args[i] + ": DIFFERENT (no decoded master equals it)"); all = false; } }
+                // U14-c: a file the WAV reader refused is named with the reason (it was only "DIFFERENT (no decoded master equals it)")
+                if (hit >= 0) { used[hit] = true; System.out.println("master " + (hit + 1) + " vs " + args[i] + ": IDENTICAL"); }
+                else if (!re.isEmpty()) { System.out.println(args[i] + ": DIFFERENT (not compared: " + (re.startsWith(args[i] + ": ") ? re.substring(args[i].length() + 2) : re) + ")"); all = false; }
+                else { System.out.println(args[i] + ": DIFFERENT (no decoded master equals it)"); all = false; } }
             for (int k = 0; k < dec.size(); k++) if (!used[k] && args.length > 2) System.out.println("master " + (k + 1) + ": not compared"); }
         return all ? 0 : 2; }
 }

@@ -185,6 +185,7 @@ inline std::string decodeLaes(const std::vector<uint8_t>& body, const Pcm& core,
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)   // all in uint64
             || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40)) return "invalid master record";
+        if (I.storage != 1 && I.refTier == 0 && core.frames() < 1) return "invalid master record: it refers to a core master of no samples";   // the reference needs core samples (refLen, mir)
         if (F64 > (uint64_t)PTRDIFF_MAX / sizeof(int64_t)) return "master too long for this decoder"; I.frames = (int64_t)F64;   // whole master in memory: int64_t counts, but a V of F64 samples must be addressable (32-bit: 2^28)
         memcpy(I.sha, sha, 32); const int j = I.storage == 2 ? std::min(I.stages, info[I.refTier - 1].stages) : 0; const int64_t nj = levLen(I.frames, I.stages - j);
         Pcm m; m.rate = I.rate; m.bits = I.bits; std::vector<V> top(2);

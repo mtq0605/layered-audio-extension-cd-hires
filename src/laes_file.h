@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: Apache-2.0
 // LAES file format and decoder (draft v1, 2026-10-28; the encoder side is in laes_file_enc.h, GPL / commercial). An LAES WAV file is an LAE file whose "LAE " chunk carries an LAES payload:
-//   RIFF/WAVE: "fmt " (PCM, 2 ch, base rate, 16 bit) | "data" = the core master (can be CD-compatible: 44.1 kHz or 48 kHz, 16 bit) | "LAE " = payload + CRC-32
+//   RIFF/WAVE: "fmt " (PCM, 2 ch, base rate, 16 / 24 / 32 bit) | "data" = the core master (can be CD-compatible: 44.1 kHz or 48 kHz, 16 bit) | "LAE " = payload + CRC-32
 // The same "LAE " chunk body followed by the 80-byte track trailer (type 2) is the per-track extension file of a CD-Extra disc (.LAX),
 // handled by lae_cdx exactly like an LAE Lossy block. An LAE Lossy decoder rejects the payload (its magic is not "LAE1") and plays the core.
 //
 // Payload (little-endian):
-//   header, 64 bytes: magic "LAE2" | u16 version = 1 | u16 header size = 64 | u32 base rate | u8 core bits (16 / 24 / 32) | u8 channels = 2 |
+//   header, 64 bytes: magic "LAE2" | u16 version (1 or 2) | u16 header size = 64 | u32 base rate | u8 core bits (16 / 24 / 32) | u8 channels = 2 |
 //                     u8 number of masters (version 1: 1..16; version 2: 1..255) | u8 core mode (0 = core in the WAV "data" / CD tracks, 1 = core in the FLAC audio frames) |
 //                     u64 core frames | 32-byte SHA-256 of the core (16 bit: int16 LE as in "data"; 24 / 32 bit: int32 LE) |
-//                     u64 reserved = 0
+//                     8 bytes: version 1 reserved (0); version 2 the default master, the core master flags and 6 zero bytes (headFrom below)
 //   per master, 72-byte record, then its layers:
 //     u8 bits (16/24/32) | u8 stages (0..3: rate = base * 2^stages) | u8 unused low bits w | u8 storage (0 = difference to a tier at the base
 //     level, 1 = full, 2 = difference to an earlier master at the highest level both have) | u8 reference tier (0 = core, k = master k;

@@ -89,15 +89,16 @@ template <class Vec> inline std::vector<uint8_t> encodeFrame(const Vec* ch, int6
         encodeSubframe(w, px, n, bps); }
     w.flush(); uint16_t cr = crc16(w.b.data(), w.b.size()); w.b.push_back((uint8_t)(cr >> 8)); w.b.push_back((uint8_t)cr); return w.b; }
 inline void putBlockHeader(std::vector<uint8_t>& o, bool last, int type, uint32_t len) { o.push_back((uint8_t)((last ? 0x80 : 0) | type)); o.push_back((uint8_t)(len >> 16)); o.push_back((uint8_t)(len >> 8)); o.push_back((uint8_t)len); }
-// core: two channels of n samples at bps bits (16 / 24 / 32), rate 44100 or 48000; app: the LAES payload (may be empty)
 // the STREAMINFO MD5 of int64 or int32 samples (as audioMd5)
 template <class Vec> inline void audioMd5T(const Vec* ch, int64_t n, int bits, uint8_t out[16]) { alignhash::Md5 m; const int by = (bits + 7) / 8; std::vector<uint8_t> b; b.reserve(1 << 16);
     for (int64_t i = 0; i < n; i++) for (int c = 0; c < 2; c++) { uint64_t v = (uint64_t)(int64_t)ch[c][(size_t)i]; for (int k = 0; k < by; k++) b.push_back((uint8_t)(v >> (8 * k))); if (b.size() >= (1 << 16)) { m.update(b.data(), b.size()); b.clear(); } }
     m.update(b.data(), b.size()); std::string h = m.hex(); for (int i = 0; i < 16; i++) out[i] = (uint8_t)std::stoul(h.substr(i * 2, 2), nullptr, 16); }
+// core: two channels of n samples at bps bits (16 / 24 / 32), rate 44100 or 48000; app: the LAES payload (may be empty)
 template <class Vec> inline std::vector<uint8_t> writeFlac(const Vec* ch, int rate, int bps, const std::vector<uint8_t>& app) {   // throws on input it cannot write exactly
     const int64_t n = (int64_t)ch[0].size(); const int64_t B = 4096;
     if (bps != 16 && bps != 24 && bps != 32) throw std::runtime_error("laesflac: the core master must be 16, 24 or 32 bit");
     if (rate < 1 || rate >= (1 << 20) || (int64_t)ch[1].size() != n || n >= (1LL << 36)) throw std::runtime_error("laesflac: bad rate or length");
+    if (n == 0) throw std::runtime_error("laesflac: no samples (an LAES core master has at least one frame)");   // FU12-5: the reader refuses a total of 0
     { const int64_t lim = 1LL << (bps - 1); for (int c = 0; c < 2; c++) for (int64_t v : ch[c]) if (v < -lim || v >= lim) throw std::runtime_error("laesflac: a sample does not fit the bit depth"); } std::vector<std::vector<uint8_t>> fr; uint32_t fmin = 0xFFFFFF, fmax = 0;
     {   // the frames are independent: coded in parallel threads (L5, 2026-11-03), then taken in order
         const int64_t nf = (n + B - 1) / B; fr.resize((size_t)nf);

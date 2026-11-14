@@ -18,7 +18,6 @@ struct BitW { std::vector<uint8_t> b; uint64_t acc = 0; int n = 0; size_t bits =
     void zeros(uint64_t q) { while (q > 0) { const int t = (int)std::min<uint64_t>(q, 32); put(0, t); q -= (uint64_t)t; } }
     void putS(int64_t v, int w) { put((uint64_t)v & ((1ull << w) - 1), w); }   // w <= 63
     void flush() { while (n) put(0, 1); } };
-// reader with a sticky failure flag: every read is bounds-checked; on failure it returns 0 and decoding stops
 // ---- residual coding
 // bit length of u (0 for 0). widthOf(v) == max(1, bitLen(zz(v))) for every int64 v, so the width of a partition is max(1, bitLen(OR of its zz values))
 inline int bitLen(uint64_t u) {

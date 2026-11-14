@@ -26,6 +26,12 @@ inline std::vector<uint8_t> encodeLaes(const Pcm& core, int baseRate, const std:
     for (size_t mi = 0; mi < ms.size(); mi++) { const Pcm& m = ms[mi].m; MasterInfo& I = info[mi];
         if (m.bits != 16 && m.bits != 24 && m.bits != 32) { err = "master word length must be 16, 24 or 32"; return {}; }
         int st = 0; while ((baseRate << st) < m.rate && st < 4) st++; if ((baseRate << st) != m.rate || st > 3) { err = "master rate must be the base rate times 1, 2, 4 or 8"; return {}; }
+        // FU12-5 (2026-11-14): input this format cannot hold is refused here, not first by the decoder's check of the written file
+        const std::string mn = "master " + std::to_string(mi + 1);
+        if (m.frames() < 1 || (int64_t)m.c[1].size() != m.frames()) { err = mn + (m.frames() < 1 ? " has no samples" : ": the two channels differ in length"); return {}; }
+        if ((uint64_t)levLen(m.frames(), st) > (uint64_t)core.frames() + (1ull << 24)) { err = mn + " is too long: its base level may exceed the core master by at most 2^24 samples"; return {}; }
+        { const int64_t lim = 1LL << (m.bits - 1); for (int c = 0; c < 2; c++) for (int64_t v : m.c[c]) if (v < -lim || v >= lim) { err = mn + ": a sample does not fit its word length"; return {}; } }
+        if (ms[mi].storage >= 0 && (ms[mi].whole <= -(1LL << 40) || ms[mi].whole >= (1LL << 40))) { err = mn + ": T must lie within +-2^40 base samples"; return {}; }
         I.bits = m.bits; I.stages = st; I.w = unusedBits(m); I.rate = m.rate; I.frames = m.frames(); hashPcm(m, I.sha);
         std::vector<std::vector<uint8_t>> d[2]; std::vector<std::vector<size_t>> dbits(2, std::vector<size_t>(st + 1, 0)); lev[mi].assign(2, std::vector<V>(st + 1));
         for (int c = 0; c < 2; c++) { V x(I.frames); for (int64_t i = 0; i < I.frames; i++) x[i] = m.c[c][i] >> I.w; std::vector<V>& s = lev[mi][c]; std::vector<V> dd(st + 1); s[st] = x;
@@ -56,7 +62,10 @@ inline std::vector<uint8_t> encodeLaes(const Pcm& core, int baseRate, const std:
                     for (int64_t i = 0; i < nj; i++) e[i] = lev[mi][c][j][i] - r[i]; size_t b; C.e[c] = encodeLayer(e, 4096L << j, b); C.bits += (double)b; } }
             if (best < 0 || C.bits < cs[best].bits) best = (int)q; }
         if (best < 0) { err = "no usable storage for master " + std::to_string(mi + 1); return {}; }
-        Cand& B = cs[best]; I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? 0 : B.whole; I.frac = B.storage == 1 ? 0 : B.frac; I.layerBits = B.bits;
+        Cand& B = cs[best];
+        for (int c = 0; c < 2; c++) { bool big = B.e[c].size() > 0xFFFFFFFFull; for (int k = B.j + 1; k <= st; k++) big |= d[c][k].size() > 0xFFFFFFFFull;   // the u32 layer length (FU12-5)
+            if (big) { err = mn + ": a layer is larger than 4 GiB, more than an LAES layer can hold"; return {}; } }
+        I.storage =B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? 0 : B.whole; I.frac = B.storage == 1 ? 0 : B.frac; I.layerBits = B.bits;
         I.name = ms[mi].name; I.flags = ms[mi].flags; I.menu = ms[mi].menu;
         o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? I.name.size() : 0, 1); o.u(ver == 2 ? (uint64_t)I.flags : 0, 1); o.u(ver == 2 ? (uint64_t)I.menu : 0, 1); o.u((uint64_t)I.rate, 4); o.u(0, 4); o.u((uint64_t)I.frames, 8);
         o.u((uint64_t)I.whole, 8); o.u(I.frac, 4); o.u(0, 4); o.raw(I.sha, 32); if (ver == 2) o.raw((const uint8_t*)I.name.data(), I.name.size());

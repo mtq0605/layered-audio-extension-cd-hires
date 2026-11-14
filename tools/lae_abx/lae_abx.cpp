@@ -52,6 +52,8 @@
 static const char* kVersion = "lae_abx 1.0 (2026-11-12)";
 
 typedef std::function<void(const std::string&, double)> Say;   // stage text, overall fraction 0..1 (negative: unchanged)
+// FU20-12: set when the window closes; the preparation stops at its next check and keeps nothing (gPrepRunning: it still runs)
+static std::atomic<bool> gQuit{ false }, gPrepRunning{ false };
 
 // ---------------------------------------------------------------- small helpers
 static std::wstring widen(const std::string& s) { if (s.empty()) return L""; int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0); std::wstring w(n, 0); MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), &w[0], n); return w; }
@@ -71,7 +73,7 @@ struct Sha256 {   // Windows CNG
 static std::string fileSha256(const std::wstring& path, const std::function<void(double)>& prog) {
     HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr); if (f == INVALID_HANDLE_VALUE) return "(cannot read)";
     LARGE_INTEGER size; GetFileSizeEx(f, &size); Sha256 h; std::vector<char> buf(1 << 22); DWORD got = 0; long long done = 0;
-    while (ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got) { h.add(buf.data(), got); done += got; if (prog) prog(size.QuadPart ? (double)done / size.QuadPart : 1); }
+    while (!gQuit && ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got) { h.add(buf.data(), got); done += got; if (prog) prog(size.QuadPart ? (double)done / size.QuadPart : 1); }
     CloseHandle(f); return h.hex(); }
 
 // ---------------------------------------------------------------- WAV reading (PCM 16/24/32, float 32; RIFF or RF64)
@@ -127,6 +129,7 @@ struct Resampler {
         for (unsigned t = 0; t < nt; t++) th.emplace_back([&, t]() {
             const long long n0 = (long long)t * nOut / nt, n1 = (long long)(t + 1) * nOut / nt;
             for (long long n = n0; n < n1; n++) {
+                if (((n - n0) & 0xFFFF) == 0 && gQuit) return;
                 if (t == 0 && prog && ((n - n0) & 0xFFFF) == 0) prog((double)(n - n0) / std::max(1LL, n1 - n0));
                 const long long tt = n * M + D, base = tt / L, ph = tt % L; const float* hp = h.data() + ph * K; double acc = 0;
                 long long k0 = std::max(0LL, base - nIn + 1), k1 = std::min(K, base + 1);
@@ -148,7 +151,7 @@ static bool loadWav(const std::wstring& path, int rate, Source& s, std::string& 
     WavIn w; if (!w.open(path, err)) return false; if (!resampleOk(w.rate, rate, err)) return false;
     LARGE_INTEGER fsz; const long long inFile = GetFileSizeEx(w.f, &fsz) ? std::max(0LL, (fsz.QuadPart - w.dataOff) / (w.ch * (w.bits / 8))) : w.frames;   // a header may announce more than the file holds
     std::vector<float> L, R, l, r; L.reserve((size_t)std::min(w.frames, inFile)); R.reserve((size_t)std::min(w.frames, inFile)); long long done = 0;
-    while (done < w.frames) { long long n = w.read(std::min<long long>(1 << 20, w.frames - done), l, r); if (n <= 0) break; L.insert(L.end(), l.begin(), l.end()); R.insert(R.end(), r.begin(), r.end()); done += n;
+    while (done < w.frames && !gQuit) { long long n = w.read(std::min<long long>(1 << 20, w.frames - done), l, r); if (n <= 0) break; L.insert(L.end(), l.begin(), l.end()); R.insert(R.end(), r.begin(), r.end()); done += n;
         const double f = (double)done / std::max(1LL, w.frames); say("reading the decoded audio  " + std::to_string((int)(f * 100)) + " %", base + span * 0.3 * f); }
     Resampler rs(w.rate, rate); const std::string what = "resampling " + std::to_string(w.rate) + " Hz to " + std::to_string(rate) + " Hz";
     rs.run(L, s.L, [&](double f) { say(what + " (left)  " + std::to_string((int)(f * 100)) + " %", base + span * (0.3 + 0.35 * f)); }); { std::vector<float>().swap(L); }
@@ -166,7 +169,7 @@ static bool loadMp3(const std::wstring& path, int rate, Source& s, std::string& 
     if (!resampleOk((int)sr, rate, err)) { rd->Release(); return false; }
     PROPVARIANT dv; PropVariantInit(&dv); double dur = 0; if (SUCCEEDED(rd->GetPresentationAttribute((DWORD)MF_SOURCE_READER_MEDIASOURCE, MF_PD_DURATION, &dv)) && dv.vt == VT_UI8) dur = (double)dv.uhVal.QuadPart; PropVariantClear(&dv);
     std::vector<float> L, R; int lastPct = -1;
-    for (;;) { DWORD flags = 0; LONGLONG ts = 0; IMFSample* smp = nullptr; if (FAILED(rd->ReadSample((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, &ts, &smp))) break;
+    for (;;) { DWORD flags = 0; LONGLONG ts = 0; IMFSample* smp = nullptr; if (gQuit || FAILED(rd->ReadSample((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr, &flags, &ts, &smp))) break;
         if (smp) { IMFMediaBuffer* b = nullptr; BYTE* p = nullptr; DWORD len = 0;
             if (FAILED(smp->ConvertToContiguousBuffer(&b)) || !b || FAILED(b->Lock(&p, nullptr, &len))) { if (b) b->Release(); smp->Release(); rd->Release(); err = "Media Foundation gave a sample that cannot be read"; return false; }
             const float* f = (const float*)p; const size_t fr = len / (4 * nch); for (size_t i = 0; i < fr; i++) { L.push_back(f[i * nch]); R.push_back(f[i * nch + (nch > 1 ? 1 : 0)]); }
@@ -252,12 +255,17 @@ static long long riffTotal(const std::wstring& path) {   // the final file size 
     if (!memcmp(b, "RF64", 4) && got >= 28 && !memcmp(b + 12, "ds64", 4)) { long long r64; memcpy(&r64, b + 20, 8); return r64 > 36 ? r64 + 8 : 0; } return 0; }
 static std::string have_text(const Job& j);
 struct Job { HANDLE proc = nullptr; std::wstring out, log; long long want = 0; bool done = false, ok = true; double frac = 0; };
+// FU20-12: every lae_udec runs in this job; it is ended when the window closes, and at the latest when this program ends
+static HANDLE decodeJob() { static HANDLE job = []() { HANDLE h = CreateJobObjectW(nullptr, nullptr); if (h) { JOBOBJECT_EXTENDED_LIMIT_INFORMATION li{}; li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!SetInformationJobObject(h, JobObjectExtendedLimitInformation, &li, sizeof li)) { CloseHandle(h); h = nullptr; } } return h; }(); return job; }
 static bool startDecode(const std::wstring& dir, const std::wstring& src, const std::string& pick, Job& j, std::string& err) {
     SECURITY_ATTRIBUTES sa{ sizeof sa, nullptr, TRUE }; HANDLE log = CreateFileW(j.log.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS, 0, nullptr);
     STARTUPINFOW si{ sizeof si }; si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE; si.hStdOutput = log; si.hStdError = log; si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
     PROCESS_INFORMATION pi{}; std::wstring c = L"\"" + dir + L"\\lae_udec.exe\" dec \"" + src + L"\" \"" + j.out + L"\" --pick=" + widen(pick);
-    const BOOL ok = CreateProcessW(nullptr, &c[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS, nullptr, nullptr, &si, &pi); if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
-    if (!ok) { err = "cannot start lae_udec.exe"; return false; } CloseHandle(pi.hThread); j.proc = pi.hProcess; return true; }
+    const BOOL ok = CreateProcessW(nullptr, &c[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi); if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
+    if (!ok) { err = "cannot start lae_udec.exe"; return false; }
+    if (decodeJob()) AssignProcessToJobObject(decodeJob(), pi.hProcess);   // FU20-12: the decoders end with this program
+    ResumeThread(pi.hThread); CloseHandle(pi.hThread); j.proc = pi.hProcess; return true; }
 
 static std::string have_text(const Job& j) { return j.want > 0 ? std::to_string((int)(j.frac * 100)) + " %" : std::string("reading and checking the file first"); }
 
@@ -296,6 +304,7 @@ static bool preparePair(const Pair& p, int rate, Source s[2], long long& lag, st
         if (isMp3[i]) { if (!loadMp3(src[i], rate, x, err, sub, base, span)) return false; }
         else if (x.pick == "-") { if (!loadWav(src[i], rate, x, err, sub, base, span)) return false; }
         else { const bool ok = loadWav(job[i].out, rate, x, err, sub, base, span); DeleteFileW(job[i].out.c_str()); DeleteFileW(job[i].log.c_str()); if (!ok) return false; }
+        if (gQuit) { err = "stopped: the window was closed"; return false; }   // a stopped reading or resampling is not kept
         say(x.file + ": keeping the prepared copy for later pairs", base + span); cacheSave(cache[i], x); }
     lag = 0; if (isMp3[0] || isMp3[1]) { say("lining up the two sources", 0.985); lag = findLag(s[0].L, s[1].L, rate); }   // LAE decodes and WAV files start together; only MP3 / AAC decoders add a delay
     for (int c = 0; c < 2; c++) { std::vector<float>& b = c ? s[1].R : s[1].L; if (lag > 0) b.erase(b.begin(), b.begin() + std::min<long long>(lag, (long long)b.size())); else if (lag < 0) b.insert(b.begin(), (size_t)(-lag), 0.0f); }
@@ -400,7 +409,7 @@ static void startPrepare() {
         if (gQueue.empty()) { setStatus("Tick one or more pairs in the list first (click to tick, click again to untick)."); return; } }
     else if (gReady && gTest.done < gTest.trials) return;   // a pair is still being tested
     const int idx = gQueue[gQueuePos];
-    gPlayer.stop(); gReady = false; enableTest(false); EnableWindow(gPrepare, FALSE); gBusy = true;
+    gPlayer.stop(); gReady = false; enableTest(false); EnableWindow(gPrepare, FALSE); gBusy = true; gPrepRunning = true;
     gTest = Test(); gTest.pair = gSet[(size_t)idx]; gTest.rate = SendMessageW(gR44, BM_GETCHECK, 0, 0) == BST_CHECKED ? 44100 : 48000;
     wchar_t tb[16]; GetWindowTextW(gTrials, tb, 16); gTest.trials = std::max(5, std::min(64, _wtoi(tb) ? _wtoi(tb) : 16));
     std::thread([]() {
@@ -409,7 +418,7 @@ static void startPrepare() {
         auto say = [](const std::string& m, double f) { if (f >= 0) gProg = (int)(f * 1000); { std::lock_guard<std::mutex> g(gMsgMu); gMsg = "Preparing " + gTest.pair.name + "  (" + std::to_string(gProg / 10) + " %)\r\n" + m; } PostMessageW(gWnd, WM_APP_STATUS, 0, 0); };
         const bool ok = preparePairSafe(gTest.pair, gTest.rate, gTest.s, gTest.lag, err, say);
         MFShutdown(); CoUninitialize();
-        { std::lock_guard<std::mutex> g(gMsgMu); gMsg = ok ? "" : "Could not prepare: " + err; } PostMessageW(gWnd, WM_APP_READY, ok, 0); }).detach(); }
+        { std::lock_guard<std::mutex> g(gMsgMu); gMsg = ok ? "" : "Could not prepare: " + err; } PostMessageW(gWnd, WM_APP_READY, ok, 0); gPrepRunning = false; }).detach(); }
 
 static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
     switch (m) {
@@ -429,7 +438,9 @@ static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
         if (!wp) { std::lock_guard<std::mutex> g(gMsgMu); setStatus(gMsg); return 0; }
         gTest.aIs = (int)(rnd32() & 1); gTest.xIsA.clear(); for (int i = 0; i < gTest.trials; i++) gTest.xIsA.push_back((int)(rnd32() & 1)); gTest.startedAt = nowText();
         gPlayer.set(gTest.s, gTest.rate); gReady = true; enableTest(true); updateRange(); showTrial(); return 0;
-    case WM_DESTROY: gPlayer.stop(); removeWorkDir(); PostQuitMessage(0); return 0; }
+    case WM_DESTROY: gPlayer.stop(); gQuit = true;   // FU20-12: end the decoders, let the preparation stop (at most 30 s), then remove the work folder
+        if (gPrepRunning) { if (decodeJob()) TerminateJobObject(decodeJob(), 1); for (int k = 0; k < 600 && gPrepRunning; k++) Sleep(50); }
+        removeWorkDir(); PostQuitMessage(0); return 0; }
     return DefWindowProcW(w, m, wp, lp); }
 
 static HWND mk(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int cw, int chh, int id) {

@@ -43,6 +43,7 @@ public final class LaesTool {
                 public void progress(String stage, double fraction) { } }, new AtomicBoolean(false)); }
         if ((cmd.equals("dec") || cmd.equals("verify")) && args.length >= 3) {
             try { return decVerify(args); }
+            catch (LaesEncoder.WorkLocked x) { System.out.println(x.getMessage()); return 2; }   // DEC 30
             catch (OutOfMemoryError x) { System.out.println("stopped: bad allocation"); return 2; }
             catch (RuntimeException x) { System.out.println("stopped: " + x.getMessage()); return 2; } }
         System.out.println("bad arguments"); return 1; }
@@ -73,8 +74,23 @@ public final class LaesTool {
         final boolean isDec = args[0].equals("dec"); final String inPath = args[1];
         if (isDec && args[2].startsWith("-") && !args[2].startsWith("--list")) {   // FU16-9 (as laes_tool.cpp 5af9e2b): an option is not taken as the output folder
             System.out.println("give the output folder: laes dec <in> <out dir> [--levels] [--pick=...] (or laes dec <in> --list)"); return 1; }
+        if (isDec && (LaesEncoder.Options.flag(args, "--list") || LaesEncoder.Options.arg(args, "--list").equals("all"))) {   // DEC 31 (2026-11-15, as laes_tool.cpp): the list reads the records only and decodes nothing (the checks belong to decoding and playback)
+            final Stream.In lin = new Stream.In(inPath); final Play.File lf = new Play.File(); final String[] lm = {""}; String le;
+            try { le = lf.open(new Play.ByteSrc() { public long size() { return lin.n; } public void read(long at, byte[] d, int off, int n) { lin.read(at, d, off, n); } }, lm, true); }
+            catch (RuntimeException x) { le = String.valueOf(x.getMessage()); } finally { lin.close(); }
+            if (!le.isEmpty() && lm[0].equals("LAE1")) { System.out.println(inPath + ": this is an LAEY file (lossy, extension LAE1): decode it with lae_dec; laes reads LAES (extension LAE2)"); return 2; }
+            if (!le.isEmpty()) { System.out.println(inPath + ": " + le); return 2; } if (!lf.why.isEmpty()) { System.out.println(inPath + ": " + lf.why + " (the core master is still playable)"); return 2; }
+            final String fnote = Flac.foreignNote(lf.foreignFront, lf.foreignBehind); if (!fnote.isEmpty()) System.out.println("note: " + fnote);
+            final List<LaesFile.MasterInfo> infos = new ArrayList<LaesFile.MasterInfo>(); for (Play.Master M : lf.ms) infos.add(M.I);
+            final List<Choices.Spec> specs = Choices.build(lf.baseRate, lf.coreBits, lf.coreFrames, infos, null, lf.head); final int defJ = Choices.defaultIndex(specs, lf.head); final boolean listAll = LaesEncoder.Options.arg(args, "--list").equals("all");
+            System.out.println("choices (use --pick=<n>[,<n>...], --pick=<rate>:<bits> (masters only), --pick=master:<k> or --pick=name:<text>; listed from the records, nothing decoded or checked here):");
+            int hidden = 0;
+            for (int j = 0; j < specs.size(); j++) { final Choices.Spec s = specs.get(j); if (!listAll && s.kind >= 2) { hidden++; continue; } String extra = ""; if (s.kind <= 1) { final long sec = s.rate != 0 ? s.frames / s.rate : 0; extra = String.format("  %d:%02d", sec / 60, sec % 60); if (j == defJ) extra += "  [default]"; }
+                System.out.println(String.format("  %3d  %6d Hz %2d-bit  %s%s%s", j + 1, s.rate, s.bits, s.kind >= 2 ? "  - " : "", s.what, extra)); }
+            if (hidden != 0) System.out.println("(" + hidden + " rate levels and derived versions not shown: --list=all)");
+            return 0; }
         final String wd = LaesEncoder.workDir(inPath + (isDec ? ".dec" : ".verify"));
-        try { return decVerifyIn(args, isDec, inPath, wd); } finally { if (System.getenv("KEEPTMP") == null) LaesEncoder.removeAll(new File(wd)); } }
+        try { return decVerifyIn(args, isDec, inPath, wd); } finally { LaesEncoder.unlockWork(wd); if (System.getenv("KEEPTMP") == null) LaesEncoder.removeAll(new File(wd)); } }   // DEC 30: unlocked first
     private static int decVerifyIn(String[] args, boolean isDec, String inPath, String wd) {
         final String bodyPath = wd + "/body.bin"; final LaesFile.Pcm core = new LaesFile.Pcm(); long bodySize = 0;
         { final Stream.In in = new Stream.In(inPath);
@@ -131,15 +147,6 @@ public final class LaesTool {
             for (Choices.Spec sp : specs) { Src s = new Src(); s.kind = sp.kind == 3 ? 0 : sp.kind; s.rate = sp.rate; s.bits = sp.bits; s.n = sp.frames; if (sp.m >= 0) s.m = sp.m; s.k = sp.level;
                 final Choice c = new Choice(sp.name, sp.what, s); c.kind = sp.kind; c.no = sp.no;
                 if (sp.kind == 3) { c.derived = true; c.from = sp.from; final Src f = ch.get(sp.from).s; final Src d = new Src(); d.kind = f.kind; d.m = f.m; d.k = f.k; d.rate = f.rate; d.bits = 16; d.n = f.n; c.s = d; } ch.add(c); }
-            final boolean listAll = LaesEncoder.Options.arg(args, "--list").equals("all");
-            if (LaesEncoder.Options.flag(args, "--list") || listAll) { System.out.println("choices (use --pick=<n>[,<n>...], --pick=<rate>:<bits> (masters only), --pick=master:<k> or --pick=name:<text>):");
-                // --list: the first level only (spec/lossless/SPEC.md, Section 10.3): the core master and each master with its whole description, the default marked;
-                // --list=all: also the rate levels and derived versions under each master, marked "-"; the numbers are those of --pick either way
-                int hidden = 0;
-                for (int j = 0; j < ch.size(); j++) { if (!listAll && ch.get(j).kind >= 2) { hidden++; continue; } String extra = ""; if (ch.get(j).kind <= 1) { final long sec = ch.get(j).s.rate != 0 ? ch.get(j).s.n / ch.get(j).s.rate : 0; extra = String.format("  %d:%02d", sec / 60, sec % 60); if (j == defJ) extra += "  [default]"; }
-                    System.out.println(String.format("  %3d  %6d Hz %2d-bit  %s%s%s", j + 1, ch.get(j).s.rate, ch.get(j).s.bits, ch.get(j).kind >= 2 ? "  - " : "", ch.get(j).what, extra)); }
-                if (hidden != 0) System.out.println("(" + hidden + " rate levels and derived versions not shown: --list=all)");
-                return all ? 0 : 2; }
             final List<Integer> pick = new ArrayList<Integer>(); final String pk = LaesEncoder.Options.arg(args, "--pick");
             if (pk.isEmpty()) { pick.add(0); for (int j = 1; j < ch.size(); j++) if (ch.get(j).kind == 1 || (ch.get(j).kind == 2 && LaesEncoder.Options.flag(args, "--levels"))) pick.add(j); }
             else { int a = 0; for (;;) { final int b = pk.indexOf(',', a); final String t = pk.substring(a, b < 0 ? pk.length() : b); final int col = t.indexOf(':');

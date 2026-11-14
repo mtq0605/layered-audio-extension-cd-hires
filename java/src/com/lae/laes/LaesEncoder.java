@@ -206,12 +206,50 @@ public final class LaesEncoder {
     // ---- the work folder <out>.laes.tmp (removed when the run ends; kept when an encoding stops, for the same command to continue)
     // job (enc, 2026-11-05): a work folder made for the same job (job.txt equal) is used again: the run continues where an earlier one stopped
     // port of laes_tool.cpp:main::workDir (the lambda; wd: the folder, resumed[0] receives whether it was used again)
-    static String workDir(String wd, String job, boolean[] resumed) { final File d = new File(wd);
-        if (d.exists() && !new File(wd + "/laes.tmp").exists()) throw new LaeException(wd + " exists and is not a laes work folder: remove it or choose another output name");
-        if (resumed != null) { resumed[0] = false; final String old = job.isEmpty() ? null : StreamEnc.getState(wd + "/job.txt"); if (old != null && old.equals(job)) { resumed[0] = true; return wd; } }
-        removeAll(d); d.mkdirs(); if (!d.isDirectory()) throw new LaeException("cannot create the work folder " + wd);
-        { Stream.Out o = new Stream.Out(wd + "/laes.tmp"); final byte[] t = "laes work folder (removed when the run ends; kept when an encoding stops, for the same command to continue)\n".getBytes(); o.put(t, 0, t.length); o.close(); }
-        if (!job.isEmpty()) StreamEnc.putState(wd + "/job.txt", job); return wd; }
+    static String workDir(String wd, String job, boolean[] resumed) { return workDir(wd, job, resumed, null); }
+    // DEC 31 (2026-11-15, as laes_tool.cpp): a work folder that cannot be made where it belongs (a read-only place) is made in the system
+    // temp folder, and said (L: where the note goes; null = System.out). Java: the folder's name there is laes_<hashCode of the absolute
+    // path without ".laes.tmp">.laes.tmp (the C++ uses std::hash, so the two names differ).
+    static String workDir(String wd, String job, boolean[] resumed, Listener L) { File d = new File(wd);
+        if (!d.exists()) { d.mkdirs();
+            if (!d.isDirectory()) { final String base = wd.endsWith(".laes.tmp") ? wd.substring(0, wd.length() - 9) : wd;
+                final String alt = new File(System.getProperty("java.io.tmpdir"), "laes_" + (new File(base).getAbsolutePath().hashCode() & 0xFFFFFFFFL) + ".laes.tmp").getPath();
+                final String n1 = "note: the work folder cannot be made at " + wd + "; it goes to the system temp folder: " + alt, n2 = "  注意：工作文件夹不能建在 " + wd + "，改放在系统临时文件夹：" + alt;
+                if (L != null) { say(L, n1); say(L, n2); } else { System.out.println(n1); System.out.println(n2); }
+                wd = alt; d = new File(wd); }
+            else d.delete(); }
+        if (d.exists() && !new File(wd + "/laes.tmp").exists() && !new File(wd + "/lock").exists()) throw new LaeException(wd + " exists and is not a laes work folder: remove it or choose another output name");
+        d.mkdirs(); final boolean hadLock = new File(wd + "/lock").exists();
+        if (!lockWork(wd)) {   // DEC 30: another run uses this work folder: stop at once, nothing of it touched (no clean-up: WorkLocked is not caught as a failure)
+            if (!hadLock) throw new LaeException("cannot create the work folder " + wd);
+            throw new WorkLocked("another laes run is using the work folder " + wd + " (the same command started twice?): this run stops, nothing written; run it again when the other has ended"); }
+        try {
+            if (resumed != null) { resumed[0] = false; final String old = job.isEmpty() ? null : StreamEnc.getState(wd + "/job.txt"); if (old != null && old.equals(job)) { resumed[0] = true; return wd; } }
+            final File[] old = d.listFiles(); if (old != null) for (File q : old) if (!q.getName().equals("lock")) removeAll(q);   // DEC 30: emptied, the lock stays
+            if (!d.isDirectory()) throw new LaeException("cannot create the work folder " + wd);
+            { Stream.Out o = new Stream.Out(wd + "/laes.tmp"); final byte[] t = "laes work folder (removed when the run ends; kept when an encoding stops, for the same command to continue)\n".getBytes(); o.put(t, 0, t.length); o.close(); }
+            if (!job.isEmpty()) StreamEnc.putState(wd + "/job.txt", job); }
+        catch (RuntimeException x) { unlockWork(wd); throw x; }
+        return wd; }
+    // DEC 30 (FU15-7 (3), 2026-11-15, as laes_tool.cpp): the work folder holds a file "lock" that a run keeps open with an exclusive lock of
+    // the system (FileChannel.tryLock) until it ends; the system frees it when the process ends in any way, so a folder kept for a resume or
+    // left by a crash is never locked. A second run of the same command (same work folder; also a second run in this process) is refused at
+    // once and touches nothing of the first. lockWork: true when locked; unlockWork when the run ends, before the folder is removed.
+    /** thrown when another run holds the work folder's lock: the caller prints the message and ends with exit code 2, removing nothing */
+    public static final class WorkLocked extends LaeException { private static final long serialVersionUID = 1L; WorkLocked(String m) { super(m); } }
+    private static final List<Object[]> workLocks = new ArrayList<Object[]>();   // {folder (File), RandomAccessFile, FileLock}
+    static boolean lockWork(String wd) {
+        RandomAccessFile f = null;
+        try { f = new RandomAccessFile(new File(wd, "lock"), "rw"); final java.nio.channels.FileLock l = f.getChannel().tryLock();
+            if (l == null) { f.close(); return false; }
+            synchronized (workLocks) { workLocks.add(new Object[] {new File(wd).getAbsoluteFile(), f, l}); } return true; }
+        catch (java.nio.channels.OverlappingFileLockException x) { try { f.close(); } catch (IOException y) { /* not locked */ } return false; }
+        catch (IOException x) { if (f != null) try { f.close(); } catch (IOException y) { /* not locked */ } return false; } }
+    static void unlockWork(String wd) { final File k = new File(wd).getAbsoluteFile();
+        synchronized (workLocks) { for (int i = 0; i < workLocks.size(); i++) if (workLocks.get(i)[0].equals(k)) {
+            try { ((java.nio.channels.FileLock) workLocks.get(i)[2]).release(); } catch (IOException x) { /* closed below */ }
+            try { ((RandomAccessFile) workLocks.get(i)[1]).close(); } catch (IOException x) { /* the system frees it */ }
+            workLocks.remove(i); return; } } }
     // the work folder of another command (dec, verify): <out>.laes.tmp, made new
     static String workDir(String out) { return workDir(out + ".laes.tmp", "", null); }
     /** the work folder of an encode (Options.workDir, or &lt;out&gt;.laes.tmp) */
@@ -230,6 +268,7 @@ public final class LaesEncoder {
     public static int encode(final Options opt, final Listener listener, AtomicBoolean cancel) {
         final StreamEnc.Ctx ctx = new StreamEnc.Ctx(); ctx.threads = Par.threadsOr(opt.threads); ctx.cancel = cancel != null ? cancel : new AtomicBoolean(false); ctx.listener = listener;
         try { return encodeImpl(opt, listener, ctx); }
+        catch (WorkLocked x) { say(listener, x.getMessage()); return 2; }   // DEC 30: another run holds the work folder; nothing of it is touched
         catch (OutOfMemoryError x) { stopped(opt, listener, "bad allocation"); return 2; }
         catch (RuntimeException x) { stopped(opt, listener, String.valueOf(x.getMessage())); return 2; }
         finally { StreamEnc.diskGuard(null); } }
@@ -360,12 +399,13 @@ public final class LaesEncoder {
                        + (opt.forceDisk ? " GB；--force-disk：照样开始" : " GB；没有开始，也没有写任何文件（加 --force-disk 可以照样开始）"));
                 if (!opt.forceDisk) return 2; }
             if (timing) say(L, "work folder: about " + gb(need) + " GB needed, " + gb(ec ? 0 : avail) + " GB free"); }
-        final boolean[] resumed = {false}; final String wd = workDir(wdPath, job, resumed);
+        final boolean[] resumed = {false}; final String wd = workDir(wdPath, job, resumed, L);
         boolean ok = false;
         try { final int rc = encodeInWork(opt, L, ctx, wd, resumed[0], paths, Ts, autoT, wis, stOf, base, asFlac, coreBits, maxSt, tlog, t0, names, mflags, given, menuList, defGiven, coreFlags); ok = true; return rc; }
         finally {   // the work folder goes at the end; kept when the run is stopped by an exception (disk full, closed: the same command continues),
                     // not with --disk-stop-remove and not when the user cancelled (Java: the app's cancel button means "stop and leave nothing")
             final boolean cancelled = ctx.cancel != null && ctx.cancel.get();
+            unlockWork(wd);   // DEC 30: unlocked first (the folder may be kept for a resume)
             if (!opt.keepTmp && (ok || opt.diskStopRemove || cancelled)) removeAll(new File(wd)); } }
 
     // "  %-22s %8.2f s   peak memory so far %7.0f MB" (C++ 3c0f89b, --timing); Java: the largest Java heap in use seen at the stage ends

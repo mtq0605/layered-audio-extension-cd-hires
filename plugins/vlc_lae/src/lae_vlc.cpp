@@ -135,8 +135,11 @@ void checkAll(demux_t* d, Sys* sy) {
 bool seekTo(Sys* sy, uint64_t frame) {
     FpPin pin; char err[256]; if (frame > sy->frames) frame = sy->frames;
     if (sy->laes) {   // every choice starts at the frame, a derived 16-bit version too (its dither state is moved there, bit-exact; 2026-11-12)
-        if (sy->play) laes_stop(sy->play); sy->play = laes_start_at(sy->laes, sy->choice, frame, 0, err, sizeof err);
-        if (!sy->play) { sy->play = laes_start(sy->laes, sy->choice, 0, err, sizeof err); frame = 0; } sy->pos = frame; return sy->play != nullptr; }
+        // the new decoder first: when it cannot start there, the playing one stays where it is and the seek fails (never a silent
+        // start from frame 0)
+        laes_play* np = laes_start_at(sy->laes, sy->choice, frame, 0, err, sizeof err); if (!np && !frame) np = laes_start(sy->laes, sy->choice, 0, err, sizeof err);
+        if (!np) return false;
+        if (sy->play) laes_stop(sy->play); sy->play = np; sy->pos = frame; return true; }
     if (sy->track) { if (lae_seek(sy->track, frame) != 0) return false; sy->pos = frame; return true; }
     return false; }
 

@@ -168,8 +168,11 @@ struct Decoder {
         int r, b; uint64_t fr; lae_output_format(track, &r, &b, &fr); rate = r; bits = b == 16 ? 16 : 24; frames = fr; pos = 0; return true; }
     bool seek(uint64_t frame) { FpPin pin; char err[256]; if (frame > frames) frame = frames;
         if (laes) {   // every choice starts at the frame, a derived 16-bit version too (its dither state is moved there, bit-exact; 2026-11-12)
-            if (play) laes_stop(play); play = frame ? laes_start_at(laes, choice, frame, 0, err, sizeof err) : laes_start_at(laes, choice, 0, 0, err, sizeof err);
-            if (!play) play = laes_start(laes, choice, 0, err, sizeof err), frame = 0; pos = frame; return play != nullptr; }
+            // the new decoder first: when it cannot start there, the playing one stays where it is and the seek fails (never a silent
+            // start from frame 0)
+            laes_play* np = laes_start_at(laes, choice, frame, 0, err, sizeof err); if (!np && !frame) np = laes_start(laes, choice, 0, err, sizeof err);
+            if (!np) return false;
+            if (play) laes_stop(play); play = np; pos = frame; return true; }
         if (track) { if (lae_seek(track, frame) != 0) return false; pos = frame; return true; }
         return false; }
     int64_t readFrames(int32_t* out, int64_t n) { FpPin pin; const int64_t k = play ? laes_read(play, out, n) : track ? lae_read(track, out, n) : -1; if (k > 0) pos += (uint64_t)k; return k; }
@@ -387,7 +390,7 @@ STDMETHODIMP LaePin::SetPositions(LONGLONG* pCurrent, DWORD dwCurrentFlags, LONG
     const uint64_t frame = t <= 0 ? 0 : (uint64_t)t * (uint64_t)d.rate / (uint64_t)kUnits;
     const bool running = m_thread.joinable() && !m_stop;
     if (running && m_peer) m_peer->BeginFlush(); stopThread(); if (m_peer && running) m_peer->EndFlush();
-    if (!d.seek(frame)) return E_FAIL;
+    if (!d.seek(frame)) { if (running) startThread(); return E_FAIL; }   // playback goes on from where it was
     if (running) startThread(); return S_OK; }
 
 // ---- COM server

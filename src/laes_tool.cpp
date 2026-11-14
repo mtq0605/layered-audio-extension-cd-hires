@@ -1044,6 +1044,15 @@ static int laesMain(int argc, char** argv) {
         if (bodySize < 8 || memcmp(mg, "LAE2", 4)) { printf("%s: no LAES extension (LAE2) found\n", argv[2]); return 2; }
         printf("format: LAES (lossless, extension LAE2)\n");
         int maxSt = 0; for (int s = 1; s <= 3; s++) maxSt = s;   // pieces sized for the highest rate a master can have
+        {   // FU16-8 (b) (2026-11-14): the temporary files of the decoding (every master: its samples and its rate levels as int64, and a
+            // reference difference for a while: about 32 bytes per frame; 24 left at the end of a test run) against the free space of the work folder's disk; short: said, the run goes on
+            laess::In hin(argv[2]); laesp::FnSrc hs; hs.n = (uint64_t)hin.n; hs.fn = [&](uint64_t at, void* d, size_t k) { hin.read((long long)at, d, k); return 0; };
+            laesp::File hf; char hm[5]; std::string he; try { he = hf.open(hs, hm, true); } catch (const std::exception&) { he = "?"; }
+            if (he.empty() && hf.why.empty()) { double need = 0; for (const auto& M : hf.ms) need += 32.0 * (double)M.I.frames;
+                std::error_code ec; const fs::space_info sp = fs::space(fs::absolute(fs::path(g.p), ec), ec);
+                if (!ec && need > (double)sp.available) {
+                    printf("note: the decoding needs about %.1f GB of temporary files in %s, %.1f GB free on that disk: it goes on, and stops if the disk is full\n", need / 1073741824.0, g.p.c_str(), sp.available / 1073741824.0);
+                    printf("%s%.1f%s%s%s%.1f%s\n", u8"  注意：解码大约需要 ", need / 1073741824.0, u8" GB 临时文件，放在 ", g.p.c_str(), u8"，这块磁盘剩 ", sp.available / 1073741824.0, u8" GB；照样开始，磁盘满时会停下"); } } }
         const int64_t piece = pieceFor(maxSt); std::vector<laess::DecMaster> dec; laes::Head head; std::string de = laess::decodeLaesS(bodyPath, core, core.rate, g.p, dec, piece, threads, &head);
         if (!de.empty()) { printf("%s: %s (the core master is still playable)\n", argv[2], de.c_str()); return 2; }
         bool all = true; { std::vector<MasterInfo> mi0; for (auto& D : dec) mi0.push_back(D.I); const std::vector<size_t> mo = laesc::menuOrder(mi0);   // in the menu order, numbered as in menus

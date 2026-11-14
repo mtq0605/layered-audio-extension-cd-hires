@@ -282,7 +282,9 @@ inline Track locate(const Disc& d, const Ext& x, long long W) {
     for (long long v : c) rg.push_back({std::max(v - W, d.base - W), std::min(v + W, d.end() - n + W)});
     if (search(d, t, rg, at, r.cd) || search(d, t, {{d.base - W, d.end() - n + W}}, at, r.cd)) { r.state = Track::PASS; r.start = at; return r; }
     r.state = Track::FAIL; r.reason = len < n ? "file too short" : "no match"; r.cd.clear(); return r; }
-// the whole reading: every extension file checked (X7), grouped by trailer track number (R13), each track located on its own (R7, R10)
+// the whole reading: every extension file checked (X7), grouped by trailer track number (R13), each track located on its own (R7, R10).
+// A track that passes here is verified by its whole-track MD5 only. Handing it to the decoder (R8) is the caller's step: this header
+// does not include one (lae_cdx.cpp: decoderCheck before anything is written; liblae opens its decoder on the result).
 inline Report read(const Disc& d, const std::vector<Ext>& exts, long long W) {
     Report S; std::map<int, std::vector<const Ext*>> by;
     for (auto& x : exts) { if (!x.bad.empty()) { S.rejected.push_back(x.name + ": " + x.bad); continue; }

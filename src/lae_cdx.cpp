@@ -93,6 +93,21 @@ static string loadV5(const fs::path& p, V5& v) {
     { Decoder D; int code = 0; string de = D.openRef(pcm, lae, "full", 0, &code); if (!de.empty()) return "the decoder refuses this file (P2): " + de;
       if (D.base != rate) return "the LAE base rate " + to_string(D.base) + " Hz differs from the WAV sample rate " + to_string(rate) + " Hz (P2, X2)"; }   // the decoder itself does not compare them
     v.name = u8(p.filename()); v.rate = rate; v.cd.swap(pcm); v.block.swap(lae); v.canonical = canonOf(v) == b; return ""; }
+// R8 (2026-11-14): every track that passed the whole-track MD5 goes to the unchanged decoder before anything is written, with the
+// checks loadV5 makes on the packaging side (P2). A track the decoder refuses takes the CD route ("extension layer damaged").
+// An LAES block is decoded whole for this (every master against its SHA-256); when the memory for that is not there, the track
+// stays verified by its MD5 and a line says that the decoder did not check it.
+static void decoderCheck(Report& r) {
+    for (auto& t : r.tracks) { if (t.state != Track::PASS) continue;
+        const vector<uint8_t> block(t.ext->bytes.begin(), t.ext->bytes.begin() + (ptrdiff_t)t.ext->blockLen); const int rate = (int)t.ext->t.rate; string why;
+        if (laes::isLaes(block)) {
+            try { laes::Pcm core; core.rate = rate; core.bits = 16; for (int c = 0; c < 2; c++) { core.c[c].resize(t.cd.size() / 2); for (size_t i = 0; i < t.cd.size() / 2; i++) core.c[c][i] = t.cd[i * 2 + c]; }
+                vector<laes::Pcm> dec; vector<laes::MasterInfo> info; vector<bool> ok; why = laes::decodeLaes(block, core, rate, dec, info, ok);
+                for (size_t i = 0; why.empty() && i < ok.size(); i++) if (!ok[i]) why = "LAES master " + to_string(i + 1) + " does not match its SHA-256"; }
+            catch (const std::bad_alloc&) { printf("track %02d: not enough memory to decode its LAES block for the check; verified by the whole-track MD5 only\n", t.track); continue; } }
+        else { Decoder D; int code = 0; why = D.openRef(t.cd, block, "full", 0, &code);
+            if (why.empty() && D.base != rate) why = "the LAE base rate " + to_string(D.base) + " Hz differs from the CD layer's " + to_string(rate) + " Hz"; }
+        if (!why.empty()) { t.state = Track::FAIL; t.reason = "extension layer damaged: the decoder refuses it (" + why + ")"; vector<int16_t>().swap(t.cd); } } }
 static vector<uint8_t> laxOf(const V5& v, uint16_t track) {
     cdx::Trailer t = cdx::compute(v.cd.data(), (uint32_t)v.ncd(), (uint32_t)v.rate, track, v.type); vector<uint8_t> o = v.block; auto tr = cdx::serialize(t); o.insert(o.end(), tr.begin(), tr.end()); return o; }
 
@@ -464,12 +479,17 @@ static int selftest() {
             bool hit = false; cdx::slide([&](long long j) { return x[(size_t)j]; }, (long long)x.size(), n, max(0LL, t - 3), t, A, B, [&](long long h) { if (h == t) hit = true; }); ok = hit; }
         ck(ok, "1000 random offsets: sliding values = direct values (X5)"); }
     {   vector<int16_t> big(2 * 300000); uint64_t r = 7; for (auto& v : big) { r = r * 6364136223846793005ULL + 1442695040888963407ULL; v = (int16_t)(r >> 48); }
-        cdx::Trailer t = cdx::compute(big.data(), 300000, 44100, 7); auto s = cdx::serialize(t); vector<uint8_t> f(100, 0xAB); memcpy(f.data(), "LAE1", 4); f.insert(f.end(), s.begin(), s.end()); cdx::Trailer u; size_t bl = 0;
+        cdx::Trailer t = cdx::compute(big.data(), 300000, 44100, 7); auto s = cdx::serialize(t); vector<uint8_t> f; cdx::Trailer u; size_t bl = 0;
+        // a 100-byte stand-in for a type 1 block: only the v5 header fields the trailer is compared with (base, nb, pb; 3.2)
+        auto block = [&](int32_t base, int32_t nb, int32_t pb) { f.assign(100, 0xAB); memcpy(f.data(), "LAE1", 4); memcpy(&f[12], &base, 4); memcpy(&f[44], &nb, 4); memcpy(&f[48], &pb, 4); };
+        block(44100, 300032, 16); f.insert(f.end(), s.begin(), s.end());
         ck(cdx::parse(f, u, bl) == "" && bl == 100 && u.s1 == t.s1 && u.s2 == t.s2 && u.ncd == 300000 && u.track == 7 && u.md5hex() == t.md5hex(), "trailer serialize / parse round trip");
         bool zero = true; for (int i = 60; i < 76; i++) if (s[(size_t)i]) zero = false; ck(zero && s.size() == 80 && !memcmp(s.data(), "LTVT", 4), "trailer: 80 bytes, LTVT, reserved bytes 0");
-        t.track = 120; s = cdx::serialize(t); f.assign(100, 0xAB); memcpy(f.data(), "LAE1", 4); f.insert(f.end(), s.begin(), s.end());
+        block(48000, 300032, 16); f.insert(f.end(), s.begin(), s.end()); ck(cdx::parse(f, u, bl) == "invalid trailer field", "type 1: sample rate 44100 Hz with base 48000 Hz in the extension block (X2)");
+        block(44100, 300033, 16); f.insert(f.end(), s.begin(), s.end()); ck(cdx::parse(f, u, bl) == "invalid trailer field", "type 1: ncd differs from nb - 2 pb of the extension block (X2)");
+        t.track = 120; s = cdx::serialize(t); block(44100, 300032, 16); f.insert(f.end(), s.begin(), s.end());
         ck(cdx::parse(f, u, bl, false) == "" && cdx::parse(f, u, bl, true) == "invalid trailer field", "track 120: valid outside CD, invalid on a CD (X2)");
-        t.track = 1; t.rate = 48000; s = cdx::serialize(t); f.assign(100, 0xAB); memcpy(f.data(), "LAE1", 4); f.insert(f.end(), s.begin(), s.end());
+        t.track = 1; t.rate = 48000; s = cdx::serialize(t); block(48000, 300032, 16); f.insert(f.end(), s.begin(), s.end());
         ck(cdx::parse(f, u, bl, false) == "" && cdx::parse(f, u, bl, true) == "invalid trailer field", "48000 Hz: valid outside CD, invalid on a CD (X2)"); }
     printf("selftest: %s\n", bad ? "FAILED" : "all passed"); return bad ? 1 : 0; }
 
@@ -737,7 +757,9 @@ static int realMain(int argc, char** argv) {
         vector<Ext> x(1); x[0].name = pos[1]; if (!cdxr::readBytes(fs::path(pos[1]), x[0].bytes)) { printf("cannot read %s\n", pos[1].c_str()); return 1; } cdxr::check(x[0]);
         if (!x[0].bad.empty()) { printf("%s: %s; only the base layer can be played\n", x[0].name.c_str(), x[0].bad.c_str()); return 3; }
         if ((int)x[0].t.rate != rate) { printf("the base layer is %d Hz, the extension file %u Hz; only the base layer can be played\n", rate, x[0].t.rate); return 3; }
-        Disc d = singleFile(pcm, rate); Report r = cdxr::read(d, x, WDEF); const Track* t = nullptr; for (auto& q : r.tracks) if (q.state == Track::PASS) t = &q;
+        Disc d = singleFile(pcm, rate); Report r = cdxr::read(d, x, WDEF); decoderCheck(r); const Track* t = nullptr, *refused = nullptr;
+        for (auto& q : r.tracks) { if (q.state == Track::PASS) t = &q; else if (q.state == Track::FAIL && q.reason.rfind("extension layer damaged", 0) == 0) refused = &q; }
+        if (!t && refused) { printf("%s: %s; only the base layer can be played\n", x[0].name.c_str(), refused->reason.c_str()); return 3; }
         if (!t) { printf("the base layer does not contain this track (%s); only the base layer can be played\n", !r.unused.empty() ? r.unused[0].c_str() : !r.tracks.empty() ? r.tracks[0].reason.c_str() : ""); return 3; }
         auto by = canonV5((int)t->ext->t.rate, t->cd, vector<uint8_t>(x[0].bytes.begin(), x[0].bytes.begin() + (ptrdiff_t)x[0].blockLen));
         if (!writeBytes(fs::path(pos[2]), by.data(), by.size())) { printf("cannot write %s\n", pos[2].c_str()); return 2; }
@@ -811,7 +833,7 @@ static int realMain(int argc, char** argv) {
         if (!e.empty()) { printf("%s\n", e.c_str()); return 1; } if (x.empty()) printf("no extension files in %s: everything plays as CD\n", src.c_str());
         long long W = max(WDEF, atoll(arg(argc, argv, "W", to_string(WDEF)).c_str())); vector<string> in(pos.begin() + 2, pos.end()); Disc d;
         e = openInputs(in, d); if (!e.empty()) { printf("%s\n", e.c_str()); return 1; }
-        Report r = cdxr::read(d, x, W); printReport(d, r); e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem())); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
+        Report r = cdxr::read(d, x, W); decoderCheck(r); printReport(d, r); e = writeOutputs(out, d, r, u8(fs::path(in[0]).stem())); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         int pass = 0, fail = 0; for (auto& t : r.tracks) { if (t.state == Track::PASS) pass++; if (t.state == Track::FAIL) fail++; }
         printf("read: %d verified, %d CD only; output in %s\n", pass, (int)r.tracks.size() - pass, pos[0].c_str()); return fail ? 3 : 0; }
     if (cmd == "sim" && pos.size() == 3) {

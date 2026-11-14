@@ -41,7 +41,8 @@ inline std::vector<uint8_t> serialize(const Trailer& t) {
     memcpy(&o[20], t.md5, 16); p64(36, t.s1); p64(44, t.s2); p32(52, t.lead0); p32(56, t.tail0); p32(76, crc32(o.data(), 76)); return o; }
 
 // the reading checks of X7, in order; returns "" when the file is usable, otherwise the reason for the report.
-// cd: the file belongs to a CD (track 1-98 and a CD layer at 44100 Hz, X2); otherwise track >= 1 and 44100 or 48000 Hz
+// cd: the file belongs to a CD (track 1-98 and a CD layer at 44100 Hz, X2); otherwise track >= 1 and 44100 or 48000 Hz.
+// The content of the extension block is checked by the decoder, which the reader calls for every track that passes (R8).
 inline std::string parse(const std::vector<uint8_t>& file, Trailer& t, size_t& blockLen, bool cd = false) {
     if (file.size() < 8 + TRAILER || memcmp(&file[file.size() - TRAILER], "LTVT", 4)) return "no trailer";
     const uint8_t* r = &file[file.size() - TRAILER]; auto g16 = [&](size_t at) { return (uint16_t)(r[at] | r[at + 1] << 8); };
@@ -53,7 +54,12 @@ inline std::string parse(const std::vector<uint8_t>& file, Trailer& t, size_t& b
     t.track = g16(10); t.rate = g32(12); t.ncd = g32(16); memcpy(t.md5, r + 20, 16); t.s1 = g64(36); t.s2 = g64(44); t.lead0 = g32(52); t.tail0 = g32(56);
     bool ok = t.track >= 1 && (!cd || t.track <= 98) && (t.rate == 44100 || (!cd && t.rate == 48000)) && t.ncd >= 1 && t.ncd < (1u << 28) && t.s1 < M && t.s2 < M && t.lead0 <= t.ncd && t.tail0 <= t.ncd
               && ((t.lead0 == t.ncd && t.tail0 == t.ncd) || (uint64_t)t.lead0 + t.tail0 < t.ncd);
-    if (!ok) return "invalid trailer field"; blockLen = file.size() - TRAILER; return ""; }
+    if (!ok) return "invalid trailer field";
+    // type 1 (3.2): the sample rate equals base, and ncd equals nb - 2 pb, of the extension block (v5 header: int32 base at byte 12, nb at
+    // 44, pb at 48). A block too short to hold these fields is left to the checks of the block itself (its CRC, the decoder).
+    if (t.type == 1 && file.size() - TRAILER >= 52) { auto h32 = [&](size_t at) { return (long long)(int32_t)((uint32_t)file[at] | (uint32_t)file[at + 1] << 8 | (uint32_t)file[at + 2] << 16 | (uint32_t)file[at + 3] << 24); };
+        if ((long long)t.rate != h32(12) || (long long)t.ncd != h32(44) - 2 * h32(48)) return "invalid trailer field"; }
+    blockLen = file.size() - TRAILER; return ""; }
 
 // sliding content checksums over a stream of frame words x[0..len): for each start t in [t0, t1] (window [t, t+n) inside the
 // stream) calls hit(t) when A(t) = S1 and B(t) = S2 (X4). Positions outside the stream count as 0 (R5).

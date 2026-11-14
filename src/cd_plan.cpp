@@ -24,6 +24,12 @@
 // encoded with lae_enc TRACKnn.master.wav TRACKnn.v5.wav 3 cd=TRACKnn.cd.wav cdalign=0 (3 = the mode; any mode works), and the disc built with
 // lae_cdx image ... layout=. Offsets go to stdout and to the plain-text report plan.align.txt (no LAE file, disc or file a program reads contains one). Compiled into lae_enc.cpp (namespace
 // m_plan) after m_align.
+// Memory (FU09-3, 2026-11-14): the planner works in memory, not through windows of the files. It holds the joined master about three
+// times as 32-bit samples, 8 bytes per stereo sample frame each (the master as read; the slices; and the moved master, or with laes
+// the master with all its bits), and while a group of pieces is moved two more times that group (a gapless album is one group). On top
+// comes the alignment search, which takes whole pieces (cd_align.cpp). 60 minutes at 176.4 kHz are 5.1 GB per copy: about 15 GB, up
+// to about 25 GB during the move of an album without gaps. The usage text and one line of every run (planMemNote) say so; a run that
+// does not get the memory stops with this explanation.
 
 namespace fsp = std::filesystem;
 using m_align::detail::fmt;
@@ -77,12 +83,21 @@ static std::string readPublisher(const std::string& cue, Pub& P) {
         if (n < 300 * cdxr::SECTOR) return fmt("track %zu is %lld sectors; a CD track needs at least 300 (L10)", k + 1, n / cdxr::SECTOR); }
     return ""; }
 
+// FU09-3: what the planner needs in memory, as text (the header of this file has the reasons)
+static const char* const planMemNote = "the planner works in memory: it holds the joined master about 3 times as 32-bit samples (8 bytes per stereo sample frame each; "
+    "60 minutes at 176.4 kHz: 5.1 GB each, about 15 GB), without laes up to 2 more times the longest group of pieces while that group is moved "
+    "(an album without gaps is one group: about 25 GB), and the alignment search takes whole pieces on top";
+static int planRun(int argc, char** argv);
 static int planMain(int argc, char** argv) {
+    try { return planRun(argc, argv); }
+    catch (const std::bad_alloc&) { printf("plan: stopped: out of memory (if the output folder already holds slices, the set is not complete: do not use it). Memory: %s. "
+                                            "The planner needs the whole master at once: use the 64-bit program on a computer with that much memory.\n", planMemNote); return 2; } }
+static int planRun(int argc, char** argv) {
     // lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdaccept]
     clearModuleEnv();   // e.g. an inherited DITHERFLAGS would make the base module write a file outside outdir
     std::vector<std::string> args; bool accept = false, laes = false; std::string alignArg;
     for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "cdaccept")) accept = true; else if (!strcmp(argv[i], "laes")) laes = true; else if (!strncmp(argv[i], "cdalign=", 8)) alignArg = argv[i] + 8; else args.push_back(argv[i]); }
-    if (args.size() < 3) { printf("usage: lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdalign=<one position per piece>] [cdaccept] [laes]\n"); return 1; }
+    if (args.size() < 3) { printf("usage: lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdalign=<one position per piece>] [cdaccept] [laes]\n  memory: %s\n", planMemNote); return 1; }
     const std::string cueArg = args[args.size() - 2], outArg = args.back(); const std::vector<std::string> mfiles(args.begin(), args.end() - 2);
     const fsp::path out(outArg); std::error_code ec;
     if (fsp::exists(out, ec) && !fsp::is_empty(out, ec)) { printf("%s is not empty: the slices go into a new or empty folder; nothing written\n", outArg.c_str()); return 1; }
@@ -95,7 +110,10 @@ static int planMain(int argc, char** argv) {
         if (f == 0) fullBits = part.bits; else if (laes && part.bits != fullBits) { printf("%s is %d-bit, %s %d-bit: for laes the master files must have one bit depth\n", mfiles[f].c_str(), part.bits, mfiles[0].c_str(), fullBits); return 1; }
         if (part.s.size() & 1) { part.s.pop_back(); if (!part.raw32.empty()) part.raw32.pop_back(); printf("plan: %s ends with half a sample frame (a cut-off data chunk): dropped\n", mfiles[f].c_str()); }   // else every later file's channels would swap
         fileStart.push_back((long long)w.s.size() / 2); w.s.insert(w.s.end(), part.s.begin(), part.s.end());
-        for (size_t i = 0; i < part.s.size(); i++) full.push_back(part.bits == 32 ? part.raw32[i] : part.s[i] >> (32 - part.bits)); }
+        if (laes) for (size_t i = 0; i < part.s.size(); i++) full.push_back(part.bits == 32 ? part.raw32[i] : part.s[i] >> (32 - part.bits)); }   // FU09-3: only laes cuts from it
+    // FU09-3: without laes the master is 16- or 24-bit and w.s has every bit of it (left-aligned, wavio::read), so "not zero" is the same
+    // on w.s as on the all-bits copy, which is no longer made; with laes (32-bit masters: w.s lacks the low byte) it is tested on `full`
+    const std::vector<int32_t>& allBits = laes ? full : w.s;
     w.ch = 2; w.bits = 24;
     int stages = 0; while ((44100 << stages) < w.rate) stages++;
     if ((44100 << stages) != w.rate || stages < 1 || stages > 3) { printf("master at %d Hz: a CD-Extra needs 88.2, 176.4 or 352.8 kHz (44.1 kHz family)\n", w.rate); return 1; }
@@ -105,6 +123,8 @@ static int planMain(int argc, char** argv) {
     for (size_t k = 0; k < n; k++) nk[k] = (k + 1 < n ? pub.p[k + 1] : pub.end) - pub.p[k];
     printf("plan: publisher disc %s: %zu pieces, %lld sectors; master %s%s: %.3f s at %d Hz\n", cueArg.c_str(), n, pub.end / cdxr::SECTOR, mfiles[0].c_str(),
            mfiles.size() > 1 ? fmt(" + %zu more files, joined in this order", mfiles.size() - 1).c_str() : "", Lm / (double)w.rate, w.rate);
+    printf("plan: memory: this master is %.2f GB as 32-bit samples and is held about 3 times%s; the alignment search takes whole pieces on top. A run without enough memory stops and says so\n",
+           (double)Lm * 8.0 / 1e9, laes ? "" : ", and up to 2 more times the longest group of pieces while that group is moved");   // FU09-3
     // the master's derived 24-bit base, once (the encoder's own derivation; also what the search compares the CD with)
     const fsp::path tmp = out / "plan.tmp"; fsp::create_directories(tmp, ec); if (ec) { printf("cannot create %s\n", tmp.u8string().c_str()); return 2; }
     struct Rm { fsp::path p; ~Rm() { std::error_code e2; fsp::remove_all(p, e2); } } rm{tmp};
@@ -118,7 +138,7 @@ static int planMain(int argc, char** argv) {
     auto cdOf = [&](size_t k) { std::vector<int16_t> c((size_t)nk[k] * 2); for (long long j = 0; j < nk[k]; j++) { c[(size_t)j * 2] = pub.d.L(pub.p[k] + j); c[(size_t)j * 2 + 1] = pub.d.R(pub.p[k] + j); } return c; };
     auto zero = [](const std::vector<int16_t>& c, long long a, long long b) { for (long long j = std::max(0LL, a); j < std::min<long long>((long long)c.size() / 2, b); j++) if (c[(size_t)j * 2] || c[(size_t)j * 2 + 1]) return j; return -1LL; };
     auto sec = [&](long long m) { return m / (double)w.rate; };
-    auto nzM = [&](long long i) { return i >= 0 && i < Lm && (full[(size_t)i * 2] || full[(size_t)i * 2 + 1]); };   // all bits (a 32-bit master's low byte counts)
+    auto nzM = [&](long long i) { return i >= 0 && i < Lm && (allBits[(size_t)i * 2] || allBits[(size_t)i * 2 + 1]); };   // all bits (a 32-bit master's low byte counts)
     long long a0 = -1, z1 = -1; for (long long i = 0; i < Lm && a0 < 0; i++) if (nzM(i)) a0 = i; for (long long i = Lm - 1; i >= 0 && z1 < 0; i--) if (nzM(i)) z1 = i;
     if (a0 < 0) { printf("the master is digital silence throughout; nothing written\n"); return 1; }
     // ---- 1. where each CD piece lies in the master: the encoder's search (cd_align.cpp) on a window around the piece's place on the CD's
@@ -337,6 +357,7 @@ static int planMain(int argc, char** argv) {
     // 5. the slices on disk
     if (laes) {   // the same cuts from the master as it is, every bit; T = where CD frame 0 lies relative to the slice, in base samples:
         // slice sample i = master(A + i - lead*up), CD frame j (lead frame included) = master time x + (j - lead)*up, so base(u) = core(u + T) with T = (A - x) / up
+        std::vector<Slice>().swap(sl);   // FU09-3: the slices of the checks are not used from here on: freed before the all-bits slices are cut
         std::vector<Slice> sf; src = &full; if (build(sf, false)) return 1;
         std::string t = "LAE plan alignment report (LAES: the master is not moved)\npublisher disc: " + cueArg + "\nmaster:"; for (auto& f : mfiles) t += " " + f; t += "\n";
         std::string cmds;

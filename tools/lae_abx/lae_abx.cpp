@@ -6,7 +6,8 @@
 //   <name> | <file A> | <pick A> | <file B> | <pick B>
 // A pick is a choice name of lae_udec (e.g. master_1_352800_32, full_352800, pack1_full_176400) for an LAE file, or "-" for a plain
 // WAV or an MP3 file. Both sources are decoded (LAE files by lae_udec, MP3 by Windows Media Foundation), brought to the test rate
-// (48 or 44.1 kHz) by the same resampler, and lined up (the lag is found by cross-correlation: MP3 decoders add a delay).
+// (48 or 44.1 kHz) by the same resampler, and, when one of them is an MP3 / AAC file, lined up (the lag is found by
+// cross-correlation: those decoders add a delay; a lag other than 0 is shown during the test).
 // The program assigns the two sources to the buttons A and B at random and does not tell which is which until the test ends.
 // In every trial X and Y are A and B in a random order; the listener says whether X is A or X is B. At the end it shows the score,
 // the one-sided binomial p-value and which source was A, and writes a log (with the SHA-256 of both source files) to results\.
@@ -172,14 +173,23 @@ static bool loadMp3(const std::wstring& path, int rate, Source& s, std::string& 
     rs.run(R, s.R, [&](double f) { say(what + "  " + std::to_string(50 + (int)(f * 50)) + " %", base + span * (0.8 + 0.2 * f)); });
     return true; }
 
-// lag of b against a (b late by lag samples), from a 3 s window in the middle, searched over +-0.15 s
+// lag of b against a (b late by lag samples), searched over +-0.15 s in the 3 s window of a with the most energy (the middle may be
+// silence). The highest correlation counts with its sign (an inverted copy is no match); among equal values the lag nearest 0 wins,
+// and 0 stays when nothing correlates (digital silence): a steady periodic signal or silence must not shift the second source.
 static long long findLag(const std::vector<float>& a, const std::vector<float>& b, int rate) {
     const long long n = (long long)std::min(a.size(), b.size()), W = 3LL * rate, R = rate * 15 / 100; if (n < W + 2 * R + 10) return 0;
-    const long long s = n / 2 - W / 2; std::vector<double> score((size_t)(2 * R + 1));
+    long long s = n / 2 - W / 2;
+    { const long long hop = std::max(1, rate / 10), nb = n / hop, wb = W / hop; std::vector<double> e((size_t)nb, 0.0);   // energy per 0.1 s block, then the loudest run of wb blocks
+        for (long long k = 0; k < nb; k++) { double acc = 0; for (long long i = k * hop; i < (k + 1) * hop; i++) acc += (double)a[(size_t)i] * a[(size_t)i]; e[(size_t)k] = acc; }
+        double run = 0, bestRun = -1; for (long long k = 0; k < nb; k++) { run += e[(size_t)k]; if (k >= wb) run -= e[(size_t)(k - wb)];
+            const long long st = (k - wb + 1) * hop; if (k + 1 >= wb && st >= R && st + W + R <= n && run > bestRun) { bestRun = run; s = st; } } }
+    std::vector<double> score((size_t)(2 * R + 1));
     const unsigned nt = std::max(1u, std::min(16u, std::thread::hardware_concurrency())); std::vector<std::thread> th;
     for (unsigned t = 0; t < nt; t++) th.emplace_back([&, t]() { for (long long g = -R + (long long)t; g <= R; g += nt) { double acc = 0; for (long long i = 0; i < W; i++) acc += (double)a[(size_t)(s + i)] * b[(size_t)(s + i + g)]; score[(size_t)(g + R)] = acc; } });
     for (auto& q : th) q.join();
-    long long best = 0; double bv = -1; for (long long g = -R; g <= R; g++) if (std::fabs(score[(size_t)(g + R)]) > bv) { bv = std::fabs(score[(size_t)(g + R)]); best = g; } return best; }
+    long long best = 0; double bv = score[(size_t)R];
+    for (long long g = -R; g <= R; g++) { const double v = score[(size_t)(g + R)]; if (v > bv || (v == bv && std::llabs(g) < std::llabs(best))) { bv = v; best = g; } }
+    return bv > 0 ? best : 0; }
 
 struct Pair { std::string name, fileA, pickA, fileB, pickB; };
 static std::vector<Pair> readSet(const std::wstring& dir) {
@@ -271,7 +281,7 @@ static bool preparePair(const Pair& p, int rate, Source s[2], long long& lag, st
         else if (x.pick == "-") { if (!loadWav(src[i], rate, x, err, sub, base, span)) return false; }
         else { const bool ok = loadWav(job[i].out, rate, x, err, sub, base, span); DeleteFileW(job[i].out.c_str()); DeleteFileW(job[i].log.c_str()); if (!ok) return false; }
         say(x.file + ": keeping the prepared copy for later pairs", base + span); cacheSave(cache[i], x); }
-    say("lining up the two sources", 0.985); lag = findLag(s[0].L, s[1].L, rate);
+    lag = 0; if (isMp3[0] || isMp3[1]) { say("lining up the two sources", 0.985); lag = findLag(s[0].L, s[1].L, rate); }   // LAE decodes and WAV files start together; only MP3 / AAC decoders add a delay
     for (int c = 0; c < 2; c++) { std::vector<float>& b = c ? s[1].R : s[1].L; if (lag > 0) b.erase(b.begin(), b.begin() + std::min<long long>(lag, (long long)b.size())); else if (lag < 0) b.insert(b.begin(), (size_t)(-lag), 0.0f); }
     const size_t n = std::min(s[0].L.size(), s[1].L.size()); for (int i = 0; i < 2; i++) { s[i].L.resize(n); s[i].R.resize(n); }
     say("ready", 1.0); return n > 0; }
@@ -323,7 +333,8 @@ static std::string fmtTime(long long frames, int rate) { char b[32]; long long s
 static void enableTest(bool on) { for (auto h : gBtn) EnableWindow(h, on); for (auto h : gChoose) EnableWindow(h, on); EnableWindow(gPos, on); for (auto h : gRangeBtn) EnableWindow(h, on); }
 static void showTrial() {
     char b[640]; snprintf(b, sizeof b, "Pair %zu of %zu: %s\r\nTrial %d of %d.  Listen to A, B, X and Y, then say whether X is A or X is B.\r\nCorrect so far is not shown until the end.", gQueuePos + 1, gQueue.size(), gTest.pair.name.c_str(), gTest.done + 1, gTest.trials);
-    setStatus(b); }
+    std::string st = b; if (gTest.lag) { char lg[160]; snprintf(lg, sizeof lg, "\r\nLined up: the second source of the pair is moved by %lld samples (%.1f ms).", gTest.lag, 1000.0 * (double)gTest.lag / gTest.rate); st += lg; }
+    setStatus(st); }
 static void finish() {
     gPlayer.pause(); enableTest(false); const double p = pValue(gTest.correct, gTest.trials);
     const Source& A = gTest.s[gTest.aIs]; const Source& B = gTest.s[1 - gTest.aIs];

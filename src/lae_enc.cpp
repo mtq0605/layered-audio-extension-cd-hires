@@ -413,7 +413,10 @@ static int encode(int argc, char** argv) {
     wavio::Wav w;
     if (rawRate > 0) { const long long rb = fileSize(argv[1]); if (rb < 8) { printf("rawin=: the aligned master is missing\n"); return 2; }   // internal: an aligned master of this run (stereo int32, 24 bit left-aligned)
         wi.rate = rawRate; wi.ch = 2; wi.bits = 24; wi.dataBytes = rb / 8 * 6; }
-    else if (!(wavin::probe(argv[1], wi) && wi.ch == 2)) { printf("need a stereo integer PCM WAV\n"); oldNote(); return 1; }
+    else if (!(wavin::probe(argv[1], wi) && wi.ch == 2)) {
+        if (wi.badLen) printf("the header of %s gives a data length of 2^63 bytes or more: the file is damaged or not a valid %s file; nothing encoded\n", argv[1], wi.kind.c_str());
+        else printf("need a stereo integer PCM WAV\n");
+        oldNote(); return 1; }
     w.rate = wi.rate; w.ch = wi.ch; w.bits = wi.bits;
     std::string note32;
     if (w.bits == 32) {   // LAE v5 carries at most 24 bit: say what reducing the master would drop, then end or continue as the user chooses

@@ -14,7 +14,8 @@
 #include "blk_io.h"
 #include "align_hash.h"
 namespace wavin {
-struct Info { int rate = 0, ch = 0, bits = 0, fmt = 0; long long dataOff = -1, dataBytes = 0; std::string kind; };
+struct Info { int rate = 0, ch = 0, bits = 0, fmt = 0; long long dataOff = -1, dataBytes = 0; std::string kind;
+    bool badLen = false; };   // the header gives a data length of 2^63 bytes or more (RF64 / W64): no file has that; probe() refuses it
 inline uint32_t le32(const uint8_t* b) { return (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24; }
 inline uint64_t le64(const uint8_t* b) { return (uint64_t)le32(b) | (uint64_t)le32(b + 4) << 32; }
 // reads the header chunks; false if the file is not a WAV / RF64 / W64 with a fmt and a data chunk
@@ -29,23 +30,26 @@ inline bool probe(const char* path, Info& in) {
         while (p + 8 <= sz) { uint8_t c[8]; if (!at(p, c, 8)) break; uint64_t n = le32(c + 4); const long long body = p + 8;
             if (rf64 && !memcmp(c, "ds64", 4)) { uint8_t d[24]; if (n >= 24 && at(body, d, 24)) ds64Data = le64(d + 8); }
             if (rf64 && !memcmp(c, "data", 4) && n == 0xFFFFFFFFull) n = ds64Data;
-            if ((long long)n > sz - body) n = (uint64_t)(sz - body);   // a truncated last chunk is tolerated (as wavio::read)
+            if (!memcmp(c, "data", 4) && n >> 63) { in.badLen = true; break; }   // 2^63 or more: as a signed length it would be negative (2026-11-14)
+            if (n > (uint64_t)(sz - body)) n = (uint64_t)(sz - body);   // a truncated last chunk is tolerated (as wavio::read); compared unsigned, so p only moves forward
             if (!memcmp(c, "fmt ", 4)) { if (!fmtChunk(body, n)) break; haveFmt = true; }
             else if (!memcmp(c, "data", 4)) { in.dataOff = body; in.dataBytes = (long long)n; }
             p = body + (long long)n + (long long)(n & 1); }
-        ok = haveFmt && in.dataOff >= 0; }
+        ok = haveFmt && in.dataOff >= 0 && !in.badLen; }
     else if (sz >= 40 && at(0, h, 40)) {   // Wave64: GUID chunks, 64-bit sizes that include the 24-byte chunk header, 8-byte alignment
         static const uint8_t riff[16] = {'r', 'i', 'f', 'f', 0x2E, 0x91, 0xCF, 0x11, 0xA5, 0xD6, 0x28, 0xDB, 0x04, 0xC1, 0x00, 0x00};
         static const uint8_t tail[12] = {0xF3, 0xAC, 0xD3, 0x11, 0x8C, 0xD1, 0x00, 0xC0, 0x4F, 0x8E, 0xDB, 0x8A};
         if (!memcmp(h, riff, 16) && !memcmp(h + 24, "wave", 4) && !memcmp(h + 28, tail, 12)) { in.kind = "W64"; bool haveFmt = false; long long p = 40;
             while (p + 24 <= sz) { uint8_t c[24]; if (!at(p, c, 24)) break; uint64_t n = le64(c + 16); if (n < 24) break; const long long body = p + 24; uint64_t len = n - 24;
-                if ((long long)len > sz - body) len = (uint64_t)(sz - body);
+                if (!memcmp(c + 4, tail, 12) && !memcmp(c, "data", 4) && len >> 63) { in.badLen = true; break; }
+                if (len > (uint64_t)(sz - body)) len = (uint64_t)(sz - body);
                 if (!memcmp(c + 4, tail, 12)) { if (!memcmp(c, "fmt ", 4)) { if (!fmtChunk(body, len)) break; haveFmt = true; } else if (!memcmp(c, "data", 4)) { in.dataOff = body; in.dataBytes = (long long)len; } }
                 p = body + (long long)((len + 7) & ~7ull); }
-            ok = haveFmt && in.dataOff >= 0; } }
+            ok = haveFmt && in.dataOff >= 0 && !in.badLen; } }
     fclose(f); return ok && in.fmt == 1 && (in.bits == 16 || in.bits == 24 || in.bits == 32); }
 // writes the raw stereo int32 file; frames = whole stereo frames; low8 = 32-bit samples with a non-zero lowest byte; md5 of the data bytes
 inline void toRaw(const char* path, const Info& in, const char* out, long long& frames, long long& low8, std::string& md5) {
+    if (in.dataBytes < 0 || in.dataOff < 0) encio::fail(std::string("internal error: data length of ") + path);   // never sized from a negative length
     FILE* f = encio::open(path, "rb"); struct Close { FILE* f; ~Close() { fclose(f); } } cl{f};
     const int bps = in.bits / 8; const long long n = in.dataBytes / bps; frames = n / 2; low8 = 0; alignhash::Md5 m;
     blkio::Writer w(out); std::vector<uint8_t> b; std::vector<int32_t> s; const long long BS = 1LL << 18;   // frames per piece

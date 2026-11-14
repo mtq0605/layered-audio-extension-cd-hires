@@ -168,7 +168,7 @@ LAE 文件的扩展名可以是 `.wav`。内置的「foobar2000 WAV 解码器」
 
 | 文件 | 内容 |
 |---|---|
-| `laes_choices.txt` | 每个曲目的选择：`<choice name>` TAB `<path>`（0.10 及以前，此文件被误写在配置文件夹旁边；0.11 会从该处读取一次）。 |
+| `laes_choices.txt` | 每个曲目的选择：`<choice name>` TAB `<path>`。选择名是条目的技术名称，与 `laes dec` 写出的文件名相同（`core`、`master_<k>_<rate>_<bits>`、`master_<k>_level_<rate>_<bits>`、`derived16_<rate>_from_<条目>`；k 是母带在菜单中的位置），从不含发行方给的母带名称；LAEY 扩展包记为 `laeypack=<n>`。0.10 及以前，此文件被误写在配置文件夹旁边；0.11 会从该处读取一次。 |
 | `laes_speed.txt` | 每个文件的 SHA-256 和选择（或 `all`）：解码速度，以实时的倍数表示。 |
 | `laes_debug.log` | 仅当用户自行创建（作为空文件）时写入：LAES 播放的事件日志（打开、跳转、切换、关闭），用于报告播放故障；删除该文件即关闭日志记录。 |
 

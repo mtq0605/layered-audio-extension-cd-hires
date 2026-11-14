@@ -168,7 +168,7 @@ The following files are stored in the foobar2000 profile folder (and are specifi
 
 | File | Contents |
 |---|---|
-| `laes_choices.txt` | The choice for each track: `<choice name>` TAB `<path>` (up to 0.10, this file was mistakenly written beside the profile folder; 0.11 reads it from there once). |
+| `laes_choices.txt` | The choice for each track: `<choice name>` TAB `<path>`. The choice name is the technical name of the entry, as in the file names of `laes dec` (`core`, `master_<k>_<rate>_<bits>`, `master_<k>_level_<rate>_<bits>`, `derived16_<rate>_from_<entry>`; k is the master's place in the menu), never the publisher's master name; an LAEY extension pack is stored as `laeypack=<n>`. Up to 0.10, this file was mistakenly written beside the profile folder; 0.11 reads it from there once. |
 | `laes_speed.txt` | For each file, the SHA-256 and choice (or `all`): the decoding speed as a multiple of real time. |
 | `laes_debug.log` | Only if you create it (as an empty file): an event log of LAES playback (open, seek, switch, close) for reporting a playback fault; delete it to turn logging off. |
 

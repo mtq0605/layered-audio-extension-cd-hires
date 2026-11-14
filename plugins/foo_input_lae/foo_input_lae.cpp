@@ -568,14 +568,23 @@ void retireWorker(std::unique_ptr<LaesWorker> w) { if (!w) return; LaesWorker* p
 // around the playing time decoded for every other master of the file that is verified for this file content, each started at its
 // position by the noted block positions and then decoded at the pace of playback. A switch takes these samples and their decoder over
 // (LaesWorker adopt), so the new master plays without starting a decoder. The seconds kept follow the free memory of the machine.
+// Memory (DEC 42, 2026-11-15): every other master is prepared when memory allows. One prepared master takes its decoder (about 30 MB
+// at 352.8 kHz, measured: tests/fix_2026-11-14/dec_e_mem.cpp) and the samples kept. At the start only as many are prepared as fit into
+// half of the memory above a reserve (1 GB physical, 512 MB address space), the nearest in menu order first; while playing, when free
+// memory falls below a lower mark, the farthest prepared master is given up. So memory does not run out and the system does not page
+// (playback would stutter). ready() / total() say how many are prepared; the status bar says so when it is fewer than all.
 class LaesPrefetcher {
 public:
-    LaesPrefetcher(std::shared_ptr<SharedLaes> sh, std::vector<std::pair<int, laes_choice_info>> cs) : m_sh(std::move(sh)) {   // (choice number, its info)
-        for (auto& c : cs) { Item it; it.idx = c.first; it.ci = c.second; m_items.push_back(std::move(it)); }
+    LaesPrefetcher(std::shared_ptr<SharedLaes> sh, std::vector<std::pair<int, laes_choice_info>> cs) : m_sh(std::move(sh)) {   // (choice number, its info), nearest first
         MEMORYSTATUSEX ms{}; ms.dwLength = sizeof ms; GlobalMemoryStatusEx(&ms);
         m_keep = ms.ullAvailPhys < (2ull << 30) || ms.ullAvailVirtual < (1ull << 30) ? 1.0 : 3.0;   // seconds ahead: less on a machine short of memory
+        const uint64_t phys = ms.ullAvailPhys > kReservePhys ? ms.ullAvailPhys - kReservePhys : 0, virt = ms.ullAvailVirtual > kReserveVirt ? ms.ullAvailVirtual - kReserveVirt : 0;
+        const uint64_t budget = (std::min)(phys, virt) / 2; uint64_t used = 0;
+        for (auto& c : cs) { const uint64_t need = itemBytes(c.second); if (used + need > budget) break; used += need;
+            Item it; it.idx = c.first; it.ci = c.second; m_items.push_back(std::move(it)); }
+        m_total = (int)cs.size(); m_ready = (int)m_items.size(); m_memShort = m_items.size() < cs.size();
         // an exception on this thread (memory) would end foobar2000: the samples kept ready are given up instead (a switch then starts a decoder)
-        m_thread = std::thread([this] { try { run(); } catch (...) { FpPin pin; std::lock_guard<std::mutex> g(m_mx); for (auto& it : m_items) { if (it.p) { laes_stop(it.p); it.p = nullptr; } it.idx = -1; } } }); }
+        m_thread = std::thread([this] { try { run(); } catch (...) { FpPin pin; std::lock_guard<std::mutex> g(m_mx); for (auto& it : m_items) { if (it.p) { laes_stop(it.p); it.p = nullptr; } it.idx = -1; } m_ready = 0; } }); }
     ~LaesPrefetcher() { m_stop = true; if (m_thread.joinable()) m_thread.join(); }
     void setTime(double t) { m_time = t; }
     // the prepared samples of choice index `idx` (laes choice number) when they hold frame `at`; null otherwise
@@ -583,18 +592,30 @@ public:
         for (auto& it : m_items) if (it.idx == idx && it.p && it.b0 <= at && at < it.b1) {
             std::unique_ptr<Prefetched> r(new Prefetched()); r->sh = m_sh; r->p = it.p; it.p = nullptr; r->b0 = it.b0; r->b1 = it.b1; r->pcm.swap(it.pcm); it.b0 = it.b1 = 0; return r; }
         return nullptr; }
+    int ready() const { return m_ready.load(); } int total() const { return m_total; }   // masters prepared / other verified masters of the file
+    bool memShort() const { return m_memShort.load(); }   // fewer than all prepared because memory is short
 private:
     struct Item { int idx = -1; laes_choice_info ci{}; laes_play* p = nullptr; uint64_t b0 = 0, b1 = 0; std::vector<int32_t> pcm; };
+    static constexpr uint64_t kReservePhys = 1ull << 30, kReserveVirt = 512ull << 20;   // left free at the start
+    static constexpr uint64_t kLowPhys = 768ull << 20, kLowVirt = 384ull << 20;          // while playing: below these, one master fewer
+    uint64_t itemBytes(const laes_choice_info& c) const { const double rate = c.rate > 0 ? c.rate : 0;   // decoder + the samples kept (ahead, behind, 2 s of slack)
+        const double dec = (std::max)(8.0, 36.0 * rate / 352800.0) * 1048576.0, pcm = (m_keep + (m_keep >= 3 ? 3.0 : 1.5) + 2.0) * rate * 8.0; return (uint64_t)(dec + pcm); }
+    // memory short while playing: the farthest prepared master is given up (under m_mx)
+    void shed() { MEMORYSTATUSEX ms{}; ms.dwLength = sizeof ms; if (!GlobalMemoryStatusEx(&ms) || (ms.ullAvailPhys >= kLowPhys && ms.ullAvailVirtual >= kLowVirt)) return;
+        for (size_t i = m_items.size(); i-- > 0;) { Item& it = m_items[i]; if (it.idx < 0) continue;
+            if (it.p) { laes_stop(it.p); it.p = nullptr; } std::vector<int32_t>().swap(it.pcm); it.b0 = it.b1 = 0; dbg("prefetch %d given up: memory", it.idx); it.idx = -1; m_ready--; m_memShort = true; return; } }
     std::shared_ptr<SharedLaes> m_sh; std::vector<Item> m_items; std::mutex m_mx; std::thread m_thread; std::atomic<bool> m_stop{false}; std::atomic<int> m_hold{0}; std::atomic<double> m_time{0}; double m_keep = 3.0;
-    void run() { FpPin pin; SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL); std::vector<int32_t> buf(16384 * 2); char err[256];
+    std::atomic<int> m_ready{0}; int m_total = 0; std::atomic<bool> m_memShort{false};
+    void run() { FpPin pin; SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL); std::vector<int32_t> buf(16384 * 2); char err[256]; uint64_t lastCheck = nowMs();
         while (!m_stop) { bool busy = false;
+            if (nowMs() - lastCheck >= 1000) { lastCheck = nowMs(); std::lock_guard<std::mutex> g(m_mx); shed(); }
             for (auto& it : m_items) { if (m_stop) break; while (m_hold.load() > 0 && !m_stop) Sleep(1);   // a switch is taking samples: it gets the lock first
                 std::lock_guard<std::mutex> g(m_mx); if (it.idx < 0) continue;
                 const uint64_t pos = (std::min)(it.ci.frames, (uint64_t)(m_time.load() * it.ci.rate)), ahead = (uint64_t)(m_keep * it.ci.rate), behind = (uint64_t)((m_keep >= 3 ? 3.0 : 1.5) * it.ci.rate);
                 // nothing yet, or the playing time moved away (a seek): before the kept samples, or further ahead than decoding catches up with soon
                 if (!it.p || pos < it.b0 || pos > it.b1 + behind + 2 * (uint64_t)it.ci.rate) {
                     if (it.p) laes_stop(it.p); it.pcm.clear(); const uint64_t s = pos > behind ? pos - behind : 0;
-                    it.p = laes_start_at(m_sh->f, it.idx, s, 2, err, sizeof err); it.b0 = it.b1 = s; dbg("prefetch %d start at %llu (pos %llu)", it.idx, (unsigned long long)s, (unsigned long long)pos); if (!it.p) { it.idx = -1; continue; } }
+                    it.p = laes_start_at(m_sh->f, it.idx, s, 2, err, sizeof err); it.b0 = it.b1 = s; dbg("prefetch %d start at %llu (pos %llu)", it.idx, (unsigned long long)s, (unsigned long long)pos); if (!it.p) { it.idx = -1; m_ready--; continue; } }
                 if (it.b1 < (std::min)(it.ci.frames, pos + ahead)) { const int64_t k = laes_read(it.p, buf.data(), 16384);
                     if (k <= 0) dbg("prefetch %d read %lld at %llu", it.idx, (long long)k, (unsigned long long)it.b1);
                     if (k <= 0) { laes_stop(it.p); it.p = nullptr; continue; }
@@ -1000,6 +1021,7 @@ private:
         retireWorker(std::move(m_worker)); if (!past) m_worker.reset(new LaesWorker(m_path.get_ptr(), m_size, choice, c.master, c.frames, c.rate, startAt, std::move(adopt)));
         m_laesChoice = choice; m_laesChoiceNow = choice; m_laesFrames = c.frames; m_rate = c.rate; m_bits = c.bits; m_laesKind = c.kind; m_gen = s_layerGen.load();
         m_laesLabel = std::string("LAES \xC2\xB7 ") + laesWhat(choice); if (!m_laesFallback.empty()) m_laesLabel += std::string(" \xC2\xB7 ") + T("extension unusable", "扩展层不可用");
+        m_laesLabelBase = m_laesLabel; m_pfShown = -1;   // the prefetcher of this choice adds its note (laesPrefetch)
         m_report = true; (void)p_abort; }
     bool laesRun(audio_chunk& p_chunk, abort_callback& p_abort) {
         enum { block = 4096 };
@@ -1024,8 +1046,15 @@ private:
         if (!m_pf && g_prefetch.get() && m_playback && !m_testing && m_laesFallback.empty() && m_worker) { std::shared_ptr<SharedLaes> sh = m_worker->shared();
             if (sh) { laes_file_info fi; laes_get_info(sh->f, &fi); std::vector<std::pair<int, laes_choice_info>> cs;
                 for (int i = 0; i < fi.choices; i++) { laes_choice_info c; laes_get_choice(sh->f, i, &c); if (c.kind == LAES_KIND_MASTER && i != m_laesChoice && g_verified.get(fi.file_sha256, c.master) > 0) cs.push_back({i, c}); }
+                // nearest in menu order first (the choice list is in menu order): when memory is short, these are the ones prepared
+                std::stable_sort(cs.begin(), cs.end(), [this](const std::pair<int, laes_choice_info>& a, const std::pair<int, laes_choice_info>& b) { return std::abs(a.first - m_laesChoice) < std::abs(b.first - m_laesChoice); });
                 if (!cs.empty()) m_pf.reset(new LaesPrefetcher(sh, cs)); } }
-        if (m_pf && m_rate > 0) m_pf->setTime((double)m_pos / m_rate); }
+        if (m_pf && m_rate > 0) m_pf->setTime((double)m_pos / m_rate);
+        // fewer masters prepared than the file has, because memory is short (DEC 42): the status bar and the console say so
+        if (m_pf && m_pf->memShort() && m_pf->ready() != m_pfShown) { m_pfShown = m_pf->ready(); const std::string n = std::to_string(m_pfShown), t = std::to_string(m_pf->total());
+            const std::string note = std::string(T("", "内存不足：其他母带只准备了 ")) + n + T(" of ", " / ") + t + T(" other masters ready (memory is short)", " 个");
+            m_laesLabel = m_laesLabelBase + " \xC2\xB7 " + note; m_report = true;
+            console::formatter() << T("LAES: ", "LAES：") << note.c_str() << T("; switching to a master that is not ready may pause briefly", "；切换到没有准备的母带时可能短暂停顿"); } }
     // the user chose other settings in the menu: a playback decoder continues at the same time position with the new choice
     // returns true when it switched. atSeconds: the time to begin at (a seek); otherwise where decoding has got to
     bool laesApplyChange(abort_callback& p_abort, double atSeconds = -1) {
@@ -1037,7 +1066,7 @@ private:
         std::unique_ptr<Prefetched> pre = m_pf ? m_pf->take(want, at) : nullptr;   // the samples kept ready, when they hold the position
         laesStart(want, p_abort, at, std::move(pre)); m_pos = (size_t)at; return true; }
     bool m_laes = false, m_laesPlayed = false; laes_file* m_lq = nullptr; std::unique_ptr<LaesPrefetcher> m_pf; std::unique_ptr<LaesWorker> m_worker; int m_laesChoice = 0, m_laesKind = 0; std::atomic<int> m_laesChoiceNow{0};
-    uint64_t m_laesFrames = 0; std::string m_laesLabel, m_laesFallback; std::atomic<bool> m_laesFellBack{false};   // m_laesFallback set, published for the menu thread
+    uint64_t m_laesFrames = 0; std::string m_laesLabel, m_laesFallback; std::string m_laesLabelBase; int m_pfShown = -1; std::atomic<bool> m_laesFellBack{false};   // m_laesFallback set, published for the menu thread
 
     service_ptr_t<file> m_file; t_filesize m_size = 0; pfc::string8 m_path;
     bool m_flacForm = false;   // LAEY in the FLAC form (m_wavTags then holds its Vorbis comments)

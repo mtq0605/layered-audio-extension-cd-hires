@@ -111,15 +111,17 @@ final class Fmt {
         boolean neg = false; if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) neg = s.charAt(i++) == '-';
         long v = 0; while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') v = v * 10 + (s.charAt(i++) - '0');
         return neg ? -v : v; }
+    // FU22-10: C digits only (Character.isDigit took full-width digits such as U+FF11, then Double.parseDouble threw)
+    private static boolean dig(char c) { return c >= '0' && c <= '9'; }
     // port of the C library's atof (the longest prefix that is a decimal floating-point number; 0 if none; correctly rounded as the UCRT strtod)
     static double atof(String s) {
         int i = 0, n = s.length(); while (i < n && Character.isWhitespace(s.charAt(i))) i++;
         int st = i; if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) i++;
-        int d0 = i; while (i < n && Character.isDigit(s.charAt(i))) i++; int nd = i - d0;
-        if (i < n && s.charAt(i) == '.') { i++; int f0 = i; while (i < n && Character.isDigit(s.charAt(i))) i++; nd += i - f0; }
+        int d0 = i; while (i < n && dig(s.charAt(i))) i++; int nd = i - d0;
+        if (i < n && s.charAt(i) == '.') { i++; int f0 = i; while (i < n && dig(s.charAt(i))) i++; nd += i - f0; }
         if (nd == 0) return 0.0;
         int end = i;
-        if (i < n && (s.charAt(i) == 'e' || s.charAt(i) == 'E')) { int j = i + 1; if (j < n && (s.charAt(j) == '+' || s.charAt(j) == '-')) j++; int e0 = j; while (j < n && Character.isDigit(s.charAt(j))) j++; if (j > e0) end = j; }
+        if (i < n && (s.charAt(i) == 'e' || s.charAt(i) == 'E')) { int j = i + 1; if (j < n && (s.charAt(j) == '+' || s.charAt(j) == '-')) j++; int e0 = j; while (j < n && dig(s.charAt(j))) j++; if (j > e0) end = j; }
         String t = s.substring(st, end); if (t.endsWith(".")) t = t + "0"; if (t.startsWith(".") || t.startsWith("+.") || t.startsWith("-.")) t = t.replace(".", "0.");
         return Double.parseDouble(t); }
 }

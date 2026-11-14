@@ -56,6 +56,6 @@ public final class EncEnv {
     // the cancellation point (C++: the signal handler)
     void step(String name) { EncEnv r = this; while (r.parent != null) r = r.parent; if (r.steps != null) r.steps.step(name); }
     void checkCancel() { if (cancel.get()) throw new Cancelled(); }
-    // getenv("PARTTHREADS") ? atoi(...) : 0 (0 = not set)
+    // getenv("PARTTHREADS") ? atoi(...) : -1 (-1 = not set; the C++ uses 0 for that)
     int partThreads() { String p = get("PARTTHREADS"); return p == null ? -1 : Fmt.atoi(p); }
 }

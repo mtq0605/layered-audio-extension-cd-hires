@@ -260,7 +260,8 @@ public final class StreamEnc {
         final byte[] c = new byte[8];
         while (pos + 8 <= in.n) { in.read(pos, c, 0, 8); long n = (c[4] & 0xFF) | (c[5] & 0xFF) << 8 | (c[6] & 0xFF) << 16 | (long) (c[7] & 0xFF) << 24; final long body = pos + 8;
             if (rf64 && n == 0xFFFFFFFFL) n = eq4(c, 0, "data") ? dsData : eq4(c, 0, "LAE ") ? dsLae : n;
-            if (n > in.n - body) n = in.n - body;   // C++ (long long)n: the same signed comparison
+            if (n < 0 && eq4(c, 0, "data")) return path + ": the header gives a data length of 2^63 bytes or more";   // negative as a long: no file has that (2026-11-14)
+            if (com.lae.core.U.gt(n, in.n - body)) n = in.n - body;   // a length beyond the end of the file: a cut-off file; compared unsigned, so pos only moves forward
             if (eq4(c, 0, "fmt ") && com.lae.core.U.ge(n, 16)) { final byte[] f = new byte[26]; in.read(body, f, 0, com.lae.core.U.ge(n, 26) ? 26 : 16); tag = (f[0] & 0xFF) | (f[1] & 0xFF) << 8; ch = (f[2] & 0xFF) | (f[3] & 0xFF) << 8;
                 wi.rate = (f[4] & 0xFF) | (f[5] & 0xFF) << 8 | (f[6] & 0xFF) << 16 | (f[7] & 0xFF) << 24; wi.bits = (f[14] & 0xFF) | (f[15] & 0xFF) << 8; if (tag == 0xFFFE && com.lae.core.U.ge(n, 26)) tag = (f[24] & 0xFF) | (f[25] & 0xFF) << 8; }
             else if (eq4(c, 0, "data")) { wi.dataOff = body; wi.dataBytes = n; }

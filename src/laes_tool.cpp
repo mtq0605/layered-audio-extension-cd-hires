@@ -260,7 +260,8 @@ static std::string readLayout(laess::In& in, Layout& L) {
     if ((memcmp(h, "RIFF", 4) && !L.rf64) || memcmp(h + 8, "WAVE", 4)) return in.path + ": not FLAC or RIFF/WAVE";
     uint64_t dsData = 0; std::vector<std::pair<std::string, uint64_t>> table; long long pos = 12; bool haveData = false;
     while (pos + 8 <= in.n) { uint8_t c[8]; in.read(pos, c, 8); Part q; q.id.assign((const char*)c, 4); uint64_t n = c[4] | c[5] << 8 | c[6] << 16 | (uint64_t)c[7] << 24; q.off = pos + 8;
-        if (L.rf64 && q.id == "ds64" && n >= 28) { std::vector<uint8_t> d((size_t)n); in.read(q.off, d.data(), d.size()); auto le64 = [&](size_t at) { uint64_t v = 0; for (int i = 7; i >= 0; i--) v = v << 8 | d[at + (size_t)i]; return v; };
+        if (L.rf64 && q.id == "ds64" && n >= 28 && n <= (uint64_t)(in.n - q.off)) {   // U14-b (2026-11-14): read only when it lies in the file (else refused below, nothing allocated)
+            std::vector<uint8_t> d((size_t)n); in.read(q.off, d.data(), d.size()); auto le64 = [&](size_t at) { uint64_t v = 0; for (int i = 7; i >= 0; i--) v = v << 8 | d[at + (size_t)i]; return v; };
             dsData = le64(8); const uint32_t cnt = d[24] | d[25] << 8 | d[26] << 16 | (uint32_t)d[27] << 24; for (uint32_t i = 0; i < cnt && 28 + 12 * (size_t)(i + 1) <= d.size(); i++) table.push_back({std::string((const char*)&d[28 + 12 * i], 4), le64(32 + 12 * (size_t)i)}); }
         if (L.rf64 && n == 0xFFFFFFFFu) { if (q.id == "data") n = dsData; else for (auto& t : table) if (t.first == q.id) n = t.second; }
         if (n > (uint64_t)(in.n - q.off)) return in.path + ": chunk " + q.id + " runs past the end of the file";   // compared unsigned: a ds64 length of 2^63 or more is refused too (2026-11-14)

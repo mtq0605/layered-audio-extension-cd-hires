@@ -7,9 +7,10 @@
 //           the depth layer (L, R) and the frequency layer (M, S), each range-coded with partition levels
 // usage: lae_enc <master.wav> <out.wav | out.flac | out.lae> [mode: max | 1 | 3 | 5 | keep | keep20, default 3] [s1 | s2 (scheme), default s1] [zs] [cd=<CD.wav>] [energy] [equal]
 //                [cdcheck] [cdalign=<offset>] [cdaccept] [cdedge=pad | cdedge=cut] [bits=24] [mem=<GB>] [noise=<marks.laenoise>] [g | g=b | g=c | g=d]
-//                [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [--form=flac | --form=wav]
+//                [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [--form=flac | --form=wav] [--overwrite]
+//        an existing output (2026-11-15) is replaced only after two "yes" answers at a console, or with --overwrite; otherwise refused
 //        the output form (2026-11-10): WAV form by default; .flac = FLAC form; .lae = WAV form unless --form=flac (see outputForm below)
-//        lae_enc tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   new tags, no re-encoding
+//        lae_enc tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [--overwrite]   new tags, no re-encoding
 //        lae_enc plan <master.wav> [<master2.wav> ...] <publisher.cue> <outdir> [cdaccept]   the CD's split markers onto the master (cd_plan.cpp)
 //   mode = share of the scanned D (and C) content kept at its tier (see the MODES table in partition_format.h); energy = measure the
 //   share by energy instead of cell count; equal = halving cuts only. The frequency layer is stored per octave (independent streams).
@@ -187,6 +188,21 @@ static void clearModuleEnv() {
 static std::vector<uint8_t> slurp(const std::string& p) { return encio::readAll<uint8_t>(p.c_str()); }   // a missing or unreadable file stops the encoder
 static bool exists(const std::string& p) { std::error_code ec; return std::filesystem::exists(p, ec); }
 static long long fileSize(const std::string& p) { std::error_code ec; auto n = std::filesystem::file_size(p, ec); return ec ? -1 : (long long)n; }
+// An existing output file is not replaced silently (2026-11-15, the same in every tool that writes an output): at a console the person
+// is asked twice and only two "yes" answers replace it; without a console it is refused unless --overwrite is given. Prompts and the
+// refusal are operating explanations: English and Chinese.
+static bool isOverwriteOpt(const char* a) { return !strcmp(a, "--overwrite") || !strcmp(a, "overwrite"); }
+static bool askYes() { char line[64] = {0}; if (!fgets(line, sizeof line, stdin)) return false; std::string s(line);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
+    size_t b = 0; while (b < s.size() && (s[b] == ' ' || s[b] == '\t')) b++; return s.substr(b) == "yes"; }
+static bool mayReplace(const std::string& out, bool overwrite) {   // true: the output does not exist, or replacing it was confirmed
+    std::error_code ec; if (!std::filesystem::exists(std::filesystem::u8path(out), ec) || overwrite) return true;
+    const char* f = out.c_str();
+    if (interactive()) {
+        printf("\"%s\" already exists. Replace it? Type yes to continue: \n\"%s\" 已经存在。要替换吗？输入 yes 继续：", f, f); fflush(stdout);
+        if (askYes()) { printf("Really replace \"%s\"? It cannot be undone. Type yes again: \n确定要替换 \"%s\" 吗？替换后无法恢复。再输入一次 yes：", f, f); fflush(stdout);
+            if (askYes()) return true; } }
+    printf("\"%s\" already exists; it was not replaced (give --overwrite to replace it).\n\"%s\" 已经存在，没有替换（加 --overwrite 才替换）。\n", f, f); return false; }
 // An input WAV / RF64 / W64 whose header gives a data length beyond the end of the file (2026-11-14): the file is read to its end as
 // before (wavin::probe, wavio::read, wavio::readCD and the CUE reader all limit the length to the file), and the user is told.
 static void longHeaderNote(const char* path, const wavin::Info& in) {
@@ -310,10 +326,14 @@ static int retagFlac(FILE* fi, const std::string& in, const std::string& out, co
     if (!ok) { std::filesystem::remove(std::filesystem::u8path(part), ec); printf("nothing written\n"); return 2; }
     printf("written: %s (FLAC form, %zu tag(s), %zu picture(s)); CD audio frames and LAE1 blocks byte-identical to %s\n", out.c_str(), tags.kv.size(), tags.pics.size(), in.c_str()); return 0; }
 static int retag(int argc, char** argv) {
-    if (argc < 4) { printf("usage: lae_enc tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]   (WAV or FLAC form, the output keeps the input's form; no tags given: the tags are removed)\n"); return 1; }
+    if (argc < 4) { printf("usage: lae_enc tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...] [--overwrite]   (WAV or FLAC form, the output keeps the input's form; no tags given: the tags are removed)\n"); return 1; }
     const std::string in = argv[2], out = argv[3], part = out + ".part";
-    for (int i = 4; i < argc; i++) if (!isTagOpt(argv[i])) { printf("unknown option '%s': nothing written (options: --tag=KEY=VALUE --cover=<image> --picture=<type>:<image>)\n", argv[i]); return 1; }
-    std::error_code ec; if (std::filesystem::exists(std::filesystem::u8path(out), ec)) { printf("%s already exists: choose another output name (the input is never changed); nothing written\n", out.c_str()); return 1; }
+    bool overwrite = false;
+    for (int i = 4; i < argc; i++) { if (isOverwriteOpt(argv[i])) { overwrite = true; continue; }
+        if (!isTagOpt(argv[i])) { printf("unknown option '%s': nothing written (options: --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> --overwrite)\n", argv[i]); return 1; } }
+    std::error_code ec;
+    if (std::filesystem::equivalent(std::filesystem::u8path(in), std::filesystem::u8path(out), ec)) { printf("%s is the input: choose another output name (the input is never changed); nothing written\n", out.c_str()); return 1; }
+    if (!mayReplace(out, overwrite)) return 1;   // 2026-11-15: an existing output only after two "yes" at a console, or with --overwrite
     if (std::filesystem::exists(std::filesystem::u8path(part), ec)) { printf("%s already exists: remove it or choose another output name; nothing written\n", part.c_str()); return 1; }
     laestag::Tags tags; { const std::string e = tagArgs(argc, argv, 4, tags); if (!e.empty()) { printf("%s: nothing written\n", e.c_str()); return 1; } }
     const std::vector<uint8_t> tc = laestag::wavChunks(tags, kLaeyEncoder);
@@ -376,6 +396,7 @@ static int encode(int argc, char** argv) {
     std::string manualText; int manualSg = 1; long long manualI = 0, manualF = 0, manualFs = 1, manualPlace = 0, manualPhi = 0;   // cdalign=<o>: o = sg * (I + F / Fs) master samples
     double manualMove = 0;   // the fraction (master samples, |f| <= 1/2) the master is moved by when it is placed at manualT
     PackOpt pk[8]; int nPacks = 0;   // extension packs: master2= .. master9=
+    bool overwrite = false;   // --overwrite (2026-11-15): replace an existing output without asking
     std::string mainName;   // master1name=<text>: the name of the main body (the first master), "" = none stored
     // internal steps of the extension packs (each a run of this encoder inside the calling run): alignout=<file> = align this master to
     // cd=, hand the aligned master to the calling run and encode nothing; rawin=<rate> = argument 1 is such an aligned master
@@ -384,7 +405,7 @@ static int encode(int argc, char** argv) {
     const int formSel = outputForm(outPath, argc, argv, opt0); if (formSel < 0) { printf("nothing encoded\n"); return 1; } const bool asFlac = formSel == 1;
     { const std::string e = tagArgs(argc, argv, opt0, tags); if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; }
       tagChunks = asFlac ? laestag::flacBlocks(tags, false, kLaeyEncoder) : laestag::wavChunks(tags, kLaeyEncoder); }   // FLAC form: VORBIS_COMMENT + PICTURE blocks, before the "LAE1" blocks
-    for (int i = opt0; i < argc; i++) { const char* a = argv[i]; if (isTagOpt(a) || isFormOpt(a)) continue;
+    for (int i = opt0; i < argc; i++) { const char* a = argv[i]; if (isTagOpt(a) || isFormOpt(a) || isOverwriteOpt(a)) { if (isOverwriteOpt(a)) overwrite = true; continue; }
         if (!strncmp(a, "master1name=", 12)) { if (strlen(a + 12) > 255) { printf("master1name=: a name has at most 255 bytes\n"); return 1; } mainName = a + 12; continue; }   // the main body's name, shown where a master is chosen
         if (!strcmp(a, "equal")) equal = true; else if (!strcmp(a, "energy")) wm = 1; else if (!strcmp(a, "s2")) scheme = 2; else if (!strcmp(a, "s1")) scheme = 1;
         else if (!strcmp(a, "zs")) zsOpt = true; else if (!strncmp(a, "cd=", 3) && a[3]) cdPath = a + 3; else if (!strcmp(a, "cdcheck")) cdCheck = true;
@@ -403,7 +424,7 @@ static int encode(int argc, char** argv) {
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
         else if (i == 3) { printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }   // the mode slot: neither a mode nor an option
-        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d master2=<master.wav> .. master9= master<n>align= master<n>name= (n from 1) master<n>accept master<n>edge= --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume)\n", a); return 1; } }
+        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d master2=<master.wav> .. master9= master<n>align= master<n>name= (n from 1) master<n>accept master<n>edge= --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume --overwrite)\n", a); return 1; } }
     encrun::keepTmp = resume;
     if ((cdCheck || cdAccept || manual || cdEdge >= 0) && !cdPath) { printf("cdcheck, cdalign, cdaccept and cdedge= need cd=<CD.wav>\n"); return 1; }
     for (int k = 0; k < 8; k++) { if (!pk[k].any) continue;
@@ -412,6 +433,7 @@ static int encode(int argc, char** argv) {
         nPacks++; }
     if (alignOut && (!cdPath || nPacks || resume || cdCheck)) { printf("alignout= is an internal step of the extension packs: nothing encoded\n"); return 1; }
     if (nPacks && (noisePath || resume || cdCheck)) { printf("further masters (master2= ...) cannot be combined with noise=, resume or cdcheck in this version: nothing encoded\n"); return 1; }
+    if (!alignOut && !rawRate && !cdCheck && !mayReplace(outPath, overwrite)) return 1;   // 2026-11-15: an existing output only after two "yes" at a console, or with --overwrite (not for the internal steps; cdcheck writes nothing)
     if (mi >= part::MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
     const bool partLeft = exists(partPath);   // with resume, decided once the work folder's notes are read (below)
     if (partLeft && !resume) { printf("%s already exists and was not created by this run: remove it or choose another output name; nothing encoded\n", partPath.c_str()); return 1; }
@@ -513,7 +535,7 @@ static int encode(int argc, char** argv) {
     // the line "align ..." the earlier run noted; if they differ, no finished step is reused (see below, after the alignment).
     std::set<std::string> doneSteps; std::mutex stepMu; const std::string manifest = T("resume.txt"); std::string resumeHead, oldAlign;
     if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | options");   // not the block length: it does not change any result
-        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume") && !isTagOpt(argv[i]) && !isFormOpt(argv[i]) && strncmp(argv[i], "mem=", 4)) key += std::string(" ") + argv[i];   // tags and the form: written with the file only; mem=: only the block length, which changes no result (FU07-9)
+        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume") && !isTagOpt(argv[i]) && !isFormOpt(argv[i]) && !isOverwriteOpt(argv[i]) && strncmp(argv[i], "mem=", 4)) key += std::string(" ") + argv[i];   // tags and the form: written with the file only; mem=: only the block length, which changes no result (FU07-9)
         key += " | master " + masterMd5;
         if (noisePath) { const std::string t = encio::readText(noisePath); uint64_t h = 1469598103934665603ull; for (unsigned char ch : t) { h ^= ch; h *= 1099511628211ull; }   // FNV-1a of the marking file
             char hs[32]; snprintf(hs, sizeof hs, "%016llx", (unsigned long long)h); key += std::string(" | noise ") + hs; }

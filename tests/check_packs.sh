@@ -30,8 +30,8 @@ cd "$W" || exit 99
 "$CUT" electronic_352800.wav m.wav 5 2 >/dev/null; "$CUT" electronic_176400.wav m176.wav 5 2 >/dev/null
 cp m.wav copy.wav; "$VAR" meq m.wav meq.wav high 8000 3 >/dev/null
 
-"$ENC" m.wav a.wav 3 s1 >a.log 2>&1 || no "plain encode"
-"$ENC" m.wav q.wav 3 s1 master2=copy.wav master2align=0 master2name=copy >q.log 2>&1 || no "encode with one further master"
+"$ENC" m.wav a.wav 3 s1 --overwrite >a.log 2>&1 || no "plain encode"
+"$ENC" m.wav q.wav 3 s1 master2=copy.wav master2align=0 master2name=copy --overwrite >q.log 2>&1 || no "encode with one further master"
 
 # 2: the differing bytes are the RIFF size, the chunk size, and everything from the plain file's CRC on
 offa=$(grep -abo "LAE " a.wav | tail -1 | cut -d: -f1); na=$(od -An -tu4 -j $((offa + 4)) -N4 a.wav | tr -d ' ')
@@ -46,7 +46,7 @@ for r in "full" "16" "cd24" "full 176400" "full 88200"; do
 done
 
 # 4
-"$VAR" extract q.wav core.wav >/dev/null; "$ENC" copy.wav s.wav 3 s1 cd=core.wav cdalign=0 >s.log 2>&1 || no "standalone encode against the core"
+"$VAR" extract q.wav core.wav >/dev/null; "$ENC" copy.wav s.wav 3 s1 cd=core.wav cdalign=0 --overwrite >s.log 2>&1 || no "standalone encode against the core"
 offp=$(grep -abo "LPAK" q.wav | head -1 | cut -d: -f1); offs=$(grep -abo "LAE " s.wav | tail -1 | cut -d: -f1)
 n=$(od -An -tu4 -j $((offs + 4)) -N4 s.wav | tr -d ' '); pl=$((n - 4))
 if cmp -s -n "$pl" -i "$((offp + 8 + 1 + 4)):$((offs + 8))" q.wav s.wav; then ok "pack 1 payload = standalone payload ($pl bytes)"; else no "pack 1 payload = standalone payload"; fi
@@ -56,13 +56,13 @@ for r in "full" "16" "cd24" "full 88200"; do d "$DEC" q.wav o5.wav $r pack=1; d 
 pos() { "$ENC" m.wav none.wav 3 s1 master2="$1" 2>&1 | sed -n 's/^ALIGN_SUGGEST whitened=aligned:\([^ ]*\) .*/\1/p' | head -1; }
 p2=$(pos meq.wav); p3=$(pos m176.wav)
 if [ -n "$p2" ] && [ -n "$p3" ] && [ ! -f none.wav ]; then ok "without a position: both searches run, nothing written ($p2, $p3)"; else no "search without a position"; fi
-"$ENC" m.wav p.wav 3 s1 master2=meq.wav master2align="$p2" master2name="EQ" master3=m176.wav master3align="$p3" >p.log 2>&1 || no "encode with two further masters"
+"$ENC" m.wav p.wav 3 s1 master2=meq.wav master2align="$p2" master2name="EQ" master3=m176.wav master3align="$p3" --overwrite >p.log 2>&1 || no "encode with two further masters"
 "$DEC" p.wav o7.wav full pack=1 >/dev/null && "$DEC" p.wav o8.wav full pack=2 >/dev/null && ok "packs 1 and 2 decode" || no "packs 1 and 2 decode"
 if "$DEC" p.wav o9.wav full pack=3 >/dev/null 2>&1; then no "pack 3 refused"; else ok "pack 3 refused"; fi
 d "$OLD" p.wav o10.wav full; d "$DEC" p.wav o11.wav full pack=0; same o10.wav o11.wav "two packs: pack 0 = earlier decoder"
 
 # 6
-"$ENC" m.wav qf.flac 3 s1 master2=copy.wav master2align=0 master2name=copy >qf.log 2>&1 || no "FLAC form encode"
+"$ENC" m.wav qf.flac 3 s1 master2=copy.wav master2align=0 master2name=copy --overwrite >qf.log 2>&1 || no "FLAC form encode"
 for r in "full pack=0" "full pack=1" "16 pack=1"; do d "$DEC" q.wav o12.wav $r; d "$DEC" qf.flac o13.wav $r; same o12.wav o13.wav "FLAC form = WAV form [$r]"; done
 "$CDX" split q.wav q_base.wav q_ext.lax track=1 >/dev/null && "$CDX" repack q_base.wav q_ext.lax q_back.wav >/dev/null; same q.wav q_back.wav "disc tool: split + repack keeps the file"
 

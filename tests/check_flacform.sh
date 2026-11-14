@@ -9,6 +9,7 @@
 #   * damaged files are refused with exit code 3, a plain FLAC and a wrong --form with exit code 1.
 # usage: check_flacform.sh <lae_enc> <lae_dec> <master.wav (10 s is enough)> <scratch folder> [mode, default 3]
 # Runs in sh (Linux, macOS, Git Bash on Windows); needs cmp, dd, od, printf.
+# The encodes and tags pass --overwrite (2026-11-15: lae_enc replaces an existing output only then), so the scratch folder may be reused.
 ENC=$1; DEC=$2; M=$3; W=$4; MODE=${5:-3}
 [ -n "$W" ] || { echo "usage: check_flacform.sh <lae_enc> <lae_dec> <master.wav> <scratch folder> [mode]"; exit 1; }
 mkdir -p "$W" || exit 1
@@ -19,10 +20,10 @@ same() { if cmp -s "$1" "$2"; then pass; else fail "$3"; fi; }
 code() { "$@" > "$W/last.txt" 2>&1; echo $?; }
 be24() { od -An -tu1 -j "$2" -N 3 "$1" | { read a b c; echo $(( (a << 16) | (b << 8) | c )); }; }
 
-"$ENC" "$M" "$W/a.wav" "$MODE" > "$W/enc_wav.txt" 2>&1 || fail "WAV form encode"
-"$ENC" "$M" "$W/a.flac" "$MODE" > "$W/enc_flac.txt" 2>&1 || fail "FLAC form encode"
-"$ENC" "$M" "$W/b.lae" "$MODE" > /dev/null 2>&1 || fail ".lae encode"
-"$ENC" "$M" "$W/c.lae" "$MODE" --form=flac > /dev/null 2>&1 || fail ".lae --form=flac encode"
+"$ENC" "$M" "$W/a.wav" "$MODE" --overwrite > "$W/enc_wav.txt" 2>&1 || fail "WAV form encode"
+"$ENC" "$M" "$W/a.flac" "$MODE" --overwrite > "$W/enc_flac.txt" 2>&1 || fail "FLAC form encode"
+"$ENC" "$M" "$W/b.lae" "$MODE" --overwrite > /dev/null 2>&1 || fail ".lae encode"
+"$ENC" "$M" "$W/c.lae" "$MODE" --form=flac --overwrite > /dev/null 2>&1 || fail ".lae --form=flac encode"
 same "$W/b.lae" "$W/a.wav" ".lae is not the WAV form (the default)"
 same "$W/c.lae" "$W/a.flac" ".lae --form=flac is not the FLAC form"
 [ "$(code "$ENC" "$M" "$W/x.wav" "$MODE" --form=flac)" = 1 ] && pass || fail "--form=flac with a .wav name was not refused"
@@ -45,16 +46,16 @@ if [ "$(od -An -tu1 -j 42 -N 1 "$W/a.flac" | tr -d ' ')" = 130 ]; then
     same "$W/ext.bin" "$W/chunk.bin" "the LAE1 data differs from the LAE chunk body"
 else echo "note: the extension is in more than one block; the byte comparison with the LAE chunk is skipped"; fi
 
-LAE_TEST_MODE=1 LAEY_TEST_PIECE=300000 "$ENC" "$M" "$W/p.flac" "$MODE" > "$W/enc_piece.txt" 2>&1 || fail "encode with small pieces"
+LAE_TEST_MODE=1 LAEY_TEST_PIECE=300000 "$ENC" "$M" "$W/p.flac" "$MODE" --overwrite > "$W/enc_piece.txt" 2>&1 || fail "encode with small pieces"
 grep -q "extension in 1 LAE1 block" "$W/enc_piece.txt" && fail "the small-piece file has one block" || pass
 "$DEC" "$W/p.flac" "$W/p.out" full > /dev/null 2>&1; same "$W/p.out" "$W/ref.out" "the multi-block file decodes differently"
 
-"$ENC" "$M" "$W/t1.flac" "$MODE" --tag=TITLE=Test --tag=ARTIST=lae > /dev/null 2>&1 || fail "encode with tags"
-"$ENC" tag "$W/a.flac" "$W/t2.flac" --tag=TITLE=Test --tag=ARTIST=lae > /dev/null 2>&1 || fail "lae_enc tag (FLAC form)"
+"$ENC" "$M" "$W/t1.flac" "$MODE" --tag=TITLE=Test --tag=ARTIST=lae --overwrite > /dev/null 2>&1 || fail "encode with tags"
+"$ENC" tag "$W/a.flac" "$W/t2.flac" --tag=TITLE=Test --tag=ARTIST=lae --overwrite > /dev/null 2>&1 || fail "lae_enc tag (FLAC form)"
 same "$W/t1.flac" "$W/t2.flac" "encoding with tags differs from tagging afterwards"
-"$ENC" tag "$W/t1.flac" "$W/t3.flac" > /dev/null 2>&1 || fail "lae_enc tag without tags"
+"$ENC" tag "$W/t1.flac" "$W/t3.flac" --overwrite > /dev/null 2>&1 || fail "lae_enc tag without tags"
 same "$W/t3.flac" "$W/a.flac" "removing the tags does not give the untagged file"
-"$ENC" tag "$W/p.flac" "$W/t4.flac" --tag=TITLE=Test > /dev/null 2>&1 || fail "lae_enc tag on a multi-block file"
+"$ENC" tag "$W/p.flac" "$W/t4.flac" --tag=TITLE=Test --overwrite > /dev/null 2>&1 || fail "lae_enc tag on a multi-block file"
 "$DEC" "$W/t4.flac" "$W/t4.out" full > /dev/null 2>&1; same "$W/t4.out" "$W/ref.out" "the tagged multi-block file decodes differently"
 [ "$(code "$ENC" tag "$W/a.flac" "$W/t5.wav" --tag=TITLE=x)" = 1 ] && pass || fail "tag: FLAC form into a .wav name was not refused"
 [ "$(code "$ENC" tag "$W/a.wav" "$W/t5.flac" --tag=TITLE=x)" = 1 ] && pass || fail "tag: WAV form into a .flac name was not refused"

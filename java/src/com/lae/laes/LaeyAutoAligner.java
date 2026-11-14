@@ -55,8 +55,10 @@ public final class LaeyAutoAligner implements LaesEncoder.Aligner {
         return A; }
 
     // port of laes_tool.cpp acceptAlign, the question: a line from stdin; the first letter y or Y accepts
+    // FU28-2: one reader for all questions (a reader made per question read ahead and lost the answers to the later ones from a pipe)
+    private static BufferedReader stdin = null;
     @Override public boolean ask(String question) { System.out.print(question); System.out.flush();
-        String l; try { l = new BufferedReader(new InputStreamReader(System.in)).readLine(); } catch (IOException e) { l = null; }
+        String l; try { synchronized (LaeyAutoAligner.class) { if (stdin == null) stdin = new BufferedReader(new InputStreamReader(System.in)); l = stdin.readLine(); } } catch (IOException e) { l = null; }
         if (l == null) { System.out.println("(no answer)"); return false; }
         int p = 0; while (p < l.length() && !Character.isLetter(l.charAt(p))) p++; return p < l.length() && (l.charAt(p) == 'y' || l.charAt(p) == 'Y'); }   // skips a byte-order mark or spaces
 

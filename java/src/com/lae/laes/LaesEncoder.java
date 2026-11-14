@@ -43,7 +43,9 @@ public final class LaesEncoder {
         public String name = ""; public int flags = 0;
         public MasterArg(String p, double t, boolean a) { path = p; T = t; auto = a; } }
     /** port of laes_tool.cpp:AutoT (the result of LAEY's alignment search; not ported, see Aligner) */
-    public static final class AutoT { public boolean found = false; public double T = 0, err = 0, resid = 0; public String search = "", notes = "", why = ""; }
+    public static final class AutoT { public boolean found = false; public double T = 0, err = 0, resid = 0; public String search = "", notes = "", why = "";
+        /** DEC 25: the check blocks (0 head, 1 middle, 2 tail) where the master is silent and the core master moved by T is not */
+        public final List<Integer> silentBlocks = new ArrayList<Integer>(); }
     /**
      * Hook for master.wav@auto (laes_tool autoAlign: LAEY's search lae_enc cdcheck against the 16-bit core master, then the own check of the
      * residual). align() returns the result; ask() is the question "use this alignment?" when the error is worse than -60 dB and --accept
@@ -477,7 +479,10 @@ public final class LaesEncoder {
     static boolean acceptAlign(AutoT A, String mPath, boolean acceptFlag, Aligner al, Listener L) {
         say(L, mPath + ": T = " + CStd.f(A.T, 10) + " base samples (" + A.search + " search), alignment error " + CStd.f(A.err, 1) + " dB, residual re the master's base level " + CStd.f(A.resid, 1) + " dB");
         if (A.resid > -40) say(L, "  note: the core master is not a close copy of this master (other mix / level / EQ / edit?); the encoder will likely store it in full");
-        if (A.err <= -60) return true;
+        final String[] blockName = {"head", "middle", "tail"};
+        for (int b : A.silentBlocks) say(L, "  check block " + (b + 1) + " (" + blockName[b] + "): the master is silent there and the core master moved by T is not: not matching");   // DEC 25
+        if (A.err <= -60 && A.silentBlocks.isEmpty()) return true;
+        if (!A.silentBlocks.isEmpty()) say(L, "  the alignment did not match in " + A.silentBlocks.size() + " check block(s): check it (" + A.notes + ")"); else
         say(L, "  alignment error " + CStd.f(A.err, 1) + " dB is " + (A.err <= -54 ? "between -60 and" : "worse than") + " -54 dB: check it (" + A.notes + ")");
         if (acceptFlag) { say(L, "  accepted (--accept)"); return true; }
         return al.ask("  use this alignment? [y/N] "); }

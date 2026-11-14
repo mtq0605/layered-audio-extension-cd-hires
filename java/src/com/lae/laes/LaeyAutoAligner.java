@@ -50,7 +50,8 @@ public final class LaeyAutoAligner implements LaesEncoder.Aligner {
             for (int b = 0; b < 3; b++) { double eb = 0, er = 0; for (int c = 0; c < 2; c++) { final long n = cd.c[c].length; long[] bv = new long[(int) bl]; base[c].get(b0[b], b0[b] + bl, bv, 0);
                     for (long i = b0[b]; i < b0[b] + bl; i++) { LaesMath.Acc a = new LaesMath.Acc(); for (int q = -127; q <= 128; q++) a.mac(h[q + 127], cd.c[c][(int) LaesMath.mir(i + wh + q, n)]); final int s = 31 - up;
                         final double r = (double) (s > 0 ? a.shr(s) : a.lo << (-s)), x = (double) bv[(int) (i - b0[b])]; eb += x * x; er += (x - r) * (x - r); } }
-                if (eb > 0 && er > 0) A.resid = Cv.max(A.resid, 10 * Math.log10(er / eb)); } }
+                if (eb > 0 && er > 0) A.resid = Cv.max(A.resid, 10 * Math.log10(er / eb));
+                else if (eb == 0 && er > 0) { A.resid = Cv.max(A.resid, 0.0); A.silentBlocks.add(b); } } }   // DEC 25 (2026-11-15, as laes_tool.cpp): not matching (0 dB, the worst); before, skipped
         finally { StreamEnc.closeQuiet(base[0]); StreamEnc.closeQuiet(base[1]); }
         if (A.err == 0) A.err = A.resid;   // LAEY gave no phase line: use the own check
         return A; }

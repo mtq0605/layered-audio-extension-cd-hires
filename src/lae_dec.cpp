@@ -32,14 +32,15 @@ int main(int argc, char** argv) {
     if (argc < 3) { printf("usage: lae_dec <in.wav | in.flac | in.lae> <out.wav> [full|16|cd24] [output rate] [pack=<n>]\n"); return 1; }
     std::string mode = argc > 3 ? argv[3] : "full";
     if (!mdct::selftestOK()) { printf("decoder self-test FAILED: this build does not follow the IEEE-754 order the format requires (see docs/BUILD.md); refusing to decode\n"); return 4; }
-    wavio::Wav w;
+    wavio::Wav w; int flacRate = 0;   // FU11-9: the STREAMINFO rate of the FLAC form
     if (laeyflac::isFlacFile(argv[1])) {   // FLAC form (2026-11-10): the CD layer in the FLAC frames, the extension in "LAE1" APPLICATION blocks
         bool notLaey = true; const std::string fe = laeyflac::readFile(argv[1], w.rate, w.pcm16, w.lae, notLaey);
-        if (!fe.empty()) { printf("%s\n", fe.c_str()); return notLaey ? 1 : 3; } w.bits = 16; w.ch = 2; }
+        if (!fe.empty()) { printf("%s\n", fe.c_str()); return notLaey ? 1 : 3; } w.bits = 16; w.ch = 2; flacRate = w.rate; }
     else if (!wavio::readCD(argv[1], w) || w.bits != 16 || w.ch != 2) { printf("not a 16-bit stereo WAV\n"); return 1; }
     Decoder D; int code = 0; int orate = argc > 4 ? (atoi(argv[4]) > 0 ? atoi(argv[4]) : -1) : 0;
     D.pack = packArg;   // extension pack (2026-11-10): 0 = the main body, as always
     std::string e = D.open(std::move(w.pcm16), std::move(w.lae), mode, orate, &code); if (!e.empty()) { printf("%s\n", e.c_str()); return code; }
+    if (flacRate && flacRate != D.base) { printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // FU11-9: spec/lossy 3.4
     if (!D.packs.empty() && !hookPath("LEAKOUT") && !hookPath("CLIPMAP")) {   // the file's extension packs; only the caller chooses one (pack=<n>)
         printf("extension packs: %zu (decoding pack %d)\n  pack 0: the main body%s%s%s\n", D.packs.size() + 1, D.pack, D.mainName.empty() ? "" : ", \"", D.mainName.c_str(), D.mainName.empty() ? "" : "\"");
         for (size_t k = 0; k < D.packs.size(); k++) printf("  pack %zu: %d Hz%s%s%s\n", k + 1, D.packs[k].rate, D.packs[k].name.empty() ? "" : ", \"", D.packs[k].name.c_str(), D.packs[k].name.empty() ? "" : "\""); }

@@ -191,7 +191,11 @@ static lae_track* openFlac(lae_read_fn rd, void* ctx, uint64_t size, char* err, 
     const laesflac::Info si = laeyflac::infoOf(L); std::vector<int16_t> pcm; e = laeyflac::decodeAudio(au.data(), au.size(), si, pcm); if (!e.empty()) { setErr(err, errlen, e); return nullptr; }
     std::vector<uint8_t>().swap(au);
     if (!laeyflac::md5ok(pcm, si)) { setErr(err, errlen, "FLAC audio (the CD or core layer): MD5 missing or wrong (the audio is not the one this file was written with): refusing to decode; that audio itself still plays"); return nullptr; }
-    return finish(std::move(pcm), std::move(lae), 0, shaOf(sh), err, errlen); }
+    lae_track* t = finish(std::move(pcm), std::move(lae), 0, shaOf(sh), err, errlen);
+    if (t && t->info.base_rate != L.rate) {   // FU11-9: spec/lossy 3.4, STREAMINFO holds the base rate; otherwise the extension is not this file's
+        setErr(err, errlen, "FLAC STREAMINFO gives " + std::to_string(L.rate) + " Hz, the extension's base rate is " + std::to_string(t->info.base_rate) + " Hz: refusing to decode; that audio itself still plays");
+        delete t; return nullptr; }
+    return t; }
 struct MemSrc { const uint8_t* b; size_t n; };
 static int LAE_CALL readMem(void* ctx, uint64_t offset, void* buf, size_t len) { const MemSrc* m = (const MemSrc*)ctx; if (offset > m->n || len > m->n - offset) return -1; memcpy(buf, m->b + offset, len); return 0; }
 // C++ linkage (not inside extern "C": with /EHsc, exceptions leaving an extern "C" function would skip the destructors of its locals)

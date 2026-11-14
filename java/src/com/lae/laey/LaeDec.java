@@ -36,20 +36,21 @@ final class LaeDec {
             int[] frate = {0}; short[][] fpcm = {null}; byte[][] flae = {null}; boolean[] notLaey = {true};
             final String fe = LaeyFlac.readFile(argv[1], frate, fpcm, flae, notLaey);
             if (!fe.isEmpty()) { env.printf("%s\n", fe); return notLaey[0] ? 1 : 3; }
-            return decode(env, argv, streamErr, packArg, mode, CdPcm.of(fpcm[0]), flae[0]); }
+            return decode(env, argv, streamErr, packArg, mode, CdPcm.of(fpcm[0]), flae[0], frate[0]); }
         WavIo.Wav w = new WavIo.Wav(); if (!WavIo.readCD(argv[1], w, false) || w.bits != 16 || w.ch != 2) { env.printf("not a 16-bit stereo WAV\n"); return 1; }
         // Java only: the CD layer is read on demand from the file through a bounded cache (the C++ reads it whole); every value is the same
         final RandomAccessFile raf; try { raf = new RandomAccessFile(argv[1], "r"); } catch (IOException x) { env.printf("not a 16-bit stereo WAV\n"); return 1; }
         try { CdPcm cdp = CdPcm.reader(new LaeyDecoder.ReadFn() { @Override public int read(long offset, byte[] buf, int off, int len) { try { raf.seek(offset); raf.readFully(buf, off, len); return 0; } catch (IOException x) { return -1; } } }, w.dataOff, w.dataValues, CD_CACHE);
-              final byte[] lae = w.lae; w.lae = null; return decode(env, argv, streamErr, packArg, mode, cdp, lae); } finally { try { raf.close(); } catch (IOException x) { /* read-only file */ } } }
+              final byte[] lae = w.lae; w.lae = null; return decode(env, argv, streamErr, packArg, mode, cdp, lae, 0); } finally { try { raf.close(); } catch (IOException x) { /* read-only file */ } } }
     private static BufferedOutputStream closeQuietly(BufferedOutputStream f) { if (f != null) try { f.close(); } catch (IOException x) { /* failure path */ } return null; }
     /** the CD layer's cache in the encoder's decode checks (bytes) */
     static final long CD_CACHE = 4L << 20;
     // port of lae_dec.cpp:main, after the file is read (the CD layer from raf)
-    private static int decode(EncEnv env, String[] argv, boolean[] streamErr, int packArg, String mode, CdPcm cdp, byte[] lae) {
+    private static int decode(EncEnv env, String[] argv, boolean[] streamErr, int packArg, String mode, CdPcm cdp, byte[] lae, int flacRate) {   // flacRate: the STREAMINFO rate of the FLAC form, 0 for WAV
         LaeDecoder.Decoder D = new LaeDecoder.Decoder(); int[] code = {0}; int orate = argv.length > 4 ? (Fmt.atoi(argv[4]) > 0 ? Fmt.atoi(argv[4]) : -1) : 0;
         D.pack = packArg;   // extension pack: 0 = the main body, as always
         String e = D.openCd(cdp, lae, mode, orate, code); if (!e.isEmpty()) { env.printf("%s\n", e); return code[0]; }
+        if (flacRate != 0 && flacRate != D.base) { env.printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // FU11-9: spec/lossy 3.4
         final String leakOut = env.get("LEAKOUT"), clipMap = env.get("CLIPMAP");
         if (!D.packs.isEmpty() && leakOut == null && clipMap == null) {   // the file's extension packs; only the caller chooses one (pack=<n>)
             env.printf("extension packs: %d (decoding pack %d)\n  pack 0: the main body%s%s%s\n", D.packs.size() + 1, D.pack, D.mainName.isEmpty() ? "" : ", \"", D.mainName, D.mainName.isEmpty() ? "" : "\"");

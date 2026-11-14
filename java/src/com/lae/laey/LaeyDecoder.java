@@ -129,7 +129,10 @@ public final class LaeyDecoder {
     private static LaeyDecoder openFlac(ReadFn rd, long size) {
         int[] rate = {0}; short[][] pcm = {null}; byte[][] lae = {null}; boolean[] notLaey = {true};
         final String e = LaeyFlac.read(rd, size, rate, pcm, lae, notLaey); if (!e.isEmpty()) throw new LaeException(e);
-        return finish(pcm[0], lae[0], 0); }
+        final LaeyDecoder t = finish(pcm[0], lae[0], 0);
+        if (t.info.base_rate != rate[0])   // FU11-9: spec/lossy 3.4, STREAMINFO holds the base rate; otherwise the extension is not this file's
+            throw new LaeException("FLAC STREAMINFO gives " + rate[0] + " Hz, the extension's base rate is " + t.info.base_rate + " Hz: refusing to decode; that audio itself still plays");
+        return t; }
 
     // port of lae_api.cpp:openBytes
     private static LaeyDecoder openBytes(final byte[] b, final long len) {

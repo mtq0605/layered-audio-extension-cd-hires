@@ -13,7 +13,7 @@ import java.util.List;
  * filter (up-conversion stages, the T lowpass, the leak lowpass) is evaluated over the window its block needs, with the same mirrored
  * edges and the same arithmetic per output sample; the cut-off's cross-spectrum is added up segment by segment in the same order. The
  * regenerated dither goes to a temporary file next to T (the random numbers are drawn once, in order).
- * usage: routes &lt;m.raw&gt; &lt;rate&gt; &lt;b16.s16&gt; &lt;b24.s32&gt; &lt;T out&gt; &lt;F out&gt; [cut-off]; environment DITHERFLAGS, CDEXT,
+ * usage: routes &lt;m.raw&gt; &lt;rate&gt; &lt;b16.s16&gt; &lt;b24.s32&gt; &lt;T out&gt; &lt;F out | -&gt; [cut-off]; environment DITHERFLAGS, CDEXT,
  * CUTOFFOUT, LEAKIN, PARTTHREADS
  * std::complex (b[k] * conj(a[k]), norm): MSVC &lt;complex&gt; 14.44: operator* = _Mul: re = a.re b.re - a.im b.im, im = a.re b.im +
  * a.im b.re; conj = (re, -im); norm = re re + im im. Written out below in that order with the conj's negation kept.
@@ -125,7 +125,7 @@ final class RoutesBlk {
             // then not give back the master, so the split stops after the last block. It cannot happen with the CD layer derived from the
             // master; it happens with an independent CD that differs from the master by more than full scale (inverted polarity, loud passages).
             final long[] overT = {0, 0}, overF = {0, 0};   // per channel (the two channels run in two threads)
-            Tf = new BlkIo.Writer(env, argv[5]); Ff = new BlkIo.Writer(env, argv[6]);
+            Tf = new BlkIo.Writer(env, argv[5]); if (!argv[6].equals("-")) Ff = new BlkIo.Writer(env, argv[6]);   // "-" (decision 35, as routes_blk.cpp): the frequency layer signal is not written (the second split after leak compensation needs only T; F is still computed and its 24-bit overflow counted)
             for (long A = 0; A < L; A += BM) { env.checkCancel(); final long B = Math.min(L, A + BM); final long ta = A >> stages, tb = B == L ? Lb : (B >> stages);
                 final int[] Tout = new int[(int) (Math.max(0L, tb - ta)) * 2], Fout = new int[(int) (B - A) * 2]; final int[] m = mr.read(A, B); final long AA = A;
                 twoWay(env, new ChanFn() { @Override public void run(final int c) {   // chanTF
@@ -135,11 +135,11 @@ final class RoutesBlk {
                     if (tb > ta) { if (!haveT[0] || Tw[0].base > ta || Tw[0].base + Tw[0].d.length < tb) Tw[0] = X.tWin(ta, tb, c);
                         for (long i = ta; i < tb; i++) { final double tv = Tw[0].at(i); if (tv < -8388608.0 || tv > 8388607.0) overT[c]++; Tout[(int) (i - ta) * 2 + c] = Cv.d2i(Cv.max(-8388608.0, Cv.min(8388607.0, tv))) * 256; } }
                     for (long i = AA; i < B; i++) { final double ui = i < e ? u.at(i) : 0.0; long d = (long) (m[(int) (i - AA) * 2 + c] >> 8) - Cv.llround(ui); if (d < -8388608L || d > 8388607L) overF[c]++; d = Math.max(-8388608L, Math.min(8388607L, d)); Fout[(int) (i - AA) * 2 + c] = (int) (d * 256); } } });
-                Tf.put(Tout); Ff.put(Fout); }
+                Tf.put(Tout); if (Ff != null) Ff.put(Fout); }
             if (overT[0] + overT[1] + overF[0] + overF[1] > 0)   // stops before finish(): the writers remove their unfinished files (finally: close)
                 throw EncIo.fail(Fmt.c("the difference between the master and the CD / core layer does not fit into 24 bits at %lld sample(s) of the depth layer signal and %lld sample(s) of the frequency layer signal, so the file would not decode to the master. This happens when an independent CD differs from the master by more than full scale, for example with inverted polarity and passages above -6 dBFS. Correct the polarity or the level of the CD and encode again",
                                        overT[0] + overT[1], overF[0] + overF[1]));
-            Tf.finish(); Tf = null; Ff.finish(); Ff = null;
+            Tf.finish(); Tf = null; if (Ff != null) { Ff.finish(); Ff = null; }
             return 0; }
         finally { if (Tf != null) Tf.close(); if (Ff != null) Ff.close(); mr.close(); b24.close(); b16.close(); if (dvr0 != null) dvr0.close(); if (leak0 != null) leak0.close(); new File(dvPath).delete(); } }
 

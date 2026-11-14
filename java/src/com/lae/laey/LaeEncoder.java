@@ -544,7 +544,7 @@ public final class LaeEncoder {
             x.markDone("leak"); }
             if (x.isDone("routes2")) env.printf("resume: second route split already done\n");
             else { String fcs = Fmt.c("%.0f", fc); env.set("LEAKIN", x.T("leak.s32"));
-              int rc = call(env, routes, "routes", x.T("m.raw"), Integer.toString(wrate), x.T("b16.s16"), x.T("b24.s32"), x.T("T.s32"), x.T("F2.s32"), fcs); env.set("LEAKIN", "");
+              int rc = call(env, routes, "routes", x.T("m.raw"), Integer.toString(wrate), x.T("b16.s16"), x.T("b24.s32"), x.T("T.s32"), "-", fcs); env.set("LEAKIN", "");   // decision 35 (FU23-1, as lae_enc.cpp): no F2.s32 ("-"), the split still computes F and counts its overflow
               stamp(env, T0, "leak decoded + route split again");
               if (rc != 0 || EncIo.testFail(env, "routes2")) { env.printf("leak compensation FAILED in the route split: nothing written\n"); x.oldNote(); return 2; }
               x.markDone("routes2"); }

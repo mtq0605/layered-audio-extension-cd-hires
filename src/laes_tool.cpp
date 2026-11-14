@@ -288,7 +288,9 @@ static std::string selfCheckFile(const std::string& path, const std::vector<laes
 
 // ---- the structure of an LAES / LAE file (2026-11-05, for laes tag / laes parts): FLAC metadata blocks or RIFF chunks, with their bodies
 struct Part { std::string id; int type = -1; long long off = 0, len = 0; };   // FLAC: type 0..126, id "" (APPLICATION: its 4-byte id); WAV: id, type -1
-struct Layout { bool flac = false, rf64 = false; std::vector<Part> parts; long long audioOff = 0, audioLen = 0; std::vector<std::pair<long long, long long>> payload; };
+struct Layout { bool flac = false, rf64 = false; std::vector<Part> parts; long long audioOff = 0, audioLen = 0; std::vector<std::pair<long long, long long>> payload;
+    long long dataPart = -1, laePart = -1;   // WAV: the index in parts of the "data" and "LAE " chunk used - the last of each, as a player reads it (SPEC 7)
+    bool unused(size_t i) const { const std::string& id = parts[i].id; return !flac && ((id == "data" && (long long)i != dataPart) || (id == "LAE " && (long long)i != laePart)); } };   // FU15-8: not written again (writers write one of each)
 static std::string readLayout(laess::In& in, Layout& L) {
     uint8_t h[12] = {0}; if (in.n < 12) return in.path + ": not FLAC or RIFF/WAVE"; in.read(0, h, 12); L = Layout(); L.flac = !memcmp(h, "fLaC", 4);
     L.rf64 = (!memcmp(h, "RF64", 4) || !memcmp(h, "BW64", 4)) && !memcmp(h + 8, "WAVE", 4);
@@ -306,7 +308,8 @@ static std::string readLayout(laess::In& in, Layout& L) {
             dsData = le64(8); const uint32_t cnt = d[24] | d[25] << 8 | d[26] << 16 | (uint32_t)d[27] << 24; for (uint32_t i = 0; i < cnt && 28 + 12 * (size_t)(i + 1) <= d.size(); i++) table.push_back({std::string((const char*)&d[28 + 12 * i], 4), le64(32 + 12 * (size_t)i)}); }
         if (L.rf64 && n == 0xFFFFFFFFu) { if (q.id == "data") n = dsData; else for (auto& t : table) if (t.first == q.id) n = t.second; }
         if (n > (uint64_t)(in.n - q.off)) return in.path + ": chunk " + q.id + " runs past the end of the file";   // compared unsigned: a ds64 length of 2^63 or more is refused too (2026-11-14)
-        q.len = (long long)n; if (q.id == "data") { L.audioOff = q.off; L.audioLen = q.len; haveData = true; } else if (q.id == "LAE ") L.payload.push_back({q.off, q.len});
+        q.len = (long long)n; if (q.id == "data") { L.audioOff = q.off; L.audioLen = q.len; haveData = true; L.dataPart = (long long)L.parts.size(); }
+        else if (q.id == "LAE ") { L.payload.assign(1, {q.off, q.len}); L.laePart = (long long)L.parts.size(); }   // FU15-8: a second "LAE " chunk replaces the first, as in a player
         L.parts.push_back(q); pos = q.off + q.len + (q.len & 1); }
     if (!haveData) return in.path + ": no data chunk"; return ""; }
 static std::string hexOf(const uint8_t* d, size_t n) { std::string s; char b[3]; for (size_t i = 0; i < n; i++) { snprintf(b, sizeof b, "%02x", d[i]); s += b; } return s; }
@@ -343,10 +346,11 @@ static std::string writeWithPayload(laess::In& in, const Layout& L, const std::s
                   if (e.lae) { o.put("LAE2", 4); copyRange(body, o, e.a, e.len); } else copyRange(in, o, e.off, e.len); }
               copyRange(in, o, L.audioOff, L.audioLen); }
           else {   // RIFF / RF64: "fmt " and every chunk in its order (tags kept as they are); the "LAE " chunk with the new payload; ds64 / JUNK made again
-              const Part* fmt = nullptr; std::vector<const Part*> keep; for (auto& q : L.parts) { if (q.id == "fmt ") fmt = &q; else if (q.id == "ds64" || q.id == "JUNK") continue; else keep.push_back(&q); }
+              const Part* fmt = nullptr; std::vector<const Part*> keep; for (size_t i = 0; i < L.parts.size(); i++) { const Part& q = L.parts[i]; if (q.id == "fmt ") fmt = &q; else if (q.id == "ds64" || q.id == "JUNK" || L.unused(i)) continue; else keep.push_back(&q); }
               if (!fmt || fmt->len < 16) return "no fmt chunk";
               long long riff = 4 + 8 + fmt->len + (fmt->len & 1); for (auto* q : keep) { const long long len = q->id == "LAE " ? bsz : q->len; riff += 8 + len + (len & 1); }
               const bool rf64 = riff > 0xFFFFFFFFLL || getenv("LAES_FORCE_RF64");
+              for (auto* q : keep) if (rf64 && q->id != "data" && q->id != "LAE " && q->len > 0xFFFFFFFFLL) return "chunk " + q->id + " beyond 4 GB";   // FU15-8: as tag (ds64 lists only data and LAE)
               std::vector<uint8_t> h; auto p32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) h.push_back((uint8_t)(v >> (8 * i))); }; auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; i++) h.push_back((uint8_t)(v >> (8 * i))); };
               if (rf64) { uint8_t fb[16]; in.read(fmt->off, fb, 16); const int align = fb[12] | fb[13] << 8;
                   h.insert(h.end(), {'R', 'F', '6', '4', 0xFF, 0xFF, 0xFF, 0xFF, 'W', 'A', 'V', 'E', 'd', 's', '6', '4', 40, 0, 0, 0}); u64((uint64_t)(riff + 48)); u64((uint64_t)L.audioLen); u64((uint64_t)(align ? L.audioLen / align : 0));
@@ -465,7 +469,7 @@ static int laesMain(int argc, char** argv) {
               copyRange(in, o, L.audioOff, L.audioLen); }
           else {   // RIFF (RF64 beyond 4 GB, as the encoder) | "fmt " | the new tags | the other chunks in their order (old LIST/INFO, id3 / ID3, ds64, JUNK dropped)
               const Part* fmt = nullptr; std::vector<const Part*> keep;
-              for (auto& q : L.parts) { if (q.id == "fmt ") fmt = &q; else if (q.id == "ds64" || q.id == "id3 " || q.id == "ID3 " || q.id == "JUNK") continue;
+              for (size_t i = 0; i < L.parts.size(); i++) { const Part& q = L.parts[i]; if (q.id == "fmt ") fmt = &q; else if (q.id == "ds64" || q.id == "id3 " || q.id == "ID3 " || q.id == "JUNK" || L.unused(i)) continue;
                   else if (q.id == "LIST") { char t4[5] = {0}; if (q.len >= 4) in.read(q.off, t4, 4); if (!strcmp(t4, "INFO")) continue; keep.push_back(&q); } else keep.push_back(&q); }
               if (!fmt || fmt->len < 16) { printf("%s: no fmt chunk\n", src.c_str()); return 2; }
               const std::vector<uint8_t> tc = laestag::wavChunks(tags); long long riff = 4 + 8 + fmt->len + (fmt->len & 1) + (long long)tc.size(), lae = 0;

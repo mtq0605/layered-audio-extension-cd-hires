@@ -180,7 +180,7 @@ static std::string laeEncPath(int argc, char** argv) { std::string e = arg(argc,
 // ---- automatic alignment: LAEY's search (lae_enc cdcheck, design D). LAEY moves the master by its offset (master samples); LAES never
 // moves the master and stores T = offset / 2^stages (base samples, same sign) exactly as measured, fraction included.
 // err = LAEY's pooled residual after the fraction (its phase line), the alignment error the -60 / -54 dB bands apply to.
-struct AutoT { bool found = false; double T = 0, err = 0, resid = 0; std::string search, notes, why; };
+struct AutoT { bool found = false; double T = 0, err = 0, resid = 0; std::string search, notes, why; std::vector<int> silentBlocks; };   // silentBlocks (DEC 25): check blocks where the master is silent and the moved core master is not
 static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::string& mPath, const laess::Prep& m, const std::string& enc) {   // m: read and its levels made (block-wise, 2026-10-30)
     AutoT A; int st = 0; while ((cd.rate << st) < m.rate && st < 4) st++;
     if ((cd.rate << st) != m.rate || st > 3) { A.why = "master rate must be the core master rate times 1, 2, 4 or 8"; return A; }
@@ -213,14 +213,18 @@ static AutoT autoAlign(const std::string& cdPath, const Pcm& cd, const std::stri
     for (int b = 0; b < 3; b++) { double eb = 0, er = 0; for (int c = 0; c < 2; c++) { const int64_t n = (int64_t)cd.c[c].size(); V bv((size_t)bl); base[c]->get(b0[b], b0[b] + bl, bv.data());
             for (int64_t i = b0[b]; i < b0[b] + bl; i++) { Acc a; for (int q = -127; q <= 128; q++) a.mac(h[q + 127], cd.c[c][mir(i + wh + q, n)]); const int s = 31 - up;
                 const double r = (double)(s > 0 ? a.shr(s) : (int64_t)a.lo << (-s)), x = (double)bv[(size_t)(i - b0[b])]; eb += x * x; er += (x - r) * (x - r); } }
-        if (eb > 0 && er > 0) A.resid = std::max(A.resid, 10 * std::log10(er / eb)); }
+        if (eb > 0 && er > 0) A.resid = std::max(A.resid, 10 * std::log10(er / eb));
+        else if (eb == 0 && er > 0) { A.resid = std::max(A.resid, 0.0); A.silentBlocks.push_back(b); } }   // DEC 25 (2026-11-15): not matching (0 dB, the worst); before, skipped
     if (A.err == 0) A.err = A.resid;   // LAEY gave no phase line: use the own check
     return A; }
 // the -60 / -54 dB bands: within -60 dB the alignment passes; otherwise it is shown and passes only when chosen by hand
 static bool acceptAlign(const AutoT& A, const std::string& mPath, bool acceptFlag) {
     printf("%s: T = %.10f base samples (%s search), alignment error %.1f dB, residual re the master's base level %.1f dB\n", mPath.c_str(), A.T, A.search.c_str(), A.err, A.resid);
     if (A.resid > -40) printf("  note: the core master is not a close copy of this master (other mix / level / EQ / edit?); the encoder will likely store it in full\n");
-    if (A.err <= -60) return true;
+    static const char* blockName[3] = {"head", "middle", "tail"};
+    for (int b : A.silentBlocks) printf("  check block %d (%s): the master is silent there and the core master moved by T is not: not matching\n", b + 1, blockName[b]);   // DEC 25
+    if (A.err <= -60 && A.silentBlocks.empty()) return true;
+    if (!A.silentBlocks.empty()) printf("  the alignment did not match in %zu check block(s): check it (%s)\n", A.silentBlocks.size(), A.notes.c_str()); else
     printf("  alignment error %.1f dB is %s -54 dB: check it (%s)\n", A.err, A.err <= -54 ? "between -60 and" : "worse than", A.notes.c_str());
     if (acceptFlag) { printf("  accepted (--accept)\n"); return true; }
     printf("  use this alignment? [y/N] "); fflush(stdout); char a[16] = {0}; if (!fgets(a, sizeof a, stdin)) { printf("(no answer)\n"); return false; }
@@ -441,7 +445,7 @@ static int laesMain(int argc, char** argv) {
             if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
             const AutoT A = autoAlign(argv[2], cd, argv[3], m, laeEncPath(argc, argv)); if (!A.found) { printf("%s\n", A.why.c_str()); return 2; }
             const bool ok = acceptAlign(A, argv[3], flag(argc, argv, "--accept"));
-            printf("ALIGN_LAES T=%.10f err=%.1f resid=%.1f band=%s accepted=%d\n", A.T, A.err, A.resid, A.err <= -60 ? "ok" : A.err <= -54 ? "check" : "large", ok ? 1 : 0);
+            printf("ALIGN_LAES T=%.10f err=%.1f resid=%.1f band=%s accepted=%d\n", A.T, A.err, A.resid, !A.silentBlocks.empty() ? "nomatch" : A.err <= -60 ? "ok" : A.err <= -54 ? "check" : "large", ok ? 1 : 0);   // DEC 25: nomatch = a silent check block
             if (ok) printf("use %s@%.10f (or %s@auto in enc)\n", argv[3], A.T, argv[3]); return ok ? 0 : 2; }
         catch (const std::exception& x) { printf("stopped: %s\n", x.what()); return 2; } }
     if (cmd == "parts" && argc >= 3) try {   // the structure and the SHA-256 of the audio bytes and of the payload (tests: unchanged by tags)

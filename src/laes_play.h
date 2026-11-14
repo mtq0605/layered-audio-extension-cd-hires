@@ -261,6 +261,11 @@ inline uint32_t crcUpdate(uint32_t crc, const uint8_t* p, size_t n) { const uint
     for (; n >= 8; n -= 8, p += 8) { const uint32_t a = crc ^ (p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24), b = p[4] | (uint32_t)p[5] << 8 | (uint32_t)p[6] << 16 | (uint32_t)p[7] << 24;
         crc = T[7][a & 0xFF] ^ T[6][(a >> 8) & 0xFF] ^ T[5][(a >> 16) & 0xFF] ^ T[4][a >> 24] ^ T[3][b & 0xFF] ^ T[2][(b >> 8) & 0xFF] ^ T[1][(b >> 16) & 0xFF] ^ T[0][b >> 24]; }
     for (; n; n--, p++) crc = T[0][(crc ^ *p) & 0xFF] ^ (crc >> 8); return crc; }
+// the core master is held in memory, two channels of int32 (8 bytes per frame): a frame count this program cannot hold is refused before
+// any array is sized by it. A 64-bit program holds every count a file can state (FLAC STREAMINFO: below 2^36; WAV: the file's bytes / 4);
+// a 32-bit program holds fewer than 2^29 frames. Without this a 32-bit program cut a STREAMINFO count of 2^32 or more to 32 bits for the
+// array and went on comparing write positions with the 64-bit count (2026-11-14).
+inline bool coreFramesFit(uint64_t frames) { return frames <= (uint64_t)(SIZE_MAX / 8); }
 inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
     laeMagic[0] = 0; quick = quickInfo; crcTable(); { std::lock_guard<std::mutex> g(idxM); idx.clear(); } const uint64_t n = src.size(); if (n < 12) return "not LAES";
     // WAV: RIFF, or RF64 / BW64 (EBU Tech 3306, ITU-R BS.2088) for files beyond 4 GB: their 64-bit sizes are in the first chunk, "ds64"
@@ -308,6 +313,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
         payload.add(laeOff, laeLen); coreFrames = (int64_t)(audioLen / (uint64_t)(2 * (coreBits / 8))); }
     memcpy(laeMagic, "LAE2", 5);
     if (quick) { why = payload.total < 68 ? "LAES block too short" : parsePayload(); makeChoices(); return ""; }
+    if (!coreFramesFit(flac ? fi.total : (uint64_t)coreFrames)) return "core master too long for this program (a 32-bit program holds fewer than 2^29 frames)";
     // one pass over the whole file: its SHA-256, the payload CRC-32 (all but its last 4 bytes), the core
     laes::Sha256 fs; uint32_t crc = 0xFFFFFFFFu; const uint64_t crcEnd = payload.total >= 4 ? payload.total - 4 : 0;
     for (int c = 0; c < 2; c++) { core[c].clear(); core[c].reserve((size_t)coreFrames); }
@@ -336,12 +342,13 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
             if (p + 16 >= fb.size()) break; off.push_back(p); num.push_back(k); }
         const size_t S = num.size(); off.push_back(fb.size());
         for (int c = 0; c < 2; c++) core[c].assign((size_t)fi.total, 0);
+        const uint64_t tot = (uint64_t)core[0].size(); if (tot != fi.total) { for (int c = 0; c < 2; c++) core[c].clear(); return false; }   // every write below is checked against the arrays' own length
         std::vector<size_t> endOff(S, 0); std::vector<uint64_t> endNum(S, 0), endAt(S, 0); std::vector<int> bad(S, 0), shortAt(S, -1);
         std::vector<std::thread> th; th.reserve(S);
         for (size_t s = 0; s < S; s++) th.emplace_back([&, s] { try { size_t p = off[s]; uint64_t f = num[s];
                 while (p < off[s + 1]) { if (shortAt[s] >= 0) { bad[s] = 1; return; }   // only the last frame of the core may be shorter
-                    const uint64_t at = f * bs; if (at >= fi.total) { bad[s] = 1; return; } V ch[2]; size_t used = 0;
-                    if (!laesflac::decodeFrame(fb.data() + p, fb.size() - p, fi, f, at, ch, used).empty() || at + ch[0].size() > fi.total) { bad[s] = 1; return; }
+                    const uint64_t at = f * bs; if (at >= tot) { bad[s] = 1; return; } V ch[2]; size_t used = 0;
+                    if (!laesflac::decodeFrame(fb.data() + p, fb.size() - p, fi, f, at, ch, used).empty() || ch[0].size() > tot - at) { bad[s] = 1; return; }
                     for (int c = 0; c < 2; c++) { int32_t* d = core[c].data() + at; for (size_t i = 0; i < ch[c].size(); i++) d[i] = (int32_t)ch[c][i]; }
                     if (ch[0].size() != bs) shortAt[s] = 1; p += used; f++; endAt[s] = at + ch[0].size(); }
                 endOff[s] = p; endNum[s] = f; } catch (...) { bad[s] = 1; } });

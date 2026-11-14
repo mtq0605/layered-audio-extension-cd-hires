@@ -246,7 +246,8 @@ private:
         char err[512] = ""; if (!lae_selftest()) { kodi::Log(ADDON_LOG_ERROR, "LAE: decoder self-test failed"); return false; }
         m_track = lae_open_reader(&Src::read, m_src.get(), m_src->size, err, sizeof err); if (!m_track) { kodi::Log(ADDON_LOG_ERROR, "LAE: %s", err); return false; }
         // LAEY extension packs: the pack number the user set (0 = the main body); a file without that pack plays pack 0. Never chosen automatically.
-        { const int pk = kodi::addon::GetSettingInt("pack"); if (pk > 0 && pk < lae_pack_count(m_track) && lae_select_pack(m_track, pk) != 0) kodi::Log(ADDON_LOG_WARNING, "LAE: extension pack %d cannot be used: pack 0 plays", pk); }
+        // The log names a pack as the settings list does: "Pack n" = pack number n - 1 (Pack 1 = the main body).
+        { const int pk = kodi::addon::GetSettingInt("pack"); if (pk > 0 && pk < lae_pack_count(m_track) && lae_select_pack(m_track, pk) != 0) kodi::Log(ADDON_LOG_WARNING, "LAE: Pack %d cannot be used; Pack 1 plays", pk + 1); }
         const int layers = kodi::addon::GetSettingInt("layers"); const int route = layers == 2 ? LAE_ROUTE_CD : layers == 1 ? LAE_ROUTE_CD24 : layers == 3 ? LAE_ROUTE_16 : LAE_ROUTE_FULL;
         lae_info li; lae_get_info(m_track, &li); int out = 0; const int cap = rateSetting(); if ((route == LAE_ROUTE_FULL || route == LAE_ROUTE_16) && cap > 0) { out = li.master_rate; while (out > cap && out > li.base_rate) out /= 2; }
         if (lae_start(m_track, route, out, err, sizeof err) != 0 && lae_start(m_track, LAE_ROUTE_CD, 0, err, sizeof err) != 0) { kodi::Log(ADDON_LOG_ERROR, "LAE: %s", err); return false; }

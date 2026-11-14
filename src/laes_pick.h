@@ -46,7 +46,8 @@ class Input {
 public:
     Input() { const char* t = getenv("LAES_TEST_KEYS"); if (t) { test = true; keys = t; }
 #ifndef _WIN32
-        else if (isatty(0)) { tcgetattr(0, &old); termios r = old; r.c_lflag &= ~(ICANON | ECHO); r.c_cc[VMIN] = 1; r.c_cc[VTIME] = 0; tcsetattr(0, TCSANOW, &r); raw = true; }
+        else if (isatty(0)) { tcgetattr(0, &old); termios r = old; r.c_lflag &= ~(ICANON | ECHO | ISIG);   // ISIG off (FU13-9): Ctrl-C arrives as byte 3 = Esc, and the terminal is set back
+            r.c_cc[VMIN] = 1; r.c_cc[VTIME] = 0; tcsetattr(0, TCSANOW, &r); raw = true; }
 #endif
     }
     ~Input() {
@@ -95,6 +96,7 @@ inline std::vector<long> tick(const std::string& title, const std::vector<Item>&
 #ifdef _WIN32
     { void* h = GetStdHandle((unsigned long)-11); unsigned long m = 0; if (GetConsoleMode(h, &m)) SetConsoleMode(h, m | 0x0004); }   // ENABLE_VIRTUAL_TERMINAL_PROCESSING: the redraw below
 #endif
+    if (items.empty()) return {};   // FU13-9: nothing to tick (Space would touch on[0])
     Input in; size_t cur = 0; std::vector<bool> on(items.size(), false); std::string typed, msg; int drawn = 0;
     for (;;) {
         if (drawn && !in.test) printf("\x1b[%dA", drawn);

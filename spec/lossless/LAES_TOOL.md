@@ -94,7 +94,7 @@ laes enc <out.flac | out.wav | out.lae> (--derive-core | --core=<core.wav>) <mas
 - The LAE plug-ins identify LAES files by their content, not by their name; the name only routes the file to a decoder.
 - With `.flac` and `.wav`, any player plays the core master.
 - `.lae` files are opened only by players that recognise the name (with an LAE plug-in) or that inspect the content.
-- An output name that is one of the inputs (a master or the `--core` file) is refused before anything is written (since 2026-11-14). An existing `<out>` is replaced only when the new file is complete.
+- An output name that is one of the inputs (a master or the `--core` file) is refused before anything is written (since 2026-11-14). An existing `<out>` is replaced only after two yes answers at a console or with `--overwrite` (see "Text, file names and exit codes"), and only when the new file is complete.
 
 ### Examples
 
@@ -122,7 +122,7 @@ None of these options changes the file: the same masters and options produce the
 | `--disk-stop-remove` | When free space falls below 2 GB, stops and removes the work folder (the work done so far is lost). |
 | `--timing` | Prints the time and peak memory of each stage and the maximum size of the work folder. |
 
-- **Work folder:** intermediate data is written to `<out>.laes.tmp` next to the output and is removed at the end.
+- **Work folder:** intermediate data is written to `<out>.laes.tmp` next to the output and is removed at the end. When the folder cannot be made there (a read-only place), it is made in the system temp folder, and the tool says so (since 2026-11-15). Two runs of the same command (the same work folder) cannot run at once: the work folder holds a lock file, and a second run stops at once (exit code 2) and changes nothing.
 - **Disk check:** before starting, the tool estimates the disk space it needs. If this estimate plus the 2 GB that the tool keeps free exceeds the free space, it does not start (`--force-disk` makes it start anyway). During the run, if free space falls below 2 GB, the tool waits until space is available again, unless `--disk-stop` or `--disk-stop-remove` is given.
 - **Resuming:** a run that stopped (because the disk was full, or the tool was closed or crashed) keeps its work folder. Running the same command again continues from where it stopped, with the same result as an uninterrupted run. If the arguments, a master, the `--core` file or the tool itself has changed, the run starts again; the same applies to a change of `--small-disk`. Tag options, `--mem`, `--timing`, `--force-disk`, `--disk-stop` and `--disk-stop-remove` are not taken into account and may be changed before resuming.
 - **Measured time, memory and disk use** for 6, 10 and 30 minutes with 2 to 12 masters are given in [SPEC.md](SPEC.md), Section 11.5. In those runs, peak memory stayed below the 2 GB budget. The work folder grows with the duration and with the number and rates of the masters: 27.8 GB for 30 minutes with 12 masters, and 15.0 GB with `--small-disk`.
@@ -138,6 +138,7 @@ None of these options changes the file: the same masters and options produce the
 | `--picture=<type>:<image>` | A further picture; any number may be given: 4 back cover, 5 leaflet page, 6 medium (disc label), 7 lead artist, 8 artist, … (the picture types of ID3v2 and FLAC, 0 to 20). |
 
 - **Images:** JPEG or PNG, stored byte for byte (never re-encoded). There is no minimum size. A single image may be up to about 16 MB (the FLAC limit for one metadata block; the same limit applies in the WAV form), and all images together up to 256 MB. Very large images make some phone players slow to open the file.
+- **Limits:** tags are refused when a VORBIS_COMMENT or PICTURE block would reach 16 MB, or the ID3v2 tag of the WAV form (text and pictures together) 256 MB.
 - **Text:** UTF-8, so any language can be used. The key itself is ASCII.
 - **Location of the tags:** one set of tags describes the core master and every master.
 
@@ -167,7 +168,7 @@ laes tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<i
 - The old tags are discarded. The audio bytes, the payload and every other block or chunk are copied byte for byte.
 - The result is byte-for-byte identical to re-encoding the same masters with the same options and the same version of the tool, with these tags.
 - The new file is then fully decoded, and every master is checked against its stored SHA-256. The audio bytes and the payload are also compared with those of the old file. Any difference causes the new file to be removed.
-- The old file is never modified. If `<out>` already exists, nothing is done.
+- The old file is never modified. An existing `<out>` is not replaced silently (see "Text, file names and exit codes").
 - Supports the FLAC form and the WAV form (including RF64). LAEY files (`LAE1`) are tagged with `lae_enc tag`.
 
 ## Looking inside: `laes parts`
@@ -188,7 +189,7 @@ laes dec <in> <out dir> --pick=<n>[,<n> ...] | <a>-<b> | <rate>:<bits> | master:
 
 - Without options, it writes the core master (`core.wav`) and every master (`master_<k>_<rate>_<bits>.wav`). An output folder name that begins with `-` is refused (since 2026-11-14), so that a forgotten folder does not become a folder named after an option.
 - `--levels` additionally writes every rate level of every master (`master_<k>_level_<rate>_<bits>.wav`). A rate level is the master at half, a quarter or an eighth of its rate, and is lossless.
-- `--list` shows every choice with a number, in the order of [SPEC.md](SPEC.md), Section 10.3: the core master first, then one group per master (the master itself, then its rate levels and derived versions, marked with "-"). If a master has a name, the name is shown with the master, its levels and its derived versions.
+- `--list` shows every choice with a number, in the order of [SPEC.md](SPEC.md), Section 10.3: the core master first, then one group per master (the master itself, then its rate levels and derived versions, marked with "-"). If a master has a name, the name is shown with the master, its levels and its derived versions. `--list` reads the master records only and decodes nothing (since 2026-11-15); the checks belong to decoding and playback. Its exit code is 0, or 2 when the records fail a check.
 - `--pick` writes only the selected choices:
   - `<n>`: the n-th entry of the list; several separated by commas, for example `--pick=2,6`;
   - `<a>-<b>`: entries a to b of the list, for example `--pick=6-12`; ranges and single numbers can be mixed, for example `--pick=2-4,9`;
@@ -238,7 +239,7 @@ The order of the masters in the file is still chosen by the encoder (for the sma
 laes names <in> <out> [--name=<k>:<text> ...] [--no-derive[=<k>|core]] [--derive[=<k>|core]] [--menu-order=<k1>,<k2>,...] [--default=<k>|core]
 ```
 
-- Writes a new file without re-encoding; the old file is kept, and an existing `<out>` is refused.
+- Writes a new file without re-encoding; the old file is kept, and an existing `<out>` is not replaced silently (see "Text, file names and exit codes").
 - k is the present number of the master in menus ("master k" in `laes dec --list`). `--name=<k>:` with an empty text removes the name; `--derive` turns derived versions back on; `--menu-order=` gives a new menu order by the present numbers; `--default=<k>` or `--default=core` sets the default; `--no-derive=core` or `--derive=core` turns the derived version of the core master off or on.
 - `laes names <in> --in-place --default=<k>|core [--no-derive=core | --derive=core]` changes the file itself instead of writing a new one. Only these options are allowed, because they keep the size of the file: at most 7 bytes change (the payload version, the two header bytes and the CRC-32). The tool prints each changed byte with its old and new value, then decodes every master and checks its SHA-256; on any failure, it writes the old bytes back. The result is byte for byte the file that a direct encode with the same options writes.
 - The layers, the core master and the tags are copied byte for byte; only the master records and the CRC-32 change. Afterwards, every master is checked against its SHA-256.
@@ -253,6 +254,7 @@ laes add <in> <out> <new master>[@T] ... [--name=<k>:<text>] [--no-derive[=<k>]]
 - Writes a new file: the core master and the record and layers of every old master are copied byte for byte, without re-encoding. The new masters are placed at the end of the payload; each is coded against the core master and every master before it, and the smallest result is kept (as in `laes enc`).
 - The k of `--name` and `--no-derive` refers to the new masters as given. By default, the new masters go to the end of the menu; `--menu-order=` gives the menu order of all masters: the old ones by their present numbers, the new ones numbered after them in the order given.
 - The old masters are decoded once (they are the references of the new ones); afterwards, every master is checked against its SHA-256. Tags, pictures and the audio bytes of the core master stay as they are.
+- A core master above 4 GiB (RF64) is read. Before it starts, `laes add` estimates the disk space it needs and says so when that is more than is free; it goes on.
 
 ## Extracting masters into a new file: `laes extract`
 
@@ -263,6 +265,7 @@ laes extract <in> <out> --pick=<p>[,<p> ...]      p = master:<k> | name:<text> |
 - Writes a new file with only the chosen masters (one or several). `<rate>:<bits>` and `name:` take the master that matches; if several match, you tick them in the same tick list as in `laes dec` (there, the numbers are the k of `master:<k>`). `master:<a>-<b>` takes masters a to b.
 - The chosen masters are decoded and encoded again in full (with the same core master), each choosing its reference among the masters kept; nothing is cut out of the old payload.
 - The order in `--pick` is the menu order of the new file; names and "no derived versions" settings go with their masters; tags, pictures and the audio bytes of the core master stay as they are. Afterwards, every master is checked against its SHA-256.
+- Each master keeps its time position T exactly: it is passed to the encoder as a number, not as text (since 2026-11-15). Before it starts, `laes extract` estimates the disk space it needs and says so when that is more than is free; it goes on.
 - To get WAV files without packing them, use `laes dec --pick=...`.
 
 ## Checking: `laes verify`
@@ -271,7 +274,7 @@ laes extract <in> <out> --pick=<p>[,<p> ...]      p = master:<k> | name:<text> |
 laes verify <in> <master.wav> [<master.wav> ...]
 ```
 
-Decodes every master in the file and compares it bit for bit with the given files, which may be given in any order. For each file, it prints `IDENTICAL` or `DIFFERENT`; for masters without a corresponding file, it prints `not compared`. A given file that cannot be opened or that the WAV reader refuses is reported as `<file>: DIFFERENT (not compared: <reason>)`, and the files after it are still compared (since 2026-11-14).
+Decodes every master in the file and compares it bit for bit with the given files, which may be given in any order. For each file, it prints `IDENTICAL` or `DIFFERENT`; for masters without a corresponding file, it prints `not compared`. A given file that cannot be opened or that the WAV reader refuses is reported as `<file>: DIFFERENT (not compared: <reason>)`, and the files after it are still compared (since 2026-11-14). `laes verify` and `laes dec` name every master by its number in menus (the menu order of the file), the same number that `--pick=master:<k>` takes (since 2026-11-15). A FLAC file with ID3v2 tags in front or APEv2 / ID3v1 tags behind (tags of other programs) is accepted, as a master and as an LAES file; the tags are not read and stay in the file, and `verify`, `dec` and `parts` name them.
 
 ## Time position: `laes align`
 
@@ -279,7 +282,7 @@ Decodes every master in the file and compares it bit for bit with the given file
 laes align <cd.wav> <master.wav> [--lae-enc=<path>] [--accept]
 ```
 
-For a core master that was produced independently, such as a released CD, this command measures the time position T of the master on the CD's time line, including the fractional part. It uses the automatic search of the LAE Lossy encoder (`lae_enc`, which is found next to `laes` or given with `--lae-enc`). A path that the shell would change is refused, as for `@auto`. An alignment error of −60 dB or lower passes; otherwise, the error is displayed and you decide, or `--accept` accepts it without asking. The command writes nothing; when the alignment is accepted, it prints `use <master>@<T>` for use with `laes enc` (exit code 0). A whole album is cut into tracks by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`).
+For a core master that was produced independently, such as a released CD, this command measures the time position T of the master on the CD's time line, including the fractional part. It uses the automatic search of the LAE Lossy encoder (`lae_enc`, which is found next to `laes` or given with `--lae-enc`). A path that the shell would change is refused, as for `@auto`. An alignment error of −60 dB or lower passes; otherwise, the error is displayed and you decide, or `--accept` accepts it without asking. A check block where the master is silent and the core master is not counts as not matching (since 2026-11-15); the tool names it and asks whether to use the alignment. The command writes nothing; when the alignment is accepted, it prints `use <master>@<T>` for use with `laes enc` (exit code 0). A whole album is cut into tracks by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`).
 
 ## Test helpers
 
@@ -293,5 +296,7 @@ For a core master that was produced independently, such as a released CD, this c
 ## Text, file names and exit codes
 
 - **Text:** on Windows, all arguments, file names, tags and console output are handled as UTF-8 within the tool. Tags and paths in any language work from cmd, PowerShell and scripts, regardless of the system code page. On other systems, the arguments are taken as given (UTF-8 on typical systems).
-- **Exit codes:** 0: success; 1: invalid arguments; 2: the operation failed (a file could not be read or written, a check failed, or the disk was full). After exit code 2, `laes enc` and `laes tag` have not written `<out>` (a stopped `laes enc` may keep its work folder `<out>.laes.tmp` for resuming). If `<out>` already exists, `laes tag` stops with exit code 1.
-- **Messages** are in English; the disk and resume messages also include a line in Chinese.
+- **Exit codes:** 0: success; 1: invalid arguments; 2: the operation failed (a file could not be read or written, a check failed, or the disk was full). After exit code 2, `laes enc` and `laes tag` have not written `<out>` (a stopped `laes enc` may keep its work folder `<out>.laes.tmp` for resuming).
+- **Existing output files:** an output file that exists is never replaced silently (`enc`, `dec`, `tag`, `add`, `extract`, `names`, and `laes_export`). On a console, the tool asks twice and replaces the file only after two yes answers; otherwise, it refuses with exit code 1 unless `--overwrite` is given. A resumed `laes enc` run is not a replacement. The exact prompts are given in [README.md](../../README.md), Section 14.11.
+- **Test switches:** the test switches of `laes` and `laes_export` (`LAES_TEST_KEYS`, `LAES_NO_SHORTLIST`, `LAES_FORCE_RF64`, `LAES_PIECE`, `LAES_SELFCHECK_FLIP`, `LAES_DISK_RESERVE`) act only with `LAE_TEST_MODE=1`; a run with it prints one line naming the active switches. `KEEPTMP` (keep the work folder; no output byte changes) acts without it ([README.md](../../README.md), Section 14.11).
+- **Messages** are in English; the disk and resume messages, the questions about an existing output and the note about a work folder in the system temp folder also include a line in Chinese.

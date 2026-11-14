@@ -311,7 +311,7 @@ The `pb` samples on either side are stored in the edge area as interleaved stere
 
 The padding extends the signal at both ends. Its content is chosen by the encoder. The decoder uses the stored values and computes nothing.
 
-*Informative.* The reference encoder mirror-pads the master by `P = 4096` samples at each end, reflecting about the end samples (whole-sample symmetric, `src/pad_mirror.cpp`). It derives the 16-bit base-rate signal from the padded master (Section 14) and stores the first and the last `pb` stereo samples of that signal as the edge samples (`src/lae_enc.cpp`).
+*Informative.* The reference encoder mirror-pads the master by `P = 4096` samples at each end, reflecting about the end samples (whole-sample symmetric, `tools/reference/pad_mirror.cpp`). It derives the 16-bit base-rate signal from the padded master (Section 14) and stores the first and the last `pb` stereo samples of that signal as the edge samples (`src/lae_enc.cpp`).
 
 ### 4.2 Dither flags
 
@@ -561,7 +561,7 @@ The reference encoder flushes four bytes at the end of a stream. A decoder MUST 
 
 **A stream ends exactly at its last byte.** When the last symbol of a stream (the end of the walk of Section 7) has been decoded, `next()` MUST have returned each of the `plen` bytes of the coded payload once and MUST NOT have been called beyond them. An encoder MUST write every stream so; the streams of the reference encoder always meet this. A file with a stream that ends earlier or later is not a conforming file.
 
-A decoder MAY refuse such a file as damaged (Section 12). The player library `liblae` refuses it since v5-2026-11-07: its one-time check of a file decodes every stream from start to end, and a stream that ends earlier or later makes the open fail, so that a player plays the CD layer alone. Reads beyond `plen` return 0 (Section 6.1); a decoder that does not refuse such a stream decodes it with these zero bytes. *Informative:* the command-line decoder `lae_dec` and the Java decoder do not check this condition at present.
+A decoder MAY refuse such a file as damaged (Section 12). The player library `liblae` refuses it since v5-2026-11-07: its one-time check of a file decodes every stream from start to end, and a stream that ends earlier or later makes the open fail, so that a player plays the CD layer alone. Reads beyond `plen` return 0 (Section 6.1); a decoder that does not refuse such a stream decodes it with these zero bytes. *Informative:* since 2026-11-15, the command-line decoder `lae_dec` and the Java decoder refuse such a file as well: `lae_dec` checks every stream of the chosen pack to its end before it writes anything, and exits with code 3 and the message "LAE chunk damaged (entropy stream <i> does not end at its last byte): refusing to decode; the CD audio itself still plays"; the Java library checks the main body when a file is opened and a further extension pack when it is first selected.
 
 ### 6.8 Model persistence
 
@@ -938,7 +938,7 @@ The value bounds of Sections 8.3 and 9.4 do not by themselves exclude `int64` ov
 * The absolute values of the taps of table 0 sum to more than 2^30.
 * The worst-case accumulator of Section 10.3 therefore exceeds 2^63.
 
-The reference decoder does not detect `int64` overflow, and the result for streams that would cause it is not specified. Whether such streams must be rejected, and a guaranteed bound for valid streams, will be specified in a later revision.
+**64-bit wrap (since 2026-11-15).** All sums, products and the final rounding of the half-band up-conversion (Section 10.3), the mix with the frequency layer (Section 11.5), the half-band decimation (this section) and the step to 24 bits (Section 11.7) are computed in 64-bit two's-complement arithmetic modulo 2^64: a result that does not fit wraps around. Arithmetic right shifts are used for the roundings (`rq31`: add 2^30, shift right by 31; the final step: add 8, shift right by 4). For a damaged stream that no other check detects, every decoder therefore gives the same wrapped value. The reference decoder does not detect such a wrap. A guaranteed bound below which valid streams cannot wrap is not stated (Appendix C, item 5).
 
 ---
 
@@ -1130,17 +1130,17 @@ Passing the self-test does not replace the conformance test of Section 1.3.
 
 The following elements belong to the encoder. They are listed so that implementers can understand the meaning of the bitstream. They do not affect decoding.
 
-Unless another source is cited, the statements in this section are based on the reference encoder sources `src/lae_enc.cpp`, `src/partition.h`, `src/pad_mirror.cpp`, `src/base_layer.cpp` and `src/routes.cpp`.
+Unless another source is cited, the statements in this section are based on the reference encoder sources `src/lae_enc.cpp`, `src/partition.h`, `tools/reference/pad_mirror.cpp`, `src/base_layer.cpp` and `tools/reference/routes.cpp`.
 
 * **Layer targets.** The decoder adds the three parts (CD path, depth layer, frequency layer) in the time domain (Section 11).
   * The encoder derives the CD layer from the master and adds TPDF dither in the blocks flagged in Section 4.2.
   * **CD layer derivation** (`src/base_layer.cpp`). The padded master (Section 4.1) is converted to FU and decimated `stages` times to the base rate with the integer half-band decimators of Section 10.4, highest-rate stage first; intermediate values are limited only to the `int32` range. With `x` the decimated value in FU and `delta` the dither of Section 11.2 (0 in blocks whose flag is 0), each CD sample is `clamp((x + delta + 2048) >> 12, -32768, 32767)`.
   * **Dither decision** (`src/base_layer.cpp`). For each channel and each block of 4096 base-rate samples, the encoder fits a 16th-order linear predictor to the decimated signal and computes the RMS of the prediction residual in LSB24. The block is dithered if this RMS is below 128 LSB24 (0.5 LSB16) and the block is not digital silence. All-zero blocks are never dithered, so the CD layer keeps true zeros.
-  * **Depth target** (`src/routes.cpp`). Let `v = 256 * CD - delta/16` be the CD path in LSB24, and `B24 = (x + 8) >> 4` the decimated master in LSB24, which is not limited to full scale. The depth target is `T = llround(lowpass(B24 - v))`, limited to `[-8388608, 8388607]`. The lowpass is a zero-phase windowed-sinc FIR filter at the base rate (511 taps, Kaiser window β = 9) with cut-off `fc`. It is omitted when `fc >= base/2 - 1` Hz.
+  * **Depth target** (`tools/reference/routes.cpp`). Let `v = 256 * CD - delta/16` be the CD path in LSB24, and `B24 = (x + 8) >> 4` the decimated master in LSB24, which is not limited to full scale. The depth target is `T = llround(lowpass(B24 - v))`, limited to `[-8388608, 8388607]`. The lowpass is a zero-phase windowed-sinc FIR filter at the base rate (511 taps, Kaiser window β = 9) with cut-off `fc`. It is omitted when `fc >= base/2 - 1` Hz.
   * The depth layer covers the base-rate band.
-  * **Frequency target** (`src/routes.cpp`). The frequency target, in LSB24 at the master rate, is `F = master - up(v + T)`, limited to `[-8388608, 8388607]`. `up` interpolates by 2 `stages` times with the half-band tables of Section 10.1; the encoder computes it in double precision.
+  * **Frequency target** (`tools/reference/routes.cpp`). The frequency target, in LSB24 at the master rate, is `F = master - up(v + T)`, limited to `[-8388608, 8388607]`. `up` interpolates by 2 `stages` times with the half-band tables of Section 10.1; the encoder computes it in double precision.
   * The frequency layer starts below the detected CD cut-off: the encoder passes a start frequency of `fc - 1000` Hz to the layer coder (`src/lae_enc.cpp`). `fc` records the cut-off.
-  * **Cut-off detection** (`src/routes.cpp`). From averaged cross-spectra of the master and the interpolated CD path, the encoder scans downwards from the base-rate Nyquist frequency to 15 kHz. It sets `fc` just above the highest frequency at which the transfer of the CD path is at least −0.1 dB. Bins in which the master has almost no energy are skipped. If no such frequency is found, `fc = 15000` Hz.
+  * **Cut-off detection** (`tools/reference/routes.cpp`). From averaged cross-spectra of the master and the interpolated CD path, the encoder scans downwards from the base-rate Nyquist frequency to 15 kHz. It sets `fc` just above the highest frequency at which the transfer of the CD path is at least −0.1 dB. Bins in which the master has almost no energy are skipped. If no such frequency is found, `fc = 15000` Hz.
 * **Independent CD input.** The encoder option `cd=<file>` accepts a separately supplied 16-bit two-channel CD at the base rate.
   * The supplied CD becomes the CD layer bit for bit. The encoder places the master on the time axis of the CD and moves the master by whole master samples and by a fraction of a master sample; the CD is never moved ([README](../../README.md), Section 4.3). Nothing about the alignment is stored in the file, and decoding is unchanged.
   * All dither flags are then 0.
@@ -1279,7 +1279,7 @@ The conformance vectors and their hash values are listed in [tests/vectors/MANIF
 2. Reproduce `src/mdct_tables.h` as a normative annex (Section 9.2).
 3. Confirm whether a decoder must reject a `fmt ` sample rate that differs from `base` (Section 3.1).
 4. Document the values that the reference encoder writes into the stream-header fields `rate` and `L` (Section 5.3).
-5. State a guaranteed bound below which no `int64` overflow occurs, and specify the treatment of streams that exceed it (Section 10.4).
+5. State a guaranteed bound below which no `int64` overflow occurs, and specify the treatment of streams that exceed it (Section 10.4). The treatment is specified (since 2026-11-15): results wrap modulo 2^64. The bound remains open.
 6. Confirm whether `CORRUPT` must be detected in the whole stream or only in the parts a route needs (Section 7.6).
 7. Specify the layout of `.lae` files and the planned carriage in FLAC (Section 1.1). Done: the FLAC form is specified in Section 3.4; a `.lae` file holds the WAV form or the FLAC form.
 8. Document how the reference encoder computes the per-cell exponents from which the leaf exponent `E` is derived (Section 8.2).

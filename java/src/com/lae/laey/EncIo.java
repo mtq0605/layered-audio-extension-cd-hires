@@ -47,10 +47,10 @@ final class EncIo {
         if (!ok) { new File(p).delete(); throw fail("write failed (disk full?): " + p); } }
     static void writeVec(EncEnv env, String p, byte[] d) { writeAll(env, p, d, 0, d.length); }
     static void writeVec(EncEnv env, String p, int[] v) { byte[] b = toBytes(v, 0, v.length); writeAll(env, p, b, 0, b.length); }
-    // port of enc_io.h:writeText
-    static void writeText(EncEnv env, String p, String s) { byte[] b = latin1(s); writeAll(env, p, b, 0, b.length); }
-    // port of enc_io.h:readText
-    static String readText(String p) { byte[] b = readAll(p); char[] c = new char[b.length]; for (int i = 0; i < b.length; i++) c[i] = (char) (b[i] & 0xFF); return new String(c); }
+    // port of enc_io.h:writeText (FU22-1: UTF-8, as the C++ writes the bytes of its strings; the work-folder notes are read only by this encoder)
+    static void writeText(EncEnv env, String p, String s) { byte[] b = s.getBytes(java.nio.charset.StandardCharsets.UTF_8); writeAll(env, p, b, 0, b.length); }
+    // port of enc_io.h:readText (FU22-1: UTF-8, the counterpart of writeText)
+    static String readText(String p) { return new String(readAll(p), java.nio.charset.StandardCharsets.UTF_8); }
     // port of enc_io.h:count (element count as the modules' index type: C++ long, 32-bit on the reference platform)
     static long count(long n) { if (n > Integer.MAX_VALUE) throw fail("file too large for this encoder version"); return n; }
 

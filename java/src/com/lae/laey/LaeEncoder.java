@@ -374,8 +374,8 @@ public final class LaeEncoder {
         if (x.resume) { StringBuilder key = new StringBuilder("lae_enc java-port " + LaeyEncoder.VERSION + " | options");
             for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i])) key.append(" ").append(argv[i]);
             key.append(" | master ").append(masterMd5);
-            if (x.noisePath != null) { final String t = EncIo.readText(x.noisePath); long h = 0xcbf29ce484222325L;   // FNV-1a of the marking file (1469598103934665603)
-                for (int i = 0; i < t.length(); i++) { h ^= (t.charAt(i) & 0xFF); h *= 1099511628211L; }
+            if (x.noisePath != null) { final byte[] t = EncIo.readAll(x.noisePath); long h = 0xcbf29ce484222325L;   // FNV-1a of the marking file's bytes (1469598103934665603)
+                for (int i = 0; i < t.length; i++) { h ^= (t[i] & 0xFF); h *= 1099511628211L; }
                 key.append(" | noise ").append(String.format("%016x", h)); }
             String old = ""; if (exists(x.manifest)) old = EncIo.readText(x.manifest);
             final String head = "key " + key + "\n";

@@ -35,6 +35,7 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 的 FLAC Applicat
 - 能读取某一格式版本的组件，旨在能够读取该版本的所有文件，但以 [spec/COMPATIBILITY.zh.md](../spec/COMPATIBILITY.zh.md) 及该组件 README 中所列的组件和平台已知限制为限。组件的后续发布不会改变已有文件的解码输出。
 - 编码器是确定性的：相同的输入、选项和编码器提交哈希，在所有受支持的平台（[BUILD.zh.md](BUILD.zh.md) 第 3 节所列的构建）上得到逐字节相同的文件。因此，编码器版本以提交哈希标识。更换编码器提交哈希可能改变编码出的字节，但绝不会改变格式版本。
 - Java 库包含 LAEY 和 LAES 的编码器和解码器。它与同一提交哈希的 C++ 工具（`lae_enc`、`lae_dec`、`laes`）编码出相同的文件、解码出相同的采样。只有一处限制不同：LAES 格式和 C++ 工具允许一个文件有 255 个母带，Java 的播放器前端只为母带不超过 16 个的文件提供母带，Java 的 LAES 编码器拒绝超过 16 个的母带。
+- Java 解码器类 `com.lae.laey.LaeyDecoder` 有自己的接口编号 `LAE_API_VERSION` = 5。只有这个类加了函数时它才增加，不跟随 `liblae` 的 API 编号（9）。这个类有 C API 第 1 到 3 版的 LAEY 函数（`lae_open_reader`、`lae_stream_bytes`）和第 8 版的扩展包函数（`lae_pack_count`、`lae_pack_info`、`lae_select_pack`；没有 `lae_selected_pack`），没有 `lae_open_pair` 和 `lae_open_pair_files`；LAES 的函数在 `com.lae.laes` 中。
 - 现有解码器无法读取的格式改动，会提高格式版本号。对于 CDX，该规则自其第一个正式版本起适用；版本 0 为草案，仍可能变化。
 - 带扩展包的 LAEY 文件仍是容器版本 5。v5-2026-11-14 之前的解码器播放这种文件的 CD 层加主体（包 0），忽略其余的包：既不列出，也不提示文件里还有别的包。
 - 解码器为 LAES 文件提供的派生 16 位版本在 2026-11-11 改了规则（[spec/lossless/SPEC.zh.md](../spec/lossless/SPEC.zh.md) 第 10.1 节）：v5-2026-11-07 的工具和插件每个采样率最多提供一个，v5-2026-11-14 的每个来源提供一个（来源是核心母带、每个母带及其每个采样率档位；发行方在编码时关掉的除外）。因此，对同一个文件，两个发布列出的条目个数、顺序和名称可能不同，按编号或名称选条目的脚本可能选到不同的条目。母带、母带的各个采样率档位和核心母带在两个发布中解码结果相同，母带 1 的派生版本逐位相同。

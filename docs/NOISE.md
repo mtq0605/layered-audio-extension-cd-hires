@@ -6,7 +6,7 @@ LAEY can omit noise that you mark in the ultrasonic band of a master. This takes
 
 1. **Align.** `lae_enc plan` aligns the master with the CD layer, and you confirm the result. Make all marks on the aligned master.
 2. **Mark.** LAE Noise Marker (`lae_noise`, `tools/noise_panel.html`; see `plugins/lae_noise_marker/`) lists steady noise and fixed
-   narrow lines and lets you choose which to mark. It writes a marking file (`.laenoise`). It never removes sound and writes no cleaned copy of the master; besides the marking file, it writes only short listening previews.
+   narrow lines and lets you choose which to mark. It writes a marking file (`.laenoise`). It never removes sound and writes no cleaned copy of the master; besides the marking file, it writes only short listening previews (the first 10 s of each position by default and at most the first 30 s, with at most 1 s of context on each side, and at most 30 s for `preview-all`; the program cuts a longer request and says so, so no command writes a cleaned excerpt longer than 30 s).
 3. **Encode.** `lae_enc <master.wav> <out.wav> [mode] noise=<marks.laenoise> [g | g=b | g=c | g=d]`.
 
 Without `noise=` and `g`, the encoder writes exactly the same file as the encoder before these options were added (2026-11-04), byte for byte.

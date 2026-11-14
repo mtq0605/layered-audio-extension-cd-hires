@@ -19,6 +19,7 @@ SPDX-License-Identifier: CC-BY-4.0
 - foobar2000 组件使用 `plugins/foo_input_lae/build_fb2k.cmd` 构建（[plugins/foo_input_lae/README.zh.md](../plugins/foo_input_lae/README.zh.md)）。
 - 编码器使用 `std::filesystem`。在 Windows 以外的系统上，编码器还使用 `setenv`/`unsetenv`。
 - 各程序的源文件列于 [README](../README.zh.md) 第 14.1 节。
+- 在 Windows 上，系统代码页以外的文件名和标签需要 Windows 10 1803 或更新的版本（各工具使用 UTF-8 区域设置，`src/win_utf8.h`）；在更旧的 Windows 上，工具打印一条警告，按系统代码页工作。
 
 | 平台 | 编译器 | 选项 |
 |---|---|---|
@@ -84,12 +85,12 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 仓库中还包含以下程序。各文件的头部注释说明了其用法。
 
 - `tools/selftest_ref.cpp` 输出某一构建的自检指纹（第 2 节）。
-- `tools/gen_halfband.cpp` 和 `tools/gen_mdct_tables.cpp` 分别生成 `src/halfband.h` 和 `src/mdct_tables.h`。仓库里的 `src/mdct_tables.h` 是规范表：生成器把结果写到当前文件夹，只用来对照。用 x64 MSVC 编出的生成器得出的表和它完全相同；按 x86（`/arch:SSE2`）编出的有 75 个值最后一位不同（2026-11-14 实测），别的编译器或 C 库也可能不同，因为生成器用的是 C 库的 `sin` 和 `cos`。重新生成的表一律不要提交：所有解码器必须用同一组常数。
+- `tools/gen_halfband.cpp` 和 `tools/gen_mdct_tables.cpp` 分别生成 `src/halfband.h` 和 `src/mdct_tables.h`。仓库里的 `src/mdct_tables.h` 是规范表：生成器把结果写到当前文件夹，只用来对照。用 x64 MSVC 编出的生成器得出的表和它完全相同；按 x86（`/arch:SSE2`）编出的有 75 个值最后一位不同（2026-11-14 实测），别的编译器或 C 库也可能不同，因为生成器用的是 C 库的 `sin` 和 `cos`。重新生成的表一律不要提交：所有解码器必须用同一组常数。这两个生成器（以及 `gen_noise_test`）不会悄悄替换已有的输出文件：在控制台上问两次，两次都回答 yes 才替换；不在控制台时拒绝，除非给了 `--overwrite`（README 第 14.11 节）。
 - `tools/test_mdct_tb.cpp` 是 `src/mdct_tb.h` 的测试程序。
 - `tools/lae_math_check.cpp` 将编码器在 `src/lae_math.h` 中的函数与 C 库进行对比检查，并输出其平台校验和。
 - `src/gen_suite.cpp` 生成合成测试信号（可以只生成一个类别）。
 - `src/cd_variant.cpp` 生成定义精确的 CD 或母带测试变体（平移、补静音、截去开头、增益、极性、左右互换、淡出等），用于对齐和扩展包测试（`tests/check_packs.sh`）。
-- `tools/lae_abx/lae_abx.cpp` 是独立运行的 ABX 听音测试（Windows x64，需要 Windows 10 1703 版或更新版本：它使用该版本的按显示器 DPI 函数），需要旁边有 `lae_udec.exe`。编译（x64）：`cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`。
+- `tools/lae_abx/lae_abx.cpp` 是独立运行的 ABX 听音测试（Windows x64，需要 Windows 10 1703 版或更新版本：它使用该版本的按显示器 DPI 函数），需要旁边有 `lae_udec.exe`。编译（x64）：`cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`。准备好的音源连同 `lae_abx` 和旁边 `lae_udec.exe` 的标识一起保存在 `%TEMP%\lae_abx_cache`，别的版本做的副本会重新准备；“Clear kept copies”按钮清除这些副本。每一对的日志从开始就写，每答一题记一行；整轮总结写出每一对的测试采样率。`lae_abx --prepare <对> <采样率> <文件夹> [--overwrite]` 不加 `--overwrite` 就不替换已有的输出。
 - `src/cut_wav.cpp` 和 `src/cmp_wav.cpp` 是 WAV 实用程序。`src/cmp_wav.cpp` 计算 README 第 12.1 节所定义的误差度量。
 
 ## 2. 启动自检
@@ -115,7 +116,7 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 
 在 Linux x86 上，256 个解码器结果中有 256 个与参考一致；在 Linux ARM64 上，192 个中有 192 个一致。
 
-`lae_cdx`、`liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 10.9、13.3 和 13.7 节）。`laes` 也不在表中：CI 不在 Linux 或 macOS 上构建它。2026-11-14 在 Linux x64（WSL 下的 g++ 13.3）上运行过一次它的 `dec`、`verify`、`extract` 和 `add` 命令，输出与 Windows 构建逐字节相同；`enc`、`align` 和 `selftest` 没有在该平台上检查过（[spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.zh.md) 的“编译”一节）。
+`lae_cdx`、`liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 10.9、13.3 和 13.7 节）；`lae_cdx` 只有读取器（`read` 和 `repack`，WAV 和 FLAC 抓轨）也在 Linux x64 上运行过（g++ 13，2026-11-14）。`laes` 也不在表中：CI 不在 Linux 或 macOS 上构建它。2026-11-14 在 Linux x64（WSL 下的 g++ 13.3）上运行过一次它的 `dec`、`verify`、`extract` 和 `add` 命令，输出与 Windows 构建逐字节相同；`enc`、`align` 和 `selftest` 没有在该平台上检查过（[spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.zh.md) 的“编译”一节）。
 
 Linux 上的检查由两个脚本执行：
 
@@ -124,16 +125,23 @@ Linux 上的检查由两个脚本执行：
 
 这些脚本输出比较结果的摘要。`.github/workflows/` 中的一个 GitHub Actions 工作流运行这些脚本。
 
+**手动运行的检查（2026-11-15）。**下面几项检查工作流不运行，发布之前在本机手动运行；下次修改工作流时再把它们加进去：
+
+- `tests/check_packs.sh <程序文件夹> <较早的 lae_dec> <临时文件夹>`：扩展包（Windows 上用 Git Bash，或 Linux）；
+- `tests/check_flacform.sh <lae_enc> <lae_dec> <master.wav> <临时文件夹>`：FLAC 形式；
+- `tools/lae_math_check`：编码器在 `src/lae_math.h` 中的函数与 C 库对照，并给出一个在所有平台上都必须相同的校验和；
+- `laes` 的 32 位（x86）构建及其 `laes selftest`。
+
 一致性测试向量及其哈希列于 [tests/vectors/MANIFEST.md](../tests/vectors/MANIFEST.md)。
 
 ## 4. 线程
 
 - **编码器。**编码器的划分搜索按根块并行执行。
   - 默认情况下，线程数为系统报告的硬件线程（逻辑处理器）数（`std::thread::hardware_concurrency`）。
-  - 环境变量 `PARTTHREADS` 可显式设定线程数。
+  - 测试开关 `PARTTHREADS` 可显式设定线程数；和 `lae_enc` 的每个测试开关（`LAEY_TEST_PIECE`、`LAE_TESTMAXFRAMES`、`LAE_TESTFAIL`、`LAE_BLOCKUNITS`、`LAE_TESTSEQUENTIAL`、`PARTTHREADS`）一样，只有设了 `LAE_TEST_MODE=1` 才起作用，这时每次运行打印一行，列出起作用的开关。`TIMING`、`KEEPTMP` 和 `TIERSTAT` 不改变输出的任何字节，不设也起作用（README 第 14.11 节）。
   - 线程数不影响结果：1 个线程与 16 个线程产生逐字节一致的码流。
   - 自 2026-10-29 起，路径分离的各滤波器也分配到多个线程上执行，且一对中的两个层（位深层 L 与 R、频率层 M 与 S，以及泄漏补偿后的 L 与 R）可以同时编码。每个输出值均以相同的运算、按相同的顺序计算，因此输出逐字节一致。
-  - 内存规划：启动时，编码器读取一次物理内存大小，并根据音轨长度决定每对中的两个层是同时运行还是先后运行（`memory plan: …`）。仅当为 64 位构建、`PARTTHREADS` 不为 1，且约 2 × （每个层样本 1 字节 + 128 MB）同时不超过内存上限与可用内存时，两个层才同时运行。内存上限通过 `mem=<GB>` 设定；默认值为 min(1/2 × 物理内存, max(1/4 × 物理内存, 物理内存 − 28 GB))：在 32 GB 的机器上为 8 GB，在 48 GB 上为 20 GB，在 64 GB 上为 32 GB。块长度取不超过该上限的最大值，至多 4 个单位；一个单位为 lcm(seg, 8) 个 MDCT 帧，其中一个基底段 seg 约为一秒的帧数，因此在 352.8 kHz 下 4 个单位约为 32 s。`LAE_BLOCKUNITS` 可手动设定单位数（用于测试；下文的 512 s 块即以此方式设定）。在一个 10.16 分钟的 352.8 kHz 测试母带（未公开）上的测量结果：32 s 块，767 s / 471 MB；24 s 块（`mem=1`），776 s / 408 MB；512 s 块，803 s / 6,921 MB；所有输出均逐字节一致。在 Linux 上，编码器读取 `/proc/meminfo`（MemAvailable）；在无法读取内存大小的情况下，各层先后运行。
+  - 内存规划：启动时，编码器读取一次物理内存大小，并根据音轨长度决定每对中的两个层是同时运行还是先后运行（`memory plan: …`）。仅当为 64 位构建、`PARTTHREADS` 不为 1，且约 2 × （每个层样本 1 字节 + 128 MB）同时不超过内存上限与可用内存时，两个层才同时运行。内存上限通过 `mem=<GB>` 设定；默认值为 min(1/2 × 物理内存, max(1/4 × 物理内存, 物理内存 − 28 GB))：在 32 GB 的机器上为 8 GB，在 48 GB 上为 20 GB，在 64 GB 上为 32 GB。块长度取不超过该上限的最大值，至多 4 个单位；一个单位为 lcm(seg, 8) 个 MDCT 帧，其中一个基底段 seg 约为一秒的帧数，因此在 352.8 kHz 下 4 个单位约为 32 s。`LAE_BLOCKUNITS` 可手动设定单位数（测试开关，只在设了 `LAE_TEST_MODE=1` 时起作用；下文的 512 s 块即以此方式设定）。在一个 10.16 分钟的 352.8 kHz 测试母带（未公开）上的测量结果：32 s 块，767 s / 471 MB；24 s 块（`mem=1`），776 s / 408 MB；512 s 块，803 s / 6,921 MB；所有输出均逐字节一致。在 Linux 上，编码器读取 `/proc/meminfo`（MemAvailable）；在无法读取内存大小的情况下，各层先后运行。
   - `PARTTHREADS=1` 使整个编码器以单线程运行。
   - 任一线程中的错误（内存不足、写入失败）均传递给主线程，并按主线程中的错误同样处理：不写出任何输出，并删除临时文件夹（给出 `resume` 时保留该文件夹，供下次运行使用；README 第 14.2 节）。
 - **解码器。**解码器为单线程。

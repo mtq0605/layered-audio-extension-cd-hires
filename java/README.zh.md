@@ -60,6 +60,14 @@ Java 移植有两处行为不同：
 - 播放器前端 `Play` 只对母带不超过 16 个的 LAES 文件提供各母带（`Play.File.maxMasters`，是常量）；母带更多的文件播放核心母带，并报告原因。设这个上限，是因为较长的参照链所需内存超过手机的内存（在 PC 上实测：参照链中每个母带约需 1 MB 堆内存）。格式允许 255 个母带；Java 版 LAES 编码器在开始之前就拒绝超过 16 个母带的任务，母带更多的文件用 PC 上的工具（`laes enc`）制作。
 - 有多个母带符合 `--pick=<rate>:<bits>` 或 `--pick=name:<text>` 时，`LaesTool` 列出候选、不写出任何内容，与 C++ 工具不在控制台中运行时相同；它没有勾选列表。
 
+## 检查、已有的输出和测试开关（2026-11-15）
+
+- **码流检查。**Java 的 LAEY 解码器和 `lae_dec`、C++ 播放器一样，拒绝熵编码流没有正好在最后一个字节结束的文件：播放库（`LaeyDecoder`）打开文件时检查主体的每条码流，其他扩展包在第一次选中时检查。和 C++ 播放器不同，它不保存这次检查的记录，所以每次打开都重新检查。
+- **已有的输出。**Java 工具（`LaeEncTool` 的编码和 `tag`、`LaesTool enc` 和 `dec`）不会悄悄替换已有的输出文件：在控制台上（`System.console()` 不为 null）问两次，两次都回答 yes 才替换；否则拒绝，除非给了 `--overwrite`。提示和 C++ 工具相同（[README.zh.md](../README.zh.md) 第 14.11 节）。`laes enc` 接着做上次没做完的工作不算替换。调用 `LaeyEncoder` 或 `LaesEncoder` 的应用没有控制台，要设 `Options.overwrite`。
+- **测试开关。**Java 工具的测试开关（`LaeEncTool` 的 `LAEY_TEST_PIECE`、`LAE_TESTMAXFRAMES`、`LAE_TESTFAIL`、`LAE_BLOCKUNITS`、`LAE_TESTSEQUENTIAL`、`PARTTHREADS`；`LaesTool` 的 `LAES_NO_SHORTLIST`、`LAES_FORCE_RF64`、`LAES_PIECE`、`LAES_SELFCHECK_FLIP`、`LAES_DISK_RESERVE`）和 C++ 工具一样，只在设了 `LAE_TEST_MODE=1` 时起作用；这时运行打印和 C++ 工具相同的一行。`KEEPTMP`、`TIMING` 和 Java 独有的 `LAE_WORKDIR` 不受它管。
+- **LAES 文件。**`LaesTool` 和 Java 播放器与 C++ 工具一样，接受前面带 ID3v2、后面带 APEv2 / ID3v1 标签的 FLAC 文件；这些标签不读取，留在文件里。同一条 `LaesTool` 命令不能同时跑两次：第二次立刻停下（工作文件夹里有锁文件）。`LaesTool dec --list` 只读母带记录，不解码。文件旁边建不了工作文件夹时，改建在系统临时文件夹（`java.io.tmpdir`），并说明；那里的文件夹名字和 C++ 工具的不同。
+- **编码器选项。**`LaeyEncoder.Options` 还可以设 `form`（`flac` 或 `wav`）、`mainName`（`master1name=`）、`packs`（扩展包的其他母带，每个可设对齐、名字、边缘和 accept）和 `overwrite`。
+
 ## 许可
 
 许可与 C++ 代码相同。解码器和公共工具采用 Apache-2.0 许可。编码器文件采用 GPL-3.0-or-later 许可或商业许可（见 [COMMERCIAL.md](../COMMERCIAL.zh.md)）。播放器前端 `Play` 属于解码器文件（Apache-2.0）；标签和图片代码（`LaesTags`、`LaeRetag`）以及命令行工具（`LaesTool`、`LaeEncTool`）属于编码器文件。每个文件在其 SPDX 文件头中写明其许可。`com.lae.laey` 中只有编码器使用的三个文件也属于编码器文件（2026-11-15 的决定）：`WavIo`（编码器使用的 WAV 代码）、`LaeDec`（编码器对自己的输出运行的解码器，带有给编码器的两项导出）和 `NoiseMarks`（编码器读取标定文件的代码）。所有 Apache-2.0 文件，包括解码器 `LaeyDecoder`、`LaeDecoder`、`LaesDecoder` 和播放器前端 `Play`，不需要任何编码器文件即可编译（2026-11-15 用 javac 17 检查）。

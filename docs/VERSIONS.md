@@ -43,6 +43,7 @@ The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IAN
   as the C++ tools (`lae_enc`, `lae_dec`, `laes`) of the same commit. One limit is its own: the LAES format and the C++ tools allow
   255 masters in one file, while the Java player front end offers the masters of files with at most 16 masters and the Java LAES
   encoder refuses more than 16.
+- The Java decoder class `com.lae.laey.LaeyDecoder` has its own interface number, `LAE_API_VERSION` = 5. It grows only when functions are added to that class and does not follow the API number of `liblae` (9). The class has the LAEY functions of C API versions 1 to 3 (`lae_open_reader`, `lae_stream_bytes`) and the extension-pack functions of version 8 (`lae_pack_count`, `lae_pack_info`, `lae_select_pack`; not `lae_selected_pack`), but not `lae_open_pair` or `lae_open_pair_files`; the LAES functions are in `com.lae.laes`.
 - A format change that existing decoders cannot read raises the format version. For CDX, this rule applies from its first stable
   version; version 0 is a draft and may still change.
 - An LAEY file with extension packs is still container version 5. A decoder from before v5-2026-11-14 plays the CD layer with the

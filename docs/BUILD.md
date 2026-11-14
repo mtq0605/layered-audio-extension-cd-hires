@@ -19,6 +19,7 @@ All code is standard C++17 and uses no third-party libraries.
 - The foobar2000 component is built with `plugins/foo_input_lae/build_fb2k.cmd` ([plugins/foo_input_lae/README.md](../plugins/foo_input_lae/README.md)).
 - The encoder uses `std::filesystem`. On systems other than Windows, it also uses `setenv`/`unsetenv`.
 - The source files of each program are listed in the [README](../README.md), Section 14.1.
+- On Windows, file names and tags outside the system code page need Windows 10 version 1803 or later (the tools use the UTF-8 locale, `src/win_utf8.h`); on an older Windows, the tools print a warning and work in the system code page.
 
 | Platform | Compiler | Options |
 |---|---|---|
@@ -84,12 +85,12 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 The repository also contains the following programs. The header comment of each file describes its usage.
 
 - `tools/selftest_ref.cpp` prints the self-test fingerprint of a build (Section 2).
-- `tools/gen_halfband.cpp` and `tools/gen_mdct_tables.cpp` generate `src/halfband.h` and `src/mdct_tables.h`, respectively. The committed `src/mdct_tables.h` is the normative table: the generator writes its result into the current folder, only for comparison. Built with x64 MSVC it reproduces the committed table exactly; built for x86 (`/arch:SSE2`), 75 values differ in the last bit (measured 2026-11-14), and other compilers or C libraries may differ as well, because the generator uses the C library's `sin` and `cos`. Never commit a regenerated table: every decoder must use the same constants.
+- `tools/gen_halfband.cpp` and `tools/gen_mdct_tables.cpp` generate `src/halfband.h` and `src/mdct_tables.h`, respectively. The committed `src/mdct_tables.h` is the normative table: the generator writes its result into the current folder, only for comparison. Built with x64 MSVC it reproduces the committed table exactly; built for x86 (`/arch:SSE2`), 75 values differ in the last bit (measured 2026-11-14), and other compilers or C libraries may differ as well, because the generator uses the C library's `sin` and `cos`. Never commit a regenerated table: every decoder must use the same constants. The generators (and `gen_noise_test`) do not replace an existing output file silently: on a console they ask twice and replace it only after two yes answers; otherwise, it is refused unless `--overwrite` is given (README, Section 14.11).
 - `tools/test_mdct_tb.cpp` is a test program for `src/mdct_tb.h`.
 - `tools/lae_math_check.cpp` checks the encoder's functions in `src/lae_math.h` against the C library and prints their platform checksum.
 - `src/gen_suite.cpp` generates the synthetic test signals (optionally a single category).
 - `src/cd_variant.cpp` derives exactly defined test variants of a CD or master (shift, padding, cut, gain, polarity, channel swap, fade, and others) for the alignment and extension-pack tests (`tests/check_packs.sh`).
-- `tools/lae_abx/lae_abx.cpp` is the stand-alone ABX listening test (Windows x64, Windows 10 version 1703 or later: it uses the per-monitor DPI functions of that version). It needs `lae_udec.exe` next to it. Build (x64): `cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`.
+- `tools/lae_abx/lae_abx.cpp` is the stand-alone ABX listening test (Windows x64, Windows 10 version 1703 or later: it uses the per-monitor DPI functions of that version). It needs `lae_udec.exe` next to it. Build (x64): `cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`. Prepared sources are kept in `%TEMP%\lae_abx_cache` together with the identity of `lae_abx` and of the `lae_udec.exe` next to it, so a copy made by another version is prepared again; the button "Clear kept copies" removes them. The log of a pair is written from its start, one line per answer, and the session summary gives the test rate of every pair. `lae_abx --prepare <pair> <rate> <folder> [--overwrite]` does not replace existing outputs without `--overwrite`.
 - `src/cut_wav.cpp` and `src/cmp_wav.cpp` are WAV utilities. `src/cmp_wav.cpp` computes the error measures defined in README Section 12.1.
 
 ## 2. Start-up self-test
@@ -115,7 +116,7 @@ At every start, the decoder passes a fixed data pattern through the inverse MDCT
 
 On Linux x86, 256 of 256 decoder results were identical to the reference; on Linux ARM64, 192 of 192 were.
 
-`lae_cdx`, `liblae` and the foobar2000 component have been built and tested only on Windows with MSVC 2022 (README, Sections 10.9, 13.3 and 13.7). `laes` is not in the table either: the CI does not build it on Linux or macOS. On 2026-11-14, its commands `dec`, `verify`, `extract` and `add` were run once on Linux x64 (g++ 13.3 under WSL), with output byte-identical to that of the Windows build; `enc`, `align` and `selftest` were not checked there ([spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.md), section "Building").
+`lae_cdx`, `liblae` and the foobar2000 component have been built and tested only on Windows with MSVC 2022 (README, Sections 10.9, 13.3 and 13.7); of `lae_cdx`, only the reader (`read` and `repack`, with WAV and FLAC rips) has also been run on Linux x64 (g++ 13, 2026-11-14). `laes` is not in the table either: the CI does not build it on Linux or macOS. On 2026-11-14, its commands `dec`, `verify`, `extract` and `add` were run once on Linux x64 (g++ 13.3 under WSL), with output byte-identical to that of the Windows build; `enc`, `align` and `selftest` were not checked there ([spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.md), section "Building").
 
 The Linux checks are performed by two scripts:
 
@@ -124,16 +125,23 @@ The Linux checks are performed by two scripts:
 
 The scripts print a summary of the comparisons. A GitHub Actions workflow in `.github/workflows/` runs them.
 
+**Checks run by hand (2026-11-15).** The workflow does not run the following checks; they are run by hand on a local machine before a release, and the workflow will take them up when it is next changed:
+
+- `tests/check_packs.sh <bin folder> <older lae_dec> <scratch folder>`: extension packs (Windows with Git Bash, or Linux);
+- `tests/check_flacform.sh <lae_enc> <lae_dec> <master.wav> <scratch folder>`: the FLAC form;
+- `tools/lae_math_check`: the encoder's functions of `src/lae_math.h` against the C library, with a checksum that must be the same on every platform;
+- the 32-bit (x86) build of `laes` and its `laes selftest`.
+
 The conformance vectors and their hashes are listed in [tests/vectors/MANIFEST.md](../tests/vectors/MANIFEST.md).
 
 ## 4. Threads
 
 - **Encoder.** The encoder's partition search runs in parallel over root blocks.
   - By default, the number of threads is the number of hardware threads (logical processors) reported by the system (`std::thread::hardware_concurrency`).
-  - The environment variable `PARTTHREADS` sets it explicitly.
+  - The test switch `PARTTHREADS` sets it explicitly; like every test switch of `lae_enc` (`LAEY_TEST_PIECE`, `LAE_TESTMAXFRAMES`, `LAE_TESTFAIL`, `LAE_BLOCKUNITS`, `LAE_TESTSEQUENTIAL`, `PARTTHREADS`), it acts only when `LAE_TEST_MODE=1` is set, and every run then prints one line naming the active switches. `TIMING`, `KEEPTMP` and `TIERSTAT` change no output byte and act without it (README, Section 14.11).
   - The thread count does not affect the result: 1 and 16 threads produce byte-identical streams.
   - Since 2026-10-29, the filters of the route split are also divided across threads, and the two layers of a pair (the depth layers L and R, the frequency layers M and S, and L and R again after leak compensation) can be coded at the same time. Every output value is computed with the same operations in the same order, so the output is byte-identical.
-  - Memory plan: at start-up, the encoder reads the physical memory size once and decides from the track length whether the two layers of each pair run at the same time or one after the other (`memory plan: …`). They run at the same time only on 64-bit builds, only if `PARTTHREADS` is not 1, and only if about 2 × (1 byte per layer sample + 128 MB) fits within both the memory limit and the available memory. The limit is set with `mem=<GB>`; by default it is min(1/2 × physical memory, max(1/4 × physical memory, physical memory − 28 GB)): 8 GB on a 32 GB machine, 20 GB on 48 GB and 32 GB on 64 GB. The block length is the largest that fits within the limit, up to 4 units; a unit is lcm(seg, 8) MDCT frames, where a floor segment seg is about one second of frames, so 4 units are about 32 s at 352.8 kHz. `LAE_BLOCKUNITS` sets the number of units manually (for tests; the 512 s blocks below were set this way). Measured on a 10.16-minute 352.8 kHz test master (unpublished): 32 s blocks, 767 s / 471 MB; 24 s blocks (`mem=1`), 776 s / 408 MB; 512 s blocks, 803 s / 6,921 MB; all outputs were byte-identical. On Linux, the encoder reads `/proc/meminfo` (MemAvailable); where the memory size cannot be read, the layers run one after the other.
+  - Memory plan: at start-up, the encoder reads the physical memory size once and decides from the track length whether the two layers of each pair run at the same time or one after the other (`memory plan: …`). They run at the same time only on 64-bit builds, only if `PARTTHREADS` is not 1, and only if about 2 × (1 byte per layer sample + 128 MB) fits within both the memory limit and the available memory. The limit is set with `mem=<GB>`; by default it is min(1/2 × physical memory, max(1/4 × physical memory, physical memory − 28 GB)): 8 GB on a 32 GB machine, 20 GB on 48 GB and 32 GB on 64 GB. The block length is the largest that fits within the limit, up to 4 units; a unit is lcm(seg, 8) MDCT frames, where a floor segment seg is about one second of frames, so 4 units are about 32 s at 352.8 kHz. `LAE_BLOCKUNITS` sets the number of units manually (a test switch, only with `LAE_TEST_MODE=1`; the 512 s blocks below were set this way). Measured on a 10.16-minute 352.8 kHz test master (unpublished): 32 s blocks, 767 s / 471 MB; 24 s blocks (`mem=1`), 776 s / 408 MB; 512 s blocks, 803 s / 6,921 MB; all outputs were byte-identical. On Linux, the encoder reads `/proc/meminfo` (MemAvailable); where the memory size cannot be read, the layers run one after the other.
   - `PARTTHREADS=1` makes the whole encoder single-threaded.
   - An error in any thread (out of memory, a failed write) is passed to the main thread and handled as an error in the main thread is: no output is written and the temporary folder is removed (with `resume`, it is kept for the next run; README Section 14.2).
 - **Decoder.** The decoder is single-threaded.

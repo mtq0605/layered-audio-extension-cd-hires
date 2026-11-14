@@ -6,7 +6,7 @@ A marking file identifies rectangles of time and frequency in one master. It hol
 
 ## 1. File
 
-- The file is plain ASCII text. Lines end with LF; a CR before the LF is ignored.
+- The file is plain ASCII text. Lines end with LF; a CR before the LF is ignored. Only LF and CR LF end a line: a file whose lines end with CR alone reads as one line and is refused (Section 4, item 1).
 - The file name extension is `.laenoise`.
 - `#` starts a comment that runs to the end of the line. Comments are for human readers only: a reader must not take from them any value that affects what it does with the file. A program may display the description they carry (the panel shows the level and the narrow-line frequency of the scanner's comments).
 - Blank lines are allowed. A line whose first word is not `LAENOISE`, `master`, `grid` or `pos` is ignored (Section 4).

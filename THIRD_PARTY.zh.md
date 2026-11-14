@@ -25,7 +25,7 @@
 | 插件 | 编译依赖 | 该依赖的许可 | 对分发的编译产物的影响 |
 |---|---|---|---|
 | foobar2000（`foo_input_lae`） | foobar2000 SDK 2019-12-27（x86）和 2026-10-01（x64） | foobar2000 SDK 许可（BSD 风格） | SDK 的部分代码编译进组件；随编译产物附上 SDK 许可原文 |
-| VLC（`vlc_lae`） | VLC 3.0 SDK、`libvlccore` | LGPL-2.1-or-later | 动态链接；附上 LGPL 说明，并注明 VLC 源代码的获取位置 |
+| VLC（`vlc_lae`） | VLC 3.0 SDK、`libvlccore` | LGPL-2.1-or-later | 动态链接；附上 LGPL 说明，并注明 VLC 源代码的获取位置。模块二进制文件整体按 LGPL-3.0-or-later 分发，并向 VLC 报告这一许可。 |
 | Kodi（`kodi_audiodecoder_lae`） | `kodi-dev-kit` 头文件，Kodi 21.3 "Omega" | GPL-2.0-or-later | 附加组件的编译产物为结合作品，按 GPL-3.0-or-later 分发（Apache-2.0 与 GPL 第 3 版兼容，但与第 2 版不兼容）；插件自身的源代码仍按 Apache-2.0 许可 |
 | DirectShow（`dshow_lae`） | Windows SDK（`strmiids`、COM 库） | 随 Windows SDK 提供 | 无需额外说明 |
 | LAE Noise Marker（`lae_noise_marker`；不是播放器插件） | C++17 标准库（`lae_noise`）；面板在浏览器中运行（HTML 和 JavaScript） | — | 无第三方代码 |

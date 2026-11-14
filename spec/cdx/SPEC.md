@@ -65,7 +65,7 @@ This specification does not define:
 - The extension block in an extension file is, byte for byte, the body of the `LAE ` chunk of a v5 WAV file ([SPEC] 3.3).
 - Everything specified here lies outside container version 5: the CD layout, the trailer record, file pairing and the delivery of LAE streams. This specification has its own version number (Section 8).
 - `.lae` remains reserved for the complete file layout of [SPEC] 1.1. `.LAX` is a different kind of file.
-- [SPEC] Appendix C item 7 asks how FLAC carries LAE; 4.2 of this specification answers it. FLAC carries only the base layer, as a base-layer WAV file does; the extension layer is placed in an accompanying .lax file, which has the same format as the extension file on CD.
+- [SPEC] Appendix C item 7 asked how FLAC carries LAE; it is answered there ("Done"): the single-file FLAC form of [SPEC] Section 3.4 carries the extension in `LAE1` APPLICATION blocks. This specification adds the two-file form of 4.2, in which a FLAC or WAV file carries only the base layer and the extension layer is placed in an accompanying .lax file, which has the same format as the extension file on CD.
 
 ### 1.3 Key Words and Clause Identifiers
 
@@ -446,7 +446,7 @@ Version 0 does not define a trailer record appended inside the WAV file.
   - A base-layer WAV contains no `LAE ` chunk.
   - Ordinary players play only this file.
 - **Extension file:** it has the same name as the base-layer file, with the file name extension .lax, and its format is that of Section 3. If the same track is also released on CD, this file MUST be byte-identical to TRACKnn.LAX on the CD.
-- The extension layer and the trailer record MUST NOT be placed inside the FLAC file. No FLAC metadata block carries them.
+- In this two-file form, the extension layer and the trailer record MUST NOT be placed inside the base-layer FLAC file: no FLAC metadata block of it carries them. (A single file that carries the extension is the FLAC form of [SPEC] Section 3.4, not a base-layer file.)
 - The audio MD5 SHOULD be written into the FLAC STREAMINFO.
 
 ### 4.3 Pairing and Ripped Files

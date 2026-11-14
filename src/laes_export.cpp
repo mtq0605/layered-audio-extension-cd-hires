@@ -28,15 +28,17 @@ namespace fs = std::filesystem;
 
 static std::string hex(const uint8_t* p, int n) { static const char* d = "0123456789abcdef"; std::string s; for (int i = 0; i < n; i++) { s += d[p[i] >> 4]; s += d[p[i] & 15]; } return s; }
 
-// one FLAC file of `frames` frames read from p, written in blocks of 4096; STREAMINFO (sizes, total, MD5) is filled in at the end
-static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& out, std::string& err) {
+// one FLAC file of `frames` frames read from p, written in blocks of 4096; STREAMINFO (sizes, total, MD5) is filled in at the end.
+// FU14-3 (2026-11-14): written as <out>.part with every write checked (a failure removes it); the caller renames it with finishPart
+static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {
+    const std::string out = outName + ".part";
     FILE* fo = fopen(out.c_str(), "wb"); if (!fo) { err = "cannot write " + out; return false; }
     std::vector<uint8_t> h = {'f', 'L', 'a', 'C'}; laesflac::putBlockHeader(h, false, 0, 34); const size_t siAt = h.size(); h.resize(h.size() + 34, 0);
     { std::vector<uint8_t> vc; auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) vc.push_back((uint8_t)(v >> (8 * i))); };   // VORBIS_COMMENT (little-endian lengths)
       const std::string vendor = "laes_export"; u32((uint32_t)vendor.size()); vc.insert(vc.end(), vendor.begin(), vendor.end()); u32((uint32_t)tags.size());
       for (const std::string& t : tags) { u32((uint32_t)t.size()); vc.insert(vc.end(), t.begin(), t.end()); }
       laesflac::putBlockHeader(h, true, 4, (uint32_t)vc.size()); h.insert(h.end(), vc.begin(), vc.end()); }
-    fwrite(h.data(), 1, h.size(), fo);
+    if (fwrite(h.data(), 1, h.size(), fo) != h.size()) { err = "cannot write " + out + " (disk full?)"; fclose(fo); fs::remove(out); return false; }
     // the frames are independent: a batch of blocks is encoded on all cores and written in order (the same bytes as one after another)
     const int64_t B = 4096; const int64_t G = 128; const unsigned T = std::max(1u, std::thread::hardware_concurrency());
     laes::V ch[2]; std::vector<int32_t> buf; alignhash::Md5 md5; const int by = bps / 8; std::vector<uint8_t> mb;
@@ -50,14 +52,19 @@ static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, c
         const size_t nb = (size_t)((n + B - 1) / B); std::vector<std::vector<uint8_t>> fr(nb); std::atomic<size_t> next{0};
         auto work = [&] { for (size_t b; (b = next++) < nb;) fr[b] = laesflac::encodeFrame(ch, (int64_t)b * B, (int64_t)std::min<int64_t>(B, n - (int64_t)b * B), frameNo + b, rate, bps); };
         std::vector<std::thread> ts; for (unsigned t = 1; t < std::min<unsigned>(T, (unsigned)nb); t++) ts.emplace_back(work); work(); for (auto& t : ts) t.join();
-        for (auto& x : fr) { fmin = std::min<uint32_t>(fmin, (uint32_t)x.size()); fmax = std::max<uint32_t>(fmax, (uint32_t)x.size()); fwrite(x.data(), 1, x.size(), fo); }
+        for (auto& x : fr) { fmin = std::min<uint32_t>(fmin, (uint32_t)x.size()); fmax = std::max<uint32_t>(fmax, (uint32_t)x.size());
+            if (fwrite(x.data(), 1, x.size(), fo) != x.size()) { err = "cannot write " + out + " (disk full?)"; fclose(fo); fs::remove(out); return false; } }
         frameNo += nb; done += n; }
     if (!frames) fmin = 0;
     laes::BitW si; const uint32_t bs = frames >= B ? (uint32_t)B : (uint32_t)std::max<int64_t>(16, frames);
     si.put(bs, 16); si.put(bs, 16); si.put(fmin, 24); si.put(fmax, 24); si.put((uint64_t)rate, 20); si.put(1, 3); si.put((uint64_t)(bps - 1), 5); si.put((uint64_t)frames, 36);
     const std::string mh = md5.hex(); for (int i = 0; i < 16; i++) si.b.push_back((uint8_t)std::stoul(mh.substr((size_t)i * 2, 2), nullptr, 16));
-    const bool ok = fseek(fo, (long)siAt, SEEK_SET) == 0 && fwrite(si.b.data(), 1, si.b.size(), fo) == 34; if (fclose(fo) != 0 || !ok) { err = "cannot write " + out; fs::remove(out); return false; }
+    const bool ok = fseek(fo, (long)siAt, SEEK_SET) == 0 && fwrite(si.b.data(), 1, si.b.size(), fo) == 34; if (fclose(fo) != 0 || !ok) { err = "cannot write " + out + " (disk full?)"; fs::remove(out); return false; }
     return true; }
+// <out>.part (written and checked) becomes <out>; a failure removes the .part
+static bool finishPart(const std::string& out, std::string& err) {
+    std::error_code ec; fs::rename(out + ".part", out, ec); if (!ec) return true;
+    err = "cannot write " + out + " (" + ec.message() + ")"; fs::remove(out + ".part", ec); return false; }
 
 int main(int argc, char** argv) {
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
@@ -82,7 +89,8 @@ int main(int argc, char** argv) {
     if (!whole) {   // the block positions: from the record, else made now (and saved when a record path is given)
         std::vector<uint8_t> rec; if (!index.empty()) { FILE* fi = fopen(index.c_str(), "rb"); if (fi) { int ch; while ((ch = fgetc(fi)) != EOF) rec.push_back((uint8_t)ch); fclose(fi); } }
         if (rec.empty() || !f.importIndex(rec.data(), rec.size())) { std::atomic<bool> no{false}; f.indexLayers(&no, (int)std::max(1u, std::thread::hardware_concurrency()));
-            if (!index.empty()) { const std::vector<uint8_t> r = f.exportIndex(); FILE* fo = fopen(index.c_str(), "wb"); if (fo) { fwrite(r.data(), 1, r.size(), fo); fclose(fo); } } } }
+            if (!index.empty()) { const std::vector<uint8_t> r = f.exportIndex(); FILE* fo = fopen(index.c_str(), "wb");   // FU14-3: a record not written whole is removed
+                if (fo) { const bool okR = fwrite(r.data(), 1, r.size(), fo) == r.size(); if (fclose(fo) != 0 || !okR) { fs::remove(index); printf("note: cannot write the block position record %s (disk full?): not saved\n", index.c_str()); } } } } }
     std::vector<std::string> tags = {"LAES_CHOICE=" + C.name, "LAES_FILE_SHA256=" + hex(f.fileSha, 32)};
     if (C.m >= 0) tags.push_back("LAES_MASTER_SHA256=" + hex(f.ms[(size_t)C.m].I.sha, 32));
     for (auto& t : f.tags) tags.push_back(t.first + "=" + t.second);
@@ -91,11 +99,13 @@ int main(int argc, char** argv) {
         if (dir.empty()) { printf("--seg needs --dir\n"); return 1; } fs::create_directories(dir);
         const int64_t step = std::max<int64_t>(1, (int64_t)(seg * C.rate + 0.5)); laesp::Player p; e = p.start(f, j, thr, false, first); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
         int k = 0; for (int64_t a = first; a < first + count; a += step, k++) { char nm[64]; snprintf(nm, sizeof nm, "seg_%05d.flac", k); std::vector<std::string> t = tags; t.push_back("LAES_FIRST_FRAME=" + std::to_string(a));
-            if (!writeFlacFrom(p, std::min<int64_t>(step, first + count - a), C.rate, C.bits, t, (fs::path(dir) / nm).string(), e)) { printf("%s\n", e.c_str()); return 2; } }
+            const std::string segOut = (fs::path(dir) / nm).string();
+            if (!writeFlacFrom(p, std::min<int64_t>(step, first + count - a), C.rate, C.bits, t, segOut, e) || !finishPart(segOut, e)) { printf("%s\n", e.c_str()); return 2; } }
         printf("%d pieces of %.3f s, %s, frames %lld..%lld\n", k, seg, C.name.c_str(), (long long)first, (long long)(first + count)); return 0; }
     if (out.empty()) { printf("no output file\n"); return 1; }
     laesp::Player p; e = whole ? p.start(f, j, thr) : p.start(f, j, thr, false, first); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
     std::vector<std::string> t = tags; t.push_back("LAES_FIRST_FRAME=" + std::to_string(first));
     if (!writeFlacFrom(p, count, C.rate, C.bits, t, out, e)) { printf("%s\n", e.c_str()); return 2; }
-    if (whole && C.kind != 0) { int64_t k; int32_t tail[2]; while ((k = p.read(tail, 1)) > 0) {} if (!p.verified()) { fs::remove(out); printf("%s did not match its SHA-256: nothing written\n", C.name.c_str()); return 2; } }
+    if (whole && C.kind != 0) { int64_t k; int32_t tail[2]; while ((k = p.read(tail, 1)) > 0) {} if (!p.verified()) { fs::remove(out + ".part"); printf("%s did not match its SHA-256: nothing written\n", C.name.c_str()); return 2; } }
+    if (!finishPart(out, e)) { printf("%s\n", e.c_str()); return 2; }
     printf("%s: %s, %lld frames from %lld%s\n", out.c_str(), C.name.c_str(), (long long)count, (long long)first, whole && C.kind != 0 ? ", SHA-256 ok" : ""); return 0; }

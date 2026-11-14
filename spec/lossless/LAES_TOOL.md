@@ -35,7 +35,7 @@ Windows (Visual Studio 2022, x64 Native Tools prompt):
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /bigobj /D_USE_MATH_DEFINES /Fe:laes.exe src\laes_tool.cpp
 ```
 
-Linux and macOS: the source contains POSIX code paths (`g++ -O2 -std=c++17 -ffp-contract=off -pthread`), but the project's CI does not yet build or test `laes` on these systems. Until it does, use the Windows build for files that you publish.
+Linux and macOS: the source contains POSIX code paths (`g++ -O2 -std=c++17 -ffp-contract=off -pthread`), but the project's CI does not yet build or test `laes` on these systems. Until it does, use the Windows build for files that you publish. On 2026-11-14, `dec`, `verify`, `extract` and `add` were run on Linux x64 (g++ 13.3 under WSL): the decoded WAV files and the files written by `extract` and `add` were byte-identical to those of the Windows build. In builds before that date, `dec` on Linux wrote its WAV files beside the output folder, and `extract` and `add` failed.
 
 `laes selftest` runs the built-in regression tests on synthetic signals. Exit code 0 indicates that all tests passed.
 
@@ -80,7 +80,7 @@ laes enc <out.flac | out.wav | out.lae> (--derive-core | --core=<core.wav>) <mas
 - With a name, `--no-derive`, `--default=<k>`, more than 16 masters, or a menu order other than the file order chosen by the encoder, the file is written in payload version 2; players and tools from before 2026-11-11 play only the core master of such a file. Otherwise, the file is written in payload version 1, byte for byte as before.
 - With more than 16 masters, the reference of each master is first tried on four fixed short excerpts, and only the three smallest candidates are coded in full; only one file order is tried. Measured on 10-second excerpts: with 20 masters, the file is byte for byte the one that a full search gives; 64 masters take about 8 minutes.
 - `<master>@T`: the time position of the master on the time line of the core master, in base-rate samples (a decimal number, for example `master.wav@-0.37`). The default is 0, which is correct for a derived core master.
-- `<master>@auto`: for a master produced independently of the given core master (for example, the hi-res master of a released CD). The tool measures T against `--core` with the same search as `laes align`, which needs `lae_enc` next to `laes` or given with `--lae-enc=<path>`. If the alignment error is above −60 dB, the tool displays it and asks for confirmation; `--accept` accepts it without asking. If it is not accepted, nothing is written. Two conditions apply: the core master given with `--core` is 16-bit (CD or DVD), and the master to be aligned is supplied as a WAV file, because the search reads WAV; a FLAC master is refused. A derived core master does not need `@auto`: its masters are at T = 0.
+- `<master>@auto`: for a master produced independently of the given core master (for example, the hi-res master of a released CD). The tool measures T against `--core` with the same search as `laes align`, which needs `lae_enc` next to `laes` or given with `--lae-enc=<path>`. If the alignment error is above −60 dB, the tool displays it and asks for confirmation; `--accept` accepts it without asking. If it is not accepted, nothing is written. Two conditions apply: the core master given with `--core` is 16-bit (CD or DVD), and the master to be aligned is supplied as a WAV file, because the search reads WAV; a FLAC master is refused. A derived core master does not need `@auto`: its masters are at T = 0. The search runs `lae_enc` through the system's shell, so a path that the shell would change is refused, with the reason, before the search starts: a path with `%` or `"` on Windows, and with `$`, `` ` ``, `"` or `\` elsewhere. Rename the file, or give T by hand (`<master>@<T>`).
 
 ### Form and file name
 
@@ -196,6 +196,8 @@ laes dec <in> <out dir> --pick=<n>[,<n> ...] | <a>-<b> | <rate>:<bits> | master:
 - **Derived 16-bit masters:** every master above 16 bits has one at its own rate and at each of its rate levels (`derived16_<rate>_from_<source>.wav`), shown as "derived from" the master, with the name of the source master; a core master above 16 bits has one as well. A master for which derived versions were turned off with `--no-derive` has none. A derived master is made by a fixed TPDF rule ([SPEC.md](SPEC.md), Section 10.1), so every decoder reproduces it bit for bit. It is lossless relative to that rule. It is not lossless relative to the master it is made from: that master is requantised to 16 bits with TPDF dither and cannot be recovered from it. It is a derived master, not the original master; it never replaces an independent master with the same rate and word length, and it is written only when picked.
 - A master that fails its SHA-256 check is not offered, and neither are its rate levels and derived versions. The core master and the other masters are not affected.
 - Output above 16 bits is written as `WAVE_FORMAT_EXTENSIBLE`.
+- **Disk check:** before anything is written, the size of the chosen WAV files is compared with the free space on the disk of the output folder. If they do not fit, nothing is written and the exit code is 2; `--force-disk` writes anyway.
+- **Write failure:** a WAV file that cannot be written completely is removed and reported as `<name>.wav: FAILED, the file was removed: <reason>`. The last line then states that not every file was written, and the exit code is 2.
 
 **When several masters match: the tick list**
 
@@ -275,7 +277,7 @@ Decodes every master in the file and compares it bit for bit with the given file
 laes align <cd.wav> <master.wav> [--lae-enc=<path>] [--accept]
 ```
 
-For a core master that was produced independently, such as a released CD, this command measures the time position T of the master on the CD's time line, including the fractional part. It uses the automatic search of the LAE Lossy encoder (`lae_enc`, which is found next to `laes` or given with `--lae-enc`). An alignment error of −60 dB or lower passes; otherwise, the error is displayed and you decide, or `--accept` accepts it without asking. The command writes nothing; when the alignment is accepted, it prints `use <master>@<T>` for use with `laes enc` (exit code 0). A whole album is cut into tracks by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`).
+For a core master that was produced independently, such as a released CD, this command measures the time position T of the master on the CD's time line, including the fractional part. It uses the automatic search of the LAE Lossy encoder (`lae_enc`, which is found next to `laes` or given with `--lae-enc`). A path that the shell would change is refused, as for `@auto`. An alignment error of −60 dB or lower passes; otherwise, the error is displayed and you decide, or `--accept` accepts it without asking. The command writes nothing; when the alignment is accepted, it prints `use <master>@<T>` for use with `laes enc` (exit code 0). A whole album is cut into tracks by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`).
 
 ## Test helpers
 

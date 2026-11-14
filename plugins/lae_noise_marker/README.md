@@ -60,7 +60,10 @@ one excerpt with every position silenced together (`all_original.wav`, `all_sile
 - Every candidate is initially unchecked; check those to be removed.
 - To add a region manually, drag a rectangle on the spectrogram or enter the times and frequencies. The region snaps inward to
   whole cells.
-- Use the three buttons in each row to listen to the previews.
+- Use the three buttons in each row to listen to the previews. The panel matches each preview to the row with the same rectangle,
+  using `preview_check.txt`; a row without a matching preview has its buttons greyed out. For a region added by hand, save first,
+  run `lae_noise preview` on the saved file and load that folder. A preview folder of another master, or one without
+  `preview_check.txt`, plays nothing, and the panel says why.
 - **Save marking file** writes only the checked positions, for example as `master.laenoise`.
 
 The panel never processes sound; it only plays the preview files.

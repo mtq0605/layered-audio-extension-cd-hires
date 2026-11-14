@@ -57,7 +57,7 @@ lae_dec in.wav out.wav [full|16|cd24] [output rate] [pack=<number>]
 - `pack=1`, `pack=2`, …: the CD layer and that pack.
 - When the file has further packs, `lae_dec` lists each with its rate and name (and the name of the main body, if one is stored).
 - The output rate and the 24-bit, 16-bit and cd24 routes work as before within the chosen pack.
-- `lae_udec info <file>` lists every pack with its routes as choices (`pack1_full_176400`, …).
+- `lae_udec info <file>` lists every pack with its routes as choices (`pack1_full_176400`, …). `lae_udec dec --pick=<rate>:<bits>` chooses among the choices of the main body only; another pack is chosen with `--pick=pack:<k>` or by the name of one of its choices.
 
 ## 3. Other forms
 

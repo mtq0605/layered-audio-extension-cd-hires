@@ -57,7 +57,7 @@ lae_dec in.wav out.wav [full|16|cd24] [output rate] [pack=<number>]
 - `pack=1`、`pack=2`……：CD 层加那个包。
 - 文件中有另外的包时，`lae_dec` 列出每个包的采样率和名称（存有主体名称时也列出）。
 - 输出采样率和 24 位、16 位、cd24 路径在选中的包之内照常使用。
-- `lae_udec info <file>` 把每个包及其路径作为选项列出（`pack1_full_176400` 等）。
+- `lae_udec info <file>` 把每个包及其路径作为选项列出（`pack1_full_176400` 等）。`lae_udec dec --pick=<rate>:<bits>` 只在主体的各项中选择；其他包用 `--pick=pack:<k>` 或该包某一项的名称选择。
 
 ## 3. 其他形式
 

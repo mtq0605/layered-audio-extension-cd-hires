@@ -390,7 +390,7 @@ Confirmation is handled as follows:
 - when it is called by a script, it stops unless the option `cdaccept` is given;
 - after a confirmation, the last line of the output states `CONTINUED AFTER CONFIRMATION`.
 
-A channel swap or inverted polarity requires the user's confirmation, as in the −40 … −33 dB band (`cdaccept`); the extension then codes the difference and becomes much larger.
+A channel swap or inverted polarity requires the user's confirmation, as in the −40 … −33 dB band (`cdaccept`); the extension then codes the difference and becomes much larger. The difference between the master and the CD layer is stored in 24-bit values. If it does not fit at one sample or more (for example, a CD of inverted polarity and a master with peaks above −6 dBFS), the encoder stops after the route split with exit code 2 and writes no file.
 
 **User confirmation of the position.** Every position is confirmed by the user. Without the option `cdalign=`, the encoder proceeds as follows:
 
@@ -1093,7 +1093,7 @@ A slip within a track, such as a lost or duplicated sample, changes only that tr
 
 **Output and failure.** The reader writes its output as follows:
 
-- **Accepted tracks.** Each accepted track is rebuilt as `TRACKnn.lae.wav`, byte-identical to the file written by the encoder.
+- **Accepted tracks.** Each accepted track is rebuilt as `TRACKnn.lae.wav`, byte-identical to the file written by the encoder. Before it is written, the track is handed to the decoder: for LAEY, the checks that the decoder makes when it opens a file; for LAES, a complete decode in which every master is compared with its SHA-256. A track that the decoder refuses is written as CD, with the reason "extension layer damaged: the decoder refuses it". If the memory for the LAES decode is missing, the track stays accepted by its MD5, and a line states that the decoder check was not made.
 - **Other tracks.** Every other track is written as `TRACKnn.cd.wav`, which contains the ripped CD audio unchanged, together with the reason. The reason categories are: unknown samples (a missing or truncated file), file too short, no match, no trailer, damaged trailer, unrecognised version or extension block type, invalid trailer field, track number not in the TOC, damaged extension, and lossy base layer.
 - **No track accepted.** If no track is accepted, the reader reports that the input may be another disc or another edition.
 - **Track without an extension.** A track in the TOC without an extension file is output as CD; this is not a failure.
@@ -1624,7 +1624,7 @@ The output name decides the form: `.wav` the WAV form, `.flac` the FLAC form, `.
 | `mem=<GB>` | Memory budget for coding the two layers of a pair simultaneously (see the memory plan below) |
 | `noise=<file>` | Code the cells marked in this marking file (LAE Noise Marker, `plugins/lae_noise_marker/`) as silence in the frequency layer (Section 8.6, [docs/NOISE.md](docs/NOISE.md)). The file must belong to this master. Marks in the CD band are listed, not deleted. |
 | `g`, `g=b`, `g=c`, `g=d` | Code the frequency layer a second time to cancel G, the up-converted CD layer, in deleted and silent cells (Section 8.6). `g` = `g=d` (step 1); `g=c` and `g=b` are coarser and smaller. Optional; the encoder prints the cost. |
-| `resume` | Continue an interrupted run: the finished steps are kept in the work folder `<output>.tmp` and are not repeated when the same master is encoded again with the same options and `resume`; otherwise the run starts from the beginning. A run stopped after it has written `<output>.part` writes that file again. With `cd=`, the alignment is performed again (it gives the same result) and the steps after it continue. The output is the same as that of an uninterrupted run. |
+| `resume` | Continue an interrupted run: the finished steps are kept in the work folder `<output>.tmp` and are not repeated when the same master is encoded again with the same options and `resume`; otherwise the run starts from the beginning. A run stopped after it has written `<output>.part` writes that file again. With `cd=`, the alignment is performed again. If it ends as in the interrupted run (the same position, the same choice of pad or cut, and the same lengths of the placed master and of the CD layer), the steps after it continue; otherwise, the encoder says so and starts from the beginning. The output is the same as that of an uninterrupted run. |
 | `--tag=KEY=VALUE` | A tag, with the usual names: `TITLE`, `ARTIST`, `ALBUM`, `ALBUMARTIST`, `DATE`, `GENRE`, `TRACKNUMBER`, `COMPOSER`, `COPYRIGHT`, `COMMENT`, … (UTF-8; a name may be repeated). Written as a RIFF `LIST/INFO` chunk and an `id3 ` chunk (ID3v2.4) between `fmt ` and `data`; the CD audio and the `LAE ` chunk do not change. |
 | `--cover=<image>` | The front cover, JPEG or PNG, stored byte for byte |
 | `--picture=<type>:<image>` | Any other picture, with the ID3 / FLAC picture type (4 back cover, 5 leaflet, 6 medium, 8 artist, …) |
@@ -1671,7 +1671,7 @@ lae_udec dec <file> <output.wav> [--pick=<n> | --pick=<name> | --pick=<rate>:<bi
 lae_udec verify <file>
 ```
 
-`lae_dec` reads both forms and tells them apart by content. `pack=<n>` decodes extension pack n (0, the default, is the main body); a file without that pack is refused. `lae_udec` reads LAEY and LAES files alike: `info` lists every choice the file offers, with its number, name and the checks of its format; `dec` decodes one choice, given by its number or its name (for example `full_352800`, `pack1_full_176400`, `master_2_352800_32`), and without `--pick` the full route at the master rate (LAEY) or the default master of the file (LAES); `verify` runs every check of the format and writes nothing. When several LAES masters match, a tick list is shown, as in `laes dec`.
+`lae_dec` reads both forms and tells them apart by content. `pack=<n>` decodes extension pack n (0, the default, is the main body); a file without that pack is refused. If the output cannot be written completely (for example, on a full disk), `lae_dec` removes it, reports the reason and exits with code 1. `lae_udec` reads LAEY and LAES files alike: `info` lists every choice the file offers, with its number, name and the checks of its format; `dec` decodes one choice, given by its number or its name (for example `full_352800`, `pack1_full_176400`, `master_2_352800_32`), and without `--pick` the full route at the master rate (LAEY) or the default master of the file (LAES); `verify` runs every check of the format and writes nothing. In an LAEY file with extension packs, `--pick=<rate>:<bits>` chooses among the choices of the main body only; another pack is chosen with `--pick=pack:<k>` or by the name of one of its choices. When several LAES masters match, a tick list is shown, as in `laes dec`.
 
 | Route | Layers | Output |
 |---|---|---|
@@ -1721,6 +1721,7 @@ lae_enc plan <master.wav> [<master2.wav> …] <publisher.cue> <out dir> [cdalign
 - Without `cdalign=`, the planner performs both searches through the whole plan, prints the positions and a line `PLAN_SUGGEST whitened=<status>:<positions> plain=<status>:<positions>`, writes nothing and exits with code 1.
 - `cdalign=<p1>,<p2>,…` gives one value per piece: the master sample at which CD frame 0 of the piece lies, with a fraction allowed, or `-` for a piece that is digital silence on the CD.
 - `cdaccept` confirms pieces that fall into the confirmation band.
+- Memory: the planner works in memory and holds the joined master about three times; it prints its need at the start (Section 17.2).
 - Output in `<out dir>`: `TRACKnn.master.wav` and `TRACKnn.cd.wav` for each piece, and the report `plan.align.txt`.
 
 The chain from a publisher's disc to a CD-Extra image (Section 4.5) is as follows:
@@ -1811,11 +1812,11 @@ Building requires third-party SDKs or headers that are not part of this reposito
 
 ```
 laes_export <in> --list
-laes_export <in> <choice> <out.flac> [--from=<s>] [--len=<s>] [--index=<record>]
-laes_export <in> <choice> --seg=<s> --dir=<folder> [--index=<record>]
+laes_export <in> <choice> <out.flac> [--from=<s>] [--len=<s>] [--index=<record>] [--unverified]
+laes_export <in> <choice> --seg=<s> --dir=<folder> [--index=<record>] [--unverified]
 ```
 
-A whole-track export of a master is checked against its SHA-256 before anything is written. Every output is an ordinary FLAC file whose samples are exactly those of the chosen version, with their MD5 in STREAMINFO and with tags that identify the source (`LAES_CHOICE`, `LAES_FILE_SHA256`, `LAES_MASTER_SHA256`, `LAES_FIRST_FRAME`). `laes_export` contains the FLAC writer of the encoder and is licensed in the same way as the encoder.
+A master is given out only after it has matched its SHA-256 ([spec/lossless/SPEC.md](spec/lossless/SPEC.md), Section 1.3). A run that decodes the whole track is this check: a whole-track export, and `--seg` over the whole track. Each output is first written as `<out>.part` (with `--seg`, each piece) and receives its name only when it is complete and the SHA-256 has matched; if the SHA-256 does not match, nothing is left and the exit code is 2. With `--index=<record>`, such a run notes the masters that matched in the text file `<record>.verified`. A part of a track (`--from`, `--len`), or pieces of such a part, of a master, of a rate level or of a derived 16-bit version is exported only when that note exists; without it, the export is refused with exit code 2 and the tool says how to obtain the note. `--unverified` exports without the check and adds the tag `LAES_UNVERIFIED=1`. The core master needs no note, because it is checked when the file is opened. Every write is checked: if an output cannot be written (for example, on a full disk), its `.part` file is removed and the exit code is 2. Every output is an ordinary FLAC file whose samples are exactly those of the chosen version, with their MD5 in STREAMINFO and with tags that identify the source (`LAES_CHOICE`, `LAES_FILE_SHA256`, `LAES_MASTER_SHA256`, `LAES_FIRST_FRAME`). `laes_export` contains the FLAC writer of the encoder and is licensed in the same way as the encoder.
 
 `tools/laes_disc.ps1` (Windows) creates a DVD or BD data-disc image of an album of LAES files, using the disc-image service of Windows (IMAPI2). The image contains the unchanged files, a playlist and a SHA-256 list. It is a data disc, not BD-Video or DVD-Audio. Any player that reads FLAC or WAV files from a disc plays the core master of each file; an LAES player plays the masters.
 
@@ -1931,7 +1932,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
 
 ### 17.2 Encoder
 
-- **Memory with an independent CD.** With `cd=`, the master is read through windows of its file like any other master, but the alignment search correlates the CD with the derived base layer over the whole track at the CD rate (its algorithm requires the whole track). This part grows with the length of the CD: about 2.4 GB for 10 minutes (`cdcheck` of a 10-minute master against its CD: 2.36 GB, formerly 7.5 GB). The whole-disc planner holds the whole master in memory.
+- **Memory with an independent CD.** With `cd=`, the master is read through windows of its file like any other master, but the alignment search correlates the CD with the derived base layer over the whole track at the CD rate (its algorithm requires the whole track). This part grows with the length of the CD: about 2.4 GB for 10 minutes (`cdcheck` of a 10-minute master against its CD: 2.36 GB, formerly 7.5 GB). The whole-disc planner `lae_enc plan` works in memory. It holds the joined master about three times, at 8 bytes per stereo sample frame per copy: 5.1 GB per copy for 60 minutes at 176.4 kHz, about 15 GB in all. Without `laes`, moving a group takes up to two further copies of the longest group; an album without gaps is one group, which gives about 25 GB. The alignment search comes on top, as described above. These figures are calculated from the number of copies; no album of that length was run. The planner prints its need at the start (`plan: memory: …`); a run without enough memory stops with exit code 2 and states the need.
 - **Limits of the alignment search.** The search can fail on short or narrowband material, in which case the encoder stops. Examples are a 2 s excerpt of one sustained tone, a 2–3 s passage dominated by one low tone, and content entirely above about 1.2 kHz, which lies outside the band of level 0. The user then gives the position manually with `cdalign=`.
   - Strictly periodic synthetic signals (tones, sawtooth waves, loops) surrounded by digital silence can be matched one whole period away. For this reason, every position is confirmed by the user (Section 4.3).
   - When the sound is longer than about 3.6 minutes, level 0 of the search uses a lower sampling rate; an improvement is planned.

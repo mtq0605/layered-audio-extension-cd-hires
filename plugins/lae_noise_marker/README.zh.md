@@ -44,7 +44,7 @@ lae_noise preview master.wav candidates.laenoise previews
 **3. 在面板中选择。** 打开 `noise_panel.html`，载入 `spectro.json`、`candidates.laenoise` 和 `previews` 文件夹。
 - 所有候选初始均为未勾选状态；勾选需要去除的候选。
 - 如需手动添加区域，可在频谱图上拖出一个矩形，或输入时间和频率。该区域向内吸附到完整的格子。
-- 使用每一行中的三个按钮试听各试听片段。
+- 使用每一行中的三个按钮试听各试听片段。面板按 `preview_check.txt` 把每个试听片段对应到矩形相同的行；没有对应片段的行，按钮是灰的。手动添加的区域：先保存，对保存的文件运行 `lae_noise preview`，再载入那个文件夹。属于另一个母带的试听文件夹，或没有 `preview_check.txt` 的文件夹，不能试听，面板会说明原因。
 - **保存标定文件** 仅写入已勾选的位置，例如保存为 `master.laenoise`。
 
 面板从不处理声音；它仅播放试听文件。

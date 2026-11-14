@@ -153,7 +153,10 @@ public final class LaesEncoder {
 
     // T (base samples, decimal) -> whole + fraction in 2^-32 base samples; returns {whole, frac as uint32}
     // port of laes_tool.cpp:setT
-    public static long[] setT(double T) { long whole = com.lae.core.Cv.d2l(Math.floor(T)); final int frac = (int) com.lae.core.Cv.llround((T - Math.floor(T)) * 4294967296.0); if (frac == 0 && T != Math.floor(T)) whole += 1; return new long[] {whole, frac & 0xFFFFFFFFL}; }
+    // port of laes_tool.cpp:splitT (decision 14, 2026-11-15): q = llround((T - floor T) * 2^32); whole = floor T, plus 1 only when q = 2^32
+    // (the fraction really rounds up to a whole; then frac = 0), else frac = q. Before, a fraction that rounded to 0 also carried
+    public static long[] setT(double T) { long whole = com.lae.core.Cv.d2l(Math.floor(T)); final long q = com.lae.core.Cv.llround((T - Math.floor(T)) * 4294967296.0);
+        if (q >= 4294967296L) return new long[] {whole + 1, 0}; return new long[] {whole, q & 0xFFFFFFFFL}; }
 
     // ---- WAV read (16/24/32-bit integer PCM, stereo; PCM or EXTENSIBLE with the PCM sub-format), for the core
     // port of laes_tool.cpp:readWav  (the C++ reads the whole file into memory; here the chunk headers, then the samples; the same checks)

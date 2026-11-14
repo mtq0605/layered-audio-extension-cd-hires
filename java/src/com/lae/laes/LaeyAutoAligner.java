@@ -45,7 +45,7 @@ public final class LaeyAutoAligner implements LaesEncoder.Aligner {
         final int w = m.w, up = (m.bits - 16) - w; Stream.Sig[] base = {StreamEnc.levelOf(m, 0, 0), StreamEnc.levelOf(m, 1, 0)};   // the base level (samples >> w)
         try {
             final long nb = base[0].n, bl = Math.max(1L, Math.min(nb / 3, 5L * cd.rate)); final long[] b0 = {0, (nb - bl) / 2, nb - bl};
-            long wh = Cv.d2l(Math.floor(A.T)); int fr = (int) Cv.llround((A.T - Math.floor(A.T)) * 4294967296.0); if (fr == 0 && A.T != Math.floor(A.T)) wh++;
+            final long[] whf = LaesEncoder.setT(A.T); final long wh = whf[0]; final int fr = (int) whf[1];   // DEC 14: the same rule as setT (laes_tool.cpp splitT)
             final long[] h = LaesMath.refTaps(fr); A.resid = -200;
             for (int b = 0; b < 3; b++) { double eb = 0, er = 0; for (int c = 0; c < 2; c++) { final long n = cd.c[c].length; long[] bv = new long[(int) bl]; base[c].get(b0[b], b0[b] + bl, bv, 0);
                     for (long i = b0[b]; i < b0[b] + bl; i++) { LaesMath.Acc a = new LaesMath.Acc(); for (int q = -127; q <= 128; q++) a.mac(h[q + 127], cd.c[c][(int) LaesMath.mir(i + wh + q, n)]); final int s = 31 - up;

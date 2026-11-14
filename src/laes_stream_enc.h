@@ -38,6 +38,8 @@ inline void diskCheck(bool now = false) {
            "  or close this program and run the same command again later: it continues from the work folder\n", left.c_str(), g->dir.c_str());
     printf("%s%llu%s%s%s\n", u8"  \u78c1\u76d8\u5feb\u6ee1\uff08\u5269 ", (unsigned long long)(sp.available >> 20), u8" MB\uff09\uff1a\u8bf7\u5728 ", g->dir.c_str(), u8" \u6240\u5728\u7684\u78c1\u76d8\u4e0a\u6e05\u7406\u4e00\u4e9b\u7a7a\u95f4\uff0c\u7f16\u7801\u4f1a\u81ea\u52a8\u63a5\u7740\u505a\uff1b\u4e5f\u53ef\u4ee5\u5173\u6389\u7a0b\u5e8f\uff0c\u4e4b\u540e\u518d\u8fd0\u884c\u540c\u4e00\u6761\u547d\u4ee4\uff0c\u4ece\u5de5\u4f5c\u6587\u4ef6\u5939\u63a5\u7740\u505a"); fflush(stdout);
     do { std::this_thread::sleep_for(std::chrono::seconds(5)); sp = std::filesystem::space(g->dir, ec); } while (!ec && sp.available < g->reserve + (256ull << 20));
+    if (ec) { printf("cannot read the free space of the disk of %s (%s): continuing\n", g->dir.c_str(), ec.message().c_str());   // FU13-8: not "room again" with a meaningless number
+        printf("%s%s%s\n", u8"  无法读取 ", g->dir.c_str(), u8" 所在磁盘的剩余空间：接着做"); fflush(stdout); g->last = std::chrono::steady_clock::now(); return; }
     printf("disk has room again (%llu MB free): continuing\n", (unsigned long long)(sp.available >> 20)); printf("%s%llu%s\n", u8"  \u78c1\u76d8\u6709\u7a7a\u95f4\u4e86\uff08\u5269 ", (unsigned long long)(sp.available >> 20), u8" MB\uff09\uff1a\u63a5\u7740\u505a"); fflush(stdout); g->last = std::chrono::steady_clock::now(); }
 // ---- resume (2026-11-05): small state files in the work folder, each written whole (a .new file, then renamed), so that a run stopped at
 // any point (disk full, closed) continues where it was. They hold only what a full run computes again the same way.
@@ -56,15 +58,15 @@ inline void putInfo(StateW& w, const laes::MasterInfo& I) { w.i(I.bits); w.i(I.s
 inline void getInfo(StateR& r, laes::MasterInfo& I) { I.bits = (int)r.i(); I.stages = (int)r.i(); I.w = (int)r.i(); I.storage = (int)r.i(); I.refTier = (int)r.i(); I.rate = (int)r.i(); I.frames = r.i(); I.whole = r.i(); I.frac = (uint32_t)r.i(); r.hex(I.sha, 32); I.layerBits = r.d(); }
 // a layer (one channel) coded in pieces: blocks of B; a piece is a whole number of blocks (only the last piece may end in a short block).
 // As laes::encodeLayer: the blocks' parameters are chosen in parallel threads, then written in order; the coded bytes go to a file.
-struct LayerOut { int64_t B; laes::BitW w; Out o; int64_t done = 0;
-    LayerOut(const std::string& p, int64_t b) : B(b), o(p) {}
+struct LayerOut { int64_t B; laes::BitW w; Out o; int64_t done = 0; int thr = 0;   // thr: threads for the block plans, 0 = every core (FU13-7: the caller's count)
+    LayerOut(const std::string& p, int64_t b, int threads = 0) : B(b), o(p), thr(threads) {}
     void feed(const int64_t* x, int64_t n) {
         const int64_t nb = (int64_t)((n + B - 1) / B); std::vector<laes::BlockPlan> plans((size_t)std::max<int64_t>(0, nb));
         // each thread takes the next block not yet taken (L5, 2026-11-03; blocks cost very different amounts, so fixed ranges left threads
         // waiting). Each block's plan depends only on its own samples, so the plans and the bytes written are the same.
         std::atomic<int64_t> next(0);
         auto work = [&]() { for (int64_t k = next++; k < nb; k = next++) { const int64_t s = (int64_t)k * B; plans[(size_t)k] = laes::planBlock(x + s, (int64_t)std::min<int64_t>(B, n - s)); } };
-        unsigned hc = std::thread::hardware_concurrency(); int th = (int)std::max(1u, hc); if (nb < 4) th = 1; th = (int)std::min<int64_t>(th, nb > 0 ? nb : 1);
+        unsigned hc = std::thread::hardware_concurrency(); int th = thr > 0 ? thr : (int)std::max(1u, hc); if (nb < 4) th = 1; th = (int)std::min<int64_t>(th, nb > 0 ? nb : 1);
         if (th <= 1) work();
         else { std::vector<std::thread> pool; std::vector<std::exception_ptr> xs((size_t)th);
             for (int t = 1; t < th; t++) { try { pool.emplace_back([&work, &xs, &next, nb, t]() { try { work(); } catch (...) { xs[(size_t)t] = std::current_exception(); next = nb; } }); } catch (...) { break; } }
@@ -154,7 +156,9 @@ inline std::string probeWav(const std::string& path, WavInfo& wi, long long* lae
     long long pos = 12; int tag = 0, ch = 0; if (laeOff) *laeOff = -1;
     uint64_t dsData = 0, dsLae = 0;
     if (rf64) { uint8_t d[48] = {0}; if (in.n < 20 + 28) return path + ": RF64 without ds64"; in.read(12, d, 8); if (memcmp(d, "ds64", 4)) return path + ": RF64 without ds64";
-        const uint32_t dl = d[4] | d[5] << 8 | d[6] << 16 | (uint32_t)d[7] << 24; if (dl < 28) return path + ": RF64 ds64 too short"; in.read(20, d, (size_t)std::min<uint32_t>(dl, 40));
+        const uint32_t dl = d[4] | d[5] << 8 | d[6] << 16 | (uint32_t)d[7] << 24; if (dl < 28) return path + ": RF64 ds64 too short";
+        if (in.n < 20 + (long long)std::min<uint32_t>(dl, 40)) return path + ": RF64 ds64 truncated";   // FU13-8: a reason, not "read failed"
+        in.read(20, d, (size_t)std::min<uint32_t>(dl, 40));
         auto le64 = [&](int at) { uint64_t v = 0; for (int i = 7; i >= 0; i--) v = v << 8 | d[at + i]; return v; }; dsData = le64(8);
         if (dl >= 40 && (d[24] | d[25] << 8 | d[26] << 16 | (uint32_t)d[27] << 24) >= 1 && !memcmp(d + 28, "LAE ", 4)) dsLae = le64(32); }
     while (pos + 8 <= in.n) { uint8_t c[8]; in.read(pos, c, 8); uint64_t n = c[4] | c[5] << 8 | c[6] << 16 | (uint64_t)c[7] << 24; const long long body = pos + 8;
@@ -175,7 +179,7 @@ inline std::string probeFlac(const std::string& path, WavInfo& wi) {
     In in(path); long long p = 4; bool last = false, haveSi = false; laesflac::Info& fi = wi.fi;
     while (!last) { if (p + 4 > in.n) return path + ": FLAC metadata truncated"; uint8_t bh[4]; in.read(p, bh, 4); last = bh[0] & 0x80; const int type = bh[0] & 0x7F; const long long len = (long long)bh[1] << 16 | bh[2] << 8 | bh[3]; p += 4;
         if (p + len > in.n) return path + ": FLAC metadata truncated";
-        if (type == 0) { if (len != 34) return path + ": bad STREAMINFO"; uint8_t s[34]; in.read(p, s, 34); laesflac::BR r{s, 34}; fi.minBs = (int)r.get(16); fi.maxBs = (int)r.get(16); r.get(24); r.get(24);
+        if (type == 0) { if (haveSi) return path + ": two STREAMINFO blocks (FLAC allows one)"; if (len != 34) return path + ": bad STREAMINFO"; uint8_t s[34]; in.read(p, s, 34); laesflac::BR r{s, 34}; fi.minBs = (int)r.get(16); fi.maxBs = (int)r.get(16); r.get(24); r.get(24);
             fi.rate = (int)r.get(20); fi.channels = (int)r.get(3) + 1; fi.bps = (int)r.get(5) + 1; fi.total = r.get(36); memcpy(fi.md5, s + 18, 16); haveSi = true; }
         p += len; }
     if (!haveSi) return path + ": no STREAMINFO";
@@ -197,12 +201,14 @@ inline std::string masterFlacFrame(const uint8_t* fp, size_t avail, const laesfl
     const int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return "frame bit depth differs from STREAMINFO";
     if (r.fail || (r.pos & 7)) return "frame header truncated"; const size_t hb = r.pos / 8; const uint8_t c8 = (uint8_t)r.get(8); if (r.fail || c8 != crc8(fp, hb)) return "frame header CRC-8 mismatch";
     if (strategy == 0 && num != frameNo) return "frame number out of order";
+    if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the header gives the first sample's number (FU13-8)
     const size_t base = ch[0].size(); for (int c = 0; c < 2; c++) { ch[c].resize(base + (size_t)n);
         const bool side = (chc == 8 && c == 1) || (chc == 9 && c == 0) || (chc == 10 && c == 1); if (!readSubframe(r, ch[c].data() + base, n, bps + (side ? 1 : 0))) return "damaged subframe"; }
     int64_t* a = ch[0].data() + base; int64_t* b = ch[1].data() + base;
     if (chc == 8) for (int64_t i = 0; i < n; i++) b[i] = a[i] - b[i];
     else if (chc == 9) for (int64_t i = 0; i < n; i++) a[i] = a[i] + b[i];
     else if (chc == 10) for (int64_t i = 0; i < n; i++) { const int64_t md = (int64_t)((uint64_t)a[i] << 1) | (b[i] & 1); a[i] = (md + b[i]) >> 1; b[i] = (md - b[i]) >> 1; }
+    { const int64_t lim = 1LL << (bps - 1); for (int64_t i = 0; i < n; i++) if (a[i] < -lim || a[i] >= lim || b[i] < -lim || b[i] >= lim) return "a sample does not fit the bit depth of STREAMINFO"; }   // FU13-5: a stereo decorrelation can leave it
     r.pos = (r.pos + 7) & ~(size_t)7; const size_t fb = r.pos / 8; if (fb + 2 > r.n) return "frame truncated";
     if (crc16(fp, fb) != (uint16_t)(fp[fb] << 8 | fp[fb + 1])) return "frame CRC-16 mismatch";
     used = fb + 2; return ""; }
@@ -251,7 +257,7 @@ inline std::string prepLevels(Prep& m, int baseRate, const std::string& stem, in
     bothChannels(par, [&](int c) { m.lev[c].assign((size_t)st, std::string()); m.lby[c].assign((size_t)st, 4); m.dfile[c].assign((size_t)st + 1, std::string()); m.dbits[c].assign((size_t)st + 1, 0);
         for (int k = st; k > 0; k--) { { std::unique_ptr<Sig> x = levelOf(m, c, k); const int64_t ne = (x->n + 1) / 2;
                 const std::string sc = stem + "_c" + std::to_string(c); m.lev[c][(size_t)(k - 1)] = sc + "_L" + std::to_string(k - 1); m.dfile[c][(size_t)k] = sc + "_D" + std::to_string(k);
-                LevOut so(m.lev[c][(size_t)(k - 1)]); LayerOut lo(m.dfile[c][(size_t)k], 4096L << (k - 1)); V s, d; const int64_t P = pc << (k - 1);
+                LevOut so(m.lev[c][(size_t)(k - 1)]); LayerOut lo(m.dfile[c][(size_t)k], 4096L << (k - 1), thc); V s, d; const int64_t P = pc << (k - 1);
                 for (int64_t a = 0; a < ne; a += P) { fwdPiece(*x, a, std::min(ne, a + P), s, d, thc); so.put(s.data(), s.size()); diskCheck(); if (!d.empty()) lo.feed(d.data(), (int64_t)d.size()); }
                 so.close(); m.lby[c][(size_t)(k - 1)] = so.by; m.dbits[c][(size_t)k] = lo.finish(); }
             if (k < st && !keep[(size_t)k]) { std::error_code ec; std::filesystem::remove(m.lev[c][(size_t)k], ec); m.lev[c][(size_t)k].clear(); } }   // read by no candidate
@@ -328,6 +334,11 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
         const Prep& m = *ms[mi]; MasterInfo& I = info[mi];
         if (m.bits != 16 && m.bits != 24 && m.bits != 32) return "master word length must be 16, 24 or 32";
         int st = 0; while ((baseRate << st) < m.rate && st < 4) st++; if ((baseRate << st) != m.rate || st > 3) return "master rate must be the base rate times 1, 2, 4 or 8";
+        // FU13-5 (2026-11-14): input this format cannot hold is refused here, not first by the check of the written file
+        const std::string mn = "master " + std::to_string(mi + 1);
+        if (m.frames < 1) return mn + " has no samples";
+        if ((uint64_t)levLen(m.frames, st) > (uint64_t)core.frames() + (1ull << 24)) return mn + " is too long: its base level may exceed the core master by at most 2^24 samples";
+        if (sel[mi].storage >= 0 && (sel[mi].whole <= -(1LL << 40) || sel[mi].whole >= (1LL << 40))) return mn + ": T must lie within +-2^40 base samples";
         I.bits = m.bits; I.stages = st; I.w = m.w; I.rate = m.rate; I.frames = m.frames; memcpy(I.sha, m.sha, 32);
         auto above = [&](int j) { double b = 0; for (int c = 0; c < 2; c++) for (int k = j + 1; k <= st; k++) b += (double)m.dbits[c][(size_t)k]; return b; };
         struct Cand { int storage, tier, j; int64_t whole; uint32_t frac; double bits; std::string e[2]; bool coded; };
@@ -347,7 +358,7 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
         auto code = [&](Cand& C, double lb[2]) -> bool {
             const bool par = levLen(I.frames, st) >= piece; const int64_t pc = par ? halfPiece(piece) : piece; const int thc = par ? std::max(1, threads / 2) : threads;
             std::string ce[2];   // the two channels at once (par)
-            if (C.storage == 1) { bothChannels(par, [&](int c) { std::unique_ptr<Sig> x = levelOf(m, c, 0); LayerOut lo(C.e[c], 4096); V v; const int64_t P = pc;
+            if (C.storage == 1) { bothChannels(par, [&](int c) { std::unique_ptr<Sig> x = levelOf(m, c, 0); LayerOut lo(C.e[c], 4096, thc); V v; const int64_t P = pc;
                     for (int64_t a = 0; a < x->n; a += P) { const int64_t b = std::min(x->n, a + P); v.resize((size_t)(b - a)); x->get(a, b, v.data()); lo.feed(v.data(), (int64_t)v.size()); }
                     lb[c] = (double)lo.finish(); }); }
             else { const int j = C.j; const int64_t nj = levLen(I.frames, st - j);
@@ -356,7 +367,7 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
                 const std::vector<int64_t> h = refTaps(fj);
                 bothChannels(par, [&](int c) { std::unique_ptr<Sig> src; if (C.tier == 0) src.reset(new Core32Sig(core.c[c])); else src = levelOf(*ms[(size_t)C.tier - 1], c, j);
                     std::unique_ptr<Sig> x = levelOf(m, c, j); if (x->n != nj) { ce[c] = "internal error: level length"; return; }
-                    LayerOut lo(C.e[c], 4096L << j); V v, r; const int64_t P = pc << j;
+                    LayerOut lo(C.e[c], 4096L << j, thc); V v, r; const int64_t P = pc << j;
                     for (int64_t a = 0; a < nj; a += P) { const int64_t b = std::min<int64_t>(nj, a + P); v.resize((size_t)(b - a)); x->get(a, b, v.data()); refPiece(*src, h, wj, up, a, b, r, thc);
                         for (size_t i = 0; i < v.size(); i++) v[i] -= r[i]; lo.feed(v.data(), (int64_t)v.size()); }
                     lb[c] = (double)lo.finish(); });
@@ -377,7 +388,7 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
                 int up = 0; if (C.storage != 1) up = C.tier == 0 ? (m.bits - I.w) - core.bits : (m.bits - I.w) - (info[(size_t)C.tier - 1].bits - info[(size_t)C.tier - 1].w);
                 const int64_t wj = wh * (1LL << j) + (j ? (int64_t)(fr >> (32 - j)) : 0); const uint32_t fj = (uint32_t)((uint64_t)fr << j); const std::vector<int64_t> h = refTaps(fj);
                 for (int c = 0; c < 2; c++) { std::unique_ptr<Sig> x = levelOf(m, c, j), src; if (C.storage != 1) { if (C.tier == 0) src.reset(new Core32Sig(core.c[c])); else src = levelOf(*ms[(size_t)C.tier - 1], c, j); }
-                    LayerOut lo(pf, B); V v, r;
+                    LayerOut lo(pf, B, threads); V v, r;
                     for (const auto& sg : segs) { v.resize((size_t)(sg.second - sg.first)); x->get(sg.first, sg.second, v.data());
                         if (C.storage != 1) { refPiece(*src, h, wj, up, sg.first, sg.second, r, threads); for (size_t i = 0; i < v.size(); i++) v[i] -= r[i]; }
                         lo.feed(v.data(), (int64_t)v.size()); if (c == 0) got += (int64_t)v.size(); }
@@ -411,6 +422,8 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
         I.name = sel[mi].name; I.flags = sel[mi].flags; I.menu = sel[mi].menu;
         o.u(I.bits, 1); o.u(I.stages, 1); o.u(I.w, 1); o.u(I.storage, 1); o.u(I.refTier, 1); o.u(ver == 2 ? I.name.size() : 0, 1); o.u(ver == 2 ? (uint64_t)I.flags : 0, 1); o.u(ver == 2 ? (uint64_t)I.menu : 0, 1); o.u((uint64_t)I.rate, 4); o.u(0, 4); o.u((uint64_t)I.frames, 8);
         o.u((uint64_t)I.whole, 8); o.u(I.frac, 4); o.u(0, 4); o.put(I.sha, 32); if (ver == 2) o.put((const uint8_t*)I.name.data(), I.name.size());
+        for (int c = 0; c < 2; c++) { if (sizeOrMinus(B.e[c]) > 0xFFFFFFFFLL) return mn + ": a layer is larger than 4 GiB, more than an LAES layer can hold";   // the u32 layer length
+            for (int k = B.j + 1; k <= st; k++) if (sizeOrMinus(m.dfile[c][(size_t)k]) > 0xFFFFFFFFLL) return mn + ": a layer is larger than 4 GiB, more than an LAES layer can hold"; }
         for (int c = 0; c < 2; c++) { { In e(B.e[c]); o.u((uint64_t)e.n, 4); } o.file(B.e[c]); if (kept) kept->push_back(B.e[c]); else remove(B.e[c].c_str());
             for (int k = B.j + 1; k <= st; k++) { { In d(m.dfile[c][(size_t)k]); o.u((uint64_t)d.n, 4); } o.file(m.dfile[c][(size_t)k]); } } }
     const uint32_t crc = o.crc ^ 0xFFFFFFFFu; uint8_t t[4] = {(uint8_t)crc, (uint8_t)(crc >> 8), (uint8_t)(crc >> 16), (uint8_t)(crc >> 24)}; bo.put(t, 4); bo.close();

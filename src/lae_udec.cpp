@@ -100,7 +100,7 @@ int pickChoice(const lae_any* a, const lae_any_info& in, const std::string& pk, 
         if (hit.size() > 1) { several = hit; return -2; }
         return hit.empty() ? -1 : hit[0]; }
     if (col != std::string::npos && pk.find_first_not_of("0123456789:") == std::string::npos) { const int r = atoi(pk.c_str()), b = atoi(pk.c_str() + col + 1); int hit = -1;
-        for (int i = 0; i < in.choices; i++) { lae_any_choice c; lae_any_get_choice(a, i, &c); if (c.rate == r && shownBits(c) == b) hit = i; }   // LAEY: the fullest route at that rate and bit depth (16 = route 16)
+        for (int i = 0; i < in.choices; i++) { lae_any_choice c; lae_any_get_choice(a, i, &c); if (lae_any_choice_pack(a, i) <= 0 && c.rate == r && shownBits(c) == b) hit = i; }   // LAEY: the fullest route at that rate and bit depth (16 = route 16), in the main body (pack 0) only; another pack only by pack:<k> or its name (SPEC 5.6)
         return hit; }
     return -1; }
 

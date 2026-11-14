@@ -115,7 +115,7 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 
 在 Linux x86 上，256 个解码器结果中有 256 个与参考一致；在 Linux ARM64 上，192 个中有 192 个一致。
 
-`lae_cdx`、`liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 10.9、13.3 和 13.7 节）。
+`lae_cdx`、`liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 10.9、13.3 和 13.7 节）。`laes` 也不在表中：CI 不在 Linux 或 macOS 上构建它。2026-11-14 在 Linux x64（WSL 下的 g++ 13.3）上运行过一次它的 `dec`、`verify`、`extract` 和 `add` 命令，输出与 Windows 构建逐字节相同；`enc`、`align` 和 `selftest` 没有在该平台上检查过（[spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.zh.md) 的“编译”一节）。
 
 Linux 上的检查由两个脚本执行：
 

@@ -115,7 +115,7 @@ At every start, the decoder passes a fixed data pattern through the inverse MDCT
 
 On Linux x86, 256 of 256 decoder results were identical to the reference; on Linux ARM64, 192 of 192 were.
 
-`lae_cdx`, `liblae` and the foobar2000 component have been built and tested only on Windows with MSVC 2022 (README, Sections 10.9, 13.3 and 13.7).
+`lae_cdx`, `liblae` and the foobar2000 component have been built and tested only on Windows with MSVC 2022 (README, Sections 10.9, 13.3 and 13.7). `laes` is not in the table either: the CI does not build it on Linux or macOS. On 2026-11-14, its commands `dec`, `verify`, `extract` and `add` were run once on Linux x64 (g++ 13.3 under WSL), with output byte-identical to that of the Windows build; `enc`, `align` and `selftest` were not checked there ([spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.md), section "Building").
 
 The Linux checks are performed by two scripts:
 

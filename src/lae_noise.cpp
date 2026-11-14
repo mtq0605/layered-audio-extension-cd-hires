@@ -52,6 +52,13 @@ static bool write32(const char* path, int rate, const vector<int32_t>& s) {
     auto w32 = [&](uint32_t v) { fwrite(&v, 4, 1, f); }; auto w16 = [&](uint16_t v) { fwrite(&v, 2, 1, f); };
     fwrite("RIFF", 1, 4, f); w32(36 + db); fwrite("WAVEfmt ", 1, 8, f); w32(16); w16(1); w16(2); w32((uint32_t)rate); w32((uint32_t)rate * 8); w16(8); w16(32);
     fwrite("data", 1, 4, f); w32(db); const bool ok = fwrite(s.data(), 4, s.size(), f) == s.size(); return fclose(f) == 0 && ok; }
+// FU17-6 (2026-11-14): a preview file is written only when it is not the master itself and fits a RIFF WAV (4 GB); false = the
+// reason is printed and the command ends with exit code 1 (before, a failed write still printed "preview written", exit code 0)
+static bool writePreview(const string& path, const char* master, int rate, const vector<int32_t>& s) {
+    if (sameFile(master, path.c_str())) { printf("%s is the master itself: not written, nothing changed\n", path.c_str()); return false; }
+    if ((unsigned long long)s.size() * 4 > 0xFFFFFFFFull - 36) { printf("cannot write %s: longer than a WAV file can hold (4 GB); give a shorter preview\n", path.c_str()); return false; }
+    if (!write32(path.c_str(), rate, s)) { printf("cannot write %s\n", path.c_str()); return false; }
+    return true; }
 
 // plane samples (24-bit units, as the encoder: M = r + ((l - r) >> 1), S = l - r) as doubles, for original samples [a, a + n)
 static void planes(WavStream& ws, long long a, long long n, vector<double>& M, vector<double>& S, vector<long long>& li, vector<long long>& ri) {
@@ -80,6 +87,7 @@ static int doMark(int argc, char** argv) {
         mk.pos.push_back({m0, m1, c0, c1});
         printf("position %zu: %.3f-%.3f s, %.1f-%.1f Hz (frames %ld-%ld, columns %d-%d)\n", mk.pos.size(), frameT0(m0, ws.rate), frameT0(m1, ws.rate), colHz(c0, ws.rate), colHz(c1, ws.rate), m0, m1 - 1, c0, c1 - 1); }
     if (mk.pos.empty()) { printf("no position: nothing written\n"); return 1; }
+    if (sameFile(argv[2], argv[3])) { printf("%s is the master itself: nothing written\n", argv[3]); return 2; }   // FU17-6
     if (!writeMarks(argv[3], mk)) { printf("cannot write %s\n", argv[3]); return 1; }
     printf("written: %s\n", argv[3]); return 0; }
 
@@ -133,14 +141,16 @@ static int doPreview(int argc, char** argv) {
                 double v1 = fabs(cm[k]), v2 = fabs(cs[k]) / 2;
                 mx = max(mx, max(v1, v2)); ss += cm[k] * cm[k] + cs[k] * cs[k] / 4; cnt += 2; } }
         double rms = cnt ? sqrt(ss / cnt) : 0; if (mx > CHECKMAX) bad++;
-        char nm[64]; snprintf(nm, sizeof nm, "/pos_%03zu_marked.wav", pi + 1); write32((dir + nm).c_str(), (int)ws.rate, outMark);
-        snprintf(nm, sizeof nm, "/pos_%03zu_silenced.wav", pi + 1); write32((dir + nm).c_str(), (int)ws.rate, outSil);
-        snprintf(nm, sizeof nm, "/pos_%03zu_original.wav", pi + 1); write32((dir + nm).c_str(), (int)ws.rate, outOrig);   // the same span unchanged, for a blind A/B
+        char nm[3][64]; snprintf(nm[0], sizeof nm[0], "/pos_%03zu_marked.wav", pi + 1); snprintf(nm[1], sizeof nm[1], "/pos_%03zu_silenced.wav", pi + 1);
+        snprintf(nm[2], sizeof nm[2], "/pos_%03zu_original.wav", pi + 1);   // original: the same span unchanged, for a blind A/B
+        if (!writePreview(dir + nm[0], argv[2], (int)ws.rate, outMark) || !writePreview(dir + nm[1], argv[2], (int)ws.rate, outSil) ||
+            !writePreview(dir + nm[2], argv[2], (int)ws.rate, outOrig)) { fclose(rep); fclose(lst); return 1; }
         fprintf(lst, "pos_%03zu %ld %ld %d %d %ld\n", pi + 1, p.m0, mk.pos[pi].m1, p.c0, p.c1, p.m1);
         double lv = 10 * lmath::log10(max(eMarked / (double)(sup1 - sup0) / fsPow, 1e-30));
         fprintf(rep, "%4zu  %9.3f-%9.3f  %9.1f-%9.1f  %8.1f   max %.4f  rms %.5f%s\n", pi + 1, frameT0(p.m0, mk.rate), frameT0(p.m1, mk.rate), colHz(p.c0, mk.rate), colHz(p.c1, mk.rate), lv, mx, rms, mx > CHECKMAX ? "  CHECK FAILED" : "");
         printf("position %zu: preview written (%.2f s with context%s), outside the marked cells max %.4f rms %.5f\n", pi + 1, (b - a) / ws.rate, cut ? ", first part of a longer position" : "", mx, rms); }
-    fprintf(rep, "%s\n", bad ? "RESULT: some positions changed cells outside the marking" : "RESULT: every position changed only its marked cells (outside: rounding to 32 bit only)"); fclose(rep);
+    fprintf(rep, "%s\n", bad ? "RESULT: some positions changed cells outside the marking" : "RESULT: every position changed only its marked cells (outside: rounding to 32 bit only)");
+    { const bool werr = ferror(rep) != 0; if (fclose(rep) != 0 || werr) { fclose(lst); printf("cannot write %s/preview_check.txt\n", dir.c_str()); return 1; } }   // FU17-6
     if (fclose(lst) != 0) { printf("cannot write %s/preview_list.txt\n", dir.c_str()); return 1; }
     return bad ? 3 : 0; }
 
@@ -170,8 +180,8 @@ static int doPreviewAll(int argc, char** argv) {
     double mx = 0, ss = 0; long cnt = 0;
     for (long m = max(1L, fA); m < min(K - 1, fB); m++) { fwdFrame(dM, r0, m, cm); fwdFrame(dS, r0, m, cs);
         for (int k = 0; k < NM; k++) { if (sel[m - fA][k]) continue; mx = max(mx, max(fabs(cm[k]), fabs(cs[k]) / 2)); ss += cm[k] * cm[k] + cs[k] * cs[k] / 4; cnt += 2; } }
-    write32((dir + "/all_original.wav").c_str(), (int)ws.rate, outOrig); write32((dir + "/all_silenced.wav").c_str(), (int)ws.rate, outSil);
-    write32((dir + "/all_marked.wav").c_str(), (int)ws.rate, outMark);
+    if (!writePreview(dir + "/all_original.wav", argv[2], (int)ws.rate, outOrig) || !writePreview(dir + "/all_silenced.wav", argv[2], (int)ws.rate, outSil) ||
+        !writePreview(dir + "/all_marked.wav", argv[2], (int)ws.rate, outMark)) return 1;   // FU17-6
     printf("excerpt %.2f-%.2f s: %zu positions, %ld marked frame-columns touched; outside the marked cells max %.4f rms %.5f%s\n", a / ws.rate, b / ws.rate, mk.pos.size(), used,
            mx, cnt ? sqrt(ss / cnt) : 0.0, mx > CHECKMAX ? "  CHECK FAILED" : "");
     return mx > CHECKMAX ? 3 : 0; }
@@ -203,6 +213,7 @@ static int doSpectro(int argc, char** argv) {
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s\n", argv[2]); return 1; }
     const long long L = ws.frames; const long K = mdct::frames((long)L); const int G = max(1, (int)llround(0.02 * ws.rate / NM));
     const long nst = (K - 1) / G; const double fsPow = 0.5 * 70368744177664.0, perKHz = 10 * lmath::log10(CW * ws.rate / (2.0 * NM) / 1000.0);
+    if (sameFile(argv[2], argv[3])) { printf("%s is the master itself: nothing written\n", argv[3]); return 2; }   // FU17-6
     FILE* f = fopen(argv[3], "w"); if (!f) { printf("cannot write %s\n", argv[3]); return 1; }
     std::string name; for (unsigned char c : std::filesystem::path(argv[2]).filename().string()) {   // UTF-8 (win_utf8.h), JSON-escaped
         if (c == '"' || c == '\\') { name += '\\'; name += (char)c; } else if (c < 0x20) { char u[8]; snprintf(u, sizeof u, "\\u%04x", c); name += u; } else name += (char)c; }
@@ -223,7 +234,8 @@ static int doSpectro(int argc, char** argv) {
             wmin.push_back((int)llround(lo * 1000)); wmax.push_back((int)llround(hi * 1000)); } }
     fprintf(f, "],\"wmin\":["); for (size_t i = 0; i < wmin.size(); i++) fprintf(f, "%s%d", i ? "," : "", wmin[i]);
     fprintf(f, "],\"wmax\":["); for (size_t i = 0; i < wmax.size(); i++) fprintf(f, "%s%d", i ? "," : "", wmax[i]); fprintf(f, "]}\n");
-    fclose(f); printf("written: %s (%ld steps of %d frames x %d columns)\n", argv[3], nst, G, NCOL); return 0; }
+    { const bool werr = ferror(f) != 0; if (fclose(f) != 0 || werr) { printf("cannot write %s (the file is incomplete)\n", argv[3]); return 1; } }   // FU17-6: disk full
+    printf("written: %s (%ld steps of %d frames x %d columns)\n", argv[3], nst, G, NCOL); return 0; }
 
 #define NOISE_SCAN_NO_MAIN
 #include "noise_scan0c.cpp"   // lae_noise scan (2026-11-06: one program for the LAE Noise Marker)

@@ -2,13 +2,13 @@
 
 Version 1, 2026-11-06. [中文](SPEC_LAENOISE.zh.md)
 
-A marking file identifies rectangles of time and frequency in one master. It holds geometry only: it contains no detector, reason, class or audio. LAE Noise Marker writes the file. The scanner writes candidates in the same format, and the user keeps a subset of them. The LAE Lossy (LAEY) encoder reads the file when given `noise=<file>` and codes the marked cells as silence. Any other program may read the file under the same rules.
+A marking file identifies rectangles of time and frequency in one master. It holds geometry only: it contains no detector, reason, class or audio. A comment may describe what is at a position, for example its level or the frequency of a narrow line; it never says why the position was chosen. LAE Noise Marker writes the file. The scanner writes candidates in the same format, and the user keeps a subset of them. The LAE Lossy (LAEY) encoder reads the file when given `noise=<file>` and codes the marked cells as silence. Any other program may read the file under the same rules.
 
 ## 1. File
 
 - The file is plain ASCII text. Lines end with LF; a CR before the LF is ignored.
 - The file name extension is `.laenoise`.
-- `#` starts a comment that runs to the end of the line. Comments are for human readers only: a reader must not take any value from them.
+- `#` starts a comment that runs to the end of the line. Comments are for human readers only: a reader must not take from them any value that affects what it does with the file. A program may display the description they carry (the panel shows the level and the narrow-line frequency of the scanner's comments).
 - Blank lines are allowed. A line whose first word is not `LAENOISE`, `master`, `grid` or `pos` is ignored (Section 4).
 
 ## 2. Lines

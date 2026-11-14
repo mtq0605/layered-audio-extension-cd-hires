@@ -62,7 +62,7 @@ final class LaeCd implements LaeEncoder.CdHook {
             // by hand
             {   CdAlign.Report r; { BlkIo.View m = new BlkIo.View(mFile); try { r = CdAlign.run(cd, have, b24, nb0, pb0, m, x.Lm, base, stages, 0, "; the placement given by hand follows", 0, -1, x.manualT, true); } finally { m.close(); } }
                 if (x.manual && !r.found && (r.tag.equals("drift") || r.tag.equals("edit"))) { r.found = true; r.band = CdAlign.BAND_CONFIRM_LARGE;   // port of lae_enc.cpp driftConfirmed (2026-11-11): a master whose speed drifts is never continued on its own; "nomatch" never
-                env.printf("align: WARNING: the master's speed drifts against the CD (for example tape wow and flutter): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"); }
+                env.printf(warnDriftEdit(r.tag)); }
                 for (String l : r.lines) env.printf("align: %s\n", l); env.printf("%s\n", r.alignLine);
                 env.printf("align: offset given by hand: cdalign=%s (checked first at the nearest whole offset %+lld)\n", x.manualText, x.manualT);
                 env.printf("align: fraction given by hand: cdalign=%s is the whole offset %+lld with the master moved by %+.7f master samples; not measured\n",
@@ -111,6 +111,10 @@ final class LaeCd implements LaeEncoder.CdHook {
         env.printf("independent CD: %s (%ld samples) used as the CD layer\n", x.cdPath, have);
         return -1; }
 
+    // port of lae_enc.cpp driftConfirmed's warning: the text names which of the two the check found (2026-11-14); what happens next is the same for both
+    static String warnDriftEdit(String tag) {
+        return tag.equals("edit") ? "align: WARNING: some check blocks of the master do not match the CD at this position at all (an edit, another take or another version of the recording): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"
+                                  : "align: WARNING: the master's speed drifts against the CD (for example tape wow and flutter): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"; }
     // port of lae_enc.cpp:encode lambda st
     static String st(String r) { return r.startsWith("aligned") ? "aligned" : (r.startsWith("not aligned") ? "not_aligned" : "failed"); }
     // port of lae_enc.cpp:encode lambda offText: o = whole offset - the master's move (7 decimals: finer than 1/524288)
@@ -193,7 +197,7 @@ final class LaeCd implements LaeEncoder.CdHook {
             final long zero = 0;   // the placed (and moved) master, checked again at offset 0 (the same three blocks, through its own derivation)
             CdAlign.Report rep2; { BlkIo.View m = new BlkIo.View(mFile); try { rep2 = CdAlign.run(cd, have, b24, nb0, pb0, m, x.Lm, base, stages, t, "", 0, -1, zero, true); } finally { m.close(); } }
             if (x.manual && !rep2.found && (rep2.tag.equals("drift") || rep2.tag.equals("edit"))) { rep2.found = true; rep2.band = CdAlign.BAND_CONFIRM_LARGE;   // port of lae_enc.cpp driftConfirmed (2026-11-11): a master whose speed drifts is never continued on its own; "nomatch" never
-                env.printf("align: WARNING: the master's speed drifts against the CD (for example tape wow and flutter): one position cannot fit the whole piece. Continuing needs your confirmation (cdaccept, or the answer at the console)\n"); }
+                env.printf(warnDriftEdit(rep2.tag)); }
             for (String l : rep2.lines) env.printf("%sre-check: %s\n", pre, l);
             env.printf("ALIGN_RECHECK%s%s\n", rep2.alignLine.substring(5), key);
             if (mv != 0 && rep2.hint.startsWith("still shifted"))   // the suggestion keeps the fraction

@@ -521,7 +521,10 @@ public final class LaeEncoder {
         new File(x.T("check.wav")).delete();
         {   // only a complete, verified file gets the output name; a briefly locked target (scanner, indexer, player) is retried
             boolean renamed = false; for (int k = 0; k < 20; k++) { if (rename(partPath, outPath)) { renamed = true; break; } sleep(250); }
-            if (!renamed) { env.printf("cannot rename %s to %s: %s (the output may be open in another program)\n", partPath, outPath, "rename failed"); x.oldNote(); return 2; }
+            if (!renamed) { env.printf("cannot rename %s to %s: %s (the output may be open in another program)\n", partPath, outPath, "rename failed");
+                if (x.run.hadOld && !exists(outPath) && exists(partPath)) {   // FU22-2: only without java.nio.file the old file can be gone: the new one is kept
+                    x.run.partMine = false; env.printf("the existing %s was removed before the rename failed; the new, checked file is kept as %s: rename it by hand\n", outPath, partPath); return 2; }
+                x.oldNote(); return 2; }
             x.run.partMine = false; x.run.keepTmp = false; }   // finished: the work folder goes, also after a resumed run
         if (x.nPacks != 0) {   // the file's packs: printed, and their alignment reports go into the report beside the file
             long all = 0; for (byte[] r : x.packRecs) all += r.length;
@@ -555,7 +558,25 @@ public final class LaeEncoder {
         return new boolean[] {mayPair && need <= memUse && (memAvail == 0 || need <= memAvail)}; }
     static void sleep(long ms) { try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } }
     // std::filesystem::rename (replaces an existing target, as MoveFileEx with MOVEFILE_REPLACE_EXISTING does)
-    static boolean rename(String from, String to) { File f = new File(from), t = new File(to); if (f.renameTo(t)) return true; if (t.isFile() && t.delete()) return f.renameTo(t); return false; }
+    // FU22-2: the target is replaced in one step (java.nio.file.Files.move with ATOMIC_MOVE: MoveFileEx with MOVEFILE_REPLACE_EXISTING on
+    // Windows, rename(2) elsewhere), so a rename that fails (the source held open by a scanner or indexer) leaves an existing target as it was.
+    // Only where java.nio.file is missing (Android below 8.0) the target is deleted first, as before; the caller handles that case.
+    static boolean rename(String from, String to) { File f = new File(from), t = new File(to); if (f.renameTo(t)) return true;
+        final Boolean moved = moveReplacing(f, t); if (moved != null) return moved.booleanValue();
+        if (t.isFile() && t.delete()) return f.renameTo(t); return false; }
+    // Files.move(f.toPath(), t.toPath(), ATOMIC_MOVE, REPLACE_EXISTING) through reflection (the library is checked against Android 7.0, API
+    // 24, which has no java.nio.file): true moved, false failed, null not available on this system
+    static Boolean moveReplacing(File f, File t) {
+        final java.lang.reflect.Method move; final Object a, b, opts;
+        try { final java.lang.reflect.Method toPath = File.class.getMethod("toPath"); a = toPath.invoke(f); b = toPath.invoke(t);
+              final Class<?> pathC = Class.forName("java.nio.file.Path"), optC = Class.forName("java.nio.file.CopyOption"), stdC = Class.forName("java.nio.file.StandardCopyOption");
+              opts = java.lang.reflect.Array.newInstance(optC, 2); java.lang.reflect.Array.set(opts, 0, stdC.getField("ATOMIC_MOVE").get(null)); java.lang.reflect.Array.set(opts, 1, stdC.getField("REPLACE_EXISTING").get(null));
+              move = Class.forName("java.nio.file.Files").getMethod("move", pathC, pathC, opts.getClass()); }
+        catch (ReflectiveOperationException e) { return null; }
+        catch (RuntimeException e) { return null; }
+        try { move.invoke(null, a, b, opts); return Boolean.TRUE; }
+        catch (java.lang.reflect.InvocationTargetException e) { return Boolean.FALSE; }   // IOException (in use, AtomicMoveNotSupportedException ...)
+        catch (IllegalAccessException e) { return null; } }
 
     /** port of lae_enc.cpp:encode lambda layer */
     interface Layer { Streams run(EncEnv e, String in, int rate, String ch, String tag); }

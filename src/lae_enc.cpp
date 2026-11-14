@@ -489,7 +489,10 @@ static int encode(int argc, char** argv) {
     // resume (block-wise, without cd=): every finished step is noted in resume.txt in the work folder, together with a key made of this
     // encoder build, the options, the block length and the master's MD5. A run with the same key continues after the last finished step;
     // any other key starts from the beginning. The notes are read only by this encoder and never go into the LAE file.
-    std::set<std::string> doneSteps; std::mutex stepMu; const std::string manifest = T("resume.txt");
+    // With cd= the alignment's result belongs to the key too (2026-11-14): the pad / cut choice can be answered at the console, so it is
+    // not among the options. Once the alignment has ended, the placed master's length, its position and that choice are compared with
+    // the line "align ..." the earlier run noted; if they differ, no finished step is reused (see below, after the alignment).
+    std::set<std::string> doneSteps; std::mutex stepMu; const std::string manifest = T("resume.txt"); std::string resumeHead, oldAlign;
     if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | options");   // not the block length: it does not change any result
         for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume") && !isTagOpt(argv[i]) && !isFormOpt(argv[i])) key += std::string(" ") + argv[i];   // tags and the form: written with the file only
         key += " | master " + masterMd5;
@@ -497,9 +500,10 @@ static int encode(int argc, char** argv) {
             char hs[32]; snprintf(hs, sizeof hs, "%016llx", (unsigned long long)h); key += std::string(" | noise ") + hs; }
         if (cdPath) { wavio::Wav cw; key += " | CD " + (wavio::readCD(cdPath, cw) ? alignhash::cdMd5(cw.pcm16.data(), cw.pcm16.size() / 2) : std::string("unreadable")); }   // cd=: the alignment runs again every time; the steps after it continue
         std::string old; if (exists(manifest)) old = encio::readText(manifest.c_str());
-        const std::string head = "key " + key + "\n";
+        const std::string head = "key " + key + "\n"; resumeHead = head;
         if (!old.empty() && old.compare(0, head.size(), head) == 0) { size_t p = head.size();
-            while (p < old.size()) { size_t e = old.find('\n', p); if (e == std::string::npos) break; if (old.compare(p, 5, "done ") == 0) doneSteps.insert(old.substr(p + 5, e - p - 5)); p = e + 1; }
+            while (p < old.size()) { size_t e = old.find('\n', p); if (e == std::string::npos) break; if (old.compare(p, 5, "done ") == 0) doneSteps.insert(old.substr(p + 5, e - p - 5));
+                else if (old.compare(p, 6, "align ") == 0) oldAlign = old.substr(p + 6, e - p - 6); p = e + 1; }
             printf("resume: continuing the earlier run (%zu step(s) already done)\n", doneSteps.size()); }
         else { if (!old.empty()) printf("resume: the work folder belongs to another run (other master, options or encoder build): starting from the beginning\n");
             encio::writeText(manifest.c_str(), head); } }
@@ -525,6 +529,7 @@ static int encode(int argc, char** argv) {
     // itself when it is placed (2026-10-23); the file stays v5 and the decoder is unchanged
     const int64_t U1 = lae_fd::unitsPerMaster(stages);
     std::string alignNote, alignReport;   // alignReport: the text of <out>.align.txt (the actual move), written only beside the finished file
+    std::string alignKey;   // resume with cd=: what the alignment ended with (the placed master's length, the position, pad / cut)
     long long placeT = 0;   // the whole offset the master was placed at (noise= needs 0: the marking was made on the aligned master)
     if (cdPath) {   // independent CD: it becomes the CD layer bit for bit; the extension codes master - CD. No dither of ours to regenerate.
         wavio::Wav c; if (!wavio::readCD(cdPath, c) || c.bits != 16 || c.ch != 2 || c.rate != (int)base) { printf("independent CD must be a 16-bit stereo WAV at %d Hz\n", (int)base); oldNote(); return 1; }
@@ -698,7 +703,8 @@ static int encode(int argc, char** argv) {
             {   // the movement report (a separate text file; plain text for the user's records, read by no program)
                 const double off = (double)rpT - rpMv, us = 1e6 / (double)w.rate;
                 placeT = rpT;
-                alignReport = fmt("LAE alignment report (independent CD)\nmaster: %s\nCD: %s\noutput: %s\n", argv[1], cdPath, outPath.c_str())
+                alignKey = fmt("lm=%lld t=%lld move=%+.7f edge=%s cd=%ld lead=%ld tail=%ld", Lm, rpT, rpMv, !edgeAsk ? "none" : (cdEdge == m_align::EDGE_CUT ? "cut" : "pad"), have, cdAddLead, cdAddTail);
+                alignReport =fmt("LAE alignment report (independent CD)\nmaster: %s\nCD: %s\noutput: %s\n", argv[1], cdPath, outPath.c_str())
                     + fmt("whole offset: %+lld master samples\n", rpT)
                     + (rpMv != 0 ? fmt("fraction moved: %+.7f master samples (%+.4f microseconds): the master's waveform taken that much later\n", rpMv, rpMv * us) : std::string("fraction moved: none\n"))
                     + fmt("total offset (cdalign): %s master samples (%+.3f microseconds): the CD starts %s than the master\n", offText(rpT, rpMv).c_str(), off * us,
@@ -716,6 +722,12 @@ static int encode(int argc, char** argv) {
         encio::writeVec(T("b16.s16").c_str(), b);
         std::vector<uint8_t> df = slurp(T("dither.flags")); std::fill(df.begin(), df.end(), 0); encio::writeVec(T("dither.flags").c_str(), df);
         printf("independent CD: %s (%ld samples) used as the CD layer\n", cdPath, have); }
+    if (resume && cdPath) {   // the alignment's result is part of the resume key: steps finished for another placed master are not reused
+        const std::string line = "align " + alignKey + "\n";
+        if (oldAlign.empty() && doneSteps.empty()) { FILE* f = fopen(manifest.c_str(), "ab"); bool okw = f && fputs(line.c_str(), f) >= 0; if (f && fclose(f)) okw = false; if (!okw) encio::fail("cannot write " + manifest); }
+        else if (oldAlign != alignKey) {
+            if (!doneSteps.empty()) printf("resume: the alignment ended with another result than in the earlier run (the placed master's length, its position, or the pad / cut choice): starting from the beginning\n");
+            doneSteps.clear(); encio::writeText(manifest.c_str(), resumeHead + line); } }
     if (alignOut) {   // internal step of the extension packs: this master now lies on the given core's time line; hand it to the calling run
         std::error_code ec; std::filesystem::rename(T("m0.raw"), alignOut, ec); if (ec) encio::fail(std::string("cannot write ") + alignOut + ": " + ec.message());
         encio::writeText((std::string(alignOut) + ".report.txt").c_str(), alignReport.empty() ? std::string("\n") : alignReport);

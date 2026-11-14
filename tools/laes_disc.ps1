@@ -6,7 +6,9 @@
 #
 #   powershell -ExecutionPolicy Bypass -File tools\laes_disc.ps1 -Album <folder> -Out <image.iso> -Disc BD25 [-Label <name>] [-Export <laes_export.exe>]
 #
-# -Disc: DVD5, DVD9, BD25, BD50 or BD100 (sets the capacity that is checked). BD: UDF 2.50. DVD: UDF 1.02 + ISO 9660 + Joliet.
+# -Disc: DVD5, DVD9, BD25, BD50 or BD100 (sets the capacity that is checked). BD: UDF 2.50. DVD: UDF 1.02 + ISO 9660 + Joliet; when a
+# file is larger than 2 GiB, UDF 1.02 only (the Windows disc-image service puts no file above 2 GiB into ISO 9660 / Joliet).
+# Decision 46 (2026-11-15): files of any size are taken; only the total size is checked against the capacity of the disc type.
 # Every LAES file (*.flac, *.wav) of the folder is opened once with laes_export --list (file SHA-256, CRC-32, core master); a file that is not
 # LAES or fails a check stops the run. The disc holds:
 #   <Label>\<files>        the LAES files, in name order
@@ -58,7 +60,12 @@ try {
 
     $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
     $fsi.FreeMediaBlocks = $blocksOf[$Disc]
-    if ($Disc -like 'BD*') { $fsi.FileSystemsToCreate = 4; $fsi.UDFRevision = 0x250 } else { $fsi.FileSystemsToCreate = 7; $fsi.UDFRevision = 0x102 }   # 4 UDF; 7 ISO 9660 + Joliet + UDF
+    # DEC 46: IMAPI2 refuses a file above 2 GiB in ISO 9660 / Joliet ("too large for the ISO9660/Joliet file system", tested 2026-11-15),
+    # so a DVD with such a file gets UDF 1.02 alone; every other DVD is made as before
+    $bigTracks = @($tracks | Where-Object { $_.Length -gt 2147483648 })
+    $udfOnly = ($Disc -like 'DVD*') -and ($bigTracks.Count -gt 0)
+    if ($udfOnly) { Write-Host ("note: {0} is larger than 2 GiB, which ISO 9660 / Joliet cannot hold: the {1} image holds UDF 1.02 only; a player that reads only ISO 9660 does not see the files" -f $bigTracks[0].Name, $Disc) }
+    if ($Disc -like 'BD*') { $fsi.FileSystemsToCreate = 4; $fsi.UDFRevision = 0x250 } elseif ($udfOnly) { $fsi.FileSystemsToCreate = 4; $fsi.UDFRevision = 0x102 } else { $fsi.FileSystemsToCreate = 7; $fsi.UDFRevision = 0x102 }   # 4 UDF; 7 ISO 9660 + Joliet + UDF
     # volume name: DVD (ISO 9660) only letters, digits and _; BD (UDF only) keeps the name as it is (FU20-6: a Chinese name was '___')
     if ($Disc -like 'BD*') { $volName = $Label } else { $volName = ($Label -replace '[^A-Za-z0-9_]', '_') }
     if ($volName.Length -gt 32) { $volName = $volName.Substring(0, 32) }
@@ -86,7 +93,7 @@ public static class LaesIsoWriter {
     $wantLen = [int64]$img.TotalBlocks * $img.BlockSize; $gotLen = (Get-Item -LiteralPath $partOut).Length
     if ($gotLen -ne $wantLen) { throw "the image is incomplete ($gotLen of $wantLen bytes); nothing written" }
     [IO.File]::Move($partOut, [IO.Path]::GetFullPath($Out)); $partMine = $false
-    Write-Host ("{0}: {1:N0} MB, {2}, volume {3}" -f $Out, ((Get-Item -LiteralPath $Out).Length / 1MB), $(if ($Disc -like 'BD*') { 'UDF 2.50' } else { 'UDF 1.02 + ISO 9660 + Joliet' }), $volName)
+    Write-Host ("{0}: {1:N0} MB, {2}, volume {3}" -f $Out, ((Get-Item -LiteralPath $Out).Length / 1MB), $(if ($Disc -like 'BD*') { 'UDF 2.50' } elseif ($udfOnly) { 'UDF 1.02' } else { 'UDF 1.02 + ISO 9660 + Joliet' }), $volName)
 }
 finally {   # only the three small files this run made, by name, and this run's unfinished image
     if ($partMine -and (Test-Path -LiteralPath $partOut)) { Remove-Item -LiteralPath $partOut }

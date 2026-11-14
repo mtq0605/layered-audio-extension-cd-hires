@@ -382,7 +382,7 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
         // never by the content; the 3 with the smallest estimate are coded in full and the smallest of those wins, as before. Up to 16
         // masters every candidate is coded in full (the file is the same byte for byte as before). Nothing about this is stored in the file.
         std::vector<bool> inShort; const size_t kShort = 3;
-        auto makeShort = [&]() { if (!(autoSel && ms.size() > 16 && cs.size() > kShort) || getenv("LAES_NO_SHORTLIST")) return;   // the variable: tests (full search, to compare)
+        auto makeShort = [&]() { if (!(autoSel && ms.size() > 16 && cs.size() > kShort) || testEnv("LAES_NO_SHORTLIST")) return;   // the variable: tests (full search, to compare)
             std::vector<std::pair<double, size_t>> est;
             for (size_t q = 0; q < cs.size(); q++) { const Cand& C = cs[q]; int64_t wh = 0; uint32_t fr = 0; if (C.storage != 1 && !relT(C.tier, wh, fr)) continue;
                 const int j = C.j; const int64_t nj = levLen(I.frames, st - j), B = 4096LL << j, L = (1LL << 15) << j;

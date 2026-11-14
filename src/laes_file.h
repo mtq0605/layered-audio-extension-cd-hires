@@ -27,6 +27,8 @@
 // One storage decision and one reference tier per master (never per block); no weights or gains are stored.
 #pragma once
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <climits>
 #include <cstring>
 #include <string>
@@ -116,6 +118,13 @@ inline void hashCore(const Pcm& p, uint8_t out[32]) { Sha256 s; std::vector<uint
 struct MasterInfo { int bits = 0, stages = 0, w = 0, storage = 0, refTier = 0, rate = 0; int64_t frames = 0; int64_t whole = 0; uint32_t frac = 0; uint8_t sha[32]; double layerBits = 0;
                     std::string name; int flags = 0; int menu = 0; };   // menu: the position in menus and selection, 1 ... M (version 2), 0 = the file order
 const int kNoDerive = 1;   // master record flag bit 0
+// DEC 39 (2026-11-15): the test switches of laes / laes_export (environment variables that change what the tools do) act only when the
+// master switch LAE_TEST_MODE=1 is set; testEnv gives the value then, else nullptr. KEEPTMP (keep the work folder) changes no output byte
+// and acts without it. testModeLine prints, once per program run, the active test switches.
+inline const char* testEnv(const char* name) { const char* m = getenv("LAE_TEST_MODE"); return m && !strcmp(m, "1") ? getenv(name) : nullptr; }
+inline void testModeLine() { static bool done = false; if (done) return; done = true; const char* m = getenv("LAE_TEST_MODE"); if (!m || strcmp(m, "1")) return;
+    std::string on; for (const char* n : {"LAES_TEST_KEYS", "LAES_NO_SHORTLIST", "LAES_FORCE_RF64", "LAES_PIECE", "LAES_SELFCHECK_FLIP", "LAES_DISK_RESERVE"}) if (getenv(n)) on += std::string(" ") + n;
+    printf("LAE_TEST_MODE=1: test switches active:%s (unset LAE_TEST_MODE for normal behaviour)\n", on.empty() ? " none" : on.c_str()); }
 // DEC 11 (2026-11-15): T (whole + frac / 2^32 base samples) of a master lies within the length of the track: -N <= T <= N, N = the core
 // master frames (an offset beyond the track is meaningless). Decoders refuse a record with a larger T; the encoder writes none.
 inline bool tWithinTrack(int64_t whole, uint32_t frac, uint64_t n) {

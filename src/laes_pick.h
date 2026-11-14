@@ -45,7 +45,7 @@ enum Key { kUp, kDown, kSpace, kEnter, kEsc, kBack, kChar, kNone };
 
 class Input {
 public:
-    Input() { const char* t = getenv("LAES_TEST_KEYS"); if (t) { test = true; keys = t; }
+    Input() { const char* t = laes::testEnv("LAES_TEST_KEYS"); if (t) { test = true; keys = t; }
 #ifndef _WIN32
         else if (isatty(0)) { tcgetattr(0, &old); termios r = old; r.c_lflag &= ~(ICANON | ECHO | ISIG);   // ISIG off (FU13-9): Ctrl-C arrives as byte 3 = Esc, and the terminal is set back
             r.c_cc[VMIN] = 1; r.c_cc[VTIME] = 0; tcsetattr(0, TCSANOW, &r); raw = true; }
@@ -84,7 +84,7 @@ private:
 
 // a console on both sides, or the test hook
 inline bool interactive() {
-    if (getenv("LAES_TEST_KEYS")) return true;
+    if (laes::testEnv("LAES_TEST_KEYS")) return true;
 #ifdef _WIN32
     return _isatty(_fileno(stdin)) && _isatty(_fileno(stdout));
 #else

@@ -91,6 +91,7 @@ static bool writeVerified(const std::string& path, const std::string& fileHex, c
     return finishPart(path, e2); }
 
 static int run(int argc, char** argv) {
+    laes::testModeLine();   // DEC 39
     if (argc < 3) { printf("usage: laes_export <in> --list | <in> <choice> <out.flac> [--from=s] [--len=s] [--index=rec] [--unverified] | <in> <choice> --seg=s --dir=folder [--index=rec] [--unverified]\n"); return 1; }
     FILE* fp = fopen(argv[1], "rb"); if (!fp) { printf("cannot open %s\n", argv[1]); return 2; }
     const long long sz = laess::sizeOf(fp); if (sz < 0) { printf("cannot read %s\n", argv[1]); return 2; } const uint64_t size = (uint64_t)sz;   // 64-bit, Windows and POSIX (laes_stream.h)

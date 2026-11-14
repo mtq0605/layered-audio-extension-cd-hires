@@ -366,7 +366,7 @@ static std::string writeWithPayload(laess::In& in, const Layout& L, const std::s
               const Part* fmt = nullptr; std::vector<const Part*> keep; for (size_t i = 0; i < L.parts.size(); i++) { const Part& q = L.parts[i]; if (q.id == "fmt ") fmt = &q; else if (q.id == "ds64" || q.id == "JUNK" || L.unused(i)) continue; else keep.push_back(&q); }
               if (!fmt || fmt->len < 16) return "no fmt chunk";
               long long riff = 4 + 8 + fmt->len + (fmt->len & 1); for (auto* q : keep) { const long long len = q->id == "LAE " ? bsz : q->len; riff += 8 + len + (len & 1); }
-              const bool rf64 = riff > 0xFFFFFFFFLL || getenv("LAES_FORCE_RF64");
+              const bool rf64 = riff > 0xFFFFFFFFLL || laes::testEnv("LAES_FORCE_RF64");
               for (auto* q : keep) if (rf64 && q->id != "data" && q->id != "LAE " && q->len > 0xFFFFFFFFLL) return "chunk " + q->id + " beyond 4 GB";   // FU15-8: as tag (ds64 lists only data and LAE)
               std::vector<uint8_t> h; auto p32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) h.push_back((uint8_t)(v >> (8 * i))); }; auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; i++) h.push_back((uint8_t)(v >> (8 * i))); };
               if (rf64) { uint8_t fb[16]; in.read(fmt->off, fb, 16); const int align = fb[12] | fb[13] << 8;
@@ -391,7 +391,7 @@ int main(int argc, char** argv) { lae_u8::init(argc, argv); return laesMain(argc
 // laes add / extract (2026-11-11) run the dec and enc commands of this same program through laesMain
 static int laesMain(int argc, char** argv) {
     if (argc < 2) { printf("laes enc | add | extract | names | tag | parts | dec | verify | align | selftest | excerpt | mkcd | reduce  (see the source header)\n"); return 1; }
-    const std::string cmd = argv[1];
+    const std::string cmd = argv[1]; laes::testModeLine();   // DEC 39
     if (flag(argc, argv, "--overwrite")) gOverwrite = true;   // DEC 21: an existing output is replaced without asking (inner runs keep the outer value)
     bool madePart = false;   // FU16-3 (2026-11-14): tag / add / extract / names remove <out>.part and <out>.body.part on an error only when this run made them
     if (cmd == "selftest") return selftest::run() ? 2 : 0;
@@ -439,7 +439,7 @@ static int laesMain(int argc, char** argv) {
     // the work folder goes at the end; keep: not when the run is stopped by an exception (disk full, closed: the same command continues)
     struct Gone { std::string p; bool keep = false; ~Gone() { if (!p.empty() && !getenv("KEEPTMP") && !(keep && std::uncaught_exceptions())) { std::error_code ec; fs::remove_all(p, ec); } } };
     auto pieceFor = [&](int maxStages) -> int64_t {   // base-level samples per piece, a multiple of 4096
-        if (const char* e = getenv("LAES_PIECE")) return std::max<int64_t>(4096, atoll(e) / 4096 * 4096);   // test hook
+        if (const char* e = laes::testEnv("LAES_PIECE")) return std::max<int64_t>(4096, atoll(e) / 4096 * 4096);   // test hook
         unsigned long long total = physMemory(); const std::string mm = arg(argc, argv, "--mem"); const unsigned long long G28 = 28ull << 30;
         unsigned long long budget = !mm.empty() ? (unsigned long long)(atof(mm.c_str()) * 1073741824.0) : std::min(2ull << 30, std::min(total / 2, std::max(total / 4, total > G28 ? total - G28 : 0ull)));
         if (budget < (512ull << 20)) budget = 512ull << 20;
@@ -508,7 +508,7 @@ static int laesMain(int argc, char** argv) {
               if (!fmt || fmt->len < 16) { printf("%s: no fmt chunk\n", src.c_str()); return 2; }
               const std::vector<uint8_t> tc = laestag::wavChunks(tags); long long riff = 4 + 8 + fmt->len + (fmt->len & 1) + (long long)tc.size(), lae = 0;
               for (auto* q : keep) { riff += 8 + q->len + (q->len & 1); if (q->id == "LAE ") lae = q->len; }
-              const bool rf64 = riff > 0xFFFFFFFFLL || getenv("LAES_FORCE_RF64");
+              const bool rf64 = riff > 0xFFFFFFFFLL || laes::testEnv("LAES_FORCE_RF64");
               for (auto* q : keep) if (rf64 && q->id != "data" && q->id != "LAE " && q->len > 0xFFFFFFFFLL) { printf("%s: chunk %s beyond 4 GB\n", src.c_str(), q->id.c_str()); return 2; }
               std::vector<uint8_t> h; auto p32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) h.push_back((uint8_t)(v >> (8 * i))); }; auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; i++) h.push_back((uint8_t)(v >> (8 * i))); };
               if (rf64) { uint8_t fb[16]; in.read(fmt->off, fb, 16); const int align = fb[12] | fb[13] << 8;
@@ -874,7 +874,7 @@ static int laesMain(int argc, char** argv) {
         const int coreBits = !cbArg.empty() ? atoi(cbArg.c_str()) : (asFlac ? std::min(maxBits, 24) : 16);
         if (coreBits != 16 && coreBits != 24 && coreBits != 32) { printf("--core-bits must be 16, 24 or 32\n"); return 1; }
         if (corePath.empty() && !derive) { printf("give --core=<core.wav> or --derive-core\n"); return 1; }
-        uint64_t reserve = 2ull << 30; if (const char* e = getenv("LAES_DISK_RESERVE")) reserve = strtoull(e, nullptr, 10);   // bytes kept free; the variable: tests
+        uint64_t reserve = 2ull << 30; if (const char* e = laes::testEnv("LAES_DISK_RESERVE")) reserve = strtoull(e, nullptr, 10);   // bytes kept free; the variable: tests
         const bool smallDisk = flag(argc, argv, "--small-disk"), diskRemove = flag(argc, argv, "--disk-stop-remove"), diskStop = diskRemove || flag(argc, argv, "--disk-stop");
         std::string job = std::string("laes enc work folder, build ") + __DATE__ + " " + __TIME__ + "\n";   // what the files depend on: the arguments and the masters
         for (int i = 2; i < argc; i++) { const std::string a = argv[i]; if (a == "--timing" || a == "--disk-stop" || a == "--disk-stop-remove" || a == "--force-disk" || a.rfind("--mem", 0) == 0 || laestag::isTagArg(a)) continue; job += a + "\n"; }
@@ -1026,7 +1026,7 @@ static int laesMain(int argc, char** argv) {
             // beyond 4 GB: RF64 (EBU Tech 3306 / ITU-R BS.2088): "RF64", a "ds64" chunk with the 64-bit sizes (RIFF, data, the LAE chunk in its
             // table), the 32-bit size fields set to 0xFFFFFFFF; everything else as in RIFF
             const std::vector<uint8_t> tagChunks = laestag::wavChunks(tags); const long long tc = (long long)tagChunks.size();   // LIST/INFO + "id3 " between "fmt " and "data" (none: nothing)
-            const long long riff = 4 + 8 + fmtLen + tc + 8 + db + (db & 1) + extra; const bool rf64 = riff > 0xFFFFFFFFLL || getenv("LAES_FORCE_RF64");   // the variable: tests on small files
+            const long long riff = 4 + 8 + fmtLen + tc + 8 + db + (db & 1) + extra; const bool rf64 = riff > 0xFFFFFFFFLL || laes::testEnv("LAES_FORCE_RF64");   // the variable: tests on small files
             Pcm hdr; hdr.rate = core32.rate; hdr.bits = core32.bits; std::vector<uint8_t> lae; std::vector<uint8_t> h = wavBytes(hdr, nullptr);   // header of an empty file: sizes patched below
             h.insert(h.end() - 8, tagChunks.begin(), tagChunks.end());
             auto p32 = [&](size_t at, uint32_t v) { for (int i = 0; i < 4; i++) h[at + i] = (uint8_t)(v >> (8 * i)); }; p32(4, (uint32_t)riff); p32(h.size() - 4, (uint32_t)db);
@@ -1046,7 +1046,7 @@ static int laesMain(int argc, char** argv) {
         // self-check of the written file, read exactly as a player reads it (the playback decoder, laes_play.h; 2026-11-03): the whole file
         // (file SHA-256, payload CRC-32, core), then every master decoded and compared sample by sample with its input; any difference:
         // the file is removed and nothing is written
-        if (const char* fb = getenv("LAES_SELFCHECK_FLIP")) {   // tests only: one byte of the written file flipped at this offset (from the end when negative)
+        if (const char* fb = laes::testEnv("LAES_SELFCHECK_FLIP")) {   // tests only: one byte of the written file flipped at this offset (from the end when negative)
             FILE* t = fopen((out + ".part").c_str(), "r+b"); if (t) { long long at = atoll(fb); _fseeki64(t, 0, SEEK_END); const long long n = _ftelli64(t); if (at < 0) at += n;
                 if (at >= 0 && at < n) { _fseeki64(t, at, SEEK_SET); const int c = fgetc(t); _fseeki64(t, at, SEEK_SET); fputc(c ^ 0x10, t); } fclose(t); } }
         { const std::string why = selfCheckFile(out + ".part", pm, threads);
@@ -1193,7 +1193,7 @@ static int laesMain(int argc, char** argv) {
                 for (int i = 0; i < 4; i++) { h[4 + i] = (uint8_t)((uint32_t)(4 + 8 + fmtLen + 8 + db + (db & 1)) >> (8 * i)); h[h.size() - 4 + i] = (uint8_t)((uint32_t)db >> (8 * i)); }
                 // beyond 4 GB: RF64 as the encoder writes it (ds64 with the 64-bit RIFF and data sizes, no table; 32-bit fields 0xFFFFFFFF), 2026-11-04
                 const long long riff = 4 + 8 + fmtLen + 8 + db + (db & 1);
-                if (riff > 0xFFFFFFFFLL || getenv("LAES_FORCE_RF64")) { std::vector<uint8_t> r = {'R', 'F', '6', '4', 0xFF, 0xFF, 0xFF, 0xFF, 'W', 'A', 'V', 'E', 'd', 's', '6', '4', 28, 0, 0, 0};
+                if (riff > 0xFFFFFFFFLL || laes::testEnv("LAES_FORCE_RF64")) { std::vector<uint8_t> r = {'R', 'F', '6', '4', 0xFF, 0xFF, 0xFF, 0xFF, 'W', 'A', 'V', 'E', 'd', 's', '6', '4', 28, 0, 0, 0};
                     auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; i++) r.push_back((uint8_t)(v >> (8 * i))); };
                     u64((uint64_t)(riff + 36)); u64((uint64_t)db); u64((uint64_t)n); r.insert(r.end(), {0, 0, 0, 0});
                     r.insert(r.end(), h.begin() + 12, h.end()); for (size_t i = r.size() - 4; i < r.size(); i++) r[i] = 0xFF; h.swap(r); }   // the data size: in ds64

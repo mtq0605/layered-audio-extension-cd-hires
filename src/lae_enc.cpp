@@ -355,7 +355,8 @@ static int encode(int argc, char** argv) {
     encrun::out = outPath; encrun::part = partPath; encrun::tmp = tmp; encrun::hadOld = exists(outPath);
     auto oldNote = []() { encrun::oldNote(); };
     if (!mdct::selftestOK() || !alignhash::md5SelfTest() || encio::testFail("selftest")) { printf("encoder self-test FAILED: this build does not compute the IMDCT in the IEEE-754 order the format requires, or its MD5 is wrong (see docs/BUILD.md); nothing encoded\n"); return 4; }
-    const char* modeName = argc > 3 ? argv[3] : "3"; int mi = part::modeIndex(modeName); if (mi < 0) { printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }
+    // the mode is the third argument and may be left out (default 3): a third argument that is no mode name is read as the first option
+    const int opt0 = argc > 3 && part::modeIndex(argv[3]) < 0 ? 3 : 4; const char* modeName = opt0 == 4 && argc > 3 ? argv[3] : "3"; const int mi = part::modeIndex(modeName);
     const char* noisePath = nullptr; bool gOpt = false; char gLevel = 'd';   // noise=<marks.laenoise>, g = g=d / g=c / g=b (2026-11-04/05)
     bool equal = false, zsOpt = false, cdCheck = false, cdAccept = false, bits24 = false, manual = false, resume = false; int wm = 0, scheme = 1, cdEdge = -1; const char* cdPath = nullptr; long long manualT = 0; unsigned long long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once (default: half the physical memory); cdEdge: cdedge=pad / cut (m_align::EDGE_*), -1 not given
     std::string manualText; int manualSg = 1; long long manualI = 0, manualF = 0, manualFs = 1, manualPlace = 0, manualPhi = 0;   // cdalign=<o>: o = sg * (I + F / Fs) master samples
@@ -366,10 +367,10 @@ static int encode(int argc, char** argv) {
     // cd=, hand the aligned master to the calling run and encode nothing; rawin=<rate> = argument 1 is such an aligned master
     const char* alignOut = nullptr; int rawRate = 0; long cdAddLead = 0, cdAddTail = 0;   // cdAdd*: the digital-silence frames the alignment added before / after the given CD
     laestag::Tags tags; std::vector<uint8_t> tagChunks;   // --tag / --cover / --picture: read and checked before any work
-    const int formSel = outputForm(outPath, argc, argv, 4); if (formSel < 0) { printf("nothing encoded\n"); return 1; } const bool asFlac = formSel == 1;
-    { const std::string e = tagArgs(argc, argv, 4, tags); if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; }
+    const int formSel = outputForm(outPath, argc, argv, opt0); if (formSel < 0) { printf("nothing encoded\n"); return 1; } const bool asFlac = formSel == 1;
+    { const std::string e = tagArgs(argc, argv, opt0, tags); if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; }
       tagChunks = asFlac ? laestag::flacBlocks(tags, false, kLaeyEncoder) : laestag::wavChunks(tags, kLaeyEncoder); }   // FLAC form: VORBIS_COMMENT + PICTURE blocks, before the "LAE1" blocks
-    for (int i = 4; i < argc; i++) { const char* a = argv[i]; if (isTagOpt(a) || isFormOpt(a)) continue;
+    for (int i = opt0; i < argc; i++) { const char* a = argv[i]; if (isTagOpt(a) || isFormOpt(a)) continue;
         if (!strncmp(a, "master1name=", 12)) { if (strlen(a + 12) > 255) { printf("master1name=: a name has at most 255 bytes\n"); return 1; } mainName = a + 12; continue; }   // the main body's name, shown where a master is chosen
         if (!strcmp(a, "equal")) equal = true; else if (!strcmp(a, "energy")) wm = 1; else if (!strcmp(a, "s2")) scheme = 2; else if (!strcmp(a, "s1")) scheme = 1;
         else if (!strcmp(a, "zs")) zsOpt = true; else if (!strncmp(a, "cd=", 3) && a[3]) cdPath = a + 3; else if (!strcmp(a, "cdcheck")) cdCheck = true;
@@ -387,6 +388,7 @@ static int encode(int argc, char** argv) {
             if (!ni || !ok || *p || I > 2000000000LL) { printf(strchr(v, ',') ? "cdalign=%s: write the fraction with a point (for example cdalign=3.5)\n"
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
+        else if (i == 3) { printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }   // the mode slot: neither a mode nor an option
         else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d master2=<master.wav> .. master9= master<n>align= master<n>name= (n from 1) master<n>accept master<n>edge= --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume)\n", a); return 1; } }
     encrun::keepTmp = resume;
     if ((cdCheck || cdAccept || manual || cdEdge >= 0) && !cdPath) { printf("cdcheck, cdalign, cdaccept and cdedge= need cd=<CD.wav>\n"); return 1; }
@@ -760,7 +762,7 @@ static int encode(int argc, char** argv) {
             std::error_code ec; std::filesystem::rename(nf, f, ec); if (ec) encio::fail("cannot replace " + f + ": " + ec.message()); };
         struct Aligned { std::string raw; int rate = 0; long long up = 1; long lead = 0, tail = 0; }; std::vector<Aligned> al((size_t)nPacks);
         std::vector<std::string> common = {modeName, scheme == 2 ? "s2" : "s1"};   // the coding options are the same for every pack
-        for (int i = 4; i < argc; i++) { const char* a = argv[i]; if (!strcmp(a, "zs") || !strcmp(a, "energy") || !strcmp(a, "equal") || !strcmp(a, "bits=24") || !strncmp(a, "mem=", 4) || !strcmp(a, "g") || !strncmp(a, "g=", 2)) common.push_back(a); }   // g: every pack on its own master (2026-11-11)
+        for (int i = opt0; i < argc; i++) { const char* a = argv[i]; if (!strcmp(a, "zs") || !strcmp(a, "energy") || !strcmp(a, "equal") || !strcmp(a, "bits=24") || !strncmp(a, "mem=", 4) || !strcmp(a, "g") || !strncmp(a, "g=", 2)) common.push_back(a); }   // g: every pack on its own master (2026-11-11)
         const bool hadUnits = getenv("LAE_BLOCKUNITS") != nullptr; bool stopA = false;
         auto nested = [&](std::vector<std::string> a) {   // one further master: this encoder, run as a step of this run with its own work folder
             const std::string so = encrun::out, sp = encrun::part, st = encrun::tmp; const bool b1 = encrun::hadOld, b2 = encrun::partMine, b3 = encrun::tmpMine, b4 = encrun::cleaned, b5 = encrun::keepTmp;

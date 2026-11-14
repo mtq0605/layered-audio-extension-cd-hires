@@ -33,9 +33,9 @@ final class PartBlk {
         BlkIo.ReaderI dumpR = new BlkIo.ReaderI(argv[1], 1); final String pePath = argv[1] + ".pe";
         BlkIo.ReaderI encR = null, peR = null; BlkIo.Writer pw = null, outW = null;
         try {
-            if (dumpR.frames < 11) { return 2; }   // C++: fprintf(stderr, "not a partition dump\n")
+            if (dumpR.frames < 11) { env.printf("not a partition dump\n"); return 2; }   // FU23-5: said, as the C++ (there on stderr)
             int[] hd = dumpR.read(0, 11);
-            if (hd[0] != 0x50415254 || hd[10] < 0 || dumpR.frames != 11 + (long) hd[10]) { return 2; }
+            if (hd[0] != 0x50415254 || hd[10] < 0 || dumpR.frames != 11 + (long) hd[10]) { env.printf("not a partition dump\n"); return 2; }   // FU23-5: said, as the C++ (there on stderr)
             PartStream.Hdr h = new PartStream.Hdr(); h.K = hd[1]; h.N = hd[2]; h.k0 = hd[3]; h.k1 = hd[4]; h.rate = hd[5]; h.L = hd[6]; h.cw = hd[7]; h.lv = hd[8]; h.eq = hd[9];
             TokIn tin = new TokIn(); tin.r = dumpR; tin.n = hd[10];
             int[] row;

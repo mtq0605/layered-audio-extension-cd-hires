@@ -141,7 +141,7 @@ public final class LaesEncoder {
         if (o.piece > 0) return Math.max(4096, o.piece / 4096 * 4096);   // test hook
         long budget; if (o.memGB >= 0) budget = (long) (o.memGB * 1073741824.0); else budget = Math.min(2L << 30, Runtime.getRuntime().maxMemory() / 2);
         if (budget < (32L << 20)) budget = 32L << 20;
-        final long top = budget / JAVA_BYTES_PER_TOP;
+        final long top = Math.min(budget / JAVA_BYTES_PER_TOP, 1L << 26);   // FU26-8: at most 2^26 top-level samples (about 10 GB), so that a piece's byte counts (k * 2 * by, int) cannot overflow
         // --small-disk (2026-11-05): half the piece, so that its extra buffers (the level made again, FLAC frames decoded again) stay
         // within the memory of a normal run; the files written do not depend on the piece
         final long topUsed = o.smallDisk ? top / 2 : top;

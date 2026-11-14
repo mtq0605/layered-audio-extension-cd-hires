@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <vector>
 using namespace std;
+// FU20-2 (2026-11-14): pi written here (the value of M_PI), so that the file builds without _USE_MATH_DEFINES, as gen_mdct_tables.cpp does
+static const double PI = 3.14159265358979323846;
 static double I0(double x) { double s = 1, t = 1; for (int k = 1; k < 100; k++) { t *= (x / 2 / k) * (x / 2 / k); s += t; } return s; }
 int main() {
     const double A = 120.0, beta = 0.1102 * (A - 8.7);
@@ -25,7 +27,7 @@ int main() {
         vector<double> h(2 * half + 1, 0.0);
         double sumOdd = 0;
         for (int n = 1; n <= half; n += 2) {
-            double ideal = sin(M_PI * n / 2.0) / (M_PI * n);
+            double ideal = sin(PI * n / 2.0) / (PI * n);
             double r = (double)n / (half + 1);
             double w = I0(beta * sqrt(1 - r * r)) / I0(beta);
             h[half + n] = h[half - n] = ideal * w;

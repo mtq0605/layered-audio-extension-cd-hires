@@ -389,7 +389,7 @@ static string overburnText(long long total) {
                           "*** A standard 80-minute blank is too small: use a blank whose real capacity is at least %s sectors (a 90- or 99-minute blank),\r\n"
                           "    or a burner and burning program with overburning switched on. Some blanks and burners refuse. ***\r\n"
                           "*** 超刻：这个映像需要 %s 个扇区（%s），比标准 80 分钟空白盘（%s 个扇区，%s）多 %s 个扇区（%s，约 %.*f 秒）。***\r\n"
-                          "*** 标准 80 分钟空白盘容量不够：请用实际容量不少于 %s 扇区的空白盘（90 或 99 分钟盘），或在刻录机和刻录软件里打开超刻。\r\n"
+                          "*** 标准 80 分钟空白盘容量不够：请用实际容量不少于 %s 个扇区的空白盘（90 或 99 分钟盘），或在刻录机和刻录软件里打开超刻。\r\n"
                           "    个别空白盘和刻录机会拒绝。***\r\n\r\n",
              n.c_str(), msf(total).c_str(), o.c_str(), over == 1 ? "sector" : "sectors", msf(over).c_str(), dp, (double)over / 75.0, c.c_str(), msf(overburnFrom).c_str(), n.c_str(),
              n.c_str(), msf(total).c_str(), c.c_str(), msf(overburnFrom).c_str(), o.c_str(), msf(over).c_str(), dp, (double)over / 75.0, n.c_str());

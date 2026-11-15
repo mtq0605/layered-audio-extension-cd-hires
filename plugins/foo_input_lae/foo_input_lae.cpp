@@ -58,7 +58,7 @@ DECLARE_COMPONENT_VERSION(T("LAE decoder", "LAE 解码器"), "0.30",
       "Containers: WAV, RF64, FLAC (.lae, .wav, .flac).\n"
       "liblae (Apache-2.0). foobar2000 SDK (c) Peter Pawlowski (BSD licence).",
       "LAE（分层音频扩展）音频解码器。\n"
-      "LAES（无损）：核心母带、各母带、采样率级别、派生 16 位版本；母带经 SHA-256 校验。\n"
+      "LAES（无损）：核心母带、各母带、采样率档位、派生 16 位版本；母带经 SHA-256 校验。\n"
       "LAEY（有损）：CD 层/核心层、位深层、频率层，最高至母带采样率。\n"
       "封装：WAV、RF64、FLAC（.lae、.wav、.flac）。\n"
       "liblae（Apache-2.0）。foobar2000 SDK (c) Peter Pawlowski（BSD 许可）。"));
@@ -1304,7 +1304,7 @@ public:
     GUID get_item_guid(unsigned i) { return i == 0 ? guid_ctx_verify : i == 1 ? guid_ctx_choose : guid_ctx_layers; }
     bool get_item_description(unsigned i, pfc::string_base& out) {
         out = i == 0 ? T("Verifies every master of the selected files (SHA-256).", "校验所选文件的全部母带（SHA-256）。")
-            : i == 1 ? T("Selects the master, sample-rate level or derived version for this track.", "为本曲目选择母带、采样率级别或派生版本。")
+            : i == 1 ? T("Selects the master, sample-rate level or derived version for this track.", "为本曲目选择母带、采样率档位或派生版本。")
                      : T("Selects the extension pack and layers for this track.", "为本曲目选择扩展包和层。"); return true; }
 };
 static contextmenu_item_factory_t<laes_ctx> g_laes_ctx;

@@ -14,7 +14,7 @@ import java.io.RandomAccessFile;
  * compensation; CLIPMAP: the positions of the samples the hard limiter changed). The decoding itself is the verified Java port of
  * lae_decoder.h ({@link LaeDecoder.Decoder}).
  * C++ thread_local g_streamErr: the decoder's own flag ({@link LaeDecoder.Decoder#err}), returned in streamErr[0].
- * A write failure removes the output and returns 1, as lae_dec.cpp (F05-1).
+ * A write failure removes the output and returns 1, as lae_dec.cpp.
  */
 final class LaeDec {
     private LaeDec() {}
@@ -50,11 +50,11 @@ final class LaeDec {
         LaeDecoder.Decoder D = new LaeDecoder.Decoder(); int[] code = {0}; int orate = argv.length > 4 ? (Fmt.atoi(argv[4]) > 0 ? Fmt.atoi(argv[4]) : -1) : 0;
         D.pack = packArg;   // extension pack: 0 = the main body, as always
         String e = D.openCd(cdp, lae, mode, orate, code); if (!e.isEmpty()) { env.printf("%s\n", e); return code[0]; }
-        if (flacRate != 0 && flacRate != D.base) { env.printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // FU11-9: spec/lossy 3.4
-        D.noSeekMarks();   // decision 34 (F05-4, as lae_dec.cpp): this tool never seeks, so no checkpoints are kept (memory no longer grows with the track)
+        if (flacRate != 0 && flacRate != D.base) { env.printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // spec/lossy 3.4
+        D.noSeekMarks();   // as lae_dec.cpp: this tool never seeks, so no checkpoints are kept (memory no longer grows with the track)
         final String leakOut = env.get("LEAKOUT"), clipMap = env.get("CLIPMAP");
         if (leakOut == null && clipMap == null) {
-            // decision 10 (FU34-9 / FU30-2, spec/lossy 6.7, as lae_dec.cpp): every entropy stream of the decoded pack must end exactly at its
+            // spec/lossy 6.7, as lae_dec.cpp: every entropy stream of the decoded pack must end exactly at its
             // last byte, as the player's one-time check requires; the same check (every stream decoded from start to end, route full at the
             // master rate, in parallel) before any output is written. The encoder's own decode runs (LEAKOUT, CLIPMAP) skip it.
             LaeDecoder.Decoder chk = new LaeDecoder.Decoder(); chk.pack = D.pack; chk.crcChecked = true; int[] c2 = {0};   // D's open checked the CRC of this array
@@ -67,7 +67,7 @@ final class LaeDec {
             for (int k = 0; k < D.packs.size(); k++) { final LaeDecoder.Decoder.PackInfo q = D.packs.get(k);
                 env.printf("  pack %d: %d Hz%s%s%s\n", k + 1, q.rate, q.name.isEmpty() ? "" : ", \"", q.name, q.name.isEmpty() ? "" : "\""); } }
         if (leakOut != null && D.haveF) {   // leak compensation (encoder only): the decoded frequency layer brought down to the base rate (int32, 1/16 LSB24, L/R interleaved)
-            BufferedOutputStream fl; try { fl = new BufferedOutputStream(new FileOutputStream(leakOut), 1 << 16); } catch (IOException x) { env.printf("cannot write %s\n", leakOut); return 1; }   // FU21-3: the reason is said (lae_dec.cpp the same since G11)
+            BufferedOutputStream fl; try { fl = new BufferedOutputStream(new FileOutputStream(leakOut), 1 << 16); } catch (IOException x) { env.printf("cannot write %s\n", leakOut); return 1; }   // the reason is said (lae_dec.cpp the same)
             long nlk; try { nlk = D.writeLeak(fl); } finally { try { fl.close(); } catch (IOException x) { /* the C++ fclose result is not checked; the encoder checks the file size */ } }
             streamErr[0] = D.err.v; env.printf("leak written: %ld base-rate samples/ch\n", nlk); return 0; }
         if (!WavIo.fits32(D.Lo * 6, 0)) { env.printf("output would exceed the 4 GB limit of WAV: choose a lower output rate\n"); return 1; }
@@ -82,10 +82,10 @@ final class LaeDec {
                 fo.write(buf, 0, n); }
             if (((D.Lo * 6) & 1) != 0) fo.write(0);
             fo.close(); fo = null;
-        } catch (IOException x) { fo = closeQuietly(fo); new File(argv[2]).delete(); env.printf("cannot write %s (disk full?): the output was removed\n", argv[2]); return 1; }   // FU21-3: as lae_dec.cpp (F05-1)
+        } catch (IOException x) { fo = closeQuietly(fo); new File(argv[2]).delete(); env.printf("cannot write %s (disk full?): the output was removed\n", argv[2]); return 1; }   // as lae_dec.cpp
         finally { closeQuietly(fo); }
         streamErr[0] = D.err.v;
-        // FU21-3: a corrupt stream is refused before the clip map is written, so no map is left beside a removed output (lae_dec.cpp the same since G11)
+        // a corrupt stream is refused before the clip map is written, so no map is left beside a removed output (lae_dec.cpp the same)
         if (D.err.v) { new File(argv[2]).delete(); env.printf("corrupt stream (values out of range): refusing to decode\n"); return 3; }
         if (wantMap) { BufferedOutputStream fm = null; try { fm = new BufferedOutputStream(new FileOutputStream(clipMap)); for (int c = 0; c < 2; c++) for (int i = 0; i < clipPos[c].size(); i++) { int v = clipPos[c].get(i); fm.write(v); fm.write(v >> 8); fm.write(v >> 16); fm.write(v >> 24); } }   // channel 0 first, as before
             catch (IOException x) { /* the C++ writes the map only if it can open it and does not check the writes */ } finally { if (fm != null) try { fm.close(); } catch (IOException x) { /* as above */ } } }

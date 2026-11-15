@@ -44,7 +44,7 @@ final class NoiseMarks {
         try {
             r = new BufferedReader(new InputStreamReader(new FileInputStream(path), "ISO-8859-1"));
             String line;
-            while ((line = lfLine(r)) != null) {   // FU24-4: lines end at LF only, as noise_marks.h (readLine also ended one at a lone CR)
+            while ((line = lfLine(r)) != null) {   // lines end at LF only, as noise_marks.h (readLine also ended one at a lone CR)
                 ln++; int h = line.indexOf('#'); if (h >= 0) line = line.substring(0, h);
                 List<String> tl = new ArrayList<String>(); for (String x : line.split("[ \\t\\r]+")) if (!x.isEmpty()) tl.add(x);
                 if (tl.isEmpty()) continue;

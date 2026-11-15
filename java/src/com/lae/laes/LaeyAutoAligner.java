@@ -16,7 +16,7 @@ import java.io.InputStreamReader;
  * The numbers are taken from the same text the C++ parses (the offset with 7 decimals, the residual with 2), so T is the same double and
  * the LAES file is the same. --lae-enc is not needed (no external program runs); the C++ check that the lae_enc file exists is not made.
  * LaesEncoder.Aligner.ask: the C++ asks "use this alignment? [y/N]" on stdin; here a line is read from System.in (EOF: no).
- * PORT_RULES 7: the own check's residual uses the C library's log10 (laes_tool.cpp autoAlign: 10 * std::log10(er / eb)); here
+ * The own check's residual uses the C library's log10 (laes_tool.cpp autoAlign: 10 * std::log10(er / eb)); here
  * Math.log10. It decides only a printed note (resid &gt; -40) and, when LAEY gave no phase line, the -60 / -54 dB question; never the file.
  */
 public final class LaeyAutoAligner implements LaesEncoder.Aligner {
@@ -25,7 +25,7 @@ public final class LaeyAutoAligner implements LaesEncoder.Aligner {
         LaesEncoder.AutoT A = new LaesEncoder.AutoT(); int st = 0; while ((cd.rate << st) < m.rate && st < 4) st++;
         if ((cd.rate << st) != m.rate || st > 3) { A.why = "master rate must be the core master rate times 1, 2, 4 or 8"; return A; }
         if (st == 0) { A.why = "LAEY's search needs a master at 2, 4 or 8 times the core master rate; give T by hand (master.wav@T)"; return A; }
-        if (cd.frames() < 1 || m.frames < 1) { A.why = (cd.frames() < 1 ? "the core master" : "the master") + " has no samples: there is nothing to align"; return A; }   // FU15-4 (as laes_tool.cpp 4977ac7): LAEY's check needs samples on both sides
+        if (cd.frames() < 1 || m.frames < 1) { A.why = (cd.frames() < 1 ? "the core master" : "the master") + " has no samples: there is nothing to align"; return A; }   // as laes_tool.cpp 4977ac7: LAEY's check needs samples on both sides
         final String dummy = new File(System.getProperty("java.io.tmpdir"), "laes_align_unused.lae").getPath();   // cdcheck encodes nothing
         final StringBuilder out = new StringBuilder();
         String[] args = m.bits == 32 ? new String[] {"lae_enc", mPath, dummy, "3", "cd=" + cdPath, "cdcheck", "bits=24"} : new String[] {"lae_enc", mPath, dummy, "3", "cd=" + cdPath, "cdcheck"};
@@ -45,19 +45,19 @@ public final class LaeyAutoAligner implements LaesEncoder.Aligner {
         final int w = m.w, up = (m.bits - 16) - w; Stream.Sig[] base = {StreamEnc.levelOf(m, 0, 0), StreamEnc.levelOf(m, 1, 0)};   // the base level (samples >> w)
         try {
             final long nb = base[0].n, bl = Math.max(1L, Math.min(nb / 3, 5L * cd.rate)); final long[] b0 = {0, (nb - bl) / 2, nb - bl};
-            final long[] whf = LaesEncoder.setT(A.T); final long wh = whf[0]; final int fr = (int) whf[1];   // DEC 14: the same rule as setT (laes_tool.cpp splitT)
+            final long[] whf = LaesEncoder.setT(A.T); final long wh = whf[0]; final int fr = (int) whf[1];   // the same rule as setT (laes_tool.cpp splitT)
             final long[] h = LaesMath.refTaps(fr); A.resid = -200;
             for (int b = 0; b < 3; b++) { double eb = 0, er = 0; for (int c = 0; c < 2; c++) { final long n = cd.c[c].length; long[] bv = new long[(int) bl]; base[c].get(b0[b], b0[b] + bl, bv, 0);
                     for (long i = b0[b]; i < b0[b] + bl; i++) { LaesMath.Acc a = new LaesMath.Acc(); for (int q = -127; q <= 128; q++) a.mac(h[q + 127], cd.c[c][(int) LaesMath.mir(i + wh + q, n)]); final int s = 31 - up;
                         final double r = (double) (s > 0 ? a.shr(s) : a.lo << (-s)), x = (double) bv[(int) (i - b0[b])]; eb += x * x; er += (x - r) * (x - r); } }
                 if (eb > 0 && er > 0) A.resid = Cv.max(A.resid, 10 * Math.log10(er / eb));
-                else if (eb == 0 && er > 0) { A.resid = Cv.max(A.resid, 0.0); A.silentBlocks.add(b); } } }   // DEC 25 (2026-11-15, as laes_tool.cpp): not matching (0 dB, the worst); before, skipped
+                else if (eb == 0 && er > 0) { A.resid = Cv.max(A.resid, 0.0); A.silentBlocks.add(b); } } }   // 2026-11-15, as laes_tool.cpp: not matching (0 dB, the worst); before, skipped
         finally { StreamEnc.closeQuiet(base[0]); StreamEnc.closeQuiet(base[1]); }
         if (A.err == 0) A.err = A.resid;   // LAEY gave no phase line: use the own check
         return A; }
 
     // port of laes_tool.cpp acceptAlign, the question: a line from stdin; the first letter y or Y accepts
-    // FU28-2: one reader for all questions (a reader made per question read ahead and lost the answers to the later ones from a pipe)
+    // one reader for all questions (a reader made per question read ahead and lost the answers to the later ones from a pipe)
     private static BufferedReader stdin = null;
     @Override public boolean ask(String question) { System.out.print(question); System.out.flush();
         String l; try { synchronized (LaeyAutoAligner.class) { if (stdin == null) stdin = new BufferedReader(new InputStreamReader(System.in)); l = stdin.readLine(); } } catch (IOException e) { l = null; }

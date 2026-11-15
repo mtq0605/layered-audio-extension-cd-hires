@@ -10,11 +10,11 @@
 #include <cmath>
 #include <vector>
 #include "../src/lae_math.h"
-#include "../src/noise_replace.h"   // decision 21: no silent replacement (--overwrite)
+#include "../src/noise_replace.h"   // no silent replacement (--overwrite)
 int main(int argc, char** argv) {
     nrep::takeOverwrite(argc, argv);
     if (argc < 2) { fprintf(stderr, "usage: gen_noise_test <out.wav> [--overwrite]\n"); return 2; }
-    if (!nrep::mayReplace(argv[1])) return 1;   // DEC 21 (2026-11-15): an existing output is not replaced silently
+    if (!nrep::mayReplace(argv[1])) return 1;   // 2026-11-15: an existing output is not replaced silently
     const uint32_t rate = 96000, secs = 25, frames = rate * secs; const int period = 96;   // 1000 Hz
     std::vector<int32_t> tone(period); for (int i = 0; i < period; i++) tone[i] = (int32_t)llround(2000.0 * lmath::sinpi(2.0 * i / period));   // about -72 dBFS
     uint64_t s = 0x2545F4914F6CDD1Dull; auto rnd = [&]() { s ^= s << 13; s ^= s >> 7; s ^= s << 17; return (int32_t)((s >> 40) & 0xFFF) - 2048; };

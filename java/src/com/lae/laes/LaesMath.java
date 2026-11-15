@@ -89,7 +89,7 @@ public final class LaesMath {
             final double r = u / (double) H; double w = 0.0; if (r > -1.0 && r < 1.0) w = I0Series(beta * Math.sqrt(1.0 - r * r)) / i0b;
             final double v = sinc * w * 2147483648.0; final long t = Cv.d2l(Math.floor(v + 0.5));
             h[q + H - 1] = t; sum += t;
-            final double au = Math.abs(u);   // C++ "u < 0 ? -u : u" (PORT_RULES F1: MSVC makes it fabs); only compared below
+            final double au = Math.abs(u);   // C++ "u < 0 ? -u : u" (MSVC makes it fabs); only compared below
             if (au < best) { best = au; centre = q + H - 1; } }
         h[centre] += (1L << 31) - sum;     // DC gain exactly 1
         return h;

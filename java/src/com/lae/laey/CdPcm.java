@@ -47,7 +47,7 @@ public abstract class CdPcm {
      * 64 KiB). A failed read throws "cannot read the file" (the decoder's read then returns -1, as on a stream error).
      */
     public static CdPcm reader(final LaeyDecoder.ReadFn rdIn, final long off, final long n, final long cacheBytes) {
-        final LaeyDecoder.ReadFn rd = rdIn instanceof Synced ? rdIn : new Synced(rdIn);   // FU24-5: shared by share(), so one read at a time
+        final LaeyDecoder.ReadFn rd = rdIn instanceof Synced ? rdIn : new Synced(rdIn);   // shared by share(), so one read at a time
         final int maxBlocks = (int) Math.max(4, Math.min(1 << 20, cacheBytes / (2L * BLOCK_VALUES)));
         return new CdPcm() {
             final Map<Long, short[]> cache = new LinkedHashMap<Long, short[]>(16, 0.75f, true) { private static final long serialVersionUID = 1L;
@@ -64,7 +64,7 @@ public abstract class CdPcm {
                 return m.hex(); }
             @Override public void close() { cache.clear(); last = null; lastK = -1; }
             @Override public CdPcm share() { return reader(rd, off, n, cacheBytes); } }; }
-    /** FU24-5: the copies of share() run in other threads and use the same read function, which the application need not make safe for
+    /** the copies of share() run in other threads and use the same read function, which the application need not make safe for
      *  two threads at once (a seek followed by a read is not): every read of one source and its copies goes through this one lock. */
     private static final class Synced implements LaeyDecoder.ReadFn {
         private final LaeyDecoder.ReadFn fn; Synced(LaeyDecoder.ReadFn f) { fn = f; }

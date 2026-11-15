@@ -32,7 +32,7 @@ static bool roundTrip(std::vector<MasterIn> ms, const std::vector<double>& Ts, i
     if (flac) { const std::vector<uint8_t> f = laesflac::writeFlac(core.c, base, core.bits, body); laesflac::Info fi; bool md5ok;
         const std::string e = laesflac::readFlac(f, fi, core2.c, body2, md5ok); if (!e.empty() || !md5ok) { why = "FLAC read: " + (e.empty() ? std::string("MD5") : e); return false; }
         core2.rate = fi.rate; core2.bits = fi.bps; if (fileOut) *fileOut = f; }
-    else { const std::string path = (fs::temp_directory_path() / ("laes_selftest_" + std::to_string((unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count()) + ".wav")).string(); const std::vector<uint8_t> wb = wavBytes(core, &body);   // FU14-9: two self-tests at once use different files
+    else { const std::string path = (fs::temp_directory_path() / ("laes_selftest_" + std::to_string((unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count()) + ".wav")).string(); const std::vector<uint8_t> wb = wavBytes(core, &body);   // two self-tests at once use different files
         if (!writeAll(path, wb)) { why = "cannot write temp WAV"; return false; } const std::string e = readWav(path, core2, &body2); fs::remove(path); if (!e.empty()) { why = e; return false; } if (fileOut) *fileOut = wb; }
     if (!same(core, core2) || body != body2) { why = "container changed the core master or the LAES block"; return false; }
     std::vector<Pcm> dec; std::vector<MasterInfo> di; std::vector<bool> ok; const std::string de = decodeLaes(body2, core2, base, dec, di, ok); if (!de.empty()) { why = "decode: " + de; return false; }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: Apache-2.0
 // lae_abx - a stand-alone ABX listening test for the LAE demo files (Windows 10 version 1703 or later, x64: it uses the per-monitor DPI functions of that version).
-// FU20-14 (2026-11-14): runProcess and expectedFromLog, unused since decoding moved to startDecode and riffTotal, removed.
+// 2026-11-14: runProcess and expectedFromLog, unused since decoding moved to startDecode and riffTotal, removed.
 //
 // The kit folder holds lae_abx.exe, lae_udec.exe (the LAE decoder), abx_set.txt and the audio files. abx_set.txt lists the pairs:
 //   <name> | <file A> | <pick A> | <file B> | <pick B>
@@ -12,7 +12,7 @@
 // The program assigns the two sources to the buttons A and B at random and does not tell which is which until the test ends.
 // In every trial X and Y are A and B in a random order; the listener says whether X is A or X is B. At the end it shows the score,
 // the one-sided binomial p-value and which source was A. The log (results\, with the SHA-256 of both source files) is written from the
-// start of a pair with one line per answer; the assignment and the results are added at the end (DEC 44, 2026-11-15). The session
+// start of a pair with one line per answer; the assignment and the results are added at the end (2026-11-15). The session
 // summary gives the test rate of every pair.
 // The ABX method itself goes back to Munson & Gardner (1950) and Clark (JAES 30(5), 1982).
 //
@@ -54,7 +54,7 @@
 static const char* kVersion = "lae_abx 1.1 (2026-11-15)";
 
 typedef std::function<void(const std::string&, double)> Say;   // stage text, overall fraction 0..1 (negative: unchanged)
-// FU20-12: set when the window closes; the preparation stops at its next check and keeps nothing (gPrepRunning: it still runs)
+// set when the window closes; the preparation stops at its next check and keeps nothing (gPrepRunning: it still runs)
 static std::atomic<bool> gQuit{ false }, gPrepRunning{ false };
 
 // ---------------------------------------------------------------- small helpers
@@ -143,7 +143,7 @@ struct Resampler {
 struct Source { std::string name, file, pick, sha; std::vector<float> L, R; };
 
 
-// the resampler's pass band ends at 20 kHz, so both rates must be above 40 kHz unless they are equal (FU20-8)
+// the resampler's pass band ends at 20 kHz, so both rates must be above 40 kHz unless they are equal
 static bool resampleOk(int in, int out, std::string& err) {
     if (in > 0 && (in == out || std::min(in, out) > 40000)) return true;
     err = "the source rate is " + std::to_string(in) + " Hz: rates of 40 kHz and below cannot be brought to the test rate (the resampler passes 0-20 kHz)"; return false; }
@@ -222,7 +222,7 @@ static void pruneCache() {   // prepared sources (and unfinished copies) older t
     const std::wstring c = cacheDir(); FILETIME now; GetSystemTimeAsFileTime(&now); const unsigned long long n = ((unsigned long long)now.dwHighDateTime << 32) | now.dwLowDateTime, limit = 14ULL * 24 * 3600 * 10000000ULL;
     for (const wchar_t* pat : { L"\\src_*.f32", L"\\src_*.f32.part" }) { WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((c + pat).c_str(), &fd); if (h == INVALID_HANDLE_VALUE) continue;
         do { const unsigned long long t = ((unsigned long long)fd.ftLastWriteTime.dwHighDateTime << 32) | fd.ftLastWriteTime.dwLowDateTime; if (n > t && n - t > limit) DeleteFileW((c + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(h, &fd)); FindClose(h); } }
-// A kept copy (FU20-9, 2026-11-14; DEC 43, 2026-11-15): the 8 bytes "LAEABXC2", the frame count (uint64), the identity of the programs
+// A kept copy (2026-11-14; 2026-11-15): the 8 bytes "LAEABXC2", the frame count (uint64), the identity of the programs
 // that made it (64 hex characters: the SHA-256 of this program's version text and of the lae_udec.exe next to it), then all left samples
 // and all right samples (float). It is written to <name>.part and renamed when complete; a file whose head, identity or length does not
 // match (another lae_abx or lae_udec, or a copy of the old head LAEABXC1) is prepared again. "Clear kept copies" removes them all.
@@ -254,7 +254,7 @@ static void cacheSave(const std::wstring& path, const Source& x) {   // nothing 
     for (int c = 0; c < 2 && ok; c++) { const char* p = (const char*)(c ? x.R.data() : x.L.data()); size_t left = x.L.size() * 4; while (left > 0) { const DWORD n = (DWORD)std::min<size_t>(left, 1u << 30); if (!WriteFile(f, p, n, &put, nullptr) || put != n) { ok = false; break; } p += n; left -= n; } }
     if (!CloseHandle(f)) ok = false;
     if (!ok || !MoveFileExW(part.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(part.c_str()); }
-// DEC 43: the button "Clear kept copies": every kept copy (and unfinished copy) in the cache folder is removed; returns how many
+// the button "Clear kept copies": every kept copy (and unfinished copy) in the cache folder is removed; returns how many
 static int clearCache(unsigned long long& bytes) {
     const std::wstring c = cacheDir(); int n = 0; bytes = 0;
     for (const wchar_t* pat : { L"\\src_*.f32", L"\\src_*.f32.part" }) { WIN32_FIND_DATAW fd; HANDLE h = FindFirstFileW((c + pat).c_str(), &fd); if (h == INVALID_HANDLE_VALUE) continue;
@@ -270,16 +270,16 @@ static long long riffTotal(const std::wstring& path) {   // the final file size 
     if (!memcmp(b, "RF64", 4) && got >= 28 && !memcmp(b + 12, "ds64", 4)) { long long r64; memcpy(&r64, b + 20, 8); return r64 > 36 ? r64 + 8 : 0; } return 0; }
 static std::string have_text(const Job& j);
 struct Job { HANDLE proc = nullptr; std::wstring out, log; long long want = 0; bool done = false, ok = true; double frac = 0; };
-// FU20-12: every lae_udec runs in this job; it is ended when the window closes, and at the latest when this program ends
+// every lae_udec runs in this job; it is ended when the window closes, and at the latest when this program ends
 static HANDLE decodeJob() { static HANDLE job = []() { HANDLE h = CreateJobObjectW(nullptr, nullptr); if (h) { JOBOBJECT_EXTENDED_LIMIT_INFORMATION li{}; li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         if (!SetInformationJobObject(h, JobObjectExtendedLimitInformation, &li, sizeof li)) { CloseHandle(h); h = nullptr; } } return h; }(); return job; }
 static bool startDecode(const std::wstring& dir, const std::wstring& src, const std::string& pick, Job& j, std::string& err) {
     SECURITY_ATTRIBUTES sa{ sizeof sa, nullptr, TRUE }; HANDLE log = CreateFileW(j.log.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS, 0, nullptr);
     STARTUPINFOW si{ sizeof si }; si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE; si.hStdOutput = log; si.hStdError = log; si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    PROCESS_INFORMATION pi{}; std::wstring c = L"\"" + dir + L"\\lae_udec.exe\" dec \"" + src + L"\" \"" + j.out + L"\" \"--pick=" + widen(pick) + L"\"";   // quoted: a master name may hold spaces (FU20-13)
+    PROCESS_INFORMATION pi{}; std::wstring c = L"\"" + dir + L"\\lae_udec.exe\" dec \"" + src + L"\" \"" + j.out + L"\" \"--pick=" + widen(pick) + L"\"";   // quoted: a master name may hold spaces
     const BOOL ok = CreateProcessW(nullptr, &c[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi); if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
     if (!ok) { err = "cannot start lae_udec.exe"; return false; }
-    if (decodeJob()) AssignProcessToJobObject(decodeJob(), pi.hProcess);   // FU20-12: the decoders end with this program
+    if (decodeJob()) AssignProcessToJobObject(decodeJob(), pi.hProcess);   // the decoders end with this program
     ResumeThread(pi.hThread); CloseHandle(pi.hThread); j.proc = pi.hProcess; return true; }
 
 static std::string have_text(const Job& j) { return j.want > 0 ? std::to_string((int)(j.frac * 100)) + " %" : std::string("reading and checking the file first"); }
@@ -325,7 +325,7 @@ static bool preparePair(const Pair& p, int rate, Source s[2], long long& lag, st
     for (int c = 0; c < 2; c++) { std::vector<float>& b = c ? s[1].R : s[1].L; if (lag > 0) b.erase(b.begin(), b.begin() + std::min<long long>(lag, (long long)b.size())); else if (lag < 0) b.insert(b.begin(), (size_t)(-lag), 0.0f); }
     const size_t n = std::min(s[0].L.size(), s[1].L.size()); for (int i = 0; i < 2; i++) { s[i].L.resize(n); s[i].R.resize(n); }
     say("ready", 1.0); return n > 0; }
-// FU20-8: an exception (memory, mostly) ends the preparation with a reason instead of ending the program
+// an exception (memory, mostly) ends the preparation with a reason instead of ending the program
 static bool preparePairSafe(const Pair& p, int rate, Source s[2], long long& lag, std::string& err, const Say& say) {
     try { return preparePair(p, rate, s, lag, err, say); }
     catch (const std::bad_alloc&) { err = "not enough memory (both sources are held in memory, at the source rate while they are read)"; }
@@ -335,7 +335,7 @@ static bool preparePairSafe(const Pair& p, int rate, Source s[2], long long& lag
 // ---------------------------------------------------------------- playback (WASAPI shared mode, float stereo at the test rate)
 struct Player {
     const std::vector<float>* src[2][2] = {}; std::atomic<int> cur{ -1 }, want{ -1 }; std::atomic<long long> pos{ 0 }, from{ 0 }, to{ 0 }; std::atomic<bool> run{ false };
-    std::thread th; int rate = 48000; long long len = 0; HWND notify = nullptr;   // notify: gets WM_APP + 3 (wParam = HRESULT) when no sound can be played (FU20-11)
+    std::thread th; int rate = 48000; long long len = 0; HWND notify = nullptr;   // notify: gets WM_APP + 3 (wParam = HRESULT) when no sound can be played
     void set(Source s[2], int r) { stop(); for (int i = 0; i < 2; i++) { src[i][0] = &s[i].L; src[i][1] = &s[i].R; } rate = r; len = (long long)s[0].L.size(); pos = 0; from = 0; to = len; }
     void play(int which) { want = which; if (!run) { if (th.joinable()) th.join(); run = true; th = std::thread([this]() { loop(); }); } }   // a loop that gave up is joined first
     void pause() { want = -1; }
@@ -364,8 +364,8 @@ struct Player {
 static double pValue(int k, int n) { double s = 0; for (int i = k; i <= n; i++) { double c = 1; for (int j = 0; j < i; j++) c = c * (n - j) / (j + 1); s += c; } return s / std::pow(2.0, n); }
 struct Test {
     Pair pair; int rate = 48000, trials = 16, done = 0, correct = 0; int aIs = 0;   // aIs: which source (0/1 = line order) is button A
-    std::vector<int> xIsA; std::vector<std::string> lines; Source s[2]; long long lag = 0; std::string startedAt; float peak[2] = { 0, 0 };   // peak: largest |sample| per source (FU20-11)
-    std::wstring logPath; std::string logText; bool logOk = true;   // DEC 44: the log of this pair, written from its start
+    std::vector<int> xIsA; std::vector<std::string> lines; Source s[2]; long long lag = 0; std::string startedAt; float peak[2] = { 0, 0 };   // peak: largest |sample| per source
+    std::wstring logPath; std::string logText; bool logOk = true;   // the log of this pair, written from its start
     int xSource(int t) const { return xIsA[(size_t)t] ? aIs : 1 - aIs; } };
 
 // ---------------------------------------------------------------- window
@@ -387,7 +387,7 @@ static void showTrial() {
     std::string st = b; for (int i = 0; i < 2; i++) if (gTest.peak[i] > 1.0f) { char pk[200]; snprintf(pk, sizeof pk, "\r\nNote: %s peaks %.1f dB above full scale; the system may limit it while playing.", i ? "the second source" : "the first source", 20 * std::log10(gTest.peak[i])); st += pk; }
     if (gTest.lag) { char lg[160]; snprintf(lg, sizeof lg, "\r\nLined up: the second source of the pair is moved by %lld samples (%.1f ms).", gTest.lag, 1000.0 * (double)gTest.lag / gTest.rate); st += lg; }
     setStatus(st); }
-// DEC 44 (2026-11-15): the log of a pair is written from its start, and every answer adds a line at once, so a test that is not
+// 2026-11-15: the log of a pair is written from its start, and every answer adds a line at once, so a test that is not
 // finished still leaves its trace. Which source was button A, and whether each answer was right, is written only when the test ends
 // (or the window is closed during it), so the open log does not give the result away.
 static void logAdd(const std::string& s) {
@@ -420,7 +420,7 @@ static void finish() {
     char b[1024]; snprintf(b, sizeof b, "Finished: %d of %d correct, p = %.4f (%s).\r\nA was: %s\r\nB was: %s\r\n%s%s",
         gTest.correct, gTest.trials, p, p < 0.05 ? "below 5 %: a difference was heard" : "not below 5 %: no reliable difference", A.name.c_str(), B.name.c_str(),
         logOk ? "Log: " : "THE LOG COULD NOT BE WRITTEN (note the result shown here): ", narrow(path).c_str());
-    char sl[400]; snprintf(sl, sizeof sl, "%-48s %2d/%-2d  p = %.4f  %d Hz  (A was %s)", gTest.pair.name.c_str(), gTest.correct, gTest.trials, p, gTest.rate, A.name.c_str()); gSummary.push_back(sl);   // DEC 44: the rate of every pair
+    char sl[400]; snprintf(sl, sizeof sl, "%-48s %2d/%-2d  p = %.4f  %d Hz  (A was %s)", gTest.pair.name.c_str(), gTest.correct, gTest.trials, p, gTest.rate, A.name.c_str()); gSummary.push_back(sl);   // the rate of every pair
     std::string msg = b; gQueuePos++;
     if (gQueuePos < gQueue.size()) { msg += "\r\n\r\nNext: " + gSet[(size_t)gQueue[gQueuePos]].name + ".  Press \"Next pair\" when you are ready."; SetWindowTextW(gPrepare, (L"Next pair (" + std::to_wstring(gQueue.size() - gQueuePos) + L" left)").c_str()); }
     else {   // the whole session in one summary file
@@ -433,7 +433,7 @@ static void choose(bool saysXisA) {
     const bool truth = gTest.xIsA[(size_t)gTest.done] != 0, ok = truth == saysXisA; if (ok) gTest.correct++;
     char b[160]; snprintf(b, sizeof b, "%s trial %2d: answered \"X is %s\", X was %s: %s", nowText().c_str() + 11, gTest.done + 1, saysXisA ? "A" : "B", truth ? "A" : "B", ok ? "correct" : "wrong");
     gTest.lines.push_back(b); gTest.done++;
-    { char ab[120]; snprintf(ab, sizeof ab, "%s trial %2d: answered \"X is %s\"\r\n", nowText().c_str() + 11, gTest.done, saysXisA ? "A" : "B"); logAdd(ab); }   // DEC 44: at once, without the result
+    { char ab[120]; snprintf(ab, sizeof ab, "%s trial %2d: answered \"X is %s\"\r\n", nowText().c_str() + 11, gTest.done, saysXisA ? "A" : "B"); logAdd(ab); }   // at once, without the result
     if (gTest.done >= gTest.trials) finish(); else showTrial(); }
 static void playButton(int b) {   // 0 A, 1 B, 2 X, 3 Y
     if (!gReady) return; int s; const int t = std::min(gTest.done, gTest.trials - 1);
@@ -468,7 +468,7 @@ static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
         case ID_PA: playButton(0); return 0; case ID_PB: playButton(1); return 0; case ID_PX: playButton(2); return 0; case ID_PY: playButton(3); return 0;
         case ID_STOP: gPlayer.pause(); return 0;
         case ID_XA: choose(true); return 0; case ID_XB: choose(false); return 0;
-        case ID_SETSTART: if (gReady) { gPlayer.from = std::max<long long>(0, std::min<long long>(gPlayer.pos, gPlayer.to - gTest.rate / 2)); updateRange(); } return 0;   // kept inside 0..len (FU20-13: a piece shorter than 0.5 s)
+        case ID_SETSTART: if (gReady) { gPlayer.from = std::max<long long>(0, std::min<long long>(gPlayer.pos, gPlayer.to - gTest.rate / 2)); updateRange(); } return 0;   // kept inside 0..len (a piece shorter than 0.5 s)
         case ID_SETEND: if (gReady) { gPlayer.to = std::min<long long>(gPlayer.len, std::max<long long>(gPlayer.pos, gPlayer.from + gTest.rate / 2)); updateRange(); } return 0;
         case ID_RESET: if (gReady) { gPlayer.from = 0; gPlayer.to = gPlayer.len; updateRange(); } return 0;
         case ID_CLEAR: if (gBusy || gPrepRunning) { setStatus("A pair is being prepared: clear the kept copies when it has finished."); return 0; }
@@ -482,8 +482,8 @@ static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
         gTest.aIs = (int)(rnd32() & 1); gTest.xIsA.clear(); for (int i = 0; i < gTest.trials; i++) gTest.xIsA.push_back((int)(rnd32() & 1)); gTest.startedAt = nowText(); logStart();
         gPlayer.set(gTest.s, gTest.rate); gReady = true; enableTest(true); updateRange(); showTrial(); return 0;
     case WM_APP_AUDIO: { char ab[300]; snprintf(ab, sizeof ab, "No sound: the default playback device could not be opened or was removed (error 0x%08lX). Check the playback device in Windows, then press Play again.", (unsigned long)wp); setStatus(ab); } return 0;
-    case WM_DESTROY: gPlayer.stop(); gQuit = true;   // FU20-12: end the decoders, let the preparation stop (at most 30 s), then remove the work folder
-        if (gReady && gTest.done < gTest.trials) logKey("test abandoned (the window was closed)");   // DEC 44: the log of a test that was not finished
+    case WM_DESTROY: gPlayer.stop(); gQuit = true;   // end the decoders, let the preparation stop (at most 30 s), then remove the work folder
+        if (gReady && gTest.done < gTest.trials) logKey("test abandoned (the window was closed)");   // the log of a test that was not finished
         if (gPrepRunning) { if (decodeJob()) TerminateJobObject(decodeJob(), 1); for (int k = 0; k < 600 && gPrepRunning; k++) Sleep(50); }
         removeWorkDir(); PostQuitMessage(0); return 0; }
     return DefWindowProcW(w, m, wp, lp); }
@@ -493,7 +493,7 @@ static HWND mk(const wchar_t* cls, const wchar_t* text, DWORD style, int x, int 
     HWND h = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, s(x), s(y), s(cw), s(chh), gWnd, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr); SendMessageW(h, WM_SETFONT, (WPARAM)gFont, TRUE); return h; }
 
 // ---------------------------------------------------------------- command-line preparation (checks)
-// DEC 21 (2026-11-15): an existing A.wav, B.wav or prepare.txt is replaced only with --overwrite. This program is a window program:
+// 2026-11-15: an existing A.wav, B.wav or prepare.txt is replaced only with --overwrite. This program is a window program:
 // its command line has no console input to answer a question, so without --overwrite it refuses (the decided text), as every LAE
 // tool does without a console.
 static bool cliMayWrite(const std::wstring& path, bool overwrite) {
@@ -539,7 +539,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     const wchar_t* rn[3] = { L"Set start", L"Set end", L"Whole piece" }; for (int i = 0; i < 3; i++) gRangeBtn[i] = mk(L"BUTTON", rn[i], BS_PUSHBUTTON, 320 + i * 104, 470, 98, 28, ID_SETSTART + i);
     mk(L"STATIC", L"A and B are assigned at random; the program tells which was which only at the end. X and Y are A and B in a random order in every trial. "
                   L"Switching keeps the position. Results are written to the results folder next to this program.", SS_LEFT, 12, 512, 616, 60, -1);
-    mk(L"BUTTON", L"Clear kept copies", BS_PUSHBUTTON, 488, 576, 140, 26, ID_CLEAR);   // DEC 43: removes the prepared copies kept in TEMP
+    mk(L"BUTTON", L"Clear kept copies", BS_PUSHBUTTON, 488, 576, 140, 26, ID_CLEAR);   // removes the prepared copies kept in TEMP
     enableTest(false); gSet = readSet(exeDir()); pruneCache();
     for (auto& p : gSet) SendMessageW(gPair, LB_ADDSTRING, 0, (LPARAM)widen(p.name).c_str());
     if (gSet.empty()) setStatus("abx_set.txt was not found next to lae_abx.exe, or it lists no pairs.");

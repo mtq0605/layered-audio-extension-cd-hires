@@ -36,7 +36,7 @@ public final class Lift {
     // port of laes_lift.h:mir
     public static long mir(long i, long n) { if (n == 1) return 0; long p = 2 * (n - 1); i %= p; if (i < 0) i += p; return i < n ? i : p - i; }
     // port of laes_lift.h:maxAbs
-    public static long maxAbs(long[] x, int len) { long m = 0; for (int k = 0; k < len; k++) { long v = x[k]; long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v;   /* FU13-3: MIN_VALUE counts as the largest (wide path) */ if (a > m) m = a; } return m; }
+    public static long maxAbs(long[] x, int len) { long m = 0; for (int k = 0; k < len; k++) { long v = x[k]; long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v;   /* MIN_VALUE counts as the largest (wide path) */ if (a > m) m = a; } return m; }
     public static long maxAbs(long[] x) { return maxAbs(x, x.length); }
     // port of laes_lift.h:sumAbs
     static long sumAbs(long[] h, int NT) { long s = 0; for (int t = 0; t < NT; t++) s += h[t] < 0 ? -h[t] : h[t]; return s; }
@@ -117,7 +117,7 @@ public final class Lift {
         final Object dm = new Object(); final int[] pending = {0}; final int helpers = Math.min(threads, nc) - 1;
         for (int k = 0; k < helpers; k++) { synchronized (dm) { pending[0]++; }
             Pool.get().push(new Runnable() { public void run() { try { work.run(); } finally { synchronized (dm) { if (--pending[0] == 0) dm.notifyAll(); } } } }); }
-        work.run(); boolean intr = false;   // FU28-5 (as FU25-6): an interruption is set again after the wait, not inside it (wait(1) threw again at once: a busy loop)
+        work.run(); boolean intr = false;   // an interruption is set again after the wait, not inside it (wait(1) threw again at once: a busy loop)
         for (;;) { synchronized (dm) { if (pending[0] == 0) break; }
             if (!Pool.get().runOne()) { synchronized (dm) { if (pending[0] != 0) { try { dm.wait(1); } catch (InterruptedException e) { intr = true; } } } } }
         if (intr) Thread.currentThread().interrupt();

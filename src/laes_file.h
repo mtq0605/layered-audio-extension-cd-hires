@@ -106,7 +106,7 @@ struct Pcm { int rate = 0, bits = 0; V c[2]; int64_t frames() const { return (in
 inline void hashPcm(const Pcm& p, uint8_t out[32]) { Sha256 s; std::vector<uint8_t> b; b.reserve(1 << 16);
     for (int64_t i = 0; i < p.frames(); i++) for (int c = 0; c < 2; c++) { uint32_t v = (uint32_t)(int32_t)p.c[c][i]; for (int k = 0; k < 4; k++) b.push_back((uint8_t)(v >> (8 * k))); if (b.size() >= (1 << 16)) { s.update(b.data(), b.size()); b.clear(); } }
     s.update(b.data(), b.size()); s.final(out); }
-// FU12-7 / FU13-4: a decoded sample outside the master's word length (bits) fails the master's check, whatever its SHA-256 says (the
+// a decoded sample outside the master's word length (bits) fails the master's check, whatever its SHA-256 says (the
 // hash covers only the low 32 bits of each value)
 inline bool inWord(int64_t v, int bits) { return v >= -(1LL << (bits - 1)) && v < (1LL << (bits - 1)); }
 inline bool pcmInWord(const Pcm& p) { for (int c = 0; c < 2; c++) for (const int64_t v : p.c[c]) if (!inWord(v, p.bits)) return false; return true; }
@@ -118,14 +118,14 @@ inline void hashCore(const Pcm& p, uint8_t out[32]) { Sha256 s; std::vector<uint
 struct MasterInfo { int bits = 0, stages = 0, w = 0, storage = 0, refTier = 0, rate = 0; int64_t frames = 0; int64_t whole = 0; uint32_t frac = 0; uint8_t sha[32]; double layerBits = 0;
                     std::string name; int flags = 0; int menu = 0; };   // menu: the position in menus and selection, 1 ... M (version 2), 0 = the file order
 const int kNoDerive = 1;   // master record flag bit 0
-// DEC 39 (2026-11-15): the test switches of laes / laes_export (environment variables that change what the tools do) act only when the
+// 2026-11-15: the test switches of laes / laes_export (environment variables that change what the tools do) act only when the
 // master switch LAE_TEST_MODE=1 is set; testEnv gives the value then, else nullptr. KEEPTMP (keep the work folder) changes no output byte
 // and acts without it. testModeLine prints, once per program run, the active test switches.
 inline const char* testEnv(const char* name) { const char* m = getenv("LAE_TEST_MODE"); return m && !strcmp(m, "1") ? getenv(name) : nullptr; }
 inline void testModeLine() { static bool done = false; if (done) return; done = true; const char* m = getenv("LAE_TEST_MODE"); if (!m || strcmp(m, "1")) return;
     std::string on; for (const char* n : {"LAES_TEST_KEYS", "LAES_NO_SHORTLIST", "LAES_FORCE_RF64", "LAES_PIECE", "LAES_SELFCHECK_FLIP", "LAES_DISK_RESERVE"}) if (const char* v = getenv(n)) on += std::string(on.empty() ? "" : ", ") + n + "=" + v;
     printf("TEST MODE (LAE_TEST_MODE=1): active test switches: %s. Unset LAE_TEST_MODE to return to normal behaviour.\n", on.empty() ? "none" : on.c_str()); }
-// DEC 11 (2026-11-15): T (whole + frac / 2^32 base samples) of a master lies within the length of the track: -N <= T <= N, N = the core
+// 2026-11-15: T (whole + frac / 2^32 base samples) of a master lies within the length of the track: -N <= T <= N, N = the core
 // master frames (an offset beyond the track is meaningless). Decoders refuse a record with a larger T; the encoder writes none.
 inline bool tWithinTrack(int64_t whole, uint32_t frac, uint64_t n) {
     if (whole >= 0) return (uint64_t)whole < n || ((uint64_t)whole == n && frac == 0);
@@ -202,7 +202,7 @@ inline std::string decodeLaes(const std::vector<uint8_t>& body, const Pcm& core,
             if (!validMasterName(np, (size_t)nl)) return "invalid master name"; I.name.assign((const char*)np, (size_t)nl); I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)   // all in uint64
-            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
+            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";
         if (I.storage != 1 && I.refTier == 0 && core.frames() < 1) return "invalid master record: it refers to a core master of no samples";   // the reference needs core samples (refLen, mir)
         if (F64 > (uint64_t)PTRDIFF_MAX / sizeof(int64_t)) return "master too long for this decoder"; I.frames = (int64_t)F64;   // whole master in memory: int64_t counts, but a V of F64 samples must be addressable (32-bit: 2^28)
         memcpy(I.sha, sha, 32); const int j = I.storage == 2 ? std::min(I.stages, info[I.refTier - 1].stages) : 0; const int64_t nj = levLen(I.frames, I.stages - j);

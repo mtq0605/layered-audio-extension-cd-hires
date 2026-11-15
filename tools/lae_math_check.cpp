@@ -7,7 +7,7 @@
 #include <cstring>
 #include <cmath>
 #include "lae_math.h"
-// FU20-2 (2026-11-14): pi written here (the value of M_PI), so that the build command above works without _USE_MATH_DEFINES
+// 2026-11-14: pi written here (the value of M_PI), so that the build command above works without _USE_MATH_DEFINES
 static const double PI = 3.14159265358979323846;
 static double ulps(double a, double b) { if (a == b) return 0; const double d = std::fabs(a - b), u = std::fabs(std::nextafter(b, 2 * b + 1) - b); return u > 0 ? d / u : d; }
 static uint64_t mix(uint64_t h, double v) { uint64_t b; std::memcpy(&b, &v, 8); return (h ^ b) * 0x100000001B3ull; }
@@ -31,7 +31,7 @@ int main() {
     w = 0; for (long i = 1; i <= 2000000; i++) { const double x = i * 0.37; w = std::fmax(w, ulps(lmath::log10(x), std::log10(x))); h = mix(h, lmath::log10(x)); }
     printf("log10: max %.2f ulp\n", w);
     printf("checksum (must be the same on every platform): %016llx\n", (unsigned long long)h);
-    // FU20-1 (2026-11-14): the reference value (MSVC x64 and x86, /fp:strict, 2026-11-14); another value is a failure, exit code 1
+    // 2026-11-14: the reference value (MSVC x64 and x86, /fp:strict, 2026-11-14); another value is a failure, exit code 1
     const uint64_t REF = 0x22f04c1237795a7dull;
     if (h != REF) { printf("FAILED: the checksum differs from the reference %016llx: lae_math gives other values on this platform\n", (unsigned long long)REF); return 1; }
     return 0; }

@@ -536,7 +536,7 @@ static int encode(int argc, char** argv) {
     // the line "align ..." the earlier run noted; if they differ, no finished step is reused (see below, after the alignment).
     std::set<std::string> doneSteps; std::mutex stepMu; const std::string manifest = T("resume.txt"); std::string resumeHead, oldAlign;
     if (resume) { std::string key = std::string("lae_enc " __DATE__ " " __TIME__ " | options");   // not the block length: it does not change any result
-        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume") && !isTagOpt(argv[i]) && !isFormOpt(argv[i]) && !isOverwriteOpt(argv[i]) && strncmp(argv[i], "mem=", 4)) key += std::string(" ") + argv[i];   // tags and the form: written with the file only; mem=: only the block length, which changes no result (FU07-9)
+        for (int i = 3; i < argc; i++) if (strcmp(argv[i], "resume") && !isTagOpt(argv[i]) && !isFormOpt(argv[i]) && !isOverwriteOpt(argv[i]) && strncmp(argv[i], "mem=", 4)) key += std::string(" ") + argv[i];   // tags and the form: written with the file only; mem=: only the block length, which changes no result
         key += " | master " + masterMd5;
         if (noisePath) { const std::string t = encio::readText(noisePath); uint64_t h = 1469598103934665603ull; for (unsigned char ch : t) { h ^= ch; h *= 1099511628211ull; }   // FNV-1a of the marking file
             char hs[32]; snprintf(hs, sizeof hs, "%016llx", (unsigned long long)h); key += std::string(" | noise ") + hs; }

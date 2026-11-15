@@ -6,7 +6,7 @@ import java.io.Console;
 import java.io.File;
 
 /**
- * Decision 21 (2026-11-15), the same rule and texts as every C++ tool (lae_enc.cpp mayReplace, src/laes_pick.h mayReplace): an existing
+ * 2026-11-15: the same rule and texts as every C++ tool (lae_enc.cpp mayReplace, src/laes_pick.h mayReplace): an existing
  * output file is not replaced silently. With a console ({@code System.console() != null}) the person is asked twice and only two answers
  * "yes" replace it; without a console it is refused unless --overwrite was given. The prompts and the refusal are operating explanations:
  * English, then Chinese. A resume of an unfinished run is not a replacement (the callers do not ask then).

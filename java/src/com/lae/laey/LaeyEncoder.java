@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class LaeyEncoder {
     /** the C++ commit this port reproduces, and the port's part. It is part of the resume key of the work folder: bump it (the part after
      *  "java-") whenever the format or the meaning of the intermediate files in the work folder changes, so that a resume never continues
-     *  from files an older build wrote (decision 36, 2026-11-15). */
+     *  from files an older build wrote (2026-11-15). */
     public static final String VERSION = "1d96a60/java-1";
 
     /** options = the command line of lae_enc (see lae_enc.cpp) */
@@ -42,7 +42,7 @@ public final class LaeyEncoder {
         public double memGB = 0;
         /** worker threads (C++ PARTTHREADS); 0: the processors of the device. The output does not depend on it */
         public int threads = 0;
-        /** the work folder (null: &lt;out&gt;.tmp). Give every encoding its own folder: a folder in use by another run is refused (FU22-8) */
+        /** the work folder (null: &lt;out&gt;.tmp). Give every encoding its own folder: a folder in use by another run is refused */
         public String workDir;
         /** independent CD (part 2 of the port): cd=, cdcheck, cdalign=, cdaccept, cdedge= */
         public String cd, cdAlign, cdEdge; public boolean cdCheck = false, cdAccept = false;
@@ -52,17 +52,17 @@ public final class LaeyEncoder {
         public char gLevel = 'd';
         /** tags and pictures (2026-11-06, a85dd40): one set for the whole file, as lae_enc --tag / --cover / --picture; null or empty = none */
         public com.lae.laes.LaesTags.Tags tags;
-        /** decision 37 (2026-11-15): the form of the output file, as --form=: "flac" or "wav"; null = by the name of out (.flac = FLAC form, .lae and
+        /** 2026-11-15: the form of the output file, as --form=: "flac" or "wav"; null = by the name of out (.flac = FLAC form, .lae and
          *  any other name = WAV form) */
         public String form;
-        /** decision 37: master1name=&lt;text&gt;, the name of the main body (the first master) shown where a pack is chosen; null = none stored */
+        /** master1name=&lt;text&gt;, the name of the main body (the first master) shown where a pack is chosen; null = none stored */
         public String mainName;
-        /** decision 37: one further master of an extension pack (master2= .. master9=, in this order): its file and, as the command line,
+        /** one further master of an extension pack (master2= .. master9=, in this order): its file and, as the command line,
          *  master&lt;k&gt;align= (null = searched), master&lt;k&gt;name=, master&lt;k&gt;edge= (pad | cut, null = not given) and master&lt;k&gt;accept */
         public static final class Pack { public String master, align, name, edge; public boolean accept = false; }
-        /** decision 37: the extension packs (at most 8: master2= .. master9=); empty = none */
+        /** the extension packs (at most 8: master2= .. master9=); empty = none */
         public final List<Pack> packs = new ArrayList<Pack>();
-        /** decision 21: --overwrite, an existing out is replaced (without it an existing out is refused: an app has no console) */
+        /** --overwrite, an existing out is replaced (without it an existing out is refused: an app has no console) */
         public boolean overwrite = false;
         // the command line of lae_enc for these options
         public String[] toArgs() { List<String> a = new ArrayList<String>(); a.add("lae_enc"); a.add(master); a.add(out); a.add(mode); a.add(scheme == 2 ? "s2" : "s1");
@@ -86,7 +86,7 @@ public final class LaeyEncoder {
         public final int rc; public final String log;
         public EncodeException(String m, int r, String l) { super(m); rc = r; log = l; } }
 
-    // FU22-7: every encode() has its own flag (a cancel() once stopped every later encode() of the object at once); cancel() stops all running ones
+    // every encode() has its own flag (a cancel() once stopped every later encode() of the object at once); cancel() stops all running ones
     private final List<AtomicBoolean> running = new ArrayList<AtomicBoolean>();
     /** stops the encodes of this object that are running (from any thread): nothing is written, the work folder is removed */
     public void cancel() { synchronized (running) { for (AtomicBoolean c : running) c.set(true); } }
@@ -115,6 +115,6 @@ public final class LaeyEncoder {
 
     // the message of a failed run: the last printed line (and the one before it when that line is indented, as "  nothing encoded ...")
     static String lastLines(String log) { String[] ls = log.split("\n"); int i = ls.length - 1; while (i > 0 && ls[i].trim().isEmpty()) i--;
-        if (ls[i].trim().isEmpty()) return "nothing encoded";   // FU22-7: an empty log (the former test i < 0 was never true)
+        if (ls[i].trim().isEmpty()) return "nothing encoded";   // an empty log (the former test i < 0 was never true)
         String m = ls[i].trim(); if (ls[i].startsWith("  ") && i > 0) m = ls[i - 1].trim() + " " + m; return m; }
 }

@@ -98,7 +98,7 @@ template <class Vec> inline std::vector<uint8_t> writeFlac(const Vec* ch, int ra
     const int64_t n = (int64_t)ch[0].size(); const int64_t B = 4096;
     if (bps != 16 && bps != 24 && bps != 32) throw std::runtime_error("laesflac: the core master must be 16, 24 or 32 bit");
     if (rate < 1 || rate >= (1 << 20) || (int64_t)ch[1].size() != n || n >= (1LL << 36)) throw std::runtime_error("laesflac: bad rate or length");
-    if (n == 0) throw std::runtime_error("laesflac: no samples (an LAES core master has at least one frame)");   // FU12-5: the reader refuses a total of 0
+    if (n == 0) throw std::runtime_error("laesflac: no samples (an LAES core master has at least one frame)");   // the reader refuses a total of 0
     { const int64_t lim = 1LL << (bps - 1); for (int c = 0; c < 2; c++) for (int64_t v : ch[c]) if (v < -lim || v >= lim) throw std::runtime_error("laesflac: a sample does not fit the bit depth"); } std::vector<std::vector<uint8_t>> fr; uint32_t fmin = 0xFFFFFF, fmax = 0;
     {   // the frames are independent: coded in parallel threads (L5, 2026-11-03), then taken in order
         const int64_t nf = (n + B - 1) / B; fr.resize((size_t)nf);

@@ -71,6 +71,6 @@ if [ "$(od -An -tu1 -j 42 -N 1 "$W/a.flac" | tr -d ' ')" = 130 ]; then
     cp "$W/a.flac" "$W/d.flac"; printf 'LAE2' | dd of="$W/d.flac" bs=1 seek=46 conv=notrunc 2> /dev/null; refused 1 "an LAE2 block was not reported as LAES"
     cp "$W/a.flac" "$W/d.flac"; printf 'XXXX' | dd of="$W/d.flac" bs=1 seek=46 conv=notrunc 2> /dev/null; refused 1 "a FLAC file without LAE1 blocks was not reported as plain FLAC"
 elif [ "$(od -An -tu1 -j 42 -N 1 "$W/a.flac" | tr -d ' ')" = 2 ]; then echo "note: the extension is in more than one block; the five damage checks are skipped"
-else fail "the block after STREAMINFO is not the LAE1 block (type byte $(od -An -tu1 -j 42 -N 1 "$W/a.flac" | tr -d ' ')): the five damage checks were not run"; fi   # FU33-4: not skipped silently
+else fail "the block after STREAMINFO is not the LAE1 block (type byte $(od -An -tu1 -j 42 -N 1 "$W/a.flac" | tr -d ' ')): the five damage checks were not run"; fi   # not skipped silently
 echo "summary: $ok ok, $bad failed"
 exit $bad

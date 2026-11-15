@@ -39,7 +39,7 @@ public final class LMath {
     public static double sinpi(double t) {
         boolean[] odd = new boolean[1];
         double r = reduce(t, odd);
-        final double a = Math.abs(r);   // MSVC x64 compiles "r < 0 ? -r : r" to fabs (+0 for -0.0); PORT_RULES 6
+        final double a = Math.abs(r);   // MSVC x64 compiles "r < 0 ? -r : r" to fabs (+0 for -0.0)
         double v = a <= 0.25 ? sinPiSmall(a) : cosPiSmall(0.5 - a);   // 0.5 - a is exact (Sterbenz)
         if (r < 0) v = -v;
         return odd[0] ? -v : v;
@@ -49,7 +49,7 @@ public final class LMath {
     public static double cospi(double t) {
         boolean[] odd = new boolean[1];
         double r = reduce(t, odd);
-        final double a = Math.abs(r);   // MSVC x64 compiles "r < 0 ? -r : r" to fabs (+0 for -0.0); PORT_RULES 6
+        final double a = Math.abs(r);   // MSVC x64 compiles "r < 0 ? -r : r" to fabs (+0 for -0.0)
         final double v = a <= 0.25 ? cosPiSmall(a) : sinPiSmall(0.5 - a);
         return odd[0] ? -v : v;
     }

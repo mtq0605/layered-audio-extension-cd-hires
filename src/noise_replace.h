@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: Apache-2.0
-// Decision 21 (2026-11-15) for the LAE Noise Marker and the small tools: an output file that exists is not replaced silently.
+// 2026-11-15, for the LAE Noise Marker and the small tools: an output file that exists is not replaced silently.
 // On a console (input and output both a console) the person is asked twice and only two answers "yes" replace it; without a console
 // it is refused unless --overwrite was given. The texts are those of every LAE tool (an operating explanation: English, then Chinese).
 #pragma once

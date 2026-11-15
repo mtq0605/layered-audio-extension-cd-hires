@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
-// Reference only (FU08-3, 2026-11-14): the whole-track version, not compiled into lae_enc (the encoder uses the block-wise *_blk.cpp). It calls the
+// Reference only (2026-11-14): the whole-track version, not compiled into lae_enc (the encoder uses the block-wise *_blk.cpp). It calls the
 // C library's math (log2 / cos / sin / log10, and std::sort): its results may differ between platforms, so it is no byte-for-byte reference.
 // Encoder-side split of the master into the depth target T and the frequency target F.
 //   v  = 256 x CD16 - regenerated dither                      (what every decoder can rebuild from the CD alone)

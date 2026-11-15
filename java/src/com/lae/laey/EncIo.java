@@ -27,7 +27,7 @@ final class EncIo {
     static long size(RandomAccessFile f) { try { return f.length(); } catch (IOException e) { return -1; } }
     // port of enc_io.h:open
     static RandomAccessFile open(String p, String mode) {
-        if (p == null) throw fail("cannot open (no path)");   // FU22-10: was a NullPointerException
+        if (p == null) throw fail("cannot open (no path)");   // was a NullPointerException
         try { if (mode.startsWith("w")) { new FileOutputStream(p).close(); }   // "wb" / "w+b": created empty
               return new RandomAccessFile(p, mode.startsWith("r") && !mode.contains("+") ? "r" : "rw"); }
         catch (IOException e) { throw fail("cannot open " + p); } }
@@ -36,7 +36,7 @@ final class EncIo {
     static byte[] readAll(String p) {
         RandomAccessFile f = open(p, "rb");
         try { long n = size(f); if (n < 0) { throw fail("cannot read the size of " + p); }
-              if (n > Integer.MAX_VALUE - 8) throw fail(p + ": the file is too large for the Java port (a work file of 2 GiB or more is read whole)");   // FU22-9: said as such (the C++ has no such limit)
+              if (n > Integer.MAX_VALUE - 8) throw fail(p + ": the file is too large for the Java port (a work file of 2 GiB or more is read whole)");   // said as such (the C++ has no such limit)
               byte[] v = new byte[(int) n]; try { f.readFully(v); } catch (IOException e) { throw fail("read failed: " + p); } return v; }
         finally { close(f); } }
     // port of enc_io.h:readAll<int32_t> / <int16_t> / <char> (size must be a multiple of the element size)
@@ -49,9 +49,9 @@ final class EncIo {
         if (!ok) { new File(p).delete(); throw fail("write failed (disk full?): " + p); } }
     static void writeVec(EncEnv env, String p, byte[] d) { writeAll(env, p, d, 0, d.length); }
     static void writeVec(EncEnv env, String p, int[] v) { byte[] b = toBytes(v, 0, v.length); writeAll(env, p, b, 0, b.length); }
-    // port of enc_io.h:writeText (FU22-1: UTF-8, as the C++ writes the bytes of its strings; the work-folder notes are read only by this encoder)
+    // port of enc_io.h:writeText (UTF-8, as the C++ writes the bytes of its strings; the work-folder notes are read only by this encoder)
     static void writeText(EncEnv env, String p, String s) { byte[] b = s.getBytes(java.nio.charset.StandardCharsets.UTF_8); writeAll(env, p, b, 0, b.length); }
-    // port of enc_io.h:readText (FU22-1: UTF-8, the counterpart of writeText)
+    // port of enc_io.h:readText (UTF-8, the counterpart of writeText)
     static String readText(String p) { return new String(readAll(p), java.nio.charset.StandardCharsets.UTF_8); }
     // port of enc_io.h:count (element count as the modules' index type: C++ long, 32-bit on the reference platform)
     static long count(long n) { if (n > Integer.MAX_VALUE) throw fail("file too large for this encoder version"); return n; }

@@ -38,7 +38,7 @@ inline void diskCheck(bool now = false) {
            "  or close this program and run the same command again later: it continues from the work folder\n", left.c_str(), g->dir.c_str());
     printf("%s%llu%s%s%s\n", u8"  \u78c1\u76d8\u5feb\u6ee1\uff08\u5269 ", (unsigned long long)(sp.available >> 20), u8" MB\uff09\uff1a\u8bf7\u5728 ", g->dir.c_str(), u8" \u6240\u5728\u7684\u78c1\u76d8\u4e0a\u6e05\u7406\u4e00\u4e9b\u7a7a\u95f4\uff0c\u7f16\u7801\u4f1a\u81ea\u52a8\u63a5\u7740\u505a\uff1b\u4e5f\u53ef\u4ee5\u5173\u6389\u7a0b\u5e8f\uff0c\u4e4b\u540e\u518d\u8fd0\u884c\u540c\u4e00\u6761\u547d\u4ee4\uff0c\u4ece\u5de5\u4f5c\u6587\u4ef6\u5939\u63a5\u7740\u505a"); fflush(stdout);
     do { std::this_thread::sleep_for(std::chrono::seconds(5)); sp = std::filesystem::space(g->dir, ec); } while (!ec && sp.available < g->reserve + (256ull << 20));
-    if (ec) { printf("cannot read the free space of the disk of %s (%s): continuing\n", g->dir.c_str(), ec.message().c_str());   // FU13-8: not "room again" with a meaningless number
+    if (ec) { printf("cannot read the free space of the disk of %s (%s): continuing\n", g->dir.c_str(), ec.message().c_str());   // not "room again" with a meaningless number
         printf("%s%s%s\n", u8"  无法读取 ", g->dir.c_str(), u8" 所在磁盘的剩余空间：接着做"); fflush(stdout); g->last = std::chrono::steady_clock::now(); return; }
     printf("disk has room again (%llu MB free): continuing\n", (unsigned long long)(sp.available >> 20)); printf("%s%llu%s\n", u8"  \u78c1\u76d8\u6709\u7a7a\u95f4\u4e86\uff08\u5269 ", (unsigned long long)(sp.available >> 20), u8" MB\uff09\uff1a\u63a5\u7740\u505a"); fflush(stdout); g->last = std::chrono::steady_clock::now(); }
 // ---- resume (2026-11-05): small state files in the work folder, each written whole (a .new file, then renamed), so that a run stopped at
@@ -58,7 +58,7 @@ inline void putInfo(StateW& w, const laes::MasterInfo& I) { w.i(I.bits); w.i(I.s
 inline void getInfo(StateR& r, laes::MasterInfo& I) { I.bits = (int)r.i(); I.stages = (int)r.i(); I.w = (int)r.i(); I.storage = (int)r.i(); I.refTier = (int)r.i(); I.rate = (int)r.i(); I.frames = r.i(); I.whole = r.i(); I.frac = (uint32_t)r.i(); r.hex(I.sha, 32); I.layerBits = r.d(); }
 // a layer (one channel) coded in pieces: blocks of B; a piece is a whole number of blocks (only the last piece may end in a short block).
 // As laes::encodeLayer: the blocks' parameters are chosen in parallel threads, then written in order; the coded bytes go to a file.
-struct LayerOut { int64_t B; laes::BitW w; Out o; int64_t done = 0; int thr = 0;   // thr: threads for the block plans, 0 = every core (FU13-7: the caller's count)
+struct LayerOut { int64_t B; laes::BitW w; Out o; int64_t done = 0; int thr = 0;   // thr: threads for the block plans, 0 = every core (the caller's count)
     LayerOut(const std::string& p, int64_t b, int threads = 0) : B(b), o(p), thr(threads) {}
     void feed(const int64_t* x, int64_t n) {
         const int64_t nb = (int64_t)((n + B - 1) / B); std::vector<laes::BlockPlan> plans((size_t)std::max<int64_t>(0, nb));
@@ -137,7 +137,7 @@ struct LevOut { std::string p; std::unique_ptr<Out> o; int by = 4; std::vector<i
           for (long long x = 0; x < in.n; x += P) { const size_t k = (size_t)(std::min<long long>(P, in.n - x) / 4); a.resize(k); in.read(x, a.data(), k * 4); b.assign(a.begin(), a.end()); o->put(b.data(), k * 8); diskCheck(); } }
         std::filesystem::remove(q, ec); by = 8; }
     void close() { o->close(); } };
-// --small-disk (D6, 2026-11-05): the largest level (stages - 1) is not kept; it is made again from the master whenever it is read (one
+// --small-disk (2026-11-05): the largest level (stages - 1) is not kept; it is made again from the master whenever it is read (one
 // lifting stage, the same values: fwdPiece gives the same samples for any range)
 inline std::unique_ptr<Sig> levelOf(const Prep& m, int c, int k);
 struct DerivedSig : Sig { std::unique_ptr<Sig> up; int th; V s, d;
@@ -158,7 +158,7 @@ inline std::string probeWav(const std::string& path, WavInfo& wi, long long* lae
     uint64_t dsData = 0, dsLae = 0;
     if (rf64) { uint8_t d[48] = {0}; if (in.n < 20 + 28) return path + ": RF64 without ds64"; in.read(12, d, 8); if (memcmp(d, "ds64", 4)) return path + ": RF64 without ds64";
         const uint32_t dl = d[4] | d[5] << 8 | d[6] << 16 | (uint32_t)d[7] << 24; if (dl < 28) return path + ": RF64 ds64 too short";
-        if (in.n < 20 + (long long)std::min<uint32_t>(dl, 40)) return path + ": RF64 ds64 truncated";   // FU13-8: a reason, not "read failed"
+        if (in.n < 20 + (long long)std::min<uint32_t>(dl, 40)) return path + ": RF64 ds64 truncated";   // a reason, not "read failed"
         in.read(20, d, (size_t)std::min<uint32_t>(dl, 40));
         auto le64 = [&](int at) { uint64_t v = 0; for (int i = 7; i >= 0; i--) v = v << 8 | d[at + i]; return v; }; dsData = le64(8);
         if (dl >= 40 && (d[24] | d[25] << 8 | d[26] << 16 | (uint32_t)d[27] << 24) >= 1 && !memcmp(d + 28, "LAE ", 4)) dsLae = le64(32); }
@@ -177,7 +177,7 @@ inline void wavFrames(In& in, const WavInfo& wi, long long a, long long b, std::
     const int by = wi.bits / 8; std::vector<uint8_t> t((size_t)(b - a) * 2 * by); in.read(wi.dataOff + a * 2 * by, t.data(), t.size()); out.resize((size_t)(b - a) * 2); unpackPcm(t.data(), out.size(), by, out.data()); }
 // a FLAC master (2026-11-05): STREAMINFO (2 channels, 16 / 24 / 32 bits, a sample count) and where the audio frames start
 inline std::string probeFlac(const std::string& path, WavInfo& wi) {
-    In in(path); long long p = (long long)laesflac::flacStart([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)in.n) + 4;   // DEC 19: after ID3v2 tags in front
+    In in(path); long long p = (long long)laesflac::flacStart([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)in.n) + 4;   // after ID3v2 tags in front
     bool last = false, haveSi = false; laesflac::Info& fi = wi.fi;
     while (!last) { if (p + 4 > in.n) return path + ": FLAC metadata truncated"; uint8_t bh[4]; in.read(p, bh, 4); last = bh[0] & 0x80; const int type = bh[0] & 0x7F; const long long len = (long long)bh[1] << 16 | bh[2] << 8 | bh[3]; p += 4;
         if (p + len > in.n) return path + ": FLAC metadata truncated";
@@ -187,7 +187,7 @@ inline std::string probeFlac(const std::string& path, WavInfo& wi) {
     if (!haveSi) return path + ": no STREAMINFO";
     if (fi.channels != 2 || (fi.bps != 16 && fi.bps != 24 && fi.bps != 32) || fi.total == 0 || fi.maxBs < 16) return path + ": need a 2-channel 16/24/32-bit FLAC with a sample count";
     wi.flac = true; wi.rate = fi.rate; wi.bits = fi.bps; wi.frames = (int64_t)fi.total; wi.dataOff = p; wi.dataBytes = (long long)fi.total * 2 * (fi.bps / 8); return ""; }
-inline std::string probeMaster(const std::string& path, WavInfo& wi) { uint8_t h[4] = {0};   // DEC 19: a FLAC master may have ID3v2 tags in front
+inline std::string probeMaster(const std::string& path, WavInfo& wi) { uint8_t h[4] = {0};   // a FLAC master may have ID3v2 tags in front
     { In in(path); const long long s0 = (long long)laesflac::flacStart([&](uint64_t at, void* d, size_t k) { in.read((long long)at, d, k); }, (uint64_t)in.n); if (in.n >= s0 + 4) in.read(s0, h, 4); } return !memcmp(h, "fLaC", 4) ? probeFlac(path, wi) : probeWav(path, wi); }
 // one FLAC frame of a master (laesflac::decodeFrame, plus the stereo decorrelations a FLAC encoder uses: left / side, side / right,
 // mid / side, the side channel one bit wider). Appends to ch[0] / ch[1], used = its size in bytes.
@@ -204,14 +204,14 @@ inline std::string masterFlacFrame(const uint8_t* fp, size_t avail, const laesfl
     const int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return "frame bit depth differs from STREAMINFO";
     if (r.fail || (r.pos & 7)) return "frame header truncated"; const size_t hb = r.pos / 8; const uint8_t c8 = (uint8_t)r.get(8); if (r.fail || c8 != crc8(fp, hb)) return "frame header CRC-8 mismatch";
     if (strategy == 0 && num != frameNo) return "frame number out of order";
-    if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the header gives the first sample's number (FU13-8)
+    if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the header gives the first sample's number
     const size_t base = ch[0].size(); for (int c = 0; c < 2; c++) { ch[c].resize(base + (size_t)n);
         const bool side = (chc == 8 && c == 1) || (chc == 9 && c == 0) || (chc == 10 && c == 1); if (!readSubframe(r, ch[c].data() + base, n, bps + (side ? 1 : 0))) return "damaged subframe"; }
     int64_t* a = ch[0].data() + base; int64_t* b = ch[1].data() + base;
     if (chc == 8) for (int64_t i = 0; i < n; i++) b[i] = a[i] - b[i];
     else if (chc == 9) for (int64_t i = 0; i < n; i++) a[i] = a[i] + b[i];
     else if (chc == 10) for (int64_t i = 0; i < n; i++) { const int64_t md = (int64_t)((uint64_t)a[i] << 1) | (b[i] & 1); a[i] = (md + b[i]) >> 1; b[i] = (md - b[i]) >> 1; }
-    { const int64_t lim = 1LL << (bps - 1); for (int64_t i = 0; i < n; i++) if (a[i] < -lim || a[i] >= lim || b[i] < -lim || b[i] >= lim) return "a sample does not fit the bit depth of STREAMINFO"; }   // FU13-5: a stereo decorrelation can leave it
+    { const int64_t lim = 1LL << (bps - 1); for (int64_t i = 0; i < n; i++) if (a[i] < -lim || a[i] >= lim || b[i] < -lim || b[i] >= lim) return "a sample does not fit the bit depth of STREAMINFO"; }   // a stereo decorrelation can leave it
     r.pos = (r.pos + 7) & ~(size_t)7; const size_t fb = r.pos / 8; if (fb + 2 > r.n) return "frame truncated";
     if (crc16(fp, fb) != (uint16_t)(fp[fb] << 8 | fp[fb + 1])) return "frame CRC-16 mismatch";
     used = fb + 2; return ""; }
@@ -337,12 +337,12 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
         const Prep& m = *ms[mi]; MasterInfo& I = info[mi];
         if (m.bits != 16 && m.bits != 24 && m.bits != 32) return "master word length must be 16, 24 or 32";
         int st = 0; while ((baseRate << st) < m.rate && st < 4) st++; if ((baseRate << st) != m.rate || st > 3) return "master rate must be the base rate times 1, 2, 4 or 8";
-        // FU13-5 (2026-11-14): input this format cannot hold is refused here, not first by the check of the written file
+        // 2026-11-14: input this format cannot hold is refused here, not first by the check of the written file
         const std::string mn = "master " + std::to_string(mi + 1);
         if (m.frames < 1) return mn + " has no samples";
         if ((uint64_t)levLen(m.frames, st) > (uint64_t)core.frames() + (1ull << 24)) return mn + " is too long: its base level may exceed the core master by at most 2^24 samples";
         if (sel[mi].storage >= 0 && (sel[mi].whole <= -(1LL << 40) || sel[mi].whole >= (1LL << 40))) return mn + ": T must lie within +-2^40 base samples";
-        if (!tWithinTrack(sel[mi].whole, sel[mi].frac, (uint64_t)core.frames())) return mn + ": T must not exceed the length of the core master (" + std::to_string((long long)core.frames()) + " base samples) either way";   // DEC 11
+        if (!tWithinTrack(sel[mi].whole, sel[mi].frac, (uint64_t)core.frames())) return mn + ": T must not exceed the length of the core master (" + std::to_string((long long)core.frames()) + " base samples) either way";
         I.bits = m.bits; I.stages = st; I.w = m.w; I.rate = m.rate; I.frames = m.frames; memcpy(I.sha, m.sha, 32);
         auto above = [&](int j) { double b = 0; for (int c = 0; c < 2; c++) for (int k = j + 1; k <= st; k++) b += (double)m.dbits[c][(size_t)k]; return b; };
         struct Cand { int storage, tier, j; int64_t whole; uint32_t frac; double bits; std::string e[2]; bool coded; };
@@ -351,7 +351,7 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
             if (!autoSel) { wh = sel[mi].whole; fr = sel[mi].frac; return true; }
             const int64_t lim = 1LL << 30; auto X = [&](size_t k) { return sel[k].whole * 4294967296LL + (int64_t)sel[k].frac; };
             if (sel[mi].whole <= -lim || sel[mi].whole >= lim || (tier && (sel[(size_t)tier - 1].whole <= -lim || sel[(size_t)tier - 1].whole >= lim))) return false;
-            const int64_t x = X(mi) - (tier ? X((size_t)tier - 1) : 0); wh = x >> 32; fr = (uint32_t)(x & 0xFFFFFFFFLL); return tWithinTrack(wh, fr, (uint64_t)core.frames()); };   // DEC 11: T relative to the tier within the track too
+            const int64_t x = X(mi) - (tier ? X((size_t)tier - 1) : 0); wh = x >> 32; fr = (uint32_t)(x & 0xFFFFFFFFLL); return tWithinTrack(wh, fr, (uint64_t)core.frames()); };   // T relative to the tier within the track too
         if (autoSel || sel[mi].storage == 1) cs.push_back({1, 0, 0, 0, 0, 0, {}, false});
         for (int t = 0; t <= (int)mi; t++) {
             if (!autoSel && t != sel[mi].refTier) continue; if (t > (int)mi) break;
@@ -422,7 +422,7 @@ inline std::string encodeLaesS(const Core32& core, int baseRate, const std::vect
         if (!cs[(size_t)best].coded) { Cand& B = cs[(size_t)best]; double lb[2]; if (!code(B, lb)) return cerr; double b = above(B.j); for (int c = 0; c < 2; c++) b += lb[c];
             if (b != B.bits) return "internal error: a candidate coded again differs in size"; }   // its files were removed in the other order
         if (kept && !restored) { const Cand& B = cs[(size_t)best]; StateW w; w.i(best); w.i(B.storage == 1 ? 0 : B.whole); w.i(B.storage == 1 ? 0 : B.frac); w.d(B.bits); w.str(B.e[0]); w.i(sizeOrMinus(B.e[0])); w.str(B.e[1]); w.i(sizeOrMinus(B.e[1])); putState(stP, w.s); }
-        // DEC 15 (2026-11-15): a master stored in full keeps its own T (relative to the core master, its tier 0) in the record; decoders
+        // 2026-11-15: a master stored in full keeps its own T (relative to the core master, its tier 0) in the record; decoders
         // do not use it (Section 6.6), but laes add / extract read it, so a master referring to it keeps its T relative to the core master
         Cand& B = cs[(size_t)best]; I.storage = B.storage; I.refTier = B.storage == 1 ? 0 : B.tier; I.whole = B.storage == 1 ? sel[mi].whole : B.whole; I.frac = B.storage == 1 ? sel[mi].frac : B.frac; I.layerBits = B.bits;
         I.name = sel[mi].name; I.flags = sel[mi].flags; I.menu = sel[mi].menu;

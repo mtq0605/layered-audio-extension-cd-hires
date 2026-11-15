@@ -16,7 +16,7 @@ import java.io.IOException;
  * The C++ console questions (cdedge, cdaccept) are never asked here (no console): the run stops with the C++ text for scripts, and the
  * app passes the user's choice back as the option (cdedge=pad / cdedge=cut / cdaccept). The report lines are the printed text.
  * <p>
- * Memory (FU24-1): the alignment ({@link CdAlign}) holds the CD and the base level as double arrays with their pyramids, about 170 MB of
+ * Memory: the alignment ({@link CdAlign}) holds the CD and the base level as double arrays with their pyramids, about 170 MB of
  * Java heap per minute of CD, plus up to about 340 MB for the FFT arrays of the search; the CD (short[]) and the 24-bit base level (int[])
  * stay in memory too (about 17 MB per minute). A 5-minute piece needs about 0.85 GB of heap and the FFT arrays (estimated from the code, not measured): on a phone (heap often 256-512 MB) cd= ends
  * with "out of memory" in the alignment step (nothing is written); on a PC give -Xmx accordingly.

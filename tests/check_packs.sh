@@ -21,7 +21,7 @@ ENC=$(x lae_enc); DEC=$(x lae_dec); VAR=$(x cd_variant); CUT=$(x cut_wav); GEN=$
 ok() { echo "ok   $1"; }
 no() { echo "FAIL $1"; bad=$((bad + 1)); }
 same() { if cmp -s "$1" "$2"; then ok "$3"; else no "$3"; fi; }
-# a decode into a fresh file: the output is removed first and a refused decode counts as a failure (FU33-3: a refused decode left the
+# a decode into a fresh file: the output is removed first and a refused decode counts as a failure (a refused decode left the
 # previous round's file in place, and the comparison then passed on it)
 d() { rm -f -- "$3"; if "$@" >/dev/null 2>&1; then return 0; fi; no "decoder refused: $(basename "$1") $2 $3 ${4:-} ${5:-} ${6:-}"; return 1; }
 cd "$W" || exit 99

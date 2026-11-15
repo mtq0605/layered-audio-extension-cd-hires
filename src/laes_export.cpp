@@ -13,7 +13,7 @@
 // A whole-track export of a master decodes it from the start and checks its SHA-256 (nothing is kept when it does not match). A part or
 // pieces start where they are asked for (block positions of the layers, from --index when the record is there, else made and saved
 // there).
-// FU14-2 (2026-11-14; specification 1.3: a master is given out only after it and its reference chain matched their SHA-256): a part or
+// 2026-11-14; specification 1.3: a master is given out only after it and its reference chain matched their SHA-256: a part or
 // pieces of a master (or of a version made from it) are exported only when this tool has checked that master for this file content
 // before. A run that decodes the whole track (a whole-track export, or --seg over the whole track: its pieces keep the name .part until
 // the SHA-256 matched) is such a check and, with --index=<record>, notes it in <record>.verified (text: the LAES file's SHA-256 and the
@@ -29,21 +29,21 @@
 #include <filesystem>
 #include "laes_play.h"
 #include "laes_flac_enc.h"
-#include "laes_pick.h"   // DEC 21: mayReplace (an existing output is not replaced silently)
-#include "laes_tags.h"   // DEC 29: vorbisName (RIFF INFO id -> Vorbis name)
+#include "laes_pick.h"   // mayReplace (an existing output is not replaced silently)
+#include "laes_tags.h"   // vorbisName (RIFF INFO id -> Vorbis name)
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 namespace fs = std::filesystem;
 
 static std::string hex(const uint8_t* p, int n) { static const char* d = "0123456789abcdef"; std::string s; for (int i = 0; i < n; i++) { s += d[p[i] >> 4]; s += d[p[i] & 15]; } return s; }
 
 // one FLAC file of `frames` frames read from p, written in blocks of 4096; STREAMINFO (sizes, total, MD5) is filled in at the end.
-// FU14-3 (2026-11-14): written as <out>.part with every write checked (a failure removes it); the caller renames it with finishPart
+// 2026-11-14: written as <out>.part with every write checked (a failure removes it); the caller renames it with finishPart
 static int closeF(FILE*& f) { const int r = f ? fclose(f) : 0; f = nullptr; return r; }
 struct CloseGuard { FILE*& f; ~CloseGuard() { closeF(f); } };
 static bool writeFlacFrom0(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {
     const std::string out = outName + ".part";
     FILE* fo = fopen(out.c_str(), "wb"); if (!fo) { err = "cannot write " + out; return false; }
-    CloseGuard guard{fo};   // FU14-7: closed also when an exception leaves this function
+    CloseGuard guard{fo};   // closed also when an exception leaves this function
     std::vector<uint8_t> h = {'f', 'L', 'a', 'C'}; laesflac::putBlockHeader(h, false, 0, 34); const size_t siAt = h.size(); h.resize(h.size() + 34, 0);
     { std::vector<uint8_t> vc; auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) vc.push_back((uint8_t)(v >> (8 * i))); };   // VORBIS_COMMENT (little-endian lengths)
       const std::string vendor = "laes_export"; u32((uint32_t)vendor.size()); vc.insert(vc.end(), vendor.begin(), vendor.end()); u32((uint32_t)tags.size());
@@ -72,14 +72,14 @@ static bool writeFlacFrom0(laesp::Player& p, int64_t frames, int rate, int bps, 
     const std::string mh = md5.hex(); for (int i = 0; i < 16; i++) si.b.push_back((uint8_t)std::stoul(mh.substr((size_t)i * 2, 2), nullptr, 16));
     const bool ok = fseek(fo, (long)siAt, SEEK_SET) == 0 && fwrite(si.b.data(), 1, si.b.size(), fo) == 34; if (closeF(fo) != 0 || !ok) { err = "cannot write " + out + " (disk full?)"; fs::remove(out); return false; }
     return true; }
-static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {   // FU14-7: an exception (memory) removes the .part, as a failed write does
+static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {   // an exception (memory) removes the .part, as a failed write does
     try { return writeFlacFrom0(p, frames, rate, bps, tags, outName, err); }
     catch (const std::exception& x) { err = std::string(x.what()) + ": nothing written"; std::error_code ec; fs::remove(outName + ".part", ec); return false; } }
 // <out>.part (written and checked) becomes <out>; a failure removes the .part
 static bool finishPart(const std::string& out, std::string& err) {
     std::error_code ec; fs::rename(out + ".part", out, ec); if (!ec) return true;
     err = "cannot write " + out + " (" + ec.message() + ")"; fs::remove(out + ".part", ec); return false; }
-// FU14-2: the note of checked masters, <record>.verified: "file <SHA-256 of the LAES file>", then "master <SHA-256>" per master that matched
+// the note of checked masters, <record>.verified: "file <SHA-256 of the LAES file>", then "master <SHA-256>" per master that matched
 static std::vector<std::string> readVerified(const std::string& path, const std::string& fileHex) {
     std::vector<std::string> v; FILE* fi = fopen(path.c_str(), "rb"); if (!fi) return v; char line[256]; bool mine = false;
     while (fgets(line, sizeof line, fi)) { std::string s = line; while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
@@ -92,7 +92,7 @@ static bool writeVerified(const std::string& path, const std::string& fileHex, c
     return finishPart(path, e2); }
 
 static int run(int argc, char** argv) {
-    laes::testModeLine();   // DEC 39
+    laes::testModeLine();
     if (argc < 3) { printf("usage: laes_export <in> --list | <in> <choice> <out.flac> [--from=s] [--len=s] [--index=rec] [--unverified] | <in> <choice> --seg=s --dir=folder [--index=rec] [--unverified]\n"); return 1; }
     FILE* fp = fopen(argv[1], "rb"); if (!fp) { printf("cannot open %s\n", argv[1]); return 2; }
     const long long sz = laess::sizeOf(fp); if (sz < 0) { printf("cannot read %s\n", argv[1]); return 2; } const uint64_t size = (uint64_t)sz;   // 64-bit, Windows and POSIX (laes_stream.h)
@@ -105,7 +105,7 @@ static int run(int argc, char** argv) {
     if (j < 0 || j >= (int)f.choices.size()) { printf("no choice %s (see --list)\n", argv[2]); return 1; }
     const laesp::Choice C = f.choices[(size_t)j]; if (!f.why.empty() && C.kind != 0) { printf("the payload failed a check: only the core master\n"); return 2; }
     std::string out, dir, index; double from = 0, len = -1, seg = 0; bool unverified = false, overwrite = false;
-    // FU14-7 (2026-11-14): a time is a number of seconds from 0 up to the length a 64-bit frame count holds; an unknown --option is refused
+    // 2026-11-14: a time is a number of seconds from 0 up to the length a 64-bit frame count holds; an unknown --option is refused
     auto secs = [&](const std::string& a, size_t at, double& v) { const char* s = a.c_str() + at; char* e = nullptr; v = strtod(s, &e);
         if (e == s || *e || !(v >= 0) || v > 1e12) { printf("%s: a number of seconds (0 or more) is expected\n", a.c_str()); return false; } return true; };
     for (int i = 3; i < argc; i++) { const std::string a = argv[i];
@@ -114,7 +114,7 @@ static int run(int argc, char** argv) {
         else if (!a.rfind("--", 0)) { printf("unknown option %s: nothing written\n", a.c_str()); return 1; } else out = a; }
     const int64_t first = std::min<int64_t>(C.frames, (int64_t)(from * C.rate + 0.5)), count = len < 0 ? C.frames - first : std::min<int64_t>(C.frames - first, (int64_t)(len * C.rate + 0.5));
     const bool whole = seg <= 0 && first == 0 && count == C.frames;
-    // FU14-2: the master this choice is made from, and whether it was checked for this file content before (the note next to the record)
+    // the master this choice is made from, and whether it was checked for this file content before (the note next to the record)
     const laesp::Choice& Sv = C.kind == 3 ? f.choices[(size_t)C.from] : C; const bool ofMaster = Sv.kind != 0 && Sv.m >= 0;
     const std::string fileHex = hex(f.fileSha, 32), vrec = index.empty() ? std::string() : index + ".verified";
     std::vector<std::string> known; if (!vrec.empty()) known = readVerified(vrec, fileHex);
@@ -136,20 +136,20 @@ static int run(int argc, char** argv) {
         if (rec.empty() || !f.importIndex(rec.data(), rec.size())) { std::atomic<bool> no{false};
             try { f.indexLayers(&no, (int)std::max(1u, std::thread::hardware_concurrency())); }   // a failed read comes back as an exception (2026-11-14)
             catch (const std::exception& x) { printf("%s: %s (while making the block positions): nothing written\n", argv[1], x.what()); return 1; }
-            if (!index.empty()) { const std::vector<uint8_t> r = f.exportIndex(); FILE* fo = fopen(index.c_str(), "wb");   // FU14-3: a record not written whole is removed
+            if (!index.empty()) { const std::vector<uint8_t> r = f.exportIndex(); FILE* fo = fopen(index.c_str(), "wb");   // a record not written whole is removed
                 if (fo) { const bool okR = fwrite(r.data(), 1, r.size(), fo) == r.size(); if (fclose(fo) != 0 || !okR) { fs::remove(index); printf("note: cannot write the block position record %s (disk full?): not saved\n", index.c_str()); } } } } }
     std::vector<std::string> tags = {"LAES_CHOICE=" + C.name, "LAES_FILE_SHA256=" + hex(f.fileSha, 32)};
     if (C.m >= 0) tags.push_back("LAES_MASTER_SHA256=" + hex(f.ms[(size_t)C.m].I.sha, 32));
-    if (ofMaster && !marked && unverified && !whole) tags.push_back("LAES_UNVERIFIED=1");   // FU14-2: given out without the SHA-256 check
-    for (auto& t : f.tags) {   // DEC 29: a WAV file's LIST/INFO ids become the Vorbis names (INAM -> TITLE, ...); a FLAC file's names are kept
+    if (ofMaster && !marked && unverified && !whole) tags.push_back("LAES_UNVERIFIED=1");   // given out without the SHA-256 check
+    for (auto& t : f.tags) {   // a WAV file's LIST/INFO ids become the Vorbis names (INAM -> TITLE, ...); a FLAC file's names are kept
         const char* vn = f.flac ? "" : laestag::vorbisName(t.first); tags.push_back((*vn ? std::string(vn) : t.first) + "=" + t.second); }
     const int thr = (int)std::max(1u, std::thread::hardware_concurrency());
     if (seg > 0) {   // consecutive pieces of seg seconds from --from on
         if (dir.empty()) { printf("--seg needs --dir\n"); return 1; }
         const int64_t step = std::max<int64_t>(1, (int64_t)(seg * C.rate + 0.5));
-        { int kq = 0; for (int64_t a = first; a < first + count; a += step, kq++) { char nm[64]; snprintf(nm, sizeof nm, "seg_%05d.flac", kq); if (!laespick::mayReplace((fs::path(dir) / nm).string(), overwrite)) return 1; } }   // DEC 21
+        { int kq = 0; for (int64_t a = first; a < first + count; a += step, kq++) { char nm[64]; snprintf(nm, sizeof nm, "seg_%05d.flac", kq); if (!laespick::mayReplace((fs::path(dir) / nm).string(), overwrite)) return 1; } }
         fs::create_directories(dir); laesp::Player p; e = p.start(f, j, thr, false, first); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
-        // FU14-2: a master not checked before (this run is over the whole track): the pieces keep the name .part until its SHA-256 matched
+        // a master not checked before (this run is over the whole track): the pieces keep the name .part until its SHA-256 matched
         std::vector<std::string> held; auto dropHeld = [&](size_t h0) { std::error_code ec2; for (size_t h = h0; h < held.size(); h++) fs::remove(held[h] + ".part", ec2); };
         int k = 0; for (int64_t a = first; a < first + count; a += step, k++) { char nm[64]; snprintf(nm, sizeof nm, "seg_%05d.flac", k); std::vector<std::string> t = tags; t.push_back("LAES_FIRST_FRAME=" + std::to_string(a));
             const std::string segOut = (fs::path(dir) / nm).string();
@@ -161,7 +161,7 @@ static int run(int argc, char** argv) {
         if (fullRun && ofMaster) noteVerified(p);
         printf("%d pieces of %.3f s, %s, frames %lld..%lld\n", k, seg, C.name.c_str(), (long long)first, (long long)(first + count)); return 0; }
     if (out.empty()) { printf("no output file\n"); return 1; }
-    if (!laespick::mayReplace(out, overwrite)) return 1;   // DEC 21: asked twice in a console, else --overwrite
+    if (!laespick::mayReplace(out, overwrite)) return 1;   // asked twice in a console, else --overwrite
     laesp::Player p; e = whole ? p.start(f, j, thr) : p.start(f, j, thr, false, first); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
     std::vector<std::string> t = tags; t.push_back("LAES_FIRST_FRAME=" + std::to_string(first));
     if (!writeFlacFrom(p, count, C.rate, C.bits, t, out, e)) { printf("%s\n", e.c_str()); return 2; }
@@ -169,7 +169,7 @@ static int run(int argc, char** argv) {
     if (!finishPart(out, e)) { printf("%s\n", e.c_str()); return 2; }
     if (whole && ofMaster) noteVerified(p);
     printf("%s: %s, %lld frames from %lld%s\n", out.c_str(), C.name.c_str(), (long long)count, (long long)first, whole && C.kind != 0 ? ", SHA-256 ok" : ""); return 0; }
-// FU14-7 (2026-11-14): an error thrown anywhere (memory, a folder that cannot be made) ends with a message and exit code 2, not a crash;
+// 2026-11-14: an error thrown anywhere (memory, a folder that cannot be made) ends with a message and exit code 2, not a crash;
 // writeFlacFrom removes its .part itself
 int main(int argc, char** argv) {
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)

@@ -112,8 +112,8 @@ function applyLang() { document.documentElement.lang = lang;
 let D = null;            // display data
 let rows = [];           // {m0, m1, c0, c1, lv, at, src, on, idx}
 let files = {};          // preview file name -> File
-let pvIds = null;        // FU17-8: the folder's preview_list.txt {sha, frames, rate, pos: [{n, m0, m1, c0, c1}]}; null = a folder of an older lae_noise
-let pvList = null, pvMaster = "", pvCells = null, pvFor = null;   // FU17-8: the positions of the folder's preview_check.txt {n, t0, t1, f0, f1}, its master name, as cells
+let pvIds = null;        // the folder's preview_list.txt {sha, frames, rate, pos: [{n, m0, m1, c0, c1}]}; null = a folder of an older lae_noise
+let pvList = null, pvMaster = "", pvCells = null, pvFor = null;   // the positions of the folder's preview_check.txt {n, t0, t1, f0, f1}, its master name, as cells
 let drag = null, hover = -1;
 const N = () => D.N, CW = () => D.cw;
 const frameT0 = m => (m * N() - N() / 2) / D.rate;
@@ -121,7 +121,7 @@ const colHz = c => c * CW() * D.rate / (2 * N());
 const K = () => Math.floor((D.frames + N() - 1) / N()) + 1;
 function snapTime(t0, t1) { return [Math.max(0, Math.ceil((t0 * D.rate + N() / 2) / N())), Math.min(K(), Math.floor((t1 * D.rate - N() / 2) / N()) + 1)]; }
 function snapFreq(f0, f1) { const w = colHz(1); return [Math.max(0, Math.ceil(f0 / w - 1e-9)), Math.min(D.ncol, Math.floor(f1 / w + 1e-9))]; }
-// FU17-9 (2026-11-14): the reading rules of SPEC_LAENOISE.md Section 4, as in nmk::readMarks (src/noise_marks.h) and NoiseMarks.java:
+// 2026-11-14: the reading rules of SPEC_LAENOISE.md Section 4, as in nmk::readMarks (src/noise_marks.h) and NoiseMarks.java:
 // comments (# to the end of the line), CR and blank lines are skipped; the first line is exactly "LAENOISE 1"; exactly one master and
 // one grid line (mdct 512 cell 8), both before the first pos line; LAENOISE, master, grid and pos lines have exactly their fields;
 // other lines are ignored. why: "" or the reason the file is refused (shown by the caller; nothing of the file is used then).
@@ -164,7 +164,7 @@ $("fMarks").onchange = async e => { const f = e.target.files[0]; if (!f || !D) r
   const have = new Map(rows.map(r => [key(r), r]));
   for (const p of mk.pos) { const r = have.get(key(p)); if (r) r.on = true; else rows.push({ ...p, src: "manual", on: true, idx: 0 }); }
   sortRows(); render(); };
-// FU17-8 (2026-11-14): a preview is played only for the row whose rectangle preview_check.txt lists for it (lae_noise preview writes
+// 2026-11-14: a preview is played only for the row whose rectangle preview_check.txt lists for it (lae_noise preview writes
 // the master and, per position, its time and Hz range), never by the row's number in the candidate file
 // preview_list.txt (lae_noise preview since 2026-11-14) names the master by SHA-256, length and rate and each pos_NNN by its rectangle
 // in cells: when the folder has it, only it is used; preview_check.txt alone (older lae_noise) is matched as before
@@ -203,7 +203,7 @@ function color(v, lo, hi) { const x = Math.max(0, Math.min(1, (v - lo) / (hi - l
   const r = Math.round(255 * Math.min(1, Math.max(0, 1.5 * x - 0.3))), g = Math.round(255 * Math.min(1, x * 1.1)), b = Math.round(255 * Math.max(0, 0.55 - x * 0.6));
   return [r, g, b]; }
 function fit(cv) { const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); return dpr; }
-function render(keepList) {   // keepList: the table stays as it is (hover, drag), only the row highlight and the drawing change (FU17-9)
+function render(keepList) {   // keepList: the table stays as it is (hover, drag), only the row highlight and the drawing change
   const sp = $("spec"), wv = $("wave"); const dpr = fit(sp); fit(wv); const g = sp.getContext("2d"), w = wv.getContext("2d");
   g.clearRect(0, 0, sp.width, sp.height); w.clearRect(0, 0, wv.width, wv.height);
   if (keepList) Array.from($("list").tBodies[0].rows).forEach((tr, j) => { tr.className = j === hover ? "hi" : ""; }); else renderList(); if (!D || !sp.width || !sp.height) return;   // not laid out (hidden): nothing to draw

@@ -16,7 +16,7 @@
 #endif
 
 struct WavStream { FILE* f = nullptr; int fmt = 0, bits = 0, bps = 0; double rate = 0; long long frames = 0, dataPos = 0;
-    std::string why;   // FU17-5 (2026-11-14): the reason when open() refuses the file
+    std::string why;   // 2026-11-14: the reason when open() refuses the file
     bool open(const char* path) {
         auto no = [&](const char* w) { why = w; return false; };
         f = fopen(path, "rb"); if (!f) return no("cannot open the file");

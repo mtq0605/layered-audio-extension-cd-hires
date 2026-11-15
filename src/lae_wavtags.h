@@ -23,7 +23,7 @@ __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int, unsigned l
 namespace lae_wavtags {
 typedef std::vector<std::pair<std::string, std::string>> List;
 inline uint32_t le32(const uint8_t* p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24; }
-inline bool validUtf8(const std::string& s) {   // F06-6: strict (RFC 3629): no overlong form, no surrogate, nothing above U+10FFFF
+inline bool validUtf8(const std::string& s) {   // strict (RFC 3629): no overlong form, no surrogate, nothing above U+10FFFF
     for (size_t i = 0; i < s.size();) { const uint8_t c = (uint8_t)s[i]; if (c < 0x80) { i++; continue; } int k; uint32_t v, lo;
         if (c >= 0xC2 && c <= 0xDF) { k = 1; v = c & 0x1Fu; lo = 0x80; } else if ((c & 0xF0) == 0xE0) { k = 2; v = c & 0x0Fu; lo = 0x800; }
         else if (c >= 0xF0 && c <= 0xF4) { k = 3; v = c & 0x07u; lo = 0x10000; } else return false;
@@ -72,7 +72,7 @@ inline void id3(const std::vector<uint8_t>& t, List& out) {
     const uint8_t flags = t[5]; const size_t want = (size_t)10 + ((size_t)(t[6] & 0x7F) << 21 | (size_t)(t[7] & 0x7F) << 14 | (size_t)(t[8] & 0x7F) << 7 | (t[9] & 0x7F));
     std::vector<uint8_t> b(t.begin(), t.begin() + (want < t.size() ? want : t.size())); size_t p = 10;
     if (ver == 3 && (flags & 0x80)) { std::vector<uint8_t> u(b.begin(), b.begin() + 10); for (size_t i = 10; i < b.size(); i++) { u.push_back(b[i]); if (b[i] == 0xFF && i + 1 < b.size() && b[i + 1] == 0) i++; } b.swap(u); }
-    if (flags & 0x40) { if (p + 4 > b.size()) return;   // the extended header (F06-6: its length in 64 bits; one beyond the tag ends the reading, also on 32-bit builds)
+    if (flags & 0x40) { if (p + 4 > b.size()) return;   // the extended header (its length in 64 bits; one beyond the tag ends the reading, also on 32-bit builds)
         const uint64_t ext = ver == 4 ? ((uint64_t)(b[p] & 0x7F) << 21 | (uint64_t)(b[p + 1] & 0x7F) << 14 | (uint64_t)(b[p + 2] & 0x7F) << 7 | (b[p + 3] & 0x7F)) : ((uint64_t)b[p] << 24 | (uint64_t)b[p + 1] << 16 | (uint64_t)b[p + 2] << 8 | b[p + 3]) + 4;
         if (ext > b.size() - p) return; p += (size_t)ext; }
     while (p + 10 <= b.size() && b[p]) { char id[5] = {(char)b[p], (char)b[p + 1], (char)b[p + 2], (char)b[p + 3], 0};

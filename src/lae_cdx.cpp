@@ -308,7 +308,7 @@ static string finishImage(Image& im, vector<V5>& t, const string& label, const s
     vector<vector<uint8_t>> lax; vector<int> no; im.lax.resize(t.size());
     for (size_t k = 0; k < t.size(); k++) { if (noext.count((int)k + 1)) continue; lax.push_back(laxOf(t[k], (uint16_t)(k + 1))); no.push_back((int)k + 1); }
     im.isoLba = (uint32_t)(im.A2 + GAP2); string err;
-    {   // one copy of each extension file besides the volume (FU10-3): moved into the file list, then back into im.lax
+    {   // one copy of each extension file besides the volume: moved into the file list, then back into im.lax
         vector<iso::File> files = dataFiles(std::move(lax), no);
         im.iso = iso::build(files, im.isoLba, label, date, 150, 300, &err); if (im.iso.empty()) return "data session: " + err;
         for (size_t i = 0; i < no.size(); i++) im.lax[(size_t)no[i] - 1].swap(files[i + 1].data); }

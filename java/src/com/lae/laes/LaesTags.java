@@ -62,7 +62,7 @@ public final class LaesTags {
     // port of laes_tags.h:readImage (the file read)
     public static String readImage(String path, Picture p) {
         byte[] d; InputStream in = null;
-        if (new java.io.File(path).length() >= (1L << 24)) return path + ": too large for a FLAC metadata block (16 MB)";   // FU28-3: before reading it all (a large file by mistake ran out of memory); the message of checkPicture
+        if (new java.io.File(path).length() >= (1L << 24)) return path + ": too large for a FLAC metadata block (16 MB)";   // before reading it all (a large file by mistake ran out of memory); the message of checkPicture
         try { in = new FileInputStream(path); ByteArrayOutputStream bo = new ByteArrayOutputStream(); byte[] b = new byte[1 << 16]; int k; while ((k = in.read(b)) > 0) bo.write(b, 0, k); d = bo.toByteArray(); }
         catch (IOException e) { return "cannot read " + path; }
         finally { if (in != null) try { in.close(); } catch (IOException ig) { /* read only */ } }
@@ -78,8 +78,8 @@ public final class LaesTags {
     public static String checkPicture(String name, Picture p) { if (32L + utf8(p.mime).length + p.data.length >= (1L << 24)) return name + ": too large for a FLAC metadata block (16 MB)"; return ""; }
     /** the size check of parseArgs over all pictures ("" or the reason) */
     public static String checkAll(Tags t) { long all = 0; for (Picture p : t.pics) all += p.data.length + 64; if (all >= (1L << 28) - 4096) return "the pictures together are too large for an ID3v2 tag (256 MB)";
-        return checkSizes(t, 64, true, true); }   // DEC 26: the text counts too (room for a vendor string of 64 bytes)
-    // port of laes_tags.h:checkSizes (DEC 26, FU28-3 (1)(2)): the final lengths of what flacBlocks / wavChunks write, for a vendor string of
+        return checkSizes(t, 64, true, true); }   // the text counts too (room for a vendor string of 64 bytes)
+    // port of laes_tags.h:checkSizes: the final lengths of what flacBlocks / wavChunks write, for a vendor string of
     // encLen bytes; "" or the reason. FLAC: VORBIS_COMMENT and every PICTURE below 2^24 (24-bit block length); WAV: every ID3 frame and the
     // whole ID3 tag below 2^28 (syncsafe), the LIST/INFO and "id3 " chunks below 2^32. flac / wav: which form to check.
     public static String checkSizes(Tags t, long encLen, boolean flac, boolean wav) {
@@ -140,9 +140,9 @@ public final class LaesTags {
     public static byte[] flacBlocks(Tags t, boolean lastBlock) { return flacBlocks(t, lastBlock, kEncoder); }
     // enc: the vendor string (lae_enc names itself)
     public static byte[] flacBlocks(Tags t, boolean lastBlock, String enc) { return flacBlocks(t, lastBlock, enc, null); }
-    // err (DEC 26): null, or err[0] receives the reason when the blocks would be too long (then null is returned); without err a LaeException
+    // err: null, or err[0] receives the reason when the blocks would be too long (then null is returned); without err a LaeException
     public static byte[] flacBlocks(Tags t, boolean lastBlock, String enc, String[] err) {
-        if (!sizesOk(t, enc, err, true)) return null;   // DEC 26
+        if (!sizesOk(t, enc, err, true)) return null;
         final List<byte[]> bl = new ArrayList<byte[]>(); final List<Integer> types = new ArrayList<Integer>();
         if (!t.kv.isEmpty()) { ByteArrayOutputStream b = new ByteArrayOutputStream(); final byte[] ven = utf8(enc); le32(b, ven.length); add(b, ven); le32(b, t.kv.size());
             for (KV kv : t.kv) { final byte[] s = utf8(kv.key + "=" + kv.value); le32(b, s.length); add(b, s); }
@@ -175,10 +175,10 @@ public final class LaesTags {
     public static byte[] wavChunks(Tags t) { return wavChunks(t, kEncoder); }
     // enc: the encoder named in ISFT / TSSE (lae_enc names itself; 2026-11-06, a85dd40)
     public static byte[] wavChunks(Tags t, String enc) { return wavChunks(t, enc, null); }
-    // err (DEC 26): as flacBlocks
+    // err: as flacBlocks
     public static byte[] wavChunks(Tags t, String enc, String[] err) {
         ByteArrayOutputStream o = new ByteArrayOutputStream(); if (t.empty()) return o.toByteArray();
-        if (!sizesOk(t, enc, err, false)) return null;   // DEC 26
+        if (!sizesOk(t, enc, err, false)) return null;
         // a repeated key: one INFO entry / text frame (INFO "; ", ID3v2.4 NUL-separated values), in the order of the first appearance
         final List<String> mk = new ArrayList<String>(); final List<List<String>> mv = new ArrayList<List<String>>(); merged(t, mk, mv);
         {   ByteArrayOutputStream info = new ByteArrayOutputStream(); add(info, utf8("INFO"));

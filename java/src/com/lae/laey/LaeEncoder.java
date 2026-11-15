@@ -51,7 +51,7 @@ public final class LaeEncoder {
 
     /** port of lae_enc.cpp:encrun: run state for the cleanup (what this run created and must remove) */
     static final class Run { String out, part, tmp; boolean hadOld = false, partMine = false, tmpMine = false, cleaned = false, finished = false, keepTmp = false;
-        // FU22-8 (Java only): the work folder is locked while this run uses it (lae_enc.lock, an OS file lock: released when the run ends or
+        // Java only: the work folder is locked while this run uses it (lae_enc.lock, an OS file lock: released when the run ends or
         // the process dies), so a second encoder given the same folder stops at once instead of writing the same files and removing the folder
         private java.io.RandomAccessFile lockFile; private java.nio.channels.FileLock lock;
         boolean lockWork() { try { lockFile = new java.io.RandomAccessFile(new File(tmp, "lae_enc.lock"), "rw"); lock = lockFile.getChannel().tryLock(); }
@@ -145,7 +145,7 @@ public final class LaeEncoder {
         catch (Error e) { emergency(x, "internal error"); return 2; }
         x.run.finished = true; return rc; }
 
-    // FU22-9: the message of an exception, or its class name when it has none (was "null", e.g. for a NullPointerException)
+    // the message of an exception, or its class name when it has none (was "null", e.g. for a NullPointerException)
     static String why(Throwable e) { final String m = e.getMessage(); return m != null ? m : "internal error (" + e.getClass().getSimpleName() + ")"; }
     static boolean exists(String p) { return new File(p).exists(); }
     static long fileSize(String p) { File f = new File(p); return f.isFile() ? f.length() : -1; }
@@ -188,11 +188,11 @@ public final class LaeEncoder {
         final String outPath = argv[2], partPath = outPath + ".part", tmp = workDir != null ? workDir : outPath + ".tmp";
         x.outPath = outPath; x.partPath = partPath; x.tmp = tmp; x.run.out = outPath; x.run.part = partPath; x.run.tmp = tmp; x.run.hadOld = exists(outPath);
         if (!MdctTb.selftestOK() || !AlignHash.md5SelfTest() || EncIo.testFail(env, "selftest")) { env.printf("encoder self-test FAILED: this build does not compute the IMDCT in the IEEE-754 order the format requires, or its MD5 is wrong (see docs/BUILD.md); nothing encoded\n"); return 4; }
-        // the mode is the third argument and may be left out (default 3): a third argument that is no mode name is read as the first option (FU07-5)
+        // the mode is the third argument and may be left out (default 3): a third argument that is no mode name is read as the first option
         final int opt0 = modeOpt0(argv); final String modeName = opt0 == 4 && argc > 3 ? argv[3] : "3"; final int mi = PartitionFormat.modeIndex(modeName);
         x.mi = mi;
         boolean equal = false, zsOpt = false, bits24 = false; int wm = 0, scheme = 1; long memBudget = 0;   // mem=<GB>: memory budget for coding two layers at once
-        boolean overwrite = false;   // --overwrite (decision 21, 2026-11-15): replace an existing output without asking
+        boolean overwrite = false;   // --overwrite (2026-11-15): replace an existing output without asking
         final int formSel = LaeRetag.outputForm(env, outPath, argv, opt0); if (formSel < 0) { env.printf("nothing encoded\n"); return 1; } x.asFlac = formSel == 1;
         { final com.lae.laes.LaesTags.Tags tags = new com.lae.laes.LaesTags.Tags(); final String e = LaeRetag.tagArgs(argv, opt0, tags); if (!e.isEmpty()) { env.printf("%s: nothing encoded\n", e); return 1; }   // read and checked before any work
           if (x.presetTags != null) { tags.kv.addAll(x.presetTags.kv); tags.pics.addAll(x.presetTags.pics); final String e2 = com.lae.laes.LaesTags.checkAll(tags); if (!e2.isEmpty()) { env.printf("%s: nothing encoded\n", e2); return 1; } }
@@ -226,7 +226,7 @@ public final class LaeEncoder {
             x.nPacks++; }
         if (x.alignOut != null && (x.cdPath == null || x.nPacks != 0 || x.resume || x.cdCheck)) { env.printf("alignout= is an internal step of the extension packs: nothing encoded\n"); return 1; }
         if (x.nPacks != 0 && (x.noisePath != null || x.resume || x.cdCheck)) { env.printf("further masters (master2= ...) cannot be combined with noise=, resume or cdcheck in this version: nothing encoded\n"); return 1; }
-        // decision 21 (2026-11-15, as lae_enc.cpp): an existing output only after two "yes" at a console, or with --overwrite (not for the
+        // 2026-11-15, as lae_enc.cpp: an existing output only after two "yes" at a console, or with --overwrite (not for the
         // internal steps alignout= / rawin=; cdcheck writes nothing)
         if (x.alignOut == null && x.rawRate == 0 && !x.cdCheck && !com.lae.core.Replace.mayReplace(outPath, overwrite, new com.lae.core.Replace.Out() { @Override public void print(String s) { env.print(s); } })) return 1;
         if (mi >= PartitionFormat.MODE_KEEP) wm = 2; if (mi == 0) wm = 1;
@@ -285,7 +285,7 @@ public final class LaeEncoder {
         if (x.gOpt) env.printf("g: on, strength %c (%s) - deleted or silent A cells code -G where G lies above the 24-bit rounding floor (docs/NOISE.md)\n",
                                x.gLevel, x.gLevel == 'd' ? "step 1, down to the 24-bit floor" : x.gLevel == 'c' ? "C steps: block peak - 4 bit" : "B steps: block peak - 2 bit");
         { File td = new File(tmp); boolean made = td.mkdirs(); if (!td.isDirectory()) { env.printf("cannot create the work folder %s: nothing encoded\n", tmp); x.oldNote(); return 2; }
-          if (!x.run.lockWork()) { env.printf("the work folder %s is in use by another encoder run: give every encoding its own work folder; nothing encoded\n", tmp); x.oldNote(); return 1; }   // FU22-8: before this run counts the folder as its own
+          if (!x.run.lockWork()) { env.printf("the work folder %s is in use by another encoder run: give every encoding its own work folder; nothing encoded\n", tmp); x.oldNote(); return 1; }   // before this run counts the folder as its own
           if (made || exists(marker)) x.run.tmpMine = true; EncIo.writeText(env, marker, "lae_enc work folder (removed at the end of each run)\n"); }
         try {   // struct Guard: removes the work folder always, the .part on failure
             return encodeBody(x, argv, T0, base, stages, P, wm, equal, scheme, memBudget, modeName, note32); }
@@ -301,9 +301,9 @@ public final class LaeEncoder {
     /** the streams of one layer (C++ std::vector&lt;std::vector&lt;uint8_t&gt;&gt;) */
     static final class Streams { List<byte[]> s = new ArrayList<byte[]>(); }
 
-    // port of lae_enc.cpp:isOverwriteOpt (decision 21)
+    // port of lae_enc.cpp:isOverwriteOpt
     static boolean isOverwriteOpt(String a) { return a.equals("--overwrite") || a.equals("overwrite"); }
-    // the first option's index: 3 when the third argument is no mode name (the mode left out, default 3), else 4 (FU07-5, as lae_enc.cpp)
+    // the first option's index: 3 when the third argument is no mode name (the mode left out, default 3), else 4 (as lae_enc.cpp)
     static int modeOpt0(String[] argv) { return argv.length > 3 && PartitionFormat.modeIndex(argv[3]) < 0 ? 3 : 4; }
     // port of lae_enc.cpp:encode lambda nested: one further master, this encoder run as a step of this run with its own work folder
     static int nested(Ctx x, List<String> a, String zs, String rf, String rd, boolean hadUnits) {
@@ -312,7 +312,7 @@ public final class LaeEncoder {
         catch (EncEnv.Cancelled c) { throw c; }
         catch (LaeException e) { env.printf("further master: stopped: %s\n", e.getMessage()); rc = 2; }
         catch (OutOfMemoryError e) { env.printf("further master: stopped: out of memory\n"); rc = 2; }
-        catch (RuntimeException e) { env.printf("further master: stopped: %s\n", why(e)); rc = 2; }   // FU07-2 (as lae_enc c45ec8c): any other error stops this run cleanly
+        catch (RuntimeException e) { env.printf("further master: stopped: %s\n", why(e)); rc = 2; }   // as lae_enc c45ec8c: any other error stops this run cleanly
         catch (Error e) { env.printf("further master: stopped: internal error\n"); rc = 2; }
         clearModuleEnv(env); env.set("ZSIGN", zs != null ? zs : ""); env.set("RULE_F", rf != null ? rf : ""); env.set("RULE_D", rd != null ? rd : ""); env.set("DITHERFLAGS", x.T("dither.flags"));   // this run's own module settings again
         if (!hadUnits) env.set("LAE_BLOCKUNITS", "");
@@ -356,7 +356,7 @@ public final class LaeEncoder {
         long maxL = 0, maxT = 0; for (int k = 0; k < n; k++) { maxL = Math.max(maxL, leads[k]); maxT = Math.max(maxT, tails[k]); }
         if (maxL != 0 || maxT != 0) {   // the largest need on each side: the core gets that digital silence once, and the master and every further master the same
             env.printf("further masters: the core gets %ld frame(s) of digital silence before and %ld after (the largest need of any master); the master and every further master get the same\n", maxL, maxT);
-            // FU22-9: the length check comes before the core's new array (a very long time line gave a negative array size first)
+            // the length check comes before the core's new array (a very long time line gave a negative array size first)
             if (!x.fitsLength(x.Lm + (maxL + maxT) * upM)) { env.printf("further masters: the time line (%lld frames) is outside this encoder's length limits: nothing encoded\n", x.Lm + (maxL + maxT) * upM); x.oldNote(); return 1; }
             { short[] o = new short[(int) (core.length + 2 * maxL + 2 * maxT)]; System.arraycopy(core, 0, o, (int) (2 * maxL), core.length); core = o; }
             padRawFile(env, x.T("m0.raw"), maxL * upM, maxT * upM); x.Lm += (maxL + maxT) * upM;
@@ -404,7 +404,7 @@ public final class LaeEncoder {
         // no finished step is reused (see below, after the alignment).
         x.manifest = x.T("resume.txt");
         if (x.resume) { StringBuilder key = new StringBuilder("lae_enc java-port " + LaeyEncoder.VERSION + " | options");
-            for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i]) && !isOverwriteOpt(argv[i]) && !argv[i].startsWith("mem=")) key.append(" ").append(argv[i]);   // mem=: only the block length, which changes no result (FU07-9)
+            for (int i = 3; i < argv.length; i++) if (!argv[i].equals("resume") && !LaeRetag.isTagOpt(argv[i]) && !LaeRetag.isFormOpt(argv[i]) && !isOverwriteOpt(argv[i]) && !argv[i].startsWith("mem=")) key.append(" ").append(argv[i]);   // mem=: only the block length, which changes no result
             key.append(" | master ").append(masterMd5);
             if (x.noisePath != null) { final byte[] t = EncIo.readAll(x.noisePath); long h = 0xcbf29ce484222325L;   // FNV-1a of the marking file's bytes (1469598103934665603)
                 for (int i = 0; i < t.length; i++) { h ^= (t[i] & 0xFF); h *= 1099511628211L; }
@@ -497,7 +497,7 @@ public final class LaeEncoder {
                    x.Lm / (60.0 * wrate), wrate, units, units > 0 ? (double) (uF * units) / wrate : x.Lm / (double) wrate,
                    planD[0] ? "two at once" : "coded one after the other", needD / 1e6, planF[0] ? "two at once" : "coded one after the other", needF / 1e6,
                    memUse / 1e6, memBudget > 0 ? " (mem=)" : "", memAvail / 1e6);
-        {   // FU22-4 (Java only: the heap limit is a hard limit): say so when even one layer coded alone is estimated above the available heap
+        {   // Java only: the heap limit is a hard limit: say so when even one layer coded alone is estimated above the available heap
             final long oneF = layerNeed(sF, uF, units > 0 ? units : (sF + uF - 1) / uF, M128);
             if (memAvail > 0 && oneF > memAvail)
                 env.printf("WARNING: one frequency layer coded alone needs about %.0f MB by this estimate, %.0f MB of Java heap are available: the encoding may stop with \"out of memory\" (nothing is written then); give the program more memory (for a JVM: -Xmx)\n", oneF / 1e6, memAvail / 1e6); }
@@ -544,7 +544,7 @@ public final class LaeEncoder {
             x.markDone("leak"); }
             if (x.isDone("routes2")) env.printf("resume: second route split already done\n");
             else { String fcs = Fmt.c("%.0f", fc); env.set("LEAKIN", x.T("leak.s32"));
-              int rc = call(env, routes, "routes", x.T("m.raw"), Integer.toString(wrate), x.T("b16.s16"), x.T("b24.s32"), x.T("T.s32"), "-", fcs); env.set("LEAKIN", "");   // decision 35 (FU23-1, as lae_enc.cpp): no F2.s32 ("-"), the split still computes F and counts its overflow
+              int rc = call(env, routes, "routes", x.T("m.raw"), Integer.toString(wrate), x.T("b16.s16"), x.T("b24.s32"), x.T("T.s32"), "-", fcs); env.set("LEAKIN", "");   // as lae_enc.cpp: no F2.s32 ("-"), the split still computes F and counts its overflow
               stamp(env, T0, "leak decoded + route split again");
               if (rc != 0 || EncIo.testFail(env, "routes2")) { env.printf("leak compensation FAILED in the route split: nothing written\n"); x.oldNote(); return 2; }
               x.markDone("routes2"); }
@@ -561,7 +561,7 @@ public final class LaeEncoder {
           env.set("CLIPMAP", x.T("clip.bin")); int rc = call(env, dec, "dec", partPath, x.T("check.wav"), "full"); env.set("CLIPMAP", "");
           if (rc != 0 || EncIo.testFail(env, "finaldecode")) { env.printf("end-to-end check FAILED: the decoder could not decode the final file (code %d): nothing written\n", rc); x.oldNote(); return 2; }
           final long wantWav = 44 + x.Lm * 6 + ((x.Lm * 6) & 1), clipB = fileSize(x.T("clip.bin")), haveWav = fileSize(x.T("check.wav"));
-          if (haveWav != wantWav) { env.printf("end-to-end check FAILED: the decoded file has %lld bytes, expected %lld: nothing written\n", haveWav, wantWav); x.oldNote(); return 2; }   // the decoder said OK but did not write the whole track (FU07-4)
+          if (haveWav != wantWav) { env.printf("end-to-end check FAILED: the decoded file has %lld bytes, expected %lld: nothing written\n", haveWav, wantWav); x.oldNote(); return 2; }   // the decoder said OK but did not write the whole track
           if (clipB >= 0 && !EncIo.testFail(env, "clipdecode")) nclip = clipB / 4;
           if (nclip >= 0) env.printf("samples beyond full scale before the decoder's hard limiter: %ld\n", nclip);
           else env.printf("samples beyond full scale before the decoder's hard limiter: not measured (the check files are incomplete)\n"); }
@@ -569,7 +569,7 @@ public final class LaeEncoder {
         {   // only a complete, verified file gets the output name; a briefly locked target (scanner, indexer, player) is retried
             boolean renamed = false; for (int k = 0; k < 20; k++) { if (rename(partPath, outPath)) { renamed = true; break; } sleep(250); }
             if (!renamed) { env.printf("cannot rename %s to %s: %s (the output may be open in another program)\n", partPath, outPath, "rename failed");
-                if (x.run.hadOld && !exists(outPath) && exists(partPath)) {   // FU22-2: only without java.nio.file the old file can be gone: the new one is kept
+                if (x.run.hadOld && !exists(outPath) && exists(partPath)) {   // only without java.nio.file the old file can be gone: the new one is kept
                     x.run.partMine = false; env.printf("the existing %s was removed before the rename failed; the new, checked file is kept as %s: rename it by hand\n", outPath, partPath); return 2; }
                 x.oldNote(); return 2; }
             x.run.partMine = false; x.run.keepTmp = false; }   // finished: the work folder goes, also after a resumed run
@@ -579,7 +579,7 @@ public final class LaeEncoder {
             for (int k = 0; k < x.nPacks; k++) { final PackOpt q = x.pk[k]; env.printf("  pack %d: %s%s%s%s, %zu B\n", k + 1, q.path, q.name.isEmpty() ? "" : " (\"", q.name, q.name.isEmpty() ? "" : "\")", (long) x.packRecs.get(k).length); }
             if (!x.packReport.isEmpty()) { if (x.alignReport.isEmpty()) x.alignReport = "LAE alignment report (further masters)\noutput: " + outPath + "\n"; x.alignReport += x.packReport; } }
         if (!x.alignReport.isEmpty()) { final String rp = outPath + ".align.txt"; boolean okr = true;
-            try { FileOutputStream f = new FileOutputStream(rp); try { f.write(x.alignReport.getBytes(java.nio.charset.StandardCharsets.UTF_8)); } finally { f.close(); } } catch (IOException e) { okr = false; }   // FU22-5: UTF-8, as lae_enc (Latin-1 kept only the low 8 bits of each character)
+            try { FileOutputStream f = new FileOutputStream(rp); try { f.write(x.alignReport.getBytes(java.nio.charset.StandardCharsets.UTF_8)); } finally { f.close(); } } catch (IOException e) { okr = false; }   // UTF-8, as lae_enc (Latin-1 kept only the low 8 bits of each character)
             env.printf(okr ? "alignment report: %s\n" : "WARNING: the alignment report %s could not be written (the LAE file itself is complete)\n", rp); }
         long sd = dL[0].s.get(0).length + dR[0].s.get(0).length, sf = 0; for (byte[] s : fM[0].s) sf += s.length; for (byte[] s : fS[0].s) sf += s.length;
         String extra = ""; if (!note32.isEmpty()) extra += " | " + note32; if (!x.alignNote.isEmpty()) extra += " | " + x.alignNote;
@@ -611,7 +611,7 @@ public final class LaeEncoder {
         return new boolean[] {mayPair && need <= memUse && (memAvail == 0 || need <= memAvail)}; }
     static void sleep(long ms) { try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } }
     // std::filesystem::rename (replaces an existing target, as MoveFileEx with MOVEFILE_REPLACE_EXISTING does)
-    // FU22-2: the target is replaced in one step (java.nio.file.Files.move with ATOMIC_MOVE: MoveFileEx with MOVEFILE_REPLACE_EXISTING on
+    // the target is replaced in one step (java.nio.file.Files.move with ATOMIC_MOVE: MoveFileEx with MOVEFILE_REPLACE_EXISTING on
     // Windows, rename(2) elsewhere), so a rename that fails (the source held open by a scanner or indexer) leaves an existing target as it was.
     // Only where java.nio.file is missing (Android below 8.0) the target is deleted first, as before; the caller handles that case.
     static boolean rename(String from, String to) { File f = new File(from), t = new File(to); if (f.renameTo(t)) return true;

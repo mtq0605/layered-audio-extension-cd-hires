@@ -146,7 +146,7 @@ public final class Flac {
         final int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return "frame bit depth differs from STREAMINFO";
         if (r.fail || (r.pos & 7) != 0) return "frame header truncated"; final int hb = (int) (r.pos / 8); final int c8 = (int) r.get(8); if (r.fail || c8 != crc8(buf, fp, hb)) return "frame header CRC-8 mismatch";
         if (strategy == 0 && num != frameNo) return "frame number out of order";
-        if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the first sample's number (FU12-6, as laes_flac.h)
+        if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the first sample's number (as laes_flac.h)
         F.n = (int) n; for (int c = 0; c < 2; c++) { if (!reuse || F.ch[c] == null || F.ch[c].length < n) F.ch[c] = new long[(int) n]; if (!readSubframe(r, F.ch[c], 0, (int) n, bps, F)) return "damaged subframe"; }
         r.pos = (r.pos + 7) & ~7L; final long fb = r.pos / 8; if (fb + 2 > r.n) return "frame truncated";
         if (crc16(buf, fp, (int) fb) != (((buf[fp + (int) fb] & 0xFF) << 8) | (buf[fp + (int) fb + 1] & 0xFF))) return "frame CRC-16 mismatch";
@@ -166,7 +166,7 @@ public final class Flac {
         final int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return false;
         if (r.fail || (r.pos & 7) != 0) return false; final int hb = (int) (r.pos / 8); final int c8 = (int) r.get(8); return !r.fail && c8 == crc8(buf, fp, hb); }
 
-    // DEC 19 (2026-11-15, port of laes_flac.h): tags that other programs put around a FLAC stream are accepted and left in the file: ID3v2
+    // 2026-11-15, port of laes_flac.h: tags that other programs put around a FLAC stream are accepted and left in the file: ID3v2
     // tags in front of "fLaC" (each "ID3", version, flags, a 28-bit synchsafe size; +10 bytes with a footer) and, after the last audio
     // frame, APEv2 tags (footer "APETAGEX", its size, a 32-byte header when flag bit 31 is set) and ID3v1 tags ("TAG", 128 bytes), in any
     // order, at most 4. They are not read. rd.read(offset, buffer, bytes) reads the file.
@@ -208,7 +208,7 @@ public final class Flac {
         Whole W = new Whole(); W.err = readFlacImpl(f, W); return W; }
     private static String readFlacImpl(byte[] f, Whole W) {
         final Info in = W.in; java.io.ByteArrayOutputStream app = new java.io.ByteArrayOutputStream();
-        final Rd rdv = rdOf(f, 0); final int s0 = (int) flacStart(rdv, f.length);   // DEC 19: ID3v2 tags in front skipped
+        final Rd rdv = rdOf(f, 0); final int s0 = (int) flacStart(rdv, f.length);   // ID3v2 tags in front skipped
         if (f.length < s0 + 8 || !(f[s0] == 'f' && f[s0 + 1] == 'L' && f[s0 + 2] == 'a' && f[s0 + 3] == 'C')) return "not a FLAC file";
         long p = s0 + 4; boolean last = false, haveSi = false;
         while (!last) { if (p + 4 > f.length) return "metadata truncated"; last = (f[(int) p] & 0x80) != 0; final int type = f[(int) p] & 0x7F; final long len = (long) (f[(int) p + 1] & 0xFF) << 16 | (f[(int) p + 2] & 0xFF) << 8 | (f[(int) p + 3] & 0xFF); p += 4;
@@ -220,10 +220,10 @@ public final class Flac {
         W.app = app.toByteArray();
         if (!haveSi) return "no STREAMINFO"; if (in.total == 0) return "STREAMINFO gives no sample count (an LAES core master always has one)"; if (in.maxBs < 16) return "bad STREAMINFO block size"; if (in.channels != 2) return "LAES core master must have 2 channels"; if (in.bps != 16 && in.bps != 24 && in.bps != 32) return "core master must be 16, 24 or 32 bit";
         long[][] ch = {new long[1024], new long[1024]}; int size = 0; long frameNo = 0;
-        while (p < f.length && size < in.total) { Frame F = decodeFrame(f, (int) p, f.length - p, in, frameNo, size); if (!F.err.isEmpty()) return F.err;   // DEC 19: no frame after the last sample
+        while (p < f.length && size < in.total) { Frame F = decodeFrame(f, (int) p, f.length - p, in, frameNo, size); if (!F.err.isEmpty()) return F.err;   // no frame after the last sample
             if (size + F.n > ch[0].length) for (int c = 0; c < 2; c++) ch[c] = java.util.Arrays.copyOf(ch[c], Math.max(size + F.n, ch[c].length * 2));
             for (int c = 0; c < 2; c++) System.arraycopy(F.ch[c], 0, ch[c], size, F.n); size += F.n; p += F.used; frameNo++; }
-        if (p < f.length && trailerLen(rdv, p, f.length) != f.length - p) return "bytes after the last audio frame that are no APEv2 / ID3v1 tag";   // DEC 19
+        if (p < f.length && trailerLen(rdv, p, f.length) != f.length - p) return "bytes after the last audio frame that are no APEv2 / ID3v1 tag";
         for (int c = 0; c < 2; c++) W.ch[c] = java.util.Arrays.copyOf(ch[c], size);
         if (in.total != 0 && in.total != size) return "sample count differs from STREAMINFO";
         byte[] m = audioMd5(W.ch, size, in.bps); boolean zero = true; for (int i = 0; i < 16; i++) zero &= in.md5[i] == 0; W.md5ok = !zero && java.util.Arrays.equals(m, in.md5);

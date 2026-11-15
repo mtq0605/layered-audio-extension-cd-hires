@@ -20,14 +20,14 @@
 //        pos_NNN its rectangle in cells as in the marking file (geometry only), with the end frame of the previewed part
 //   lae_noise preview-all <master.wav> <marks.laenoise> <outdir> <t0 s> <t1 s>
 //        every position silenced together over one excerpt of at most 30 s: all_original.wav, all_silenced.wav, all_marked.wav, with the same check
-//   Decision 6 (2026-11-15, "we do not support export"): every preview is limited in the program, so no command writes a cleaned
+//   2026-11-15, "we do not support export": every preview is limited in the program, so no command writes a cleaned
 //   master: preview covers at most the first 30 s of a position (10 s by default) with at most 1 s of context on each side, preview-all at most 30 s (30 s: user decision 2026-11-15);
 //   a longer request is cut to the limit and the program says so (as a long position was already cut to its first part)
 //   lae_noise level <file.wav> <marks.laenoise>   level of the marked cells in any file of that length (master, copy, decode)
 //   lae_noise spectro <master.wav> <out.json>   display data for the panel (tools/noise_panel.html): cell levels and waveform
 //   lae_noise scan <master.wav> <report.txt> [candidates.laenoise]   the scanner (src/noise_scan0c.cpp): stationary noise and fixed
 //        narrow lines of 10 s or more, as a list and as a marking file of candidates; nothing is marked until the user keeps one
-//   --overwrite (with any command, anywhere): decision 21 (2026-11-15): an output file that exists is replaced only after two "yes"
+//   --overwrite (with any command, anywhere; 2026-11-15): an output file that exists is replaced only after two "yes"
 //        answers at a console, or with --overwrite; without a console it is refused (src/noise_replace.h)
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
@@ -44,7 +44,7 @@
 #include "mdct_tb.h"
 #include "noise_marks.h"   // the marking format (Pos, Marks, masterSha, read / write / check)
 #include "wavio.h"
-#include "noise_replace.h"   // decision 21: an existing output is not replaced silently (--overwrite)
+#include "noise_replace.h"   // an existing output is not replaced silently (--overwrite)
 #include "win_utf8.h"   // Windows: arguments, file names and output in UTF-8 (2026-11-05)
 #include "lae_math.h"   // levels in dB the same on every platform (2026-11-06)
 using namespace std;
@@ -52,21 +52,21 @@ using namespace nmk;
 // previews are 32-bit PCM: the master's 24 bits x 256, so rounding stays 256 times below a 24-bit step and the check sees the deletion
 // itself (a sub-LSB removal rounded to 24 bit would spread its own distortion into other cells)
 static const double CHECKMAX = 0.05;   // outside the marked cells, in 24-bit units: rounding to 32 bit alone stays near 0.005
-static const double MAXPREV = 30.0, MAXCTX = 1.0;   // decision 6: the longest preview (s) of a position or of preview-all, and its context (s) on each side
+static const double MAXPREV = 30.0, MAXCTX = 1.0;   // the longest preview (s) of a position or of preview-all, and its context (s) on each side
 static int32_t clip32(long long v) { return (int32_t)max((long long)INT32_MIN, min((long long)INT32_MAX, v)); }
 static bool write32(const char* path, int rate, const vector<int32_t>& s) {
     FILE* f = fopen(path, "wb"); if (!f) return false; const uint32_t db = (uint32_t)(s.size() * 4);
     auto w32 = [&](uint32_t v) { fwrite(&v, 4, 1, f); }; auto w16 = [&](uint16_t v) { fwrite(&v, 2, 1, f); };
     fwrite("RIFF", 1, 4, f); w32(36 + db); fwrite("WAVEfmt ", 1, 8, f); w32(16); w16(1); w16(2); w32((uint32_t)rate); w32((uint32_t)rate * 8); w16(8); w16(32);
     fwrite("data", 1, 4, f); w32(db); const bool ok = fwrite(s.data(), 4, s.size(), f) == s.size(); return fclose(f) == 0 && ok; }
-// FU17-6 (2026-11-14): a preview file is written only when it is not the master itself and fits a RIFF WAV (4 GB); false = the
+// 2026-11-14: a preview file is written only when it is not the master itself and fits a RIFF WAV (4 GB); false = the
 // reason is printed and the command ends with exit code 1 (before, a failed write still printed "preview written", exit code 0)
 static bool writePreview(const string& path, const char* master, int rate, const vector<int32_t>& s) {
     if (sameFile(master, path.c_str())) { printf("%s is the master itself: not written, nothing changed\n", path.c_str()); return false; }
     if ((unsigned long long)s.size() * 4 > 0xFFFFFFFFull - 36) { printf("cannot write %s: longer than a WAV file can hold (4 GB); give a shorter preview\n", path.c_str()); return false; }
     if (!write32(path.c_str(), rate, s)) { printf("cannot write %s\n", path.c_str()); return false; }
     return true; }
-// DEC 21 (2026-11-15): every output a command will write is checked before anything is written: an existing file is replaced only
+// 2026-11-15: every output a command will write is checked before anything is written: an existing file is replaced only
 // after two "yes" at a console, or with --overwrite (a name that is the master itself is refused later, as before)
 static bool mayWriteAll(const char* master, const vector<string>& outs) { for (const string& o : outs) if (!sameFile(master, o.c_str()) && !nrep::mayReplace(o)) return false; return true; }
 
@@ -89,7 +89,7 @@ static void invFrame(const double* c, long m, long long a, vector<double>& y) {
 
 static int doMark(int argc, char** argv) {
     if (argc < 8 || (argc - 4) % 4) { printf("usage: lae_noise mark <master.wav> <out.laenoise> <t0 s> <t1 s> <f0 Hz> <f1 Hz> [...]\n"); return 2; }
-    if (!mayWriteAll(argv[2], { argv[3] })) return 1;   // DEC 21
+    if (!mayWriteAll(argv[2], { argv[3] })) return 1;
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; mk.sha = masterSha(ws); mk.frames = ws.frames; mk.rate = ws.rate; long K = mdct::frames((long)ws.frames);
     for (int i = 4; i + 3 < argc; i += 4) { double t0 = atof(argv[i]), t1 = atof(argv[i + 1]), f0 = atof(argv[i + 2]), f1 = atof(argv[i + 3]);
@@ -98,7 +98,7 @@ static int doMark(int argc, char** argv) {
         mk.pos.push_back({m0, m1, c0, c1});
         printf("position %zu: %.3f-%.3f s, %.1f-%.1f Hz (frames %ld-%ld, columns %d-%d)\n", mk.pos.size(), frameT0(m0, ws.rate), frameT0(m1, ws.rate), colHz(c0, ws.rate), colHz(c1, ws.rate), m0, m1 - 1, c0, c1 - 1); }
     if (mk.pos.empty()) { printf("no position: nothing written\n"); return 1; }
-    if (sameFile(argv[2], argv[3])) { printf("%s is the master itself: nothing written\n", argv[3]); return 2; }   // FU17-6
+    if (sameFile(argv[2], argv[3])) { printf("%s is the master itself: nothing written\n", argv[3]); return 2; }
     if (!writeMarks(argv[3], mk)) { printf("cannot write %s\n", argv[3]); return 1; }
     printf("written: %s\n", argv[3]); return 0; }
 
@@ -120,15 +120,15 @@ static int doPreview(int argc, char** argv) {
     const string dir = argv[4]; std::error_code ec; std::filesystem::create_directories(dir, ec);
     double ctx = argc > 5 ? atof(argv[5]) : 1.0; const long long L = ws.frames; const long K = mdct::frames((long)L);
     double maxSec = argc > 6 ? atof(argv[6]) : 10.0;
-    if (ctx > MAXCTX) { printf("context %s s: cut to %.0f s (previews are limited; lae_noise does not export)\n", argv[5], MAXCTX); ctx = MAXCTX; }   // decision 6
+    if (ctx > MAXCTX) { printf("context %s s: cut to %.0f s (previews are limited; lae_noise does not export)\n", argv[5], MAXCTX); ctx = MAXCTX; }
     if (maxSec > MAXPREV) { printf("longest preview per position %s s: cut to %.0f s (previews are limited; lae_noise does not export)\n", argv[6], MAXPREV); maxSec = MAXPREV; }
     const long maxFr = max(1L, (long)llround(maxSec * ws.rate / NM));   // a long position is previewed from its start
-    { vector<string> outs{ dir + "/preview_check.txt", dir + "/preview_list.txt" }; char pn[64];   // DEC 21
+    { vector<string> outs{ dir + "/preview_check.txt", dir + "/preview_list.txt" }; char pn[64];
       for (size_t pi = 0; pi < mk.pos.size(); pi++) for (const char* kind : { "marked", "silenced", "original" }) { snprintf(pn, sizeof pn, "/pos_%03zu_%s.wav", pi + 1, kind); outs.push_back(dir + pn); }
       if (!mayWriteAll(argv[2], outs)) return 1; }
     FILE* rep = fopen((dir + "/preview_check.txt").c_str(), "w"); if (!rep) { printf("cannot write in %s\n", dir.c_str()); return 1; }
     fprintf(rep, "master %s\nmarking file %s\nposition | time s | Hz | marked level dBFS | outside the marked cells: max |coefficient| and rms (24-bit units; previews are 32-bit, rounding alone gives about 0.001 rms; fails above %.2f)\n", argv[2], argv[3], CHECKMAX);
-    // FU17-8: the list the panel matches by (the master by SHA-256, each preview by its rectangle); "wb": LF line ends everywhere
+    // the list the panel matches by (the master by SHA-256, each preview by its rectangle); "wb": LF line ends everywhere
     FILE* lst = fopen((dir + "/preview_list.txt").c_str(), "wb"); if (!lst) { fclose(rep); printf("cannot write in %s\n", dir.c_str()); return 1; }
     fprintf(lst, "LAEPREVIEW 1\nmaster sha256 %s frames %lld rate %.0f\ngrid mdct %d cell %d\n", mk.sha.c_str(), mk.frames, mk.rate, NM, CW);
     fprintf(lst, "# pos_NNN <m0> <m1> <c0> <c1> <e>: the files pos_NNN_*.wav are the preview of the position pos <m0> <m1> <c0> <c1> of the marking file; frames [m0, e) are previewed (e < m1: the first part of a long position)\n");
@@ -167,7 +167,7 @@ static int doPreview(int argc, char** argv) {
         fprintf(rep, "%4zu  %9.3f-%9.3f  %9.1f-%9.1f  %8.1f   max %.4f  rms %.5f%s\n", pi + 1, frameT0(p.m0, mk.rate), frameT0(p.m1, mk.rate), colHz(p.c0, mk.rate), colHz(p.c1, mk.rate), lv, mx, rms, mx > CHECKMAX ? "  CHECK FAILED" : "");
         printf("position %zu: preview written (%.2f s with context%s), outside the marked cells max %.4f rms %.5f\n", pi + 1, (b - a) / ws.rate, cut ? ", first part of a longer position" : "", mx, rms); }
     fprintf(rep, "%s\n", bad ? "RESULT: some positions changed cells outside the marking" : "RESULT: every position changed only its marked cells (outside: rounding to 32 bit only)");
-    { const bool werr = ferror(rep) != 0; if (fclose(rep) != 0 || werr) { fclose(lst); printf("cannot write %s/preview_check.txt\n", dir.c_str()); return 1; } }   // FU17-6
+    { const bool werr = ferror(rep) != 0; if (fclose(rep) != 0 || werr) { fclose(lst); printf("cannot write %s/preview_check.txt\n", dir.c_str()); return 1; } }
     if (fclose(lst) != 0) { printf("cannot write %s/preview_list.txt\n", dir.c_str()); return 1; }
     return bad ? 3 : 0; }
 
@@ -180,9 +180,9 @@ static int doPreviewAll(int argc, char** argv) {
     const string dir = argv[4]; std::error_code ec; std::filesystem::create_directories(dir, ec);
     const long long L = ws.frames; const long K = mdct::frames((long)L);
     const long long a = max(0LL, (long long)llround(atof(argv[5]) * ws.rate)); long long b = min(L, (long long)llround(atof(argv[6]) * ws.rate)); if (b <= a) { printf("empty excerpt\n"); return 2; }
-    const long long maxLen = llround(MAXPREV * ws.rate);   // decision 6: one excerpt of at most 30 s
+    const long long maxLen = llround(MAXPREV * ws.rate);   // one excerpt of at most 30 s
     if (b - a > maxLen) { b = a + maxLen; printf("excerpt %s-%s s is longer than %.0f s: cut to %.3f-%.3f s (previews are limited; lae_noise does not export)\n", argv[5], argv[6], MAXPREV, a / ws.rate, b / ws.rate); }
-    if (!mayWriteAll(argv[2], { dir + "/all_original.wav", dir + "/all_silenced.wav", dir + "/all_marked.wav" })) return 1;   // DEC 21
+    if (!mayWriteAll(argv[2], { dir + "/all_original.wav", dir + "/all_silenced.wav", dir + "/all_marked.wav" })) return 1;
     const long fA = max(0L, (long)(a / NM)), fB = min(K, (long)(b / NM) + 2);   // frames that touch the excerpt
     const long long r0 = (long long)fA * NM - 2 * NM, r1 = (long long)fB * NM + 2 * NM;
     vector<double> M, S; vector<long long> li, ri; planes(ws, r0, r1 - r0, M, S, li, ri);
@@ -201,7 +201,7 @@ static int doPreviewAll(int argc, char** argv) {
     for (long m = max(1L, fA); m < min(K - 1, fB); m++) { fwdFrame(dM, r0, m, cm); fwdFrame(dS, r0, m, cs);
         for (int k = 0; k < NM; k++) { if (sel[m - fA][k]) continue; mx = max(mx, max(fabs(cm[k]), fabs(cs[k]) / 2)); ss += cm[k] * cm[k] + cs[k] * cs[k] / 4; cnt += 2; } }
     if (!writePreview(dir + "/all_original.wav", argv[2], (int)ws.rate, outOrig) || !writePreview(dir + "/all_silenced.wav", argv[2], (int)ws.rate, outSil) ||
-        !writePreview(dir + "/all_marked.wav", argv[2], (int)ws.rate, outMark)) return 1;   // FU17-6
+        !writePreview(dir + "/all_marked.wav", argv[2], (int)ws.rate, outMark)) return 1;
     printf("excerpt %.2f-%.2f s: %zu positions, %ld marked frame-columns touched; outside the marked cells max %.4f rms %.5f%s\n", a / ws.rate, b / ws.rate, mk.pos.size(), used,
            mx, cnt ? sqrt(ss / cnt) : 0.0, mx > CHECKMAX ? "  CHECK FAILED" : "");
     return mx > CHECKMAX ? 3 : 0; }
@@ -213,7 +213,7 @@ static int doLevel(int argc, char** argv) {
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     Marks mk; std::string why; if (!readMarks(argv[3], mk, &why)) { printf("cannot read the marking file %s (%s)\n", argv[3], why.c_str()); return 1; }
     if (mk.frames != ws.frames || fabs(mk.rate - ws.rate) > 0.5) { printf("length or rate differ from the marking file\n"); return 1; }
-    if (!checkGrid(ws.frames, mk)) return 1;   // FU17-4: a position outside the grid was read past the 512 bins (or looped for ever)
+    if (!checkGrid(ws.frames, mk)) return 1;   // a position outside the grid was read past the 512 bins (or looped for ever)
     WavStream wr; const bool ref = argc > 4; if (ref && (!wr.open(argv[4]) || wr.frames != ws.frames)) { printf("cannot read the reference %s, or its length differs\n", argv[4]); return 1; }
     const double fsPow = 0.5 * 70368744177664.0; double eAll = 0; long long nAll = 0; double cm[NM], cs[NM];
     for (size_t pi = 0; pi < mk.pos.size(); pi++) { const Pos& p = mk.pos[pi]; double e = 0; const long CH = 2048;
@@ -234,8 +234,8 @@ static int doSpectro(int argc, char** argv) {
     WavStream ws; if (!ws.open(argv[2])) { printf("cannot read %s (%s)\n", argv[2], ws.why.c_str()); return 1; }
     const long long L = ws.frames; const long K = mdct::frames((long)L); const int G = max(1, (int)llround(0.02 * ws.rate / NM));
     const long nst = (K - 1) / G; const double fsPow = 0.5 * 70368744177664.0, perKHz = 10 * lmath::log10(CW * ws.rate / (2.0 * NM) / 1000.0);
-    if (sameFile(argv[2], argv[3])) { printf("%s is the master itself: nothing written\n", argv[3]); return 2; }   // FU17-6
-    if (!nrep::mayReplace(argv[3])) return 1;   // DEC 21
+    if (sameFile(argv[2], argv[3])) { printf("%s is the master itself: nothing written\n", argv[3]); return 2; }
+    if (!nrep::mayReplace(argv[3])) return 1;
     FILE* f = fopen(argv[3], "w"); if (!f) { printf("cannot write %s\n", argv[3]); return 1; }
     std::string name; for (unsigned char c : std::filesystem::path(argv[2]).filename().string()) {   // UTF-8 (win_utf8.h), JSON-escaped
         if (c == '"' || c == '\\') { name += '\\'; name += (char)c; } else if (c < 0x20) { char u[8]; snprintf(u, sizeof u, "\\u%04x", c); name += u; } else name += (char)c; }
@@ -256,7 +256,7 @@ static int doSpectro(int argc, char** argv) {
             wmin.push_back((int)llround(lo * 1000)); wmax.push_back((int)llround(hi * 1000)); } }
     fprintf(f, "],\"wmin\":["); for (size_t i = 0; i < wmin.size(); i++) fprintf(f, "%s%d", i ? "," : "", wmin[i]);
     fprintf(f, "],\"wmax\":["); for (size_t i = 0; i < wmax.size(); i++) fprintf(f, "%s%d", i ? "," : "", wmax[i]); fprintf(f, "]}\n");
-    { const bool werr = ferror(f) != 0; if (fclose(f) != 0 || werr) { printf("cannot write %s (the file is incomplete)\n", argv[3]); return 1; } }   // FU17-6: disk full
+    { const bool werr = ferror(f) != 0; if (fclose(f) != 0 || werr) { printf("cannot write %s (the file is incomplete)\n", argv[3]); return 1; } }   // disk full
     printf("written: %s (%ld steps of %d frames x %d columns)\n", argv[3], nst, G, NCOL); return 0; }
 
 #define NOISE_SCAN_NO_MAIN
@@ -264,7 +264,7 @@ static int doSpectro(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     lae_u8::init(argc, argv);   // UTF-8 arguments and file names on Windows (win_utf8.h)
-    nrep::takeOverwrite(argc, argv);   // DEC 21: --overwrite anywhere
+    nrep::takeOverwrite(argc, argv);   // --overwrite anywhere
     if (argc < 2) { printf("usage: lae_noise scan | mark | show | preview | preview-all | level | spectro ... [--overwrite] (see the head of src/lae_noise.cpp)\n"
                            "  --overwrite: replace existing output files without asking (on a console it is asked twice; otherwise it is refused)\n"
                            "  %s\n", u8"--overwrite：不问就替换已有的输出文件（在控制台上会问两次；不在控制台上就拒绝）"); return 2; }

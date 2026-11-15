@@ -568,7 +568,7 @@ void retireWorker(std::unique_ptr<LaesWorker> w) { if (!w) return; LaesWorker* p
 // around the playing time decoded for every other master of the file that is verified for this file content, each started at its
 // position by the noted block positions and then decoded at the pace of playback. A switch takes these samples and their decoder over
 // (LaesWorker adopt), so the new master plays without starting a decoder. The seconds kept follow the free memory of the machine.
-// Memory (DEC 42, 2026-11-15): every other master is prepared when memory allows. One prepared master takes its decoder (about 30 MB
+// Memory (2026-11-15): every other master is prepared when memory allows. One prepared master takes its decoder (about 30 MB
 // at 352.8 kHz, measured: tests/fix_2026-11-14/dec_e_mem.cpp) and the samples kept. At the start only as many are prepared as fit into
 // half of the memory above a reserve (1 GB physical, 512 MB address space), the nearest in menu order first; while playing, when free
 // memory falls below a lower mark, the farthest prepared master is given up. So memory does not run out and the system does not page
@@ -1050,7 +1050,7 @@ private:
                 std::stable_sort(cs.begin(), cs.end(), [this](const std::pair<int, laes_choice_info>& a, const std::pair<int, laes_choice_info>& b) { return std::abs(a.first - m_laesChoice) < std::abs(b.first - m_laesChoice); });
                 if (!cs.empty()) m_pf.reset(new LaesPrefetcher(sh, cs)); } }
         if (m_pf && m_rate > 0) m_pf->setTime((double)m_pos / m_rate);
-        // fewer masters prepared than the file has, because memory is short (DEC 42): the status bar and the console say so
+        // fewer masters prepared than the file has, because memory is short: the status bar and the console say so
         if (m_pf && m_pf->memShort() && m_pf->ready() != m_pfShown) { m_pfShown = m_pf->ready(); const std::string n = std::to_string(m_pfShown), t = std::to_string(m_pf->total());
             const std::string note = std::string(T("", "内存不足：其他母带只准备了 ")) + n + T(" of ", " / ") + t + T(" other masters ready (memory is short)", " 个");
             m_laesLabel = m_laesLabelBase + " \xC2\xB7 " + note; m_report = true;

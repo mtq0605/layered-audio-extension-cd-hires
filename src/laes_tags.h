@@ -62,7 +62,7 @@ inline std::vector<std::pair<std::string, std::vector<std::string>>> merged(cons
         if (!found) m.push_back({kv.first, {kv.second}}); }
     return m; }
 inline const char* id3Frame(const std::string& k);
-// DEC 26 (FU28-3 (1)(2)): the final lengths of what flacBlocks / wavChunks write, for a vendor string of encLen bytes; "" or the reason.
+// the final lengths of what flacBlocks / wavChunks write, for a vendor string of encLen bytes; "" or the reason.
 // FLAC: VORBIS_COMMENT and every PICTURE below 2^24 (24-bit block length); WAV: every ID3 frame and the whole ID3 tag below 2^28
 // (syncsafe), the LIST/INFO and "id3 " chunks below 2^32.
 inline std::string checkSizes(const Tags& t, size_t encLen, bool flac = true, bool wav = true) {   // flac / wav: which form to check
@@ -94,7 +94,7 @@ inline std::string parseArgs(int argc, char** argv, Tags& t) {
         if (!a.compare(0, 6, "--tag=")) { const std::string kv = a.substr(6); const size_t eq = kv.find('=');
             if (eq == std::string::npos || eq == 0) return "--tag needs KEY=VALUE: " + a;
             const std::string key = upperKey(kv.substr(0, eq)); for (char c : key) if (c < 0x20 || c > 0x7D || c == '=') return "--tag: a key is ASCII 0x20..0x7D without '=': " + a;
-            if (!validUtf8(kv.substr(eq + 1))) return "--tag: the value is not valid UTF-8: " + a;   // FU12-8: Vorbis comments and ID3 (encoding 3) are UTF-8
+            if (!validUtf8(kv.substr(eq + 1))) return "--tag: the value is not valid UTF-8: " + a;   // Vorbis comments and ID3 (encoding 3) are UTF-8
             t.kv.push_back({key, kv.substr(eq + 1)}); }
         else if (!a.compare(0, 8, "--cover=") || !a.compare(0, 10, "--picture=")) { Picture p; std::string path;
             if (a[2] == 'c') { p.type = 3; path = a.substr(8); }
@@ -105,7 +105,7 @@ inline std::string parseArgs(int argc, char** argv, Tags& t) {
             if (32 + p.mime.size() + p.data.size() >= (1u << 24)) return path + ": too large for a FLAC metadata block (16 MB)";
             t.pics.push_back(std::move(p)); } }
     size_t all = 0; for (auto& p : t.pics) all += p.data.size() + 64; if (all >= (1u << 28) - 4096) return "the pictures together are too large for an ID3v2 tag (256 MB)";
-    return checkSizes(t, 64); }   // DEC 26: the text counts too (room for a vendor string of 64 bytes)
+    return checkSizes(t, 64); }   // the text counts too (room for a vendor string of 64 bytes)
 // true when the argument is one of ours (the work folder does not depend on it)
 inline bool isTagArg(const std::string& a) { return !a.compare(0, 6, "--tag=") || !a.compare(0, 8, "--cover=") || !a.compare(0, 10, "--picture="); }
 
@@ -115,7 +115,7 @@ inline void add(std::vector<uint8_t>& o, const std::string& s) { o.insert(o.end(
 
 // FLAC: VORBIS_COMMENT (type 4) then one PICTURE (type 6) per picture; lastBlock: the final one carries the "last" flag. Empty for no tags.
 inline std::vector<uint8_t> flacBlocks(const Tags& t, bool lastBlock, const char* enc = kEncoder, std::string* err = nullptr) {   // enc: the vendor string (lae_enc names itself)
-    if (!sizesOk(t, enc, err, true)) return {};   // DEC 26
+    if (!sizesOk(t, enc, err, true)) return {};
     std::vector<std::vector<uint8_t>> bl; std::vector<int> types;
     if (!t.kv.empty()) { std::vector<uint8_t> b; le32(b, (uint32_t)strlen(enc)); add(b, enc); le32(b, (uint32_t)t.kv.size());
         for (auto& kv : t.kv) { const std::string s = kv.first + "=" + kv.second; le32(b, (uint32_t)s.size()); add(b, s); }
@@ -133,7 +133,7 @@ static const char* const kInfoIds[][2] = {{"TITLE", "INAM"}, {"ARTIST", "IART"},
                                            {"GENRE", "IGNR"}, {"TRACKNUMBER", "ITRK"}, {"ENGINEER", "IENG"}, {"DESCRIPTION", "ISBJ"}};
 inline const char* infoId(const std::string& k) {
     for (auto& e : kInfoIds) if (k == e[0]) return e[1]; return ""; }
-// DEC 29 (FU14-7 (4)): the other way, RIFF INFO id -> Vorbis name (laes_export writes FLAC tags from a WAV file's LIST/INFO); ISFT (the
+// the other way, RIFF INFO id -> Vorbis name (laes_export writes FLAC tags from a WAV file's LIST/INFO); ISFT (the
 // encoder) -> ENCODER; "" = not one of these (the id is kept as it is)
 inline const char* vorbisName(const std::string& id) {
     for (auto& e : kInfoIds) if (id == e[1]) return e[0]; return id == "ISFT" ? "ENCODER" : ""; }
@@ -146,7 +146,7 @@ inline void syncsafe(std::vector<uint8_t>& o, uint32_t v) { for (int i = 3; i >=
 // WAV: a LIST/INFO chunk (UTF-8 text, NUL-terminated, even sizes) and an "id3 " chunk (ID3v2.4, UTF-8). Empty for no tags.
 inline std::vector<uint8_t> wavChunks(const Tags& t, const char* enc = kEncoder, std::string* err = nullptr) {   // enc: the encoder named in ISFT / TSSE (lae_enc names itself)
     std::vector<uint8_t> o; if (t.empty()) return o;
-    if (!sizesOk(t, enc, err, false)) return o;   // DEC 26
+    if (!sizesOk(t, enc, err, false)) return o;
     const auto merged = laestag::merged(t);
     auto join = [](const std::vector<std::string>& v, const std::string& sep) { std::string s; for (size_t i = 0; i < v.size(); i++) s += (i ? sep : std::string()) + v[i]; return s; };
     {   std::vector<uint8_t> info; add(info, "INFO");

@@ -110,7 +110,7 @@ public final class LaeRetag {
         while (len > 0) { final int n = (int) Math.min(len, x.length); a.readFully(x, 0, n); b.readFully(y, 0, n);
             for (int i = 0; i < n; i++) if (x[i] != y[i]) return false; len -= n; }
         return true; }
-    // port of lae_enc.cpp:decoderOpens (decision 4, 2026-11-15): the decoder's open check, before anything is written: the WAV form's
+    // port of lae_enc.cpp:decoderOpens (2026-11-15): the decoder's open check, before anything is written: the WAV form's
     // "LAE " chunk (its CRC-32, the header and every stream header) or the FLAC form's frames, MD5 and "LAE1" blocks, exactly as lae_dec
     // opens the file (Java: the WAV form's CD layer read on demand, as LaeDec does; the result is the same). A damaged file is refused.
     static boolean decoderOpens(String in, boolean inFlac, String[] why) {
@@ -138,7 +138,7 @@ public final class LaeRetag {
             if (!walkFlac(fi, bks, audioOff, end, why)) { env.printf("%s: %s; nothing written\n", in, why[0]); return 1; }
             boolean haveLae = false; for (Bk k : bks) haveLae = haveLae || k.lae1;
             if (bks.isEmpty() || bks.get(0).type != 0 || bks.get(0).len != 34 || !haveLae) { env.printf("%s is not an LAE file in the FLAC form (it needs STREAMINFO and \"LAE1\" APPLICATION blocks); nothing written\n", in); return 1; }
-            if (openCheckFails(env, in, true)) return 1;   // decision 4: a damaged file is refused
+            if (openCheckFails(env, in, true)) return 1;   // a damaged file is refused
             List<Bk> keep = new ArrayList<Bk>(); for (int i = 1; i < bks.size(); i++) { final int t = bks.get(i).type; if (t != 0 && t != 1 && t != 4 && t != 6) keep.add(bks.get(i)); }
             final byte[] tb = LaesTags.flacBlocks(tags, false, kLaeyEncoder);
             try { BufferedOutputStream fo = new BufferedOutputStream(new FileOutputStream(part), 1 << 16);
@@ -159,7 +159,7 @@ public final class LaeRetag {
                 if (!ok) env.printf("check FAILED: the new file's CD audio frames or LAE1 blocks differ from the input's\n"); }
             else env.printf("cannot write %s\n", part);
         } catch (IOException e) { ok = false; env.printf("cannot read %s\n", in); }
-        if (ok) { ok = LaeEncoder.rename(part, out); if (!ok) env.printf("cannot rename %s to %s\n", part, out); }   // also replaces an output agreed to (decision 21)
+        if (ok) { ok = LaeEncoder.rename(part, out); if (!ok) env.printf("cannot rename %s to %s\n", part, out); }   // also replaces an output agreed to
         if (!ok) { new File(part).delete(); env.printf("nothing written\n"); return 2; }
         env.printf("written: %s (FLAC form, %zu tag(s), %zu picture(s)); CD audio frames and LAE1 blocks byte-identical to %s\n", out, (long) tags.kv.size(), (long) tags.pics.size(), in); return 0; }
 
@@ -174,7 +174,7 @@ public final class LaeRetag {
         for (int i = 4; i < argv.length; i++) { if (LaeEncoder.isOverwriteOpt(argv[i])) { overwrite = true; continue; }
             if (!isTagOpt(argv[i])) { env.printf("unknown option '%s': nothing written (options: --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> --overwrite)\n", argv[i]); return 1; } }
         if (sameFile(in, out)) { env.printf("%s is the input: choose another output name (the input is never changed); nothing written\n", out); return 1; }
-        // decision 21 (2026-11-15, as lae_enc.cpp): an existing output only after two "yes" at a console, or with --overwrite
+        // 2026-11-15, as lae_enc.cpp: an existing output only after two "yes" at a console, or with --overwrite
         if (!com.lae.core.Replace.mayReplace(out, overwrite, new com.lae.core.Replace.Out() { @Override public void print(String s) { env.print(s); } })) return 1;
         if (new File(part).exists()) { env.printf("%s already exists: remove it or choose another output name; nothing written\n", part); return 1; }
         LaesTags.Tags tags = new LaesTags.Tags(); { final String e = tagArgs(argv, 4, tags); if (!e.isEmpty()) { env.printf("%s: nothing written\n", e); return 1; } }
@@ -190,7 +190,7 @@ public final class LaeRetag {
             if (!walk(fi, cks, why)) { env.printf("%s: %s; nothing written\n", in, why[0]); return 1; }
             final Ck fmt = find(cks, "fmt "), dat = find(cks, "data"), lae = find(cks, "LAE ");
             if (fmt == null || dat == null || lae == null) { env.printf("%s is not an LAE file (it needs \"fmt \", \"data\" and \"LAE \" chunks); nothing written\n", in); return 1; }
-            if (openCheckFails(env, in, false)) return 1;   // decision 4: a damaged file is refused
+            if (openCheckFails(env, in, false)) return 1;   // a damaged file is refused
             List<Ck> keep = new ArrayList<Ck>(); keep.add(fmt); for (Ck k : cks) if (k != fmt && !isOldTag(fi, k)) keep.add(k);
             long riff = 4 + tc.length; for (Ck k : keep) riff += 8L + k.len + (k.len & 1);
             if (riff > 0xFFFFFFFFL) { env.printf("the new file would exceed the 4 GB limit of WAV; nothing written\n"); return 1; }
@@ -209,7 +209,7 @@ public final class LaeRetag {
             else env.printf("cannot write %s\n", part);
         } catch (IOException e) { ok = false; env.printf("cannot read %s\n", in);
         } finally { if (fi != null) try { fi.close(); } catch (IOException e) { /* read only */ } }
-        if (ok) { ok = LaeEncoder.rename(part, out); if (!ok) env.printf("cannot rename %s to %s\n", part, out); }   // also replaces an output agreed to (decision 21)
+        if (ok) { ok = LaeEncoder.rename(part, out); if (!ok) env.printf("cannot rename %s to %s\n", part, out); }   // also replaces an output agreed to
         if (!ok) { new File(part).delete(); env.printf("nothing written\n"); return 2; }
         env.printf("written: %s (%zu tag(s), %zu picture(s)); CD audio and LAE chunk byte-identical to %s\n", out, (long) tags.kv.size(), (long) tags.pics.size(), in); return 0; }
 }

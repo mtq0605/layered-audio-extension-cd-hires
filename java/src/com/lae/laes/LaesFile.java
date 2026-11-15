@@ -14,7 +14,7 @@ import com.lae.core.U;
  * Port of src/laes_file.h (namespace laes), decoder side: LAES file format and decoder. The field table below is payload version 1;
  * version 2 (spec/lossless/SPEC.md, Section 6, the normative description) adds: up to 255 masters; header byte 56 = the default master
  * (0 = the core master), byte 57 = the core master's flags (bit 0: no derived version); in each master record a name length, flags and
- * a menu position (record bytes 5, 6, 7), each name right after its record, before its layers (FU27-2). An LAES WAV file is an
+ * a menu position (record bytes 5, 6, 7), each name right after its record, before its layers. An LAES WAV file is an
  * LAE file whose "LAE " chunk carries an LAES payload:
  *   RIFF/WAVE: "fmt " (PCM, 2 ch, base rate, 16 bit) | "data" = the core master (can be CD-compatible: 44.1 kHz or 48 kHz, 16 bit) | "LAE " = payload + CRC-32
  *
@@ -41,10 +41,10 @@ import com.lae.core.U;
 public final class LaesFile {
     private LaesFile() {}
 
-    // port of laes_file.h:testEnv / testModeLine (decision 39, 2026-11-15): the test switches of the LAES code act only when the master
+    // port of laes_file.h:testEnv / testModeLine (2026-11-15): the test switches of the LAES code act only when the master
     // switch LAE_TEST_MODE=1 is set; testEnv gives the value then, else null. KEEPTMP (keep the work folder) changes no output byte and acts
     // without it. testModeLine gives, once per program run, the line naming the active test switches ("" when LAE_TEST_MODE is not 1).
-    // port of laes_file.h:tWithinTrack (DEC 11, 2026-11-15): T (whole + frac / 2^32 base samples) of a master lies within the length of the
+    // port of laes_file.h:tWithinTrack (2026-11-15): T (whole + frac / 2^32 base samples) of a master lies within the length of the
     // track: -N <= T <= N, N = the core master frames (an offset beyond the track is meaningless). Decoders refuse a record with a larger T;
     // the encoder writes none. (n and the comparisons unsigned, as the C++ uint64_t.)
     public static boolean tWithinTrack(long whole, int frac, long n) {
@@ -76,7 +76,7 @@ public final class LaesFile {
     public static void hashPcm(Pcm p, byte[] out) { Sha256 s = new Sha256(); byte[] b = new byte[1 << 16]; int fill = 0;
         for (int i = 0; i < p.frames(); i++) for (int c = 0; c < 2; c++) { final int v = (int) p.c[c][i]; b[fill++] = (byte) v; b[fill++] = (byte) (v >>> 8); b[fill++] = (byte) (v >>> 16); b[fill++] = (byte) (v >>> 24); if (fill >= (1 << 16)) { s.update(b, 0, fill); fill = 0; } }
         s.update(b, 0, fill); s.finish(out); }
-    // port of laes_file.h:inWord / pcmInWord (FU12-7 / FU13-4): a decoded sample outside the master's word length fails the master's check,
+    // port of laes_file.h:inWord / pcmInWord: a decoded sample outside the master's word length fails the master's check,
     // whatever its SHA-256 says (the hash covers only the low 32 bits of each value)
     public static boolean inWord(long v, int bits) { return v >= -(1L << (bits - 1)) && v < (1L << (bits - 1)); }
     public static boolean pcmInWord(Pcm p) { for (int c = 0; c < 2; c++) for (long v : p.c[c]) if (!inWord(v, p.bits)) return false; return true; }
@@ -177,9 +177,9 @@ public final class LaesFile {
                 if (!validMasterName(body, np, (int) nl)) return "invalid master name"; I.name = nameOf(body, np, (int) nl); I.flags = (int) fl; I.menu = (int) mp; }
             if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                 || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))   // all in uint64
-                || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
-            if (I.storage != 1 && I.refTier == 0 && core.frames() < 1) return "invalid master record: it refers to a core master of no samples";   // FU12-2 (as laes_file.h): the reference needs core samples (refLen, mir)
-            if (U.gt(F64, WHOLE_MAX_FRAMES) || F64 > Integer.MAX_VALUE - 8) return "master too long for this decoder";   // FU27-1: a Java array holds at most 2^31 - 9 values I.frames = F64;
+                || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";
+            if (I.storage != 1 && I.refTier == 0 && core.frames() < 1) return "invalid master record: it refers to a core master of no samples";   // as laes_file.h: the reference needs core samples (refLen, mir)
+            if (U.gt(F64, WHOLE_MAX_FRAMES) || F64 > Integer.MAX_VALUE - 8) return "master too long for this decoder";   // a Java array holds at most 2^31 - 9 values I.frames = F64;
             System.arraycopy(body, sha, I.sha, 0, 32); final int j = I.storage == 2 ? Math.min(I.stages, info.get(I.refTier - 1).stages) : 0; final long nj = levLen(I.frames, I.stages - j);
             Pcm m = new Pcm(); m.rate = I.rate; m.bits = I.bits; long[][] top = new long[2][];
             for (int c = 0; c < 2; c++) {

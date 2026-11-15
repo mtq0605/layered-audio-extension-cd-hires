@@ -12,7 +12,7 @@ int main() {
     for (long i = 0; i < L; i++) { long d = labs((long)x[i] - y[i]); mx = d > mx ? d : mx; if (d > 2) bad++; ex += (double)x[i] * x[i]; }
     for (size_t i = 0; i < X.size(); i++) eX += (double)X[i] * X[i];
     printf("max |x - inverse(forward(x))| = %ld LSB, samples off by more than 2: %ld | energy ratio coefficients/signal %.6f\n", mx, bad, eX / ex);
-    // FU20-1 (2026-11-14): a failure is an exit code, not only a printed line (limits: reconstruction within 2 LSB, the orthonormal
+    // 2026-11-14: a failure is an exit code, not only a printed line (limits: reconstruction within 2 LSB, the orthonormal
     // scale within 1e-3; this build gives 1 LSB and 1.000000)
     const bool okRec = bad == 0, okScale = std::fabs(eX / ex - 1.0) <= 1e-3;
     if (!okRec || !okScale) { printf("FAILED:%s%s\n", okRec ? "" : " reconstruction off by more than 2 LSB", okScale ? "" : " energy ratio not 1"); return 1; }

@@ -52,7 +52,7 @@ final class WavIo {
             w.pcm16 = new short[d.length / 2]; EncIo.toShorts(d, 0, w.pcm16, 0, w.pcm16.length);
             return ok; }
         finally { EncIo.close(f); } }
-    // FU21-6 (Java only): a body of 2 GiB or more does not fit a Java array (the C++ reads it); said instead of a NegativeArraySizeException
+    // Java only: a body of 2 GiB or more does not fit a Java array (the C++ reads it); said instead of a NegativeArraySizeException
     private static RuntimeException tooLarge(String path) { return EncIo.fail(path + ": the file is too large for the Java port (a chunk of 2 GiB or more)"); }
     private static boolean at(RandomAccessFile f, long sz, long p, byte[] d, int n) {
         if (!(p >= 0 && p + n <= sz)) return false; try { f.seek(p); f.readFully(d, 0, n); return true; } catch (IOException e) { return false; } }

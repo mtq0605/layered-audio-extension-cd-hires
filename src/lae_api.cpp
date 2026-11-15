@@ -50,7 +50,7 @@ std::string md5hex(const std::vector<int16_t>& cd) {   // the whole-track MD5 ov
 // the SHA-256 of the whole file, never written into or sent with the media file. Folder: %APPDATA%\LAE\lae_index (Windows) or
 // $XDG_CACHE_HOME/lae/lae_index, ~/.cache/lae/lae_index; the environment variable LAE_INDEX_DIR overrides it ("off": no folder).
 // At most 256 MB of records: the least recently used ones are deleted (only this cache's own records, <sha256>.idx beginning with
-// "LAEYIDX1"; F06-2). A missing or damaged record only
+// "LAEYIDX1"). A missing or damaged record only
 // means the check runs again; the output never depends on it (a seek from a checkpoint gives the samples of a decode from the start).
 typedef std::array<uint8_t, 32> Sha;
 const uint64_t INDEX_CAP = (uint64_t)256 << 20;
@@ -66,7 +66,7 @@ std::filesystem::path indexDir() {
     if (const char* h = getenv("HOME")) return std::filesystem::path(h) / ".cache" / "lae" / "lae_index";
 #endif
     return {}; }
-// record, version 2 (decision 33, 2026-11-15: every extension pack's result is kept, so that a second open decodes no pack again):
+// record, version 2 (2026-11-15: every extension pack's result is kept, so that a second open decodes no pack again):
 // "LAEYIDX1" | u32 version 2 | 32-byte key | u32 seconds between checkpoints | u32 sections | per section: u32 pack number, u64 bytes of
 // the section body, body | u32 CRC-32 of everything before. Sections in increasing pack number, each pack at most once.
 // Section body: u32 result (1 = every entropy stream of the pack ends exactly at its last byte, 0 = the pack failed that check: nothing
@@ -102,7 +102,7 @@ bool splitIndex(const std::vector<uint8_t>& b, const Sha& key, std::map<int, std
         out[(int)k].assign(b.begin() + (ptrdiff_t)at, b.begin() + (ptrdiff_t)(at + n)); at += (size_t)n; last = (long)k; }
     if (at != end) { out.clear(); return false; } return true; }
 // fills saved from a section when it belongs to these streams (result 1); pass = the stored result. Any mismatch or damage: false (nothing
-// used). F06-4: a model value lies in 1 ... 2047 and the range decoder's code below its width, as the decoder itself never leaves them
+// used). A model value lies in 1 ... 2047 and the range decoder's code below its width, as the decoder itself never leaves them
 bool unpackSection(const std::vector<uint8_t>& b, Decoder& D, std::vector<std::vector<SavedMark>>& saved, bool& pass) {
     size_t at = 0; const size_t end = b.size(); bool ok = true;
     auto get = [&](int n) -> uint64_t { if (at + (size_t)n > end) { ok = false; return 0; } uint64_t v = 0; for (int k = 0; k < n; k++) v |= (uint64_t)b[at + k] << (8 * k); at += (size_t)n; return v; };
@@ -118,7 +118,7 @@ bool unpackSection(const std::vector<uint8_t>& b, Decoder& D, std::vector<std::v
             for (uint64_t v = 0; v < nv && ok; v++) { const uint32_t x = (uint32_t)get(4); if ((x >> 16) >= nModel || (x & 0xFFFF) < 1 || (x & 0xFFFF) > 2047) return false; s.diff.push_back(x); }
             last = s.M0; out[i].push_back(std::move(s)); } }
     if (!ok || at != end) return false; saved.swap(out); pass = true; return true; }
-bool readPath(const std::filesystem::path& p, std::vector<uint8_t>& b) {   // decision 33: a record up to INDEX_CAP (was 64 MB)
+bool readPath(const std::filesystem::path& p, std::vector<uint8_t>& b) {   // a record up to INDEX_CAP (was 64 MB)
     std::error_code ec; const auto n = std::filesystem::file_size(p, ec); if (ec || n > INDEX_CAP) return false;
 #ifdef _WIN32
     FILE* f = _wfopen(p.c_str(), L"rb");
@@ -141,7 +141,7 @@ bool isRecord(const std::filesystem::path& p) {   // the file begins with "LAEYI
     if (!f) return false; char m[8]; const bool ok = fread(m, 1, 8, f) == 8 && !memcmp(m, "LAEYIDX1", 8); fclose(f); return ok; }
 // writes the record (a temporary file renamed over the old one), then keeps the folder under INDEX_CAP (the least recently used of
 // this cache's own records deleted first)
-// decision 33: the given sections are merged into the sections of this file's version 2 record already there (another pack's result
+// the given sections are merged into the sections of this file's version 2 record already there (another pack's result
 // stays); a record beyond INDEX_CAP is not written (it could not be read back)
 void saveIndex(const std::filesystem::path& dir, const Sha& key, const std::map<int, std::vector<uint8_t>>& fresh) {
     std::lock_guard<std::mutex> g(g_indexMu); std::error_code ec; std::filesystem::create_directories(dir, ec);
@@ -157,7 +157,7 @@ void saveIndex(const std::filesystem::path& dir, const Sha& key, const std::map<
 #endif
     if (!f) return; const bool ok = fwrite(rec.data(), 1, rec.size(), f) == rec.size(); if (fclose(f) != 0 || !ok) { std::filesystem::remove(tmp, ec); return; }
     std::filesystem::rename(tmp, target, ec); if (ec) { std::filesystem::remove(tmp, ec); return; }
-    // F06-2 (2026-11-14): only this cache's own files are counted and deleted: a record is named <64 hex digits>.idx and begins with
+    // 2026-11-14: only this cache's own files are counted and deleted: a record is named <64 hex digits>.idx and begins with
     // "LAEYIDX1"; any other file (also another program's *.idx in a folder LAE_INDEX_DIR names) is left alone. A temporary file of ours
     // (<64 hex digits>.idx.tmp<digits>) that a crash left behind is removed once it is more than an hour old.
     const auto oldTmp = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
@@ -171,7 +171,7 @@ void saveIndex(const std::filesystem::path& dir, const Sha& key, const std::map<
     std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.t < b.t; });
     for (const Item& x : items) { if (total <= INDEX_CAP) break; if (x.p == target) continue; std::error_code e3; if (std::filesystem::remove(x.p, e3)) total -= x.n; } }
 // the record of this file, if one is there and fits; a record that is used becomes the most recently used one
-// decision 33: the stored result of pack `pack` (D opened on that pack, route full): 1 = passed (saved filled), 0 = failed its check,
+// the stored result of pack `pack` (D opened on that pack, route full): 1 = passed (saved filled), 0 = failed its check,
 // -1 = no usable entry (no record, a version 1 record, damage, or this pack not in it)
 int loadIndex(const std::filesystem::path& dir, const Sha& key, int pack, Decoder& D, std::vector<std::vector<SavedMark>>& saved) {
     std::lock_guard<std::mutex> g(g_indexMu); const std::filesystem::path p = dir / (hexOf(key) + ".idx"); std::vector<uint8_t> b; std::map<int, std::vector<uint8_t>> sections;
@@ -186,9 +186,9 @@ struct lae_track {
     std::vector<std::vector<SavedMark>> saved;   // seek checkpoints of every stream (from the check at open or the player's record)
     // extension packs (API 8, spec/lossy/SPEC.md, Section 5.6): the pack the next lae_start decodes (0 = the main body), the further packs found at
     // open, pack 0's information, and the checkpoints of each further pack once it was selected (its streams are checked then, or its
-    // result is taken from the player's record on disk, which holds every pack checked so far: decision 33)
+    // result is taken from the player's record on disk, which holds every pack checked so far)
     int pack = 0; std::vector<Decoder::PackInfo> packs; std::string mainName; lae_info info0{}; std::map<int, std::vector<std::vector<SavedMark>>> savedOf;
-    Sha key{}; std::filesystem::path indexDir;   // decision 33: the player's record of this file holds every pack's result (version 2)
+    Sha key{}; std::filesystem::path indexDir;   // the player's record of this file holds every pack's result (version 2)
 };
 // checks the v5 pair (all decoder checks) and fills the information; takes cd and lae. key: SHA-256 of the whole file (the player's
 // checkpoint record is looked up by it); the first time a file is met, every entropy stream is checked to its end and the record is made
@@ -222,7 +222,7 @@ static lae_track* openFlac(lae_read_fn rd, void* ctx, uint64_t size, char* err, 
     std::vector<uint8_t>().swap(au);
     if (!laeyflac::md5ok(pcm, si)) { setErr(err, errlen, "FLAC audio (the CD or core layer): MD5 missing or wrong (the audio is not the one this file was written with): refusing to decode; that audio itself still plays"); return nullptr; }
     lae_track* t = finish(std::move(pcm), std::move(lae), 0, shaOf(sh), err, errlen);
-    if (t && t->info.base_rate != L.rate) {   // FU11-9: spec/lossy 3.4, STREAMINFO holds the base rate; otherwise the extension is not this file's
+    if (t && t->info.base_rate != L.rate) {   // spec/lossy 3.4, STREAMINFO holds the base rate; otherwise the extension is not this file's
         setErr(err, errlen, "FLAC STREAMINFO gives " + std::to_string(L.rate) + " Hz, the extension's base rate is " + std::to_string(t->info.base_rate) + " Hz: refusing to decode; that audio itself still plays");
         delete t; return nullptr; }
     return t; }
@@ -310,7 +310,7 @@ LAE_API lae_track* LAE_CALL lae_open_pair_files(const char* base_wav, const char
 LAE_API int LAE_CALL lae_get_info(const lae_track* t, lae_info* out) { if (!t || !out) return -1; *out = t->info; return 0; }
 // Extension packs (API 8). The pack is chosen by the caller only, by its number; the name is for display and selects nothing.
 // Selecting a pack leaves the track unstarted; a further pack's entropy streams are checked to their end the first time it
-// is selected (as pack 0's are at open), or its result is taken from the player's record of the file (decision 33).
+// is selected (as pack 0's are at open), or its result is taken from the player's record of the file.
 LAE_API int LAE_CALL lae_pack_count(const lae_track* t) { return t ? 1 + (int)t->packs.size() : -1; }
 LAE_API int LAE_CALL lae_pack_info(const lae_track* t, int k, int* rate, int* stages, char* name, size_t name_size) {
     if (!t || k < 0 || (size_t)k > t->packs.size()) return -1;
@@ -324,7 +324,7 @@ LAE_API int LAE_CALL lae_select_pack(lae_track* t, int k) {
         if (k == 0) { t->info = t->info0; t->pack = 0; return 0; }
         Decoder D; D.pack = k; int code = 0; std::string e = D.openRef(t->cd, t->lae, "full", 0, &code); if (!e.empty()) return -1;
         if (!t->savedOf.count(k)) { std::vector<std::vector<SavedMark>> s;
-            // decision 33: the pack's result from the player's record of this file (version 2); otherwise it is checked now and stored
+            // the pack's result from the player's record of this file (version 2); otherwise it is checked now and stored
             const int stored = t->indexDir.empty() ? -1 : loadIndex(t->indexDir, t->key, k, D, s);
             if (stored == 0) return -1;
             if (stored != 1) { e = D.checkAll(s, D.seekThreads);

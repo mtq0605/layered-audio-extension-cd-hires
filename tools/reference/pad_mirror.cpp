@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 mtq0605
 // SPDX-License-Identifier: GPL-3.0-or-later OR LicenseRef-LAE-Commercial
-// Reference only (FU08-3, 2026-11-14): the whole-track version, not compiled into lae_enc (the encoder uses the block-wise *_blk.cpp).
+// Reference only (2026-11-14): the whole-track version, not compiled into lae_enc (the encoder uses the block-wise *_blk.cpp).
 // mirror-pad an s32 stereo raw file by P samples at both ends (encoder side; the decoder trims P from the output)
 #include <cstdio>
 #include <cstdint>

@@ -29,7 +29,7 @@ static const char* hookPath(const char*) { return nullptr; }
 #else
 #include <unistd.h>
 #endif
-// Decision 21 (2026-11-15): an existing output is not replaced silently. On a console (input and output both a console) the person
+// 2026-11-15: an existing output is not replaced silently. On a console (input and output both a console) the person
 // is asked twice and only two answers "yes" replace it; without a console it is refused unless --overwrite was given.
 static bool onConsole() {
 #ifdef _WIN32
@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     for (int i = 3; i < argc; i++) if (!strncmp(argv[i], "pack=", 5)) { const char* v = argv[i] + 5; char* end = nullptr; const long k = strtol(v, &end, 10);
         if (!*v || *end || k < 0 || k > 8) { printf("pack=%s: give the pack's number (0 = the main body)\n", v); return 1; }
         packArg = (int)k; for (int j = i; j + 1 < argc; j++) argv[j] = argv[j + 1]; argc--; i--; }
-    bool overwrite = false;   // --overwrite (anywhere): an existing output is replaced without a question (decision 21)
+    bool overwrite = false;   // --overwrite (anywhere): an existing output is replaced without a question
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--overwrite")) { overwrite = true; for (int j = i; j + 1 < argc; j++) argv[j] = argv[j + 1]; argc--; i--; }
     if (argc < 3) { printf("usage: lae_dec <in.wav | in.flac | in.lae> <out.wav> [full|16|cd24] [output rate] [pack=<n>] [--overwrite]\n"
                            "  --overwrite: replace an existing <out.wav> without asking (on a console it is asked twice; otherwise it is refused)\n"
@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
 #endif
     std::string mode = argc > 3 ? argv[3] : "full";
     if (!mdct::selftestOK()) { printf("decoder self-test FAILED: this build does not follow the IEEE-754 order the format requires (see docs/BUILD.md); refusing to decode\n"); return 4; }
-    wavio::Wav w; int flacRate = 0;   // FU11-9: the STREAMINFO rate of the FLAC form
+    wavio::Wav w; int flacRate = 0;   // the STREAMINFO rate of the FLAC form
     if (laeyflac::isFlacFile(argv[1])) {   // FLAC form (2026-11-10): the CD layer in the FLAC frames, the extension in "LAE1" APPLICATION blocks
         bool notLaey = true; const std::string fe = laeyflac::readFile(argv[1], w.rate, w.pcm16, w.lae, notLaey);
         if (!fe.empty()) { printf("%s\n", fe.c_str()); return notLaey ? 1 : 3; } w.bits = 16; w.ch = 2; flacRate = w.rate; }
@@ -78,10 +78,10 @@ int main(int argc, char** argv) {
     Decoder D; int code = 0; int orate = argc > 4 ? (atoi(argv[4]) > 0 ? atoi(argv[4]) : -1) : 0;
     D.pack = packArg;   // extension pack (2026-11-10): 0 = the main body, as always
     std::string e = D.open(std::move(w.pcm16), std::move(w.lae), mode, orate, &code); if (!e.empty()) { printf("%s\n", e.c_str()); return code; }
-    if (flacRate && flacRate != D.base) { printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // FU11-9: spec/lossy 3.4
-    D.noSeekMarks();   // decision 34 (F05-4): this tool never seeks, so no checkpoints are kept (memory no longer grows with the track)
+    if (flacRate && flacRate != D.base) { printf("FLAC STREAMINFO gives %d Hz, the extension's base rate is %d Hz: refusing to decode; the CD audio itself still plays\n", flacRate, D.base); return 3; }   // spec/lossy 3.4
+    D.noSeekMarks();   // this tool never seeks, so no checkpoints are kept (memory no longer grows with the track)
     if (!hookPath("LEAKOUT") && !hookPath("CLIPMAP")) {
-        // decision 10 (FU34-9 / FU30-2, spec/lossy 6.7): every entropy stream of the decoded pack must end exactly at its last byte, as the
+        // spec/lossy 6.7: every entropy stream of the decoded pack must end exactly at its last byte, as the
         // player's one-time check requires; it is the same check (every stream decoded from start to end, route full at the master rate,
         // in parallel) before any output is written. The encoder's own decode runs (LEAKOUT, CLIPMAP) skip it: they decode its own new streams.
         Decoder chk; chk.pack = D.pack; int c2 = 0; std::string e2 = chk.openRef(D.cdOwn, D.laeOwn, "full", 0, &c2);
@@ -92,12 +92,12 @@ int main(int argc, char** argv) {
         printf("extension packs: %zu (decoding pack %d)\n  pack 0: the main body%s%s%s\n", D.packs.size() + 1, D.pack, D.mainName.empty() ? "" : ", \"", D.mainName.c_str(), D.mainName.empty() ? "" : "\"");
         for (size_t k = 0; k < D.packs.size(); k++) printf("  pack %zu: %d Hz%s%s%s\n", k + 1, D.packs[k].rate, D.packs[k].name.empty() ? "" : ", \"", D.packs[k].name.c_str(), D.packs[k].name.empty() ? "" : "\""); }
     if (hookPath("LEAKOUT") && D.haveF) {   // leak compensation (encoder only): the decoded frequency layer brought down to the base rate (int32, 1/16 LSB24, L/R interleaved)
-        FILE* fl = fopen(hookPath("LEAKOUT"), "wb"); if (!fl) { printf("cannot write %s\n", hookPath("LEAKOUT")); return 1; }   // FU21-3: the reason is said (as the Java LaeDec)
+        FILE* fl = fopen(hookPath("LEAKOUT"), "wb"); if (!fl) { printf("cannot write %s\n", hookPath("LEAKOUT")); return 1; }   // the reason is said (as the Java LaeDec)
         long nlk = D.writeLeak(fl);
         fclose(fl); printf("leak written: %ld base-rate samples/ch\n", nlk); return 0; }
     if (!wavio::fits32((unsigned long long)D.Lo * 6, 0)) { printf("output would exceed the 4 GB limit of WAV: choose a lower output rate\n"); return 1; }
     FILE* fo = fopen(argv[2], "wb"); if (!fo) { printf("cannot write %s\n", argv[2]); return 1; }
-    bool wok = true;   // F05-1 (2026-11-14): every write and the close are checked; on a failure (disk full) the output is removed
+    bool wok = true;   // 2026-11-14: every write and the close are checked; on a failure (disk full) the output is removed
     { std::vector<uint8_t> hdr; wavio::hdr(hdr, D.wrate, 2, 24, (size_t)D.Lo * 6, 0); wok = fwrite(hdr.data(), 1, hdr.size(), fo) == hdr.size(); }
     bool wantMap = hookPath("CLIPMAP") && D.d == 0 && mode != "cd24";
     std::vector<uint8_t> buf; buf.reserve(1 << 16); std::vector<int32_t> clipPos[2], blk(2 * 4096);
@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
     if (wok && ((D.Lo * 6) & 1)) wok = fputc(0, fo) != EOF;
     if (fclose(fo) != 0) wok = false;
     if (!wok) { remove(argv[2]); printf("cannot write %s (disk full?): the output was removed\n", argv[2]); return 1; }
-    if (g_streamErr) { remove(argv[2]); printf("corrupt stream (values out of range): refusing to decode\n"); return 3; }   // FU21-3: before the clip map, so no map is left beside a removed output (as the Java LaeDec)
+    if (g_streamErr) { remove(argv[2]); printf("corrupt stream (values out of range): refusing to decode\n"); return 3; }   // before the clip map, so no map is left beside a removed output (as the Java LaeDec)
     if (wantMap) { FILE* fm = fopen(hookPath("CLIPMAP"), "wb"); if (fm) { for (int c = 0; c < 2; c++) fwrite(clipPos[c].data(), 4, clipPos[c].size(), fm); fclose(fm); } }   // channel 0 first, as before
     printf("LAE decode OK: %s -> %s | %s, %d Hz %s, %ld samples/ch | mode %s (share by %s) %s, CD / core layer cut-off %d Hz | frequency segments used %d of %d | hard-limited samples %ld | format LAEY (extension LAE1)\n",
            argv[1], argv[2], mode == "16" ? "16-bit route" : (mode == "cd24" ? "CD / core layer + depth" : "24-bit route"), D.wrate, mode == "16" ? "16 bit (in 24-bit words)" : "24 bit", D.Lo, part::MODES[D.mi].name, D.wm == 2 ? "cells+energy" : (D.wm ? "energy" : "cells"), D.eq ? "equal" : "unequal", D.fc, D.nused, D.nseg, D.clip);

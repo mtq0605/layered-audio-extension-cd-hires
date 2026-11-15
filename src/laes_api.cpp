@@ -62,7 +62,7 @@ LAE_API laes_play* LAE_CALL laes_start_at(laes_file* h, int choice, uint64_t fra
 LAE_API void LAE_CALL laes_index_layers(laes_file* h, const volatile int* cancel, int threads) {
     if (!h) return; std::atomic<bool> stop{false}; std::atomic<bool> done{false};
     std::thread watch; try { watch = std::thread([&] { while (!done) { if (cancel && *cancel) stop = true; std::this_thread::sleep_for(std::chrono::milliseconds(20)); } }); }
-    catch (...) { return; }   // F06-6: no thread for the cancel flag: nothing is indexed (as if cancelled at once); no exception leaves this C function
+    catch (...) { return; }   // no thread for the cancel flag: nothing is indexed (as if cancelled at once); no exception leaves this C function
     try { h->f.indexLayers(&stop, threads > 0 ? threads : std::max(1, laesfast::defaultThreads() / 2)); } catch (...) {}
     done = true; watch.join(); }
 LAE_API int64_t LAE_CALL laes_index_save(laes_file* h, void* buf, int64_t cap) {

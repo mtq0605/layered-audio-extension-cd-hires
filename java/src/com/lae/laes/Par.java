@@ -33,7 +33,7 @@ public final class Par {
                 catch (Throwable x) { xs[tt] = x; next.set(nb); } } }; }
         for (int t = 1; t < th; t++) { try { pool[t] = new Thread(work[t], "laes-enc"); pool[t].setDaemon(true); pool[t].start(); } catch (Throwable x) { pool[t] = null; break; } }
         work[0].run();
-        boolean intr = false;   // FU25-6: an interruption is noted and set again after the joins (setting it at once made join throw again at once: a busy loop)
+        boolean intr = false;   // an interruption is noted and set again after the joins (setting it at once made join throw again at once: a busy loop)
         for (int t = 1; t < th; t++) if (pool[t] != null) { boolean done = false; while (!done) { try { pool[t].join(); done = true; } catch (InterruptedException e) { intr = true; } } }
         if (intr) Thread.currentThread().interrupt();
         for (Throwable x : xs) if (x != null) throw Lift.rethrow(x);

@@ -10,7 +10,7 @@
 //                                       decodes one choice (default: LAEY the route full at the master rate, LAES the default entry the file names, else the core master)
 //   lae_udec verify <file> [--pick=..]  every check of the format, nothing written (LAES: every master's SHA-256 in one run; LAEY:
 //                                       every extension pack decoded to its end on the route full at its master rate, one line per pack)
-// An existing output is replaced only after two answers "yes" on a console, or with --overwrite (decision 21, 2026-11-15).
+// An existing output is replaced only after two answers "yes" on a console, or with --overwrite (2026-11-15).
 // A choice: LAEY cd | cd24 (core | core24 in a 48 kHz file) | 16_<rate> | full_<rate> (also 16, full = at the master rate); LAES core | master_<k>_<rate>_<bits> |
 // master_<k>_level_<rate>_<bits> | derived16_<rate>_from_<name>. <rate>:<bits> picks LAEY the fullest route at that rate and bit depth (16 = route 16, which has no depth layer); LAES (SPEC 10.3): <rate>:<bits>,
 // master:<k> (k = the number shown) and name:<text> (the publisher's name, exactly) fit masters themselves only; when several masters fit,
@@ -52,7 +52,7 @@ bool stderrIsTty() {
 }
 std::string optOf(int argc, char** argv, const char* key) { const std::string k = std::string(key) + "="; for (int i = 1; i < argc; i++) if (!strncmp(argv[i], k.c_str(), k.size())) return argv[i] + k.size(); return ""; }
 bool flagOf(int argc, char** argv, const char* key) { for (int i = 1; i < argc; i++) if (!strcmp(argv[i], key)) return true; return false; }
-// Decision 21 (2026-11-15): an existing output is not replaced silently. On a console (input and output both a console, as the tick
+// 2026-11-15: an existing output is not replaced silently. On a console (input and output both a console, as the tick
 // list) the person is asked twice and only two answers "yes" replace it; without a console it is refused unless --overwrite was given.
 bool answeredYes() { char b[256]; if (!fgets(b, sizeof b, stdin)) return false; std::string s(b);
     while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ' || s.back() == '\t')) s.pop_back();
@@ -185,7 +185,7 @@ int main(int argc, char** argv) {
         if (todo.empty()) { printf("nothing ticked: nothing written\n"); lae_any_close(a); return 1; } }
     const bool all = cmd == "verify" || flagOf(argc, argv, "--verify-all"); const int threads = atoi(optOf(argc, argv, "--threads").c_str());
     const bool overwrite = flagOf(argc, argv, "--overwrite");
-    // decision 3 (2026-11-15, F06-5 (2)): LAEY verify decodes every extension pack completely (the main body and each further pack, route
+    // 2026-11-15: LAEY verify decodes every extension pack completely (the main body and each further pack, route
     // full at its master rate, to its last frame), one result line per pack; a pack that failed its check at open is a failed line.
     // The pack's checks at open are the list entries "every entropy stream of the extension" (pack 0) and "... of pack <k> ..." (pack k).
     const bool packLines = cmd == "verify" && info.format == LAE_FORMAT_LAEY && info.usable; std::vector<std::string> packLabel{"pack 0 (the main body)"};
@@ -201,7 +201,7 @@ int main(int argc, char** argv) {
     lae_any_choice C; lae_any_get_choice(a, one, &C);
     std::string out = cmd == "dec" ? pos[1] : "";
     if (cmd == "dec" && todo.size() > 1) { const fs::path p = fs::u8path(out); out = (p.parent_path() / fs::u8path(p.stem().u8string() + "_" + C.name + p.extension().u8string())).u8string(); }
-    if (cmd == "dec" && !mayWrite(out, overwrite)) { printf("nothing written for %s\n", C.name); if (worst < 1) worst = 1; continue; }   // decision 21
+    if (cmd == "dec" && !mayWrite(out, overwrite)) { printf("nothing written for %s\n", C.name); if (worst < 1) worst = 1; continue; }
     if (lae_any_start(a, one, all ? LAE_ANY_VERIFY_ALL : 0, threads, err, (int)sizeof err)) { printf("cannot start the choice: %s\n", err); lae_any_close(a); return 3; }
     if (!packLines || one == todo.front()) printChoices(a, info, one);
 

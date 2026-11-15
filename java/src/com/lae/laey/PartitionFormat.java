@@ -56,7 +56,7 @@ public final class PartitionFormat {
 
     // ---- geometry shared by encoder and decoder
     // port of partition_format.h:cuts (returns the cut positions; the C++ vector)
-    // FU21-1 (Java only): the walkers call this twice per node; the arrays depend only on w and equal, so widths up to CUT_TAB come from a
+    // Java only: the walkers call this twice per node; the arrays depend only on w and equal, so widths up to CUT_TAB come from a
     // table made once (shared and read-only: no caller writes into the result); wider ones (none in valid streams) are made as before
     static int[] cuts(int w, boolean equal) {
         if (w < 2) return EMPTY;

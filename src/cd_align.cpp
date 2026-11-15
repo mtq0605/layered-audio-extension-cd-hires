@@ -16,7 +16,7 @@
 //     whole master sample against the piece's one fractional best fit near it, pooled over the blocks). Nothing is searched inside a
 //     block: the check never gives a block an offset, it only judges at the piece's one offset.
 // Every value is printed only. Nothing is stored in the file, transmitted, or used to change the CD, T or F.
-// Memory (FU09-4): the search holds the CD and the derived base as doubles (32 bytes per CD frame for both channels of both) and its
+// Memory: the search holds the CD and the derived base as doubles (32 bytes per CD frame for both channels of both) and its
 // pyramid about as much again: about 0.85 GB for 5 minutes of CD, 13 GB for 80 minutes. A run that does not get it stops ("out of memory").
 // Design rules: no energy / power envelopes; no search repeated because of
 // what it found (the second level-0 scan always runs); one pooled peak per level; one offset per piece, never interpolated, smoothed or

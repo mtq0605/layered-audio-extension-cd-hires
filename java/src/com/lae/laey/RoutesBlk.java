@@ -125,7 +125,7 @@ final class RoutesBlk {
             // then not give back the master, so the split stops after the last block. It cannot happen with the CD layer derived from the
             // master; it happens with an independent CD that differs from the master by more than full scale (inverted polarity, loud passages).
             final long[] overT = {0, 0}, overF = {0, 0};   // per channel (the two channels run in two threads)
-            Tf = new BlkIo.Writer(env, argv[5]); if (!argv[6].equals("-")) Ff = new BlkIo.Writer(env, argv[6]);   // "-" (decision 35, as routes_blk.cpp): the frequency layer signal is not written (the second split after leak compensation needs only T; F is still computed and its 24-bit overflow counted)
+            Tf = new BlkIo.Writer(env, argv[5]); if (!argv[6].equals("-")) Ff = new BlkIo.Writer(env, argv[6]);   // "-" (as routes_blk.cpp): the frequency layer signal is not written (the second split after leak compensation needs only T; F is still computed and its 24-bit overflow counted)
             for (long A = 0; A < L; A += BM) { env.checkCancel(); final long B = Math.min(L, A + BM); final long ta = A >> stages, tb = B == L ? Lb : (B >> stages);
                 final int[] Tout = new int[(int) (Math.max(0L, tb - ta)) * 2], Fout = new int[(int) (B - A) * 2]; final int[] m = mr.read(A, B); final long AA = A;
                 twoWay(env, new ChanFn() { @Override public void run(final int c) {   // chanTF

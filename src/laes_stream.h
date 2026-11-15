@@ -91,7 +91,7 @@ struct HalfSig : Sig { Sig* x; int odd; HalfSig(Sig& s, int o) : x(&s), odd(o) {
     void get(int64_t a, int64_t b, int64_t* out) override { if (b <= a) return; const int64_t xa = 2 * a + odd, xb = 2 * (b - 1) + odd + 1; V t((size_t)(xb - xa)); x->get(xa, xb, t.data());
         for (int64_t i = a; i < b; i++) out[i - a] = t[(size_t)(2 * (i - a))]; } };
 // ---- filter taps on a window (already extended): sum_t h[t] (w[ia - t] + w[ib + t]), rounded by 2^sh (add 2^(sh-1), arithmetic shift)
-inline int64_t maxAbsOf(const V& x) { int64_t m = 0; for (int64_t v : x) { const int64_t a = v < 0 ? (v == INT64_MIN ? INT64_MAX : -v) : v;   /* FU13-3: INT64_MIN counts as the largest (wide path) */ if (a > m) m = a; } return m; }
+inline int64_t maxAbsOf(const V& x) { int64_t m = 0; for (int64_t v : x) { const int64_t a = v < 0 ? (v == INT64_MIN ? INT64_MAX : -v) : v;   /* INT64_MIN counts as the largest (wide path) */ if (a > m) m = a; } return m; }
 template <int NT, class H> inline bool fits(const H* h, int64_t mx, int sh) { return laesfast::fits64<NT, H>(h, mx, sh); }
 template <int NT, bool WIDE, class H> inline int64_t wtap(const H* h, const int64_t* w, int64_t ia, int64_t ib, int sh) {
     if (!WIDE) { int64_t acc = 0; for (int t = 0; t < NT; t++) acc += (int64_t)h[t] * (w[ia - t] + w[ib + t]); return (acc + (1LL << (sh - 1))) >> sh; }
@@ -204,7 +204,7 @@ inline void refPiece(Sig& src, const std::vector<int64_t>& h, int64_t whole, int
             r[(size_t)k] = s > 0 ? (acc + (1LL << (s - 1))) >> s : (int64_t)((uint64_t)acc << (-s)); }
         else { laes::Acc A; for (int t = 0; t < 256; t++) A.mac(h[t], c[t]); r[(size_t)k] = s > 0 ? A.shr(s) : (int64_t)((uint64_t)A.lo << (-s)); } } }); }
 // ---- the bit reader of laes_codec.h over a byte range of a file, read through a window
-struct BitRF { In* in = nullptr; long long off = 0, len = 0; uint64_t pos = 0;   // bit counts in 64 bits: a layer may hold 4 GiB (FU13-1)
+struct BitRF { In* in = nullptr; long long off = 0, len = 0; uint64_t pos = 0;   // bit counts in 64 bits: a layer may hold 4 GiB
     bool fail = false; std::vector<uint8_t> w; long long wb = -1;
     uint64_t left() const { return (uint64_t)len * 8 - pos; }
     uint8_t byteAt(uint64_t k) { if ((long long)k < wb || (long long)k >= wb + (long long)w.size()) { wb = (long long)k; const long long e = std::min(len, wb + (1LL << 22)); w.resize((size_t)(e - wb)); in->read(off + wb, w.data(), w.size()); }
@@ -225,7 +225,7 @@ inline bool decodeLayerToFile(In& in, long long off, long long len, int64_t n, i
 struct DecMaster { laes::MasterInfo I; std::string top[2]; std::vector<std::string> lev[2]; bool shaOk = false; };
 inline std::unique_ptr<Sig> levelOf(const DecMaster& m, int c, int k) { return std::unique_ptr<Sig>(new FileSig(k >= m.I.stages ? m.top[c] : m.lev[c][(size_t)k])); }
 // SHA-256 of a master given as two channel files of samples >> w (as laes::hashPcm of the samples); returns false when a sample lies
-// outside the master's word length (bits), which fails the master whatever the hash says (FU12-7 / FU13-4)
+// outside the master's word length (bits), which fails the master whatever the hash says
 inline bool hashFiles(const std::string& c0, const std::string& c1, int w, int bits, uint8_t out[32]) {
     FileSig a(c0), b(c1); laes::Sha256 s; V x, y; std::vector<uint8_t> buf; const int64_t P = 1 << 20; bool inw = true;
     for (int64_t i = 0; i < a.n; i += P) { const int64_t e = std::min(a.n, i + P); x.resize((size_t)(e - i)); y.resize((size_t)(e - i)); a.get(i, e, x.data()); b.get(i, e, y.data()); buf.clear();
@@ -261,7 +261,7 @@ inline std::string decodeLaesS(const std::string& bodyPath, const laes::Pcm& cor
             if (fl & ~(uint64_t)kNoDerive) return "invalid master record"; if (!validMasterName((const uint8_t*)nm2.data(), nm2.size())) return "invalid master name"; I.name = nm2; I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)
-            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !laes::tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
+            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !laes::tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";
         if (F64 > (uint64_t)INT64_MAX) return "master too long for this decoder"; I.frames = (int64_t)F64;   // frame counts are int64_t on every platform (32 and 64 bit)
         memcpy(I.sha, sha, 32); const int j = I.storage == 2 ? std::min(I.stages, out[(size_t)I.refTier - 1].I.stages) : 0; const int64_t nj = levLen(I.frames, I.stages - j);
         const std::string stem = wd + "/d" + std::to_string(mi);

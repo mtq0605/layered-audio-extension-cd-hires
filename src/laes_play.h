@@ -126,7 +126,7 @@ struct LayerNode : Node { BitRS rd; int64_t B = 4096; uint64_t restarts = 0; int
     ~LayerNode() { halt(); }
     void compute(int64_t a, int64_t b, V& out) override { LAESP_PROF(0); out.resize((size_t)(b - a));
         if (!started) start(a);
-        else { int64_t h0, hE; { std::lock_guard<std::mutex> g0(m); h0 = q0; hE = qEnd; }   // read under the lock: the thread moves them (FU14-4)
+        else { int64_t h0, hE; { std::lock_guard<std::mutex> g0(m); h0 = q0; hE = qEnd; }   // read under the lock: the thread moves them
           if (a < h0) { halt(); restarts++; start(a); }   // behind the kept blocks
           else if (a > hE + ahead && ix) { uint64_t p; if ((int64_t)ix->atMost((size_t)(a / B), p) * B > hE) { halt(); start(a); } } }   // far ahead: jump
         std::unique_lock<std::mutex> g(m); if (b > want) { want = b; cv.notify_all(); }
@@ -136,7 +136,7 @@ struct LayerNode : Node { BitRS rd; int64_t B = 4096; uint64_t restarts = 0; int
         while (!q.empty() && q0 + (int64_t)q.front().size() <= a) { q0 += (int64_t)q.front().size(); q.pop_front(); }   // blocks wholly before this request
         cv.notify_all(); }
 private:
-    std::thread th; std::mutex m; std::condition_variable cv; std::deque<V> q; int64_t q0 = 0, qEnd = 0, want = 0, skip = 0; bool stop = false, started = false; std::exception_ptr err;   // skip: blocks wholly before it are not kept (FU14-4)
+    std::thread th; std::mutex m; std::condition_variable cv; std::deque<V> q; int64_t q0 = 0, qEnd = 0, want = 0, skip = 0; bool stop = false, started = false; std::exception_ptr err;   // skip: blocks wholly before it are not kept
     void start(int64_t a) { uint64_t p = 0; const size_t k = ix ? ix->atMost((size_t)(a / B), p) : 0;
         rd.reset(); rd.pos = k ? p : 0; q.clear(); q0 = qEnd = (int64_t)(k ? k : 0) * B; want = q0; skip = a; stop = false; err = nullptr; started = true;
         const int64_t s0 = q0; th = std::thread([this, s0] { produce(s0); }); }
@@ -148,7 +148,7 @@ private:
             const int64_t k = (int64_t)std::min<int64_t>(B, n - s); V blk((size_t)k); bool ok = false;
             try { ok = laes::decodeBlock(rd, blk.data(), k); } catch (...) { std::lock_guard<std::mutex> g(m); err = std::current_exception(); cv.notify_all(); return; }
             std::lock_guard<std::mutex> g(m); if (!ok) { err = std::make_exception_ptr(laess::Fail("LAES layer damaged")); cv.notify_all(); return; }
-            if (q.empty() && s + k <= skip) { q0 += k; qEnd += k; s += k; cv.notify_all(); continue; }   // wholly before the request that started the thread: not kept (FU14-4)
+            if (q.empty() && s + k <= skip) { q0 += k; qEnd += k; s += k; cv.notify_all(); continue; }   // wholly before the request that started the thread: not kept
             q.push_back(std::move(blk)); qEnd += k; s += k; cv.notify_all(); } } };
 // level j of a master stored as a difference: layer + the reference of its tier (laess::refPiece)
 struct AddRefNode : Node { Node* e = nullptr; laess::Sig* src = nullptr; std::vector<int64_t> h; int64_t wj = 0; int up = 0;
@@ -179,7 +179,7 @@ struct DownNode : Node { laess::Sig* x = nullptr;
 struct Master { laes::MasterInfo I; int j = 0; uint64_t layOff[2][4] = {{0}}, layLen[2][4] = {{0}}; };   // layers per channel: [0] level j, [k - j] octave k
 struct Choice { int kind = 0; int m = -1, level = 0, from = -1; int rate = 0, bits = 0; int64_t frames = 0; std::string name, what; };   // kind 0 core, 1 master, 2 rate level, 3 derived 16-bit
 struct File {
-    uint64_t foreignFront = 0, foreignBehind = 0;   // DEC 19: bytes of ID3v2 tags in front of a FLAC file, of APEv2 / ID3v1 tags after its last frame (kept, not read)
+    uint64_t foreignFront = 0, foreignBehind = 0;   // bytes of ID3v2 tags in front of a FLAC file, of APEv2 / ID3v1 tags after its last frame (kept, not read)
     bool flac = false; int baseRate = 0, coreBits = 0; int64_t coreFrames = 0; std::vector<int32_t> core[2];
     uint8_t fileSha[32] = {0}; std::string why;            // why: "" when the payload passed every check; else the reason (the core still plays)
     std::vector<Master> ms; std::vector<Choice> choices; std::vector<std::pair<std::string, std::string>> tags;
@@ -223,7 +223,7 @@ struct Player {
     int64_t pos = 0; bool done = false, ok = false, noHash = false;
     std::string err;
     // the nodes: per decoded master, per channel; tiers' lower levels are shared
-    struct MD { int idx = -1; std::vector<std::unique_ptr<Node>> own; Node* top[2] = {nullptr, nullptr}; std::vector<Node*> lev[2]; Hasher sha; int64_t hashed = 0; bool shaOk = false; bool wide = false; };   // wide: a sample outside the word length (FU12-7)
+    struct MD { int idx = -1; std::vector<std::unique_ptr<Node>> own; Node* top[2] = {nullptr, nullptr}; std::vector<Node*> lev[2]; Hasher sha; int64_t hashed = 0; bool shaOk = false; bool wide = false; };   // wide: a sample outside the word length
     std::vector<std::unique_ptr<MD>> chain; CoreNode coreSig[2];
     uint64_t rng[2] = {20261029ull + 0x9E3779B97F4A7C15ull * 1, 20261029ull + 0x9E3779B97F4A7C15ull * 2};
     // the derived 16-bit dither's xorshift64 state after `steps` steps (2 per sample, SPEC 10.1), in O(log steps): the step is linear over
@@ -273,7 +273,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
     laeMagic[0] = 0; quick = quickInfo; crcTable(); { std::lock_guard<std::mutex> g(idxM); idx.clear(); } const uint64_t n = src.size(); if (n < 12) return "not LAES";
     // WAV: RIFF, or RF64 / BW64 (EBU Tech 3306, ITU-R BS.2088) for files beyond 4 GB: their 64-bit sizes are in the first chunk, "ds64"
     uint8_t h[12]; src.read(0, h, 12);
-    foreignFront = laesflac::flacStart([&](uint64_t at, void* d, size_t k) { src.read(at, d, k); }, n); foreignBehind = 0;   // DEC 19: ID3v2 tags in front of "fLaC"
+    foreignFront = laesflac::flacStart([&](uint64_t at, void* d, size_t k) { src.read(at, d, k); }, n); foreignBehind = 0;   // ID3v2 tags in front of "fLaC"
     if (foreignFront) { if (n < foreignFront + 12) return "not LAES"; src.read(foreignFront, h, 12); if (memcmp(h, "fLaC", 4)) return "not LAES"; }
     flac = !memcmp(h, "fLaC", 4); const bool rf64 = (!memcmp(h, "RF64", 4) || !memcmp(h, "BW64", 4)) && !memcmp(h + 8, "WAVE", 4);
     const bool wav = (!memcmp(h, "RIFF", 4) && !memcmp(h + 8, "WAVE", 4)) || rf64; if (!flac && !wav) return "not LAES";
@@ -294,7 +294,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
         if (!haveSi) return "no STREAMINFO";
         if (!payload.total) { if (lae1) memcpy(laeMagic, "LAE1", 5); return "not LAES"; }
         if (fi.total == 0 || fi.maxBs < 16 || fi.channels != 2 || (fi.bps != 16 && fi.bps != 24 && fi.bps != 32)) return "core master is not 2-channel 16/24/32-bit FLAC with a sample count";
-        foreignBehind = laesflac::trailerLen([&](uint64_t at, void* d, size_t k) { src.read(at, d, k); }, p, n);   // DEC 19: APEv2 / ID3v1 tags at the end (checked after the frames)
+        foreignBehind = laesflac::trailerLen([&](uint64_t at, void* d, size_t k) { src.read(at, d, k); }, p, n);   // APEv2 / ID3v1 tags at the end (checked after the frames)
         audioOff = p; audioLen = n - p; baseRate = fi.rate; coreBits = fi.bps; coreFrames = (int64_t)fi.total; }
     else {   // RIFF/WAVE chunks (the last 'fmt ', 'data' and 'LAE ' count; sizes clamped to the file), LIST/INFO tags
         uint64_t pos = 12, laeOff = 0, laeLen = 0; bool haveLae = false, haveData = false;
@@ -327,7 +327,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
     std::vector<uint8_t> fb; size_t fbHead = 0; uint64_t frameNo = 0; std::string coreErr; alignhash::Md5 md5; const int by = coreBits / 8;
     std::vector<uint8_t> carry;   // WAV: bytes of a sample frame split across two reads
     auto flacFrames = [&](bool final) {   // decodes the complete frames in fb (a frame is at most a few hundred kB; 4 MB stay ahead unless final)
-        while (coreErr.empty() && fbHead < fb.size() && (uint64_t)core[0].size() < fi.total && (final || fb.size() - fbHead > (4u << 20))) { V ch[2]; size_t used = 0;   // DEC 19: no frame after the last sample
+        while (coreErr.empty() && fbHead < fb.size() && (uint64_t)core[0].size() < fi.total && (final || fb.size() - fbHead > (4u << 20))) { V ch[2]; size_t used = 0;   // no frame after the last sample
             const std::string e = laesflac::decodeFrame(fb.data() + fbHead, fb.size() - fbHead, fi, frameNo, (uint64_t)core[0].size(), ch, used);
             if (!e.empty()) { coreErr = e; break; } fbHead += used; frameNo++;
             std::vector<uint8_t> mb; mb.reserve(ch[0].size() * 2 * ((fi.bps + 7) / 8));
@@ -343,7 +343,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
         uint64_t k0 = 0; if (T < 2 || fb.size() < (4u << 20) || !laesflac::frameHeaderAt(fb.data(), fb.size(), fi, k0) || k0 != 0) return false;
         // the parts begin at frame headers (sync, header CRC-8, a rising frame number) near equal byte shares; each part must then end exactly
         // where the next begins, with the frame number it begins with, or the core is decoded in order instead
-        const size_t fbEnd = fb.size() - (size_t)std::min<uint64_t>(foreignBehind, fb.size());   // DEC 19: the frames end before the tags at the end
+        const size_t fbEnd = fb.size() - (size_t)std::min<uint64_t>(foreignBehind, fb.size());   // the frames end before the tags at the end
         std::vector<size_t> off{0}; std::vector<uint64_t> num{0};
         for (size_t t = 1; t < T; t++) { size_t p = std::max(off.back() + 1, fbEnd / T * t); uint64_t k = 0;
             for (; p + 16 < fbEnd; p++) if (fb[p] == 0xFF && (fb[p + 1] & 0xFE) == 0xF8 && laesflac::frameHeaderAt(fb.data() + p, fb.size() - p, fi, k) && k > num.back()) break;
@@ -389,7 +389,7 @@ inline std::string File::open(ByteSrc& src, char laeMagic[5], bool quickInfo) {
       { std::lock_guard<std::mutex> g(cm); cend = true; ccv.notify_all(); } ct.join(); hs.final(fileSha); }
     crc ^= 0xFFFFFFFFu; (void)fs;
     if (flac) { if (!(par && coreErr.empty() && flacParallel())) flacFrames(true); if (!coreErr.empty()) return "FLAC core master: " + coreErr;
-        {   // DEC 19: after the last frame only APEv2 / ID3v1 tags (before, any byte there was refused as a frame)
+        {   // after the last frame only APEv2 / ID3v1 tags (before, any byte there was refused as a frame)
             const size_t rest = fb.size() - fbHead; auto rdb = [&](uint64_t at, void* d, size_t k) { memcpy(d, fb.data() + fbHead + at, k); };
             if (rest && laesflac::trailerLen(rdb, 0, rest) != rest) return "FLAC core master: bytes after the last audio frame that are no APEv2 / ID3v1 tag";
             foreignBehind = rest; }
@@ -424,7 +424,7 @@ inline std::string File::parsePayload() {
             if (fl & ~(uint64_t)laes::kNoDerive) return "invalid master record"; if (!laes::validMasterName((const uint8_t*)nm2.data(), nm2.size())) return "invalid master name"; I.name = nm2; I.flags = (int)fl; I.menu = (int)mp; }
         if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int)mi) || (I.storage == 2 && I.refTier < 1)
             || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 < 1 || ((F64 + (1ull << I.stages) - 1) >> I.stages) > nc + (1ull << 24)
-            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !laes::tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
+            || I.whole <= -(1LL << 40) || I.whole >= (1LL << 40) || !laes::tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";
         if (F64 > (uint64_t)INT64_MAX) return "master too long for this decoder"; I.frames = (int64_t)F64;   // frame counts are int64_t on every platform (32 and 64 bit)
         M.j = I.storage == 2 ? std::min(I.stages, ms[(size_t)I.refTier - 1].I.stages) : 0;
         for (int c = 0; c < 2; c++) for (int k = M.j; k <= I.stages; k++) { const uint64_t l = u(4); if (trunc || pos + l > end) return "LAES block truncated"; M.layOff[c][k - M.j] = pos; M.layLen[c][k - M.j] = l; pos += l; }
@@ -551,7 +551,7 @@ inline void Player::advanceHashes(double frac) {   // every master of the chain 
         V a, b; std::vector<uint8_t> buf;
         while (d->hashed < want) { const int64_t e = std::min(want, d->hashed + (int64_t)(1 << 16)); a.resize((size_t)(e - d->hashed)); b.resize(a.size());
             bothChannels([&](int c) { d->top[c]->get(d->hashed, e, (c ? b : a).data()); });
-            for (size_t i = 0; i < a.size(); i++) if (!laes::inWord(a[i] << I.w, I.bits) || !laes::inWord(b[i] << I.w, I.bits)) d->wide = true;   // FU12-7 / FU13-4
+            for (size_t i = 0; i < a.size(); i++) if (!laes::inWord(a[i] << I.w, I.bits) || !laes::inWord(b[i] << I.w, I.bits)) d->wide = true;
             LAESP_PROF(4); buf.resize(a.size() * 8); for (size_t i = 0; i < a.size(); i++) { const uint32_t l = (uint32_t)(int32_t)(a[i] << I.w), r = (uint32_t)(int32_t)(b[i] << I.w); for (int q = 0; q < 4; q++) { buf[i * 8 + q] = (uint8_t)(l >> (8 * q)); buf[i * 8 + 4 + q] = (uint8_t)(r >> (8 * q)); } }
             d->sha.push(std::move(buf)); buf = std::vector<uint8_t>(); d->hashed = e; } } }
 inline int64_t Player::read(int32_t* out, int64_t frames) {

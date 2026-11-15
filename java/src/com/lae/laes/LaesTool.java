@@ -19,22 +19,22 @@ import com.lae.core.LaeException;
  *       number or by its exact name); a selection that matches several masters lists them and writes nothing
  *   verify &lt;in.wav | in.flac&gt; &lt;master.wav&gt; ...
  * Environment (test hooks, as the C++): LAES_PIECE, LAES_FORCE_RF64, LAES_SELFCHECK_FLIP, LAES_NO_SHORTLIST, LAES_DISK_RESERVE only with
- * LAE_TEST_MODE=1 (decision 39: one line names them at the start); KEEPTMP always.
- * An existing output (enc: the file, dec: each WAV) is replaced only after two "yes" at a console, or with --overwrite (decision 21).
+ * LAE_TEST_MODE=1 (one line names them at the start); KEEPTMP always.
+ * An existing output (enc: the file, dec: each WAV) is replaced only after two "yes" at a console, or with --overwrite.
  * Not ported: align, selftest, excerpt, reduce, mkcd (out of scope). enc with master.wav@auto: this tool uses LAEY's search (LaeyAutoAligner);
  * an app that calls LaesEncoder sets LaesEncoder.Options.aligner itself.
  */
 public final class LaesTool {
     private LaesTool() {}
 
-    // the texts of decision 21 (questions without a new line at the end)
+    // the texts of the questions (without a new line at the end)
     static final com.lae.core.Replace.Out OUT = new com.lae.core.Replace.Out() { public void print(String s) { System.out.print(s); System.out.flush(); } };
     public static void main(String[] args) { System.out.flush(); final int code = run(args); System.out.flush(); System.exit(code); }
 
     // port of laes_tool.cpp:main  (args = the C++ argv[1..])
     public static int run(String[] args) {
         if (args.length < 1) { System.out.println("laes enc | dec | verify  (see the source header; the other commands of the C++ laes are not in this port)"); return 1; }
-        final String cmd = args[0]; { final String tl = LaesFile.testModeLine(); if (!tl.isEmpty()) System.out.println(tl); }   // decision 39
+        final String cmd = args[0]; { final String tl = LaesFile.testModeLine(); if (!tl.isEmpty()) System.out.println(tl); }
         if (cmd.equals("enc") && args.length >= 3) {
             final LaesEncoder.Options o = LaesEncoder.Options.fromArgs(args);
             o.aligner = new LaeyAutoAligner();   // master.wav@auto: LAEY's search in Java (com.lae.laey)
@@ -43,7 +43,7 @@ public final class LaesTool {
                 public void progress(String stage, double fraction) { } }, new AtomicBoolean(false)); }
         if ((cmd.equals("dec") || cmd.equals("verify")) && args.length >= 3) {
             try { return decVerify(args); }
-            catch (LaesEncoder.WorkLocked x) { System.out.println(x.getMessage()); return 2; }   // DEC 30
+            catch (LaesEncoder.WorkLocked x) { System.out.println(x.getMessage()); return 2; }
             catch (OutOfMemoryError x) { System.out.println("stopped: bad allocation"); return 2; }
             catch (RuntimeException x) { System.out.println("stopped: " + x.getMessage()); return 2; } }
         System.out.println("bad arguments"); return 1; }
@@ -72,9 +72,9 @@ public final class LaesTool {
     // port of laes_tool.cpp:main ("dec" / "verify")
     static int decVerify(String[] args) {
         final boolean isDec = args[0].equals("dec"); final String inPath = args[1];
-        if (isDec && args[2].startsWith("-") && !args[2].startsWith("--list")) {   // FU16-9 (as laes_tool.cpp 5af9e2b): an option is not taken as the output folder
+        if (isDec && args[2].startsWith("-") && !args[2].startsWith("--list")) {   // as laes_tool.cpp 5af9e2b: an option is not taken as the output folder
             System.out.println("give the output folder: laes dec <in> <out dir> [--levels] [--pick=...] (or laes dec <in> --list)"); return 1; }
-        if (isDec && (LaesEncoder.Options.flag(args, "--list") || LaesEncoder.Options.arg(args, "--list").equals("all"))) {   // DEC 31 (2026-11-15, as laes_tool.cpp): the list reads the records only and decodes nothing (the checks belong to decoding and playback)
+        if (isDec && (LaesEncoder.Options.flag(args, "--list") || LaesEncoder.Options.arg(args, "--list").equals("all"))) {   // 2026-11-15, as laes_tool.cpp: the list reads the records only and decodes nothing (the checks belong to decoding and playback)
             final Stream.In lin = new Stream.In(inPath); final Play.File lf = new Play.File(); final String[] lm = {""}; String le;
             try { le = lf.open(new Play.ByteSrc() { public long size() { return lin.n; } public void read(long at, byte[] d, int off, int n) { lin.read(at, d, off, n); } }, lm, true); }
             catch (RuntimeException x) { le = String.valueOf(x.getMessage()); } finally { lin.close(); }
@@ -90,14 +90,14 @@ public final class LaesTool {
             if (hidden != 0) System.out.println("(" + hidden + " rate levels and derived versions not shown: --list=all)");
             return 0; }
         final String wd = LaesEncoder.workDir(inPath + (isDec ? ".dec" : ".verify"));
-        try { return decVerifyIn(args, isDec, inPath, wd); } finally { LaesEncoder.unlockWork(wd); if (System.getenv("KEEPTMP") == null) LaesEncoder.removeAll(new File(wd)); } }   // DEC 30: unlocked first
+        try { return decVerifyIn(args, isDec, inPath, wd); } finally { LaesEncoder.unlockWork(wd); if (System.getenv("KEEPTMP") == null) LaesEncoder.removeAll(new File(wd)); } }   // unlocked first
     private static int decVerifyIn(String[] args, boolean isDec, String inPath, String wd) {
         final String bodyPath = wd + "/body.bin"; final LaesFile.Pcm core = new LaesFile.Pcm(); long bodySize = 0;
         { final Stream.In in = new Stream.In(inPath);
-          try { final byte[] mg = new byte[4]; final long s0 = Flac.flacStart(StreamEnc.rdOf(in), in.n);   // DEC 19: ID3v2 tags in front
+          try { final byte[] mg = new byte[4]; final long s0 = Flac.flacStart(StreamEnc.rdOf(in), in.n);   // ID3v2 tags in front
             if (in.n >= s0 + 4) in.read(s0, mg, 0, 4); if (s0 != 0 && !StreamEnc.eq4(mg, 0, "fLaC")) { System.out.println(inPath + ": no FLAC stream after the ID3v2 tag"); return 2; }
             if (StreamEnc.eq4(mg, 0, "fLaC")) {   // metadata: STREAMINFO kept, the "LAE2" APPLICATION blocks into the payload file; the audio through the FLAC reader
-                { final long tl = Flac.trailerLen(StreamEnc.rdOf(in), s0 + 4, in.n); final String fn = Flac.foreignNote(s0, tl); if (!fn.isEmpty()) System.out.println("note: " + fn); }   // DEC 19
+                { final long tl = Flac.trailerLen(StreamEnc.rdOf(in), s0 + 4, in.n); final String fn = Flac.foreignNote(s0, tl); if (!fn.isEmpty()) System.out.println("note: " + fn); }
                 long p = s0 + 4; boolean last = false; java.io.ByteArrayOutputStream meta = new java.io.ByteArrayOutputStream(); meta.write('f'); meta.write('L'); meta.write('a'); meta.write('C'); final Stream.Out bo = new Stream.Out(bodyPath);
                 try { while (!last) { if (p + 4 > in.n) { System.out.println(inPath + ": metadata truncated"); return 2; } final byte[] bh = new byte[4]; in.read(p, bh, 0, 4); last = (bh[0] & 0x80) != 0; final int type = bh[0] & 0x7F; final long len = (long) (bh[1] & 0xFF) << 16 | (bh[2] & 0xFF) << 8 | (bh[3] & 0xFF);
                         if (p + 4 + len > in.n) { System.out.println(inPath + ": metadata truncated"); return 2; }
@@ -128,7 +128,7 @@ public final class LaesTool {
         final LaesEncoder.Options po = LaesEncoder.Options.fromArgs(args); final long piece = LaesEncoder.pieceFor(po, maxSt); final int threads = Par.threadsOr(po.threads);
         final List<Stream.DecMaster> dec = new ArrayList<Stream.DecMaster>(); final LaesFile.Head head = new LaesFile.Head(); final String de = Stream.decodeLaesS(bodyPath, core, core.rate, wd, dec, piece, threads, head);
         if (!de.isEmpty()) { System.out.println(inPath + ": " + de + " (the core master is still playable)"); return 2; }
-        boolean all = true; final List<LaesFile.MasterInfo> mi0 = new ArrayList<LaesFile.MasterInfo>(); for (Stream.DecMaster D : dec) mi0.add(D.I); {   // DEC 24: every master line below gives the menu number (Choices.displayNo)
+        boolean all = true; final List<LaesFile.MasterInfo> mi0 = new ArrayList<LaesFile.MasterInfo>(); for (Stream.DecMaster D : dec) mi0.add(D.I); {   // every master line below gives the menu number (Choices.displayNo)
           final int[] mo = Choices.menuOrder(mi0);   // in the menu order, numbered as in menus
           for (int p = 0; p < mo.length; p++) { final int i = mo[p]; final LaesFile.MasterInfo I = dec.get(i).I;
               System.out.println("master " + (p + 1) + (I.name.length() == 0 ? "" : " \"" + I.name + "\"") + ": " + I.rate + " Hz " + I.bits + "-bit, " + I.frames + " frames, SHA-256 " + (dec.get(i).shaOk ? "ok" : "MISMATCH")
@@ -164,9 +164,9 @@ public final class LaesTool {
                         for (int j : hit) System.out.println(String.format("  %4d  %6d Hz %2d-bit  %s", j + 1, ch.get(j).s.rate, ch.get(j).s.bits, Choices.masterLabel(ch.get(j).no, infos.get(ch.get(j).s.m))));
                         System.out.println("Not in a console: give the numbers with --pick=<n>, several --pick=<n>,<n>, a range --pick=<a>-<b>. Nothing written."); return 1; }
                     for (int j : hit) if (!pick.contains(j)) pick.add(j); if (b < 0) break; a = b + 1; } }
-            // decision 21 (as laes_tool.cpp): an existing WAV only after two "yes" at a console, or with --overwrite; asked before anything is written
+            // as laes_tool.cpp: an existing WAV only after two "yes" at a console, or with --overwrite; asked before anything is written
             for (int j : pick) if (!com.lae.core.Replace.mayReplace(new File(args[2], ch.get(j).name + ".wav").getPath(), LaesEncoder.Options.flag(args, "--overwrite"), OUT)) return 1;
-            {   // FU16-5 (2026-11-14, as laes_tool.cpp): the WAVs' size against the free space, before anything is written (as enc does for its work folder)
+            {   // 2026-11-14, as laes_tool.cpp: the WAVs' size against the free space, before anything is written (as enc does for its work folder)
                 long need = 0; for (int j : pick) { final long db = ch.get(j).s.n * 2 * (ch.get(j).s.bits / 8); need += 128 + db + (db & 1); }
                 File fsAt = new File(args[2]).getAbsoluteFile(); while (fsAt != null && !fsAt.exists()) fsAt = fsAt.getParentFile();   // the folder may not exist yet
                 final long avail = fsAt != null ? fsAt.getUsableSpace() : 0;   // 0: not known (as the C++ error code): no check
@@ -179,7 +179,7 @@ public final class LaesTool {
             for (int j : pick) { final Choice C = ch.get(j); final Src S = C.derived ? ch.get(C.from).s : C.s; final int by = C.s.bits / 8; final long n = C.s.n, db = n * 2 * by;
                 byte[] h = LaesEncoder.wavHeader(C.s.rate, C.s.bits); final long fmtLen = C.s.bits > 16 ? 40 : 16;
                 com.lae.core.Le.put32(h, 4, (int) (4 + 8 + fmtLen + 8 + db + (db & 1))); com.lae.core.Le.put32(h, h.length - 4, (int) db);
-                // FU28-1: beyond 4 GB RF64 as the encoder writes it (ds64 with the 64-bit RIFF and data sizes, no table; 32-bit fields
+                // beyond 4 GB RF64 as the encoder writes it (ds64 with the 64-bit RIFF and data sizes, no table; 32-bit fields
                 // 0xFFFFFFFF), as laes_tool.cpp dec (2026-11-04); the header lengths wrapped before. Test hook LAES_FORCE_RF64 as the C++
                 final long riff = 4 + 8 + fmtLen + 8 + db + (db & 1);
                 if (riff > 0xFFFFFFFFL || LaesFile.testEnv("LAES_FORCE_RF64") != null) { final byte[] r = new byte[20 + 28 + h.length - 12];
@@ -198,7 +198,7 @@ public final class LaesTool {
                     if ((db & 1) != 0) o.put(new byte[1], 0, 1); o.close(); o = null; }
                 catch (LaeException x) { okw = false; why = String.valueOf(x.getMessage()); }
                 finally { StreamEnc.closeQuiet(o); }
-                if (!okw) { new File(d + C.name + ".wav").delete(); System.out.println(C.name + ".wav: FAILED, the file was removed: " + why); }   // FU16-5: said, and the part written is removed (the file is closed)
+                if (!okw) { new File(d + C.name + ".wav").delete(); System.out.println(C.name + ".wav: FAILED, the file was removed: " + why); }   // said, and the part written is removed (the file is closed)
                 all &= okw; wroteAll &= okw; if (okw) System.out.println(C.name + ".wav: " + C.s.rate + " Hz " + C.s.bits + "-bit, " + C.what); }
             if (wroteAll) System.out.println("written to " + args[2]); else System.out.println("not every file was written: see above (" + args[2] + ")"); }
         else { final boolean[] used = new boolean[dec.size()];   // each given file must equal one decoded master (the file order may differ from the command line)
@@ -209,7 +209,7 @@ public final class LaesTool {
                             for (long q = 0; q < e - a && same; q++) same = r[(int) q * 2] == x0[(int) q] && r[(int) q * 2 + 1] == x1[(int) q]; } }
                     finally { in.close(); }
                     if (same) hit = k; }
-                // U14-c: a file the WAV reader refused is named with the reason (it was only "DIFFERENT (no decoded master equals it)")
+                // a file the WAV reader refused is named with the reason (it was only "DIFFERENT (no decoded master equals it)")
                 if (hit >= 0) { used[hit] = true; System.out.println("master " + Choices.displayNo(mi0, hit) + " vs " + args[i] + ": IDENTICAL"); }
                 else if (!re.isEmpty()) { System.out.println(args[i] + ": DIFFERENT (not compared: " + (re.startsWith(args[i] + ": ") ? re.substring(args[i].length() + 2) : re) + ")"); all = false; }
                 else { System.out.println(args[i] + ": DIFFERENT (no decoded master equals it)"); all = false; } }

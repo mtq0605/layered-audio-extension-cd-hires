@@ -105,7 +105,7 @@ public final class Stream {
             for (long i = a; i < b; i++) out[outOff + (int) (i - a)] = t[(int) (2 * (i - a))]; } }
     // ---- filter taps on a window (already extended): sum_t h[t] (w[ia - t] + w[ib + t]), rounded by 2^sh (add 2^(sh-1), arithmetic shift)
     // port of laes_stream.h:maxAbsOf
-    public static long maxAbsOf(long[] x) { long m = 0; for (long v : x) { final long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v;   /* FU13-3 */ if (a > m) m = a; } return m; }
+    public static long maxAbsOf(long[] x) { long m = 0; for (long v : x) { final long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v; if (a > m) m = a; } return m; }
     // port of laes_stream.h:fits
     static boolean fits(long[] h, int NT, long mx, int sh) { return Lift.fits64(h, NT, mx, sh); }
     // port of laes_stream.h:wtap
@@ -132,7 +132,7 @@ public final class Stream {
     // the largest magnitude of x[0, len), with -2^63 counted as 2^63 - 1 (Java only: for the choice of the split forms)
     static long maxAbsAll(long[] x, int len) { long m = 0; for (int i = 0; i < len; i++) { final long v = x[i]; final long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v; if (a > m) m = a; } return m; }
     // maxAbsOf over x[0, len)
-    static long maxAbsOf(long[] x, int len) { long m = 0; for (int i = 0; i < len; i++) { final long v = x[i]; final long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v;   /* FU13-3 */ if (a > m) m = a; } return m; }
+    static long maxAbsOf(long[] x, int len) { long m = 0; for (int i = 0; i < len; i++) { final long v = x[i]; final long a = v < 0 ? (v == Long.MIN_VALUE ? Long.MAX_VALUE : -v) : v; if (a > m) m = a; } return m; }
     /** Java (2026-11-04): reusable arrays of one caller (a player node), so that a piece does not allocate its temporaries anew; not shared between threads */
     public static final class Work { private final long[][] a = new long[10][];
         long[] get(int slot, int len) { long[] x = a[slot]; if (x == null || x.length < len) { x = new long[Math.max(len, x == null ? 0 : x.length + x.length / 4)]; a[slot] = x; } return x; } }
@@ -296,7 +296,7 @@ public final class Stream {
     // port of laes_stream.h:levelOf
     public static FileSig levelOf(DecMaster m, int c, int k) { return new FileSig(k >= m.I.stages ? m.top[c] : m.lev[c][k]); }
     // SHA-256 of a master given as two channel files of samples >> w (as laes::hashPcm of the samples); returns false when a sample lies
-    // outside the master's word length (bits), which fails the master whatever the hash says (FU12-7 / FU13-4)
+    // outside the master's word length (bits), which fails the master whatever the hash says
     // port of laes_stream.h:hashFiles
     public static boolean hashFiles(String c0, String c1, int w, int bits, byte[] out) {
         FileSig a = new FileSig(c0), b = new FileSig(c1); LaesFile.Sha256 s = new LaesFile.Sha256(); final long P = 1 << 20; long[] x = new long[(int) P], y = new long[(int) P]; byte[] buf = new byte[(int) P * 8]; boolean inw = true;
@@ -346,7 +346,7 @@ public final class Stream {
                 I.name = LaesFile.nameOf(nb, 0, nb.length); I.flags = (int) fl; I.menu = (int) mp; }
             if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                 || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))
-                || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !LaesFile.tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
+                || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !LaesFile.tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";
             if (F64 < 0) return "master too long for this decoder"; I.frames = F64;   // F64 > INT64_MAX: as laes_play.h / laes_stream.h since 635019a
             System.arraycopy(sha, 0, I.sha, 0, 32); final int j = I.storage == 2 ? Math.min(I.stages, out.get(I.refTier - 1).I.stages) : 0; final long nj = LaesFile.levLen(I.frames, I.stages - j);
             final String stem = wd + "/d" + mi;

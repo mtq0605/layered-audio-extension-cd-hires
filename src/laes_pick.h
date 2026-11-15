@@ -13,7 +13,7 @@
 #include <cctype>
 #include <string>
 #include <vector>
-#include "laes_file.h"   // laes::testEnv (DEC 39: test switches only with LAE_TEST_MODE=1)
+#include "laes_file.h"   // laes::testEnv (test switches only with LAE_TEST_MODE=1)
 #ifdef _WIN32
 #include <conio.h>
 #include <io.h>
@@ -48,7 +48,7 @@ class Input {
 public:
     Input() { const char* t = laes::testEnv("LAES_TEST_KEYS"); if (t) { test = true; keys = t; }
 #ifndef _WIN32
-        else if (isatty(0)) { tcgetattr(0, &old); termios r = old; r.c_lflag &= ~(ICANON | ECHO | ISIG);   // ISIG off (FU13-9): Ctrl-C arrives as byte 3 = Esc, and the terminal is set back
+        else if (isatty(0)) { tcgetattr(0, &old); termios r = old; r.c_lflag &= ~(ICANON | ECHO | ISIG);   // ISIG off: Ctrl-C arrives as byte 3 = Esc, and the terminal is set back
             r.c_cc[VMIN] = 1; r.c_cc[VTIME] = 0; tcsetattr(0, TCSANOW, &r); raw = true; }
 #endif
     }
@@ -93,7 +93,7 @@ inline bool interactive() {
 #endif
 }
 
-// DEC 21 (2026-11-15): an output file that exists is not replaced silently. In a console the user is asked twice and only two "yes"
+// 2026-11-15: an output file that exists is not replaced silently. In a console the user is asked twice and only two "yes"
 // answers replace it; not in a console it is refused unless --overwrite was given (overwrite = true). The texts are the same in every
 // LAE tool (an operating explanation: English, then Chinese). true: the file may be written (it does not exist, or replacing it is agreed).
 inline bool mayReplace(const std::string& path, bool overwrite) {
@@ -115,7 +115,7 @@ inline std::vector<long> tick(const std::string& title, const std::vector<Item>&
 #ifdef _WIN32
     { void* h = GetStdHandle((unsigned long)-11); unsigned long m = 0; if (GetConsoleMode(h, &m)) SetConsoleMode(h, m | 0x0004); }   // ENABLE_VIRTUAL_TERMINAL_PROCESSING: the redraw below
 #endif
-    if (items.empty()) return {};   // FU13-9: nothing to tick (Space would touch on[0])
+    if (items.empty()) return {};   // nothing to tick (Space would touch on[0])
     Input in; size_t cur = 0; std::vector<bool> on(items.size(), false); std::string typed, msg; int drawn = 0;
     for (;;) {
         if (drawn && !in.test) printf("\x1b[%dA", drawn);

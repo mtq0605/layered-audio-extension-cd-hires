@@ -34,7 +34,7 @@ inline void snapTime(double t0, double t1, double rate, long K, long& m0, long& 
 inline void snapFreq(double f0, double f1, double rate, int& c0, int& c1) {
     c0 = std::max(0, (int)ceil(f0 / colHz(1, rate) - 1e-9)); c1 = std::min(NCOL, (int)floor(f1 / colHz(1, rate) + 1e-9)); }
 
-// FU17-2 / FU17-6 (2026-11-14): true when path b names the same existing file as path a (any spelling): an output that is the master
+// 2026-11-14: true when path b names the same existing file as path a (any spelling): an output that is the master
 // itself is refused before it is opened for writing ("wb" would empty the master while it is being read)
 inline bool sameFile(const char* a, const char* b) { std::error_code ec; const bool eq = std::filesystem::equivalent(std::filesystem::path(a), std::filesystem::path(b), ec); return eq && !ec; }
 inline bool writeMarks(const char* path, const Marks& mk) {
@@ -44,7 +44,7 @@ inline bool writeMarks(const char* path, const Marks& mk) {
     for (size_t i = 0; i < mk.pos.size(); i++) { const Pos& p = mk.pos[i];
         fprintf(f, "pos %ld %ld %d %d   # %zu: %.3f-%.3f s (%.2f s), %.1f-%.1f Hz%s%s\n", p.m0, p.m1, p.c0, p.c1, i + 1, frameT0(p.m0, mk.rate), frameT0(p.m1, mk.rate),
                 frameT0(p.m1, mk.rate) - frameT0(p.m0, mk.rate), colHz(p.c0, mk.rate), colHz(p.c1, mk.rate), i < mk.note.size() ? ", " : "", i < mk.note.size() ? mk.note[i].c_str() : ""); }
-    const bool ok = !ferror(f); return fclose(f) == 0 && ok; }   // FU17-2: a write error (disk full) counts, not only fclose
+    const bool ok = !ferror(f); return fclose(f) == 0 && ok; }   // a write error (disk full) counts, not only fclose
 // Reading rules (SPEC_LAENOISE.md Section 4; strict since 2026-11-07, the same in NoiseMarks.java): a comment (# to the end of the
 // line), CR and blank lines are skipped. The first remaining line is exactly "LAENOISE 1". Then exactly one master line and exactly one
 // grid line, both before the first pos line. A line that begins with LAENOISE, master, grid or pos must have exactly its fields (a
@@ -79,7 +79,7 @@ inline bool readMarks(const char* path, Marks& mk, std::string* why = nullptr) {
         else if (t[0] == "pos") {
             if (!haveMaster || !haveGrid) return bad(ln, "a pos line before the master and grid lines");
             if (t.size() != 5 || !digits(t[1], 18) || !digits(t[2], 18) || !digits(t[3], 9) || !digits(t[4], 9)) return bad(ln, "expected \"pos <m0> <m1> <c0> <c1>\" with whole numbers");
-            // FU17-1 (2026-11-14): a frame number above 2^31 - 1 lies outside every grid; it is kept as 2^31 - 1, so that it fails the grid
+            // 2026-11-14: a frame number above 2^31 - 1 lies outside every grid; it is kept as 2^31 - 1, so that it fails the grid
             // check on every platform (a 32-bit long, Windows, cut 4294967297 to 1 and accepted it; Linux and Java refuse it)
             auto frameNo = [](const std::string& s) { return (long)std::min<long long>(atoll(s.c_str()), 2147483647LL); };
             mk.pos.push_back({frameNo(t[1]), frameNo(t[2]), atoi(t[3].c_str()), atoi(t[4].c_str())}); } }
@@ -87,7 +87,7 @@ inline bool readMarks(const char* path, Marks& mk, std::string* why = nullptr) {
     if (!haveMaster) return bad(0, "no master line");
     if (!haveGrid) return bad(0, "no grid line");
     return true; }
-// every position must lie inside the grid of a master of this length (FU17-4, 2026-11-14: a function of its own, so that
+// every position must lie inside the grid of a master of this length (2026-11-14: a function of its own, so that
 // lae_noise level, which compares length and rate but no SHA-256, checks it too)
 inline bool checkGrid(long long frames, const Marks& mk) {
     long K = mdct::frames((long)frames);

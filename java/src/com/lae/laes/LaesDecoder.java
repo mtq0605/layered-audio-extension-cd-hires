@@ -25,7 +25,7 @@ public final class LaesDecoder {
     public static final class ChoiceInfo { public int kind, master, level, rate, bits; public long frames; public String name, what; }
     /** port of laes_api.cpp:laes_file */
     public static final class LaesFileH { final Play.FnSrc src = new Play.FnSrc(); final Play.File f = new Play.File();
-        final java.util.List<LaesPlayH> players = new java.util.ArrayList<LaesPlayH>(); }   // FU25-4: the players started and not stopped (laes_close stops them)
+        final java.util.List<LaesPlayH> players = new java.util.ArrayList<LaesPlayH>(); }   // the players started and not stopped (laes_close stops them)
     /** port of laes_api.cpp:laes_play */
     public static final class LaesPlayH { final Play.Player p = new Play.Player(); LaesFileH owner = null; }
 
@@ -67,7 +67,7 @@ public final class LaesDecoder {
         out.kind = c.kind; out.master = c.m; out.level = c.level; out.rate = c.rate; out.bits = c.bits; out.frames = c.frames; out.name = c.name; out.what = c.what; return 0; }
     // port of laes_api.cpp:laes_get_tag
     public static int laes_get_tag(LaesFileH h, int i, String[] key, String[] value) {
-        if (h == null || i < 0 || i >= h.f.tags.size()) return -1; setErrS(key, h.f.tags.get(i).key); setErrS(value, h.f.tags.get(i).value); return 0; }   // FU25-7: an empty array is skipped like null
+        if (h == null || i < 0 || i >= h.f.tags.size()) return -1; setErrS(key, h.f.tags.get(i).key); setErrS(value, h.f.tags.get(i).value); return 0; }   // an empty array is skipped like null
     /** port of lae_api.h:LAES_MASTER_NO_DERIVE (API 7) */
     public static final int LAES_MASTER_NO_DERIVE = LaesFile.NO_DERIVE;
     // port of laes_api.cpp:laes_master_name  (API 7; m = the file index of choice_info.master; "" = no name; null = no such master)
@@ -133,7 +133,7 @@ public final class LaesDecoder {
     // port of laes_api.cpp:laes_stop
     public static void laes_stop(LaesPlayH p) { if (p != null) { p.p.close(); final LaesFileH o = p.owner; if (o != null) { synchronized (o.players) { o.players.remove(p); } p.owner = null; } } }
     // port of laes_api.cpp:laes_close
-    // FU25-4: also stops the players of this file that were not stopped (the C++ destructors end their threads; here they would wait for ever)
+    // also stops the players of this file that were not stopped (the C++ destructors end their threads; here they would wait for ever)
     public static void laes_close(LaesFileH h) { if (h == null) return; final LaesPlayH[] ps; synchronized (h.players) { ps = h.players.toArray(new LaesPlayH[0]); h.players.clear(); }
         for (LaesPlayH p : ps) { p.p.close(); p.owner = null; } }
 }

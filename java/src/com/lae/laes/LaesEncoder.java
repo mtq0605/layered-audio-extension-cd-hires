@@ -22,7 +22,7 @@ import com.lae.core.LaeException;
  * piece by piece (StreamEnc), the file is written as &lt;out&gt;.part, read back (FLAC form: the APPLICATION blocks and the audio frames;
  * then every master decoded by the playback decoder Play and compared with its input), and only then renamed to &lt;out&gt;. On any failure
  * nothing is left behind (the .part file and the work folder are removed), as in the C++; only when that last rename fails is the finished
- * &lt;out&gt;.part kept (and named), and an existing &lt;out&gt; stays as it was (FU26-4).
+ * &lt;out&gt;.part kept (and named), and an existing &lt;out&gt; stays as it was.
  *
  * The file written does not depend on the memory budget (piece length), the thread count or the cancellation checks.
  * Not ported: master.wav@auto (LAEY's alignment search, laes_tool autoAlign / acceptAlign, which runs lae_enc cdcheck): Options.aligner is
@@ -41,12 +41,12 @@ public final class LaesEncoder {
     public static final class MasterArg { public String path; public double T = 0; public boolean auto = false;
         /** the publisher's name of this master ("" = none; UTF-8 of at most 255 bytes, no control characters) and its flags (LaesFile.NO_DERIVE) - payload version 2, 2026-11-11 */
         public String name = ""; public int flags = 0;
-        /** DEC 23 (FU15-3, as laes_tool.cpp masterArg): the reason this command-line argument is refused ("" = taken) */
+        /** as laes_tool.cpp masterArg: the reason this command-line argument is refused ("" = taken) */
         public String argError = "";
         public MasterArg(String p, double t, boolean a) { path = p; T = t; auto = a; } }
     /** port of laes_tool.cpp:AutoT (the result of LAEY's alignment search; not ported, see Aligner) */
     public static final class AutoT { public boolean found = false; public double T = 0, err = 0, resid = 0; public String search = "", notes = "", why = "";
-        /** DEC 25: the check blocks (0 head, 1 middle, 2 tail) where the master is silent and the core master moved by T is not */
+        /** the check blocks (0 head, 1 middle, 2 tail) where the master is silent and the core master moved by T is not */
         public final List<Integer> silentBlocks = new ArrayList<Integer>(); }
     /**
      * Hook for master.wav@auto (laes_tool autoAlign: LAEY's search lae_enc cdcheck against the 16-bit core master, then the own check of the
@@ -109,7 +109,7 @@ public final class LaesEncoder {
         public long diskReserve = 2L << 30;
         /** the work folder (null: &lt;out&gt;.laes.tmp; Java only, the app's cache folder) */
         public String workDir = null;
-        /** --overwrite (decision 21, 2026-11-15): an existing output is replaced without asking; without it an existing output is replaced
+        /** --overwrite (2026-11-15): an existing output is replaced without asking; without it an existing output is replaced
          *  only after two "yes" at a console (System.console() != null), otherwise refused. A resume of the same job is not a replacement. */
         public boolean overwrite = false;
 
@@ -117,7 +117,7 @@ public final class LaesEncoder {
         static String arg(String[] args, String key) { final String k = key + "="; for (String a : args) if (a.startsWith(k)) return a.substring(k.length()); return ""; }
         // port of laes_tool.cpp:flag
         static boolean flag(String[] args, String key) { for (String a : args) if (a.equals(key)) return true; return false; }
-        // port of laes_tool.cpp:masterArg (DEC 23, FU15-3): "<master>[@T]" of enc. The text after the last @ is T only when all of it is a
+        // port of laes_tool.cpp:masterArg: "<master>[@T]" of enc. The text after the last @ is T only when all of it is a
         // finite decimal number below 2^40 base samples (or "auto"); otherwise the whole argument is the file name when that file exists (a
         // name with an @), else it is refused with the reason (argError). Before, atof took any text and the path was cut at the @.
         static MasterArg masterArg(String a) {
@@ -135,7 +135,7 @@ public final class LaesEncoder {
             o.timing = flag(args, "--timing"); o.accept = flag(args, "--accept"); o.laeEnc = arg(args, "--lae-enc"); o.form = arg(args, "--form");
             o.overwrite = flag(args, "--overwrite");
             o.smallDisk = flag(args, "--small-disk"); o.diskStopRemove = flag(args, "--disk-stop-remove"); o.diskStop = o.diskStopRemove || flag(args, "--disk-stop"); o.forceDisk = flag(args, "--force-disk");
-            { final String r = LaesFile.testEnv("LAES_DISK_RESERVE"); if (r != null) o.diskReserve = CStd.atoll(r); }   // test switches: only with LAE_TEST_MODE=1 (decision 39)
+            { final String r = LaesFile.testEnv("LAES_DISK_RESERVE"); if (r != null) o.diskReserve = CStd.atoll(r); }   // test switches: only with LAE_TEST_MODE=1
             o.tagError = LaesTags.parseArgs(args, o.tags);
             for (int i = 2; i < args.length; i++) if (args[i].startsWith("--name=") || args[i].equals("--no-derive") || args[i].startsWith("--no-derive=") || args[i].startsWith("--default=")) o.nameArgs.add(args[i]);
             o.menuOrder = arg(args, "--menu-order");
@@ -157,7 +157,7 @@ public final class LaesEncoder {
         if (o.piece > 0) return Math.max(4096, o.piece / 4096 * 4096);   // test hook
         long budget; if (o.memGB >= 0) budget = (long) (o.memGB * 1073741824.0); else budget = Math.min(2L << 30, Runtime.getRuntime().maxMemory() / 2);
         if (budget < (32L << 20)) budget = 32L << 20;
-        final long top = Math.min(budget / JAVA_BYTES_PER_TOP, 1L << 26);   // FU26-8: at most 2^26 top-level samples (about 10 GB), so that a piece's byte counts (k * 2 * by, int) cannot overflow
+        final long top = Math.min(budget / JAVA_BYTES_PER_TOP, 1L << 26);   // at most 2^26 top-level samples (about 10 GB), so that a piece's byte counts (k * 2 * by, int) cannot overflow
         // --small-disk (2026-11-05): half the piece, so that its extra buffers (the level made again, FLAC frames decoded again) stay
         // within the memory of a normal run; the files written do not depend on the piece
         final long topUsed = o.smallDisk ? top / 2 : top;
@@ -165,7 +165,7 @@ public final class LaesEncoder {
 
     // T (base samples, decimal) -> whole + fraction in 2^-32 base samples; returns {whole, frac as uint32}
     // port of laes_tool.cpp:setT
-    // port of laes_tool.cpp:splitT (decision 14, 2026-11-15): q = llround((T - floor T) * 2^32); whole = floor T, plus 1 only when q = 2^32
+    // port of laes_tool.cpp:splitT (2026-11-15): q = llround((T - floor T) * 2^32); whole = floor T, plus 1 only when q = 2^32
     // (the fraction really rounds up to a whole; then frac = 0), else frac = q. Before, a fraction that rounded to 0 also carried
     public static long[] setT(double T) { long whole = com.lae.core.Cv.d2l(Math.floor(T)); final long q = com.lae.core.Cv.llround((T - Math.floor(T)) * 4294967296.0);
         if (q >= 4294967296L) return new long[] {whole + 1, 0}; return new long[] {whole, q & 0xFFFFFFFFL}; }
@@ -174,7 +174,7 @@ public final class LaesEncoder {
     // port of laes_tool.cpp:readWav  (the C++ reads the whole file into memory; here the chunk headers, then the samples; the same checks)
     public static String readWav(String path, StreamEnc.Core p) { return readWav(path, p, null); }
     // (hl: null, or hl[0] = the header's data length and hl[1] = the bytes the file holds of it, when the header gives more than the file
-    // holds (the file is read to its end as before); else both 0 (2026-11-14, U15-LAES))
+    // holds (the file is read to its end as before); else both 0 (2026-11-14))
     public static String readWav(String path, StreamEnc.Core p, long[] hl) {
         if (hl != null) { hl[0] = 0; hl[1] = 0; }
         RandomAccessFile f; try { f = new RandomAccessFile(path, "r"); } catch (IOException e) { return "cannot read " + path; }
@@ -207,7 +207,7 @@ public final class LaesEncoder {
     // job (enc, 2026-11-05): a work folder made for the same job (job.txt equal) is used again: the run continues where an earlier one stopped
     // port of laes_tool.cpp:main::workDir (the lambda; wd: the folder, resumed[0] receives whether it was used again)
     static String workDir(String wd, String job, boolean[] resumed) { return workDir(wd, job, resumed, null); }
-    // DEC 31 (2026-11-15, as laes_tool.cpp): a work folder that cannot be made where it belongs (a read-only place) is made in the system
+    // 2026-11-15, as laes_tool.cpp: a work folder that cannot be made where it belongs (a read-only place) is made in the system
     // temp folder, and said (L: where the note goes; null = System.out). Java: the folder's name there is laes_<hashCode of the absolute
     // path without ".laes.tmp">.laes.tmp (the C++ uses std::hash, so the two names differ).
     static String workDir(String wd, String job, boolean[] resumed, Listener L) { File d = new File(wd);
@@ -220,18 +220,18 @@ public final class LaesEncoder {
             else d.delete(); }
         if (d.exists() && !new File(wd + "/laes.tmp").exists() && !new File(wd + "/lock").exists()) throw new LaeException(wd + " exists and is not a laes work folder: remove it or choose another output name");
         d.mkdirs(); final boolean hadLock = new File(wd + "/lock").exists();
-        if (!lockWork(wd)) {   // DEC 30: another run uses this work folder: stop at once, nothing of it touched (no clean-up: WorkLocked is not caught as a failure)
+        if (!lockWork(wd)) {   // another run uses this work folder: stop at once, nothing of it touched (no clean-up: WorkLocked is not caught as a failure)
             if (!hadLock) throw new LaeException("cannot create the work folder " + wd);
             throw new WorkLocked("another laes run is using the work folder " + wd + " (the same command started twice?): this run stops, nothing written; run it again when the other has ended"); }
         try {
             if (resumed != null) { resumed[0] = false; final String old = job.isEmpty() ? null : StreamEnc.getState(wd + "/job.txt"); if (old != null && old.equals(job)) { resumed[0] = true; return wd; } }
-            final File[] old = d.listFiles(); if (old != null) for (File q : old) if (!q.getName().equals("lock")) removeAll(q);   // DEC 30: emptied, the lock stays
+            final File[] old = d.listFiles(); if (old != null) for (File q : old) if (!q.getName().equals("lock")) removeAll(q);   // emptied, the lock stays
             if (!d.isDirectory()) throw new LaeException("cannot create the work folder " + wd);
             { Stream.Out o = new Stream.Out(wd + "/laes.tmp"); final byte[] t = "laes work folder (removed when the run ends; kept when an encoding stops, for the same command to continue)\n".getBytes(); o.put(t, 0, t.length); o.close(); }
             if (!job.isEmpty()) StreamEnc.putState(wd + "/job.txt", job); }
         catch (RuntimeException x) { unlockWork(wd); throw x; }
         return wd; }
-    // DEC 30 (FU15-7 (3), 2026-11-15, as laes_tool.cpp): the work folder holds a file "lock" that a run keeps open with an exclusive lock of
+    // 2026-11-15, as laes_tool.cpp: the work folder holds a file "lock" that a run keeps open with an exclusive lock of
     // the system (FileChannel.tryLock) until it ends; the system frees it when the process ends in any way, so a folder kept for a resume or
     // left by a crash is never locked. A second run of the same command (same work folder; also a second run in this process) is refused at
     // once and touches nothing of the first. lockWork: true when locked; unlockWork when the run ends, before the folder is removed.
@@ -255,7 +255,7 @@ public final class LaesEncoder {
     /** the work folder of an encode (Options.workDir, or &lt;out&gt;.laes.tmp) */
     public static String workDirOf(Options o) { return o.workDir != null ? o.workDir : o.out + ".laes.tmp"; }
     /** the version in job.txt: a work folder made by another version of this encoder is not used again. Change it whenever the format or
-     *  the meaning of the intermediate files in the work folder changes (decision 36, 2026-11-15). */
+     *  the meaning of the intermediate files in the work folder changes (2026-11-15). */
     public static final String JOB_VERSION = "java 2026-11-06 (laes_tool 77dc9ef)";
     // std::filesystem::remove_all (errors ignored, as with the error_code overload): only ever called on a laes work folder (it holds "laes.tmp")
     static void removeAll(File f) { if (!f.exists()) return; if (f.isDirectory()) { final File[] k = f.listFiles(); if (k != null) for (File c : k) removeAll(c); } f.delete(); }
@@ -268,7 +268,7 @@ public final class LaesEncoder {
     public static int encode(final Options opt, final Listener listener, AtomicBoolean cancel) {
         final StreamEnc.Ctx ctx = new StreamEnc.Ctx(); ctx.threads = Par.threadsOr(opt.threads); ctx.cancel = cancel != null ? cancel : new AtomicBoolean(false); ctx.listener = listener;
         try { return encodeImpl(opt, listener, ctx); }
-        catch (WorkLocked x) { say(listener, x.getMessage()); return 2; }   // DEC 30: another run holds the work folder; nothing of it is touched
+        catch (WorkLocked x) { say(listener, x.getMessage()); return 2; }   // another run holds the work folder; nothing of it is touched
         catch (OutOfMemoryError x) { stopped(opt, listener, "bad allocation"); return 2; }
         catch (RuntimeException x) { stopped(opt, listener, String.valueOf(x.getMessage())); return 2; }
         finally { StreamEnc.diskGuard(null); } }
@@ -281,13 +281,13 @@ public final class LaesEncoder {
     // std::filesystem::equivalent: both exist and are the same file (Java: the same canonical path)
     static boolean sameFile(String a, String b) { final File x = new File(a), y = new File(b); if (!x.exists() || !y.exists()) return false;
         try { return x.getCanonicalFile().equals(y.getCanonicalFile()); } catch (IOException e) { return false; } }
-    // a text that may hold several lines, or end without a new line (the questions of decision 21): one message per line; an unfinished last line is given as it is
+    // a text that may hold several lines, or end without a new line (the questions): one message per line; an unfinished last line is given as it is
     static void sayRaw(Listener l, String s) { if (l == null) return; int a = 0; for (int b; (b = s.indexOf('\n', a)) >= 0; a = b + 1) l.message(s.substring(a, b)); if (a < s.length()) l.message(s.substring(a)); }
     // port of laes_tool.cpp:longHeaderNote: a master or core master WAV whose header gives a data length beyond the end of the file
     // (2026-11-14, as lae_enc and laes): told once per file, the file is read to its end
     static void longHeaderNote(Listener l, String path, long hdrLen, long have) {
         if (hdrLen != 0) say(l, "NOTE: the header of " + path + " gives a data length of " + hdrLen + " bytes, but the file holds only " + have + " bytes of it: the file may be cut off (incomplete). It is read to its end and the run continues."); }
-    // FU26-4: part becomes dst; an existing dst is given up only once part has taken its place. One rename where it may replace a file
+    // part becomes dst; an existing dst is given up only once part has taken its place. One rename where it may replace a file
     // (Android, Linux); else (Windows) dst is first renamed to dst.laes-old and put back when the rename fails. false: dst as before, part kept.
     static boolean replaceWith(File part, File dst) {
         if (part.renameTo(dst)) return true;
@@ -313,7 +313,7 @@ public final class LaesEncoder {
         // --timing: prints the time of each stage at the end (L5, 2026-11-03); the file written does not change
         final boolean timing = opt.timing; final StringBuilder tlog = new StringBuilder(); final long[] t0 = {System.nanoTime()};
         final List<String> paths = new ArrayList<String>(); final List<Double> Ts = new ArrayList<Double>(); final List<Boolean> autoT = new ArrayList<Boolean>(); final List<StreamEnc.WavInfo> wis = new ArrayList<StreamEnc.WavInfo>();
-        // FU26-2 (user 2026-11-14): the Java / phone player opens files with at most Play.File.maxMasters (16) masters, and a phone must never
+        // user 2026-11-14: the Java / phone player opens files with at most Play.File.maxMasters (16) masters, and a phone must never
         // open a file with more; so this encoder makes at most that many and refuses more before any work. Up to 255 masters: the PC tool.
         if (opt.masters.size() > Play.File.maxMasters) {
             say(L, opt.masters.size() + " masters given: this encoder makes files with at most " + Play.File.maxMasters + " masters, because the Java / phone player opens at most "
@@ -321,11 +321,11 @@ public final class LaesEncoder {
             say(L, "  给了 " + opt.masters.size() + " 个母带：Java / 手机播放器最多打开 " + Play.File.maxMasters + " 个母带的文件（母带更多时手机内存不够），所以这个编码器最多做 "
                    + Play.File.maxMasters + " 个；最多 255 个母带的文件请用 PC 上的工具（laes enc）制作；没有写任何文件");
             return 1; }
-        for (MasterArg a : opt.masters) { if (!a.argError.isEmpty()) { say(L, a.argError); return 1; }   // DEC 23 (FU15-3)
+        for (MasterArg a : opt.masters) { if (!a.argError.isEmpty()) { say(L, a.argError); return 1; }
             StreamEnc.WavInfo wi = new StreamEnc.WavInfo(); final String e = StreamEnc.probeMaster(a.path, wi); if (!e.isEmpty()) { say(L, e); return 2; } longHeaderNote(L, a.path, wi.hdrLen, wi.dataBytes); paths.add(a.path); Ts.add(a.T); autoT.add(a.auto); wis.add(wi); }
         if (paths.isEmpty()) { say(L, "no master given"); return 1; }
         if (paths.size() > 255) { say(L, "at most 255 masters"); return 1; }
-        {   // DEC 23 (FU16-7, as laes_tool.cpp): <out> must not be an input (before, a master given as the output was replaced by it)
+        {   // as laes_tool.cpp: <out> must not be an input (before, a master given as the output was replaced by it)
             final List<String> ins = new ArrayList<String>(paths); if (!opt.core.isEmpty()) ins.add(opt.core);
             if (new File(out).exists()) for (String p : ins) if (sameFile(out, p)) { say(L, out + " is one of the inputs (" + p + "): choose another output name; nothing written"); return 1; } }
         // names and "no derived versions" (2026-11-11, payload version 2): --name=<k>:<text> (k = the k-th master as given, from 1; may repeat),
@@ -380,7 +380,7 @@ public final class LaesEncoder {
         if (corePath.isEmpty() && !derive) { say(L, "give --core=<core.wav> or --derive-core"); return 1; }
         final String wdPath = workDirOf(opt), job = jobOf(opt, paths);
         long oldWork = 0; boolean sameJob = false; { final String old = StreamEnc.getState(wdPath + "/job.txt"); if (old != null && old.equals(job)) { oldWork = StreamEnc.folderBytes(wdPath); sameJob = true; } }   // counts as free
-        // decision 21 (as laes_tool.cpp): an existing output only after two "yes" at a console, or with --overwrite; a resume of an unfinished run is not a replacement
+        // as laes_tool.cpp: an existing output only after two "yes" at a console, or with --overwrite; a resume of an unfinished run is not a replacement
         if (!sameJob && !com.lae.core.Replace.mayReplace(out, opt.overwrite, new com.lae.core.Replace.Out() { public void print(String s) { sayRaw(L, s); } })) return 1;
         final int[] stOf = new int[wis.size()]; for (int i = 0; i < wis.size(); i++) { int st = 0; while ((base << st) < wis.get(i).rate && st < 4) st++; stOf[i] = st; }
         {   // disk needed by the work folder, estimated before it is made (2026-11-05): a FLAC master's decoded copy and the kept rate levels
@@ -405,7 +405,7 @@ public final class LaesEncoder {
         finally {   // the work folder goes at the end; kept when the run is stopped by an exception (disk full, closed: the same command continues),
                     // not with --disk-stop-remove and not when the user cancelled (Java: the app's cancel button means "stop and leave nothing")
             final boolean cancelled = ctx.cancel != null && ctx.cancel.get();
-            unlockWork(wd);   // DEC 30: unlocked first (the folder may be kept for a resume)
+            unlockWork(wd);   // unlocked first (the folder may be kept for a resume)
             if (!opt.keepTmp && (ok || opt.diskStopRemove || cancelled)) removeAll(new File(wd)); } }
 
     // "  %-22s %8.2f s   peak memory so far %7.0f MB" (C++ 3c0f89b, --timing); Java: the largest Java heap in use seen at the stage ends
@@ -470,10 +470,10 @@ public final class LaesEncoder {
             { boolean same = true; for (int k = 0; k < s2.size(); k++) same &= s2.get(k).menu == 0 || s2.get(k).menu == k + 1; if (same) for (StreamEnc.MasterSel s : s2) s.menu = 0; }   // the menu order is the file order: nothing to store
             final List<LaesFile.MasterInfo> i2 = oinfo.get(oi); final String bp = wd + "/body" + oi, stO = wd + "/o" + oi + ".done";
             final LaesFile.Head hd = new LaesFile.Head(); hd.coreFlags = coreFlags; if (defGiven != 0) for (int k = 0; k < ord.size(); k++) if (given.get(ord.get(k)) == defGiven) hd.def = k + 1;   // the default in this file order
-            final String hsig = headSig(hd, s2);   // FU26-1: the names, flags, menu positions and default this body holds
+            final String hsig = headSig(hd, s2);   // the names, flags, menu positions and default this body holds
             if (resumed) { final String t = StreamEnc.getState(stO);
                 if (t != null) { final StreamEnc.StateR r = new StreamEnc.StateR(t); final long sz = r.i(); final String ts = r.str(); final long n = r.i(); i2.clear(); for (long q = 0; q < Math.max(0, Math.min(n, 255)); q++) { final LaesFile.MasterInfo I = new LaesFile.MasterInfo(); StreamEnc.getInfo(r, I); i2.add(I); }
-                    final String hs = r.str();   // a state without this line (made before FU26-1) is bad: the order is made again
+                    final String hs = r.str();   // a state without this line (made by an older build) is bad: the order is made again
                     if (!r.bad && ts.equals(tsig) && hs.equals(hsig) && n == ord.size() && new File(bp).isFile() && sz == new File(bp).length()) { osz[oi] = sz; continue; }   // made by an earlier run
                     // a stale o<oi>.done (other T, other names / flags / menu order / default, damaged, body gone): the whole order is made again. Without one the order was not
                     // finished: its masters' choice states stay, each checked (files' sizes, T) when encodeLaesS restores it (C++ e6eab9f).
@@ -537,7 +537,7 @@ public final class LaesEncoder {
         say(L, mPath + ": T = " + CStd.f(A.T, 10) + " base samples (" + A.search + " search), alignment error " + CStd.f(A.err, 1) + " dB, residual re the master's base level " + CStd.f(A.resid, 1) + " dB");
         if (A.resid > -40) say(L, "  note: the core master is not a close copy of this master (other mix / level / EQ / edit?); the encoder will likely store it in full");
         final String[] blockName = {"head", "middle", "tail"};
-        for (int b : A.silentBlocks) say(L, "  check block " + (b + 1) + " (" + blockName[b] + "): the master is silent there and the core master moved by T is not: not matching");   // DEC 25
+        for (int b : A.silentBlocks) say(L, "  check block " + (b + 1) + " (" + blockName[b] + "): the master is silent there and the core master moved by T is not: not matching");
         if (A.err <= -60 && A.silentBlocks.isEmpty()) return true;
         if (!A.silentBlocks.isEmpty()) say(L, "  the alignment did not match in " + A.silentBlocks.size() + " check block(s): check it (" + A.notes + ")"); else
         say(L, "  alignment error " + CStd.f(A.err, 1) + " dB is " + (A.err <= -54 ? "between -60 and" : "worse than") + " -54 dB: check it (" + A.notes + ")");
@@ -629,7 +629,7 @@ public final class LaesEncoder {
         if (!md5ok || !same || size != nCore) return "";
         return null; }
 
-    // FU26-1: the default master, the core master's flags and every master's name, flags and menu position of a body (in its file order), as
+    // the default master, the core master's flags and every master's name, flags and menu position of a body (in its file order), as
     // one line for the state o<oi>.done (names as hex of their UTF-8 bytes); a body made for other values is not used again
     static String headSig(LaesFile.Head hd, List<StreamEnc.MasterSel> s2) {
         final StringBuilder b = new StringBuilder("def ").append(hd.def).append(" core ").append(hd.coreFlags);
@@ -639,7 +639,7 @@ public final class LaesEncoder {
     // the self-check of a written LAES file, read exactly as a player reads it (laes_play.h): open (file SHA-256, payload CRC-32, core), then
     // every master decoded in time order and compared sample by sample with its input (pm: in file order; read where they are: StreamEnc.masterFrames).
     // "" when everything matches, else the reason.
-    // FU26-1 (Java): also the default master, the core master's flags and every master's name, flags and menu position against the ones given
+    // Java: also the default master, the core master's flags and every master's name, flags and menu position against the ones given
     // (wantHead, names, mflags, menus: in file order; menus all 0 when the menu order is the file order)
     // port of laes_tool.cpp:selfCheckFile
     static String selfCheckFile(String path, List<StreamEnc.Prep> pm, StreamEnc.Ctx ctx, LaesFile.Head wantHead, List<String> names, List<Integer> mflags, int[] menus) {

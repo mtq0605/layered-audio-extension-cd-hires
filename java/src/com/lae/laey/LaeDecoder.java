@@ -35,7 +35,7 @@ public final class LaeDecoder {
     // port of lae_decoder.h:tab (half-length returned in half[0])
     static int[] tab(int s, int[] half) { switch (s) { case 0: half[0] = Halfband.kHalfLen0; return Halfband.kHalf0; case 1: half[0] = Halfband.kHalfLen1; return Halfband.kHalf1;
         case 2: half[0] = Halfband.kHalfLen2; return Halfband.kHalf2; default: half[0] = Halfband.kHalfLen3; return Halfband.kHalf3; } }
-    // Decision 13 (2026-11-15, F05-6 point 5, spec Appendix C): the sums and products of the signal stages after the IMDCT (rq31, the
+    // 2026-11-15, spec Appendix C: the sums and products of the signal stages after the IMDCT (rq31, the
     // half-band stages UpSrc and DecSrc, the mix MixSrc, the final (v + 8) >> 4 of read) are taken modulo 2^64, two's complement. Java's
     // long arithmetic wraps modulo 2^64 and >> is arithmetic, so these lines already give the values lae_decoder.h now computes in
     // unsigned arithmetic; nothing changes here.
@@ -63,14 +63,14 @@ public final class LaeDecoder {
         // Java: a Mark is never changed after it is made (seekTo copies its state), so decoders of the same stream share Mark objects.
         static final class Mark { final long M0; final PartStream.Dec dc; final PartStream.Walker w; Mark(long m, PartStream.Dec d, PartStream.Walker ww) { M0 = m; dc = d; w = ww; } }
         final List<Mark> marks = new ArrayList<Mark>(); long every = 1;
-        // decision 34 (2026-11-15, F05-4): false = no checkpoints are kept (LaeDec converts the whole file and never seeks; the library keeps them)
+        // 2026-11-15: false = no checkpoints are kept (LaeDec converts the whole file and never seeks; the library keeps them)
         boolean keepMarks = true;
-        // F05-2 (2026-11-14): the stream header's rate and K are the file's own statement and have no upper limit, so nothing that costs
+        // 2026-11-14: the stream header's rate and K are the file's own statement and have no upper limit, so nothing that costs
         // memory or time follows them alone. srate = the sample rate of this stream's layer from the main header (base for the depth layer,
         // the master rate for the frequency layer): the checkpoint spacing is counted with it. lim = min(K, frames of the layer): rows from
         // frame lim on are never requested (spec 5.3) and are not decoded. The decoded samples of every file are the same as before.
         int srate = 0; long lim = 0;
-        PartStream.Dec dc0;   // the state at the start of the stream (decision 10: the check decodes every stream from here)
+        PartStream.Dec dc0;   // the state at the start of the stream (the check decodes every stream from here)
         public PlaneStream(PartStream.Err e) { err = e; }
         // port of lae_decoder.h:PlaneStream::open (p[off ..] = the stream's bytes)
         public boolean open(byte[] p, int off, int nbytes, int layerRate, long layerFrames) { if (nbytes < 40) return false; Rd s = new Rd(p, off, nbytes); int[] f = new int[10]; for (int i = 0; i < 10; i++) f[i] = s.i32v();
@@ -94,7 +94,7 @@ public final class LaeDecoder {
             for (Mark k : marks) { if (k.M0 > m) break; best = k; }
             if (best != null && (!forward || best.M0 > cur)) { dc = best.dc.copy(); w = new PartStream.Walker(h, err, best.w); row0 = -1; rows = 0; } } }   // Java: bound to this stream's header and error flag (the mark may come from another decoder)
 
-    // port of lae_decoder.h:scanStream (decision 10, spec/lossy 6.7), without the saved checkpoints (the Java port keeps no player record):
+    // port of lae_decoder.h:scanStream (spec/lossy 6.7), without the saved checkpoints (the Java port keeps no player record):
     // decodes the whole stream from its start with its own walker and error flag; true when the stream ends exactly at its last byte with
     // no symbol out of range. The walk stops at the first byte asked for beyond the end, and a K within one row of 2^31 is refused before it.
     static boolean scanStream(PlaneStream ps) {
@@ -251,13 +251,13 @@ public final class LaeDecoder {
                 try { q.name = new String(p, (int) e + 9, nl, "UTF-8"); } catch (java.io.UnsupportedEncodingException x) { q.name = ""; }
                 q.off = (int) e + 9 + nl; q.len = (int) (len - 1 - nl);
                 if (Le.i32(p, q.off) != 0x3145414C || Le.i32(p, q.off + 4) != 5) break;
-                if (Le.i32(p, q.off + 12) != Le.i32(p, 12)) break;   // F05-5 (C++ 47c58c4): spec 5.6, a pack has the main body's base (the same CD / core layer)
+                if (Le.i32(p, q.off + 12) != Le.i32(p, 12)) break;   // C++ 47c58c4: spec 5.6, a pack has the main body's base (the same CD / core layer)
                 q.rate = Le.i32(p, q.off + 8); q.stages = Le.i32(p, q.off + 16); packs.add(q); e += 8 + len; }
             // the name of the main body: one optional record after the last pack record, "LNAM" | 1 byte length | the name (UTF-8); display only
             mainName = ""; if (n - e >= 5 && p[(int) e] == 'L' && p[(int) e + 1] == 'N' && p[(int) e + 2] == 'A' && p[(int) e + 3] == 'M' && (p[(int) e + 4] & 0xFF) <= n - e - 5) {
                 try { mainName = new String(p, (int) e + 5, p[(int) e + 4] & 0xFF, "UTF-8"); } catch (java.io.UnsupportedEncodingException x) { mainName = ""; } } }
         public String mainName = "";   // the main body's name ("" = none stored)
-        private boolean opened = false;   // FU21-2: set by the first openCd (open / openRef included)
+        private boolean opened = false;   // set by the first openCd (open / openRef included)
         private String fail(int[] code, int c, String m) { if (code != null) code[0] = c; return m; }
         // port of lae_decoder.h:Decoder::open
         // returns "" when ready; otherwise the message and code[0] (1 = not this format / bad arguments, 3 = corrupt: the CD audio still plays)
@@ -268,7 +268,7 @@ public final class LaeDecoder {
         public String openRef(final short[] cd, final byte[] lae, String route, int outRate, int[] code) { return openCd(CdPcm.of(cd), lae, route, outRate, code); }
         // Java only: as openRef, with the CD layer from a source (an array, or read on demand from the file with a bounded cache: {@link CdPcm})
         public String openCd(final CdPcm cd, final byte[] lae, String route, int outRate, int[] code) {
-            // FU21-2: one object, one open. A second open would add the depth streams again and keep the former file's streams and
+            // one object, one open. A second open would add the depth streams again and keep the former file's streams and
             // checkpoints in the lists (the C++ clears only fS); every caller makes a new Decoder for every open
             if (opened) return fail(code, 1, "internal error: this decoder was opened before (use a new one for every open)");
             opened = true;
@@ -342,11 +342,11 @@ public final class LaeDecoder {
         // port of lae_decoder.h:Decoder::allStreams: every entropy stream of the chunk in a fixed order (depth L, depth R, then the
         // frequency segments); unopened ones have no walker
         List<PlaneStream> allStreams() { List<PlaneStream> v = new ArrayList<PlaneStream>(); v.add(dS[0]); v.add(dS[1]); for (PlaneStream f : fS) v.add(f); return v; }
-        // port of lae_decoder.h:Decoder::noSeekMarks (decision 34): no checkpoints are kept while decoding (a whole-file conversion that never seeks: LaeDec)
+        // port of lae_decoder.h:Decoder::noSeekMarks: no checkpoints are kept while decoding (a whole-file conversion that never seeks: LaeDec)
         public void noSeekMarks() { for (PlaneStream p : allStreams()) p.keepMarks = false; }
         /** port of lae_decoder.h:Decoder::seekThreads */
         public int seekThreads = Math.max(1, Math.min(16, Runtime.getRuntime().availableProcessors()));
-        // port of lae_decoder.h:Decoder::checkAll (decision 10, 2026-11-15): every stream decoded from start to end in parallel (route full at
+        // port of lae_decoder.h:Decoder::checkAll (2026-11-15): every stream decoded from start to end in parallel (route full at
         // the master rate opens all of them); returns "" or the reason the file fails the check. Java: no checkpoints are saved.
         public String checkAll(int threads) {
             final List<PlaneStream> ps = allStreams(); final boolean[] ok = new boolean[ps.size()];

@@ -13,7 +13,7 @@ import java.math.RoundingMode;
 public final class CStd {
     private CStd() {}
     static boolean space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == 11 || c == '\f' || c == '\r'; }
-    // FU25-5: the C digits only ('0'-'9', and a-f / A-F in hex); Character.isDigit / digit also take full-width and other scripts' digits
+    // the C digits only ('0'-'9', and a-f / A-F in hex); Character.isDigit / digit also take full-width and other scripts' digits
     static boolean dig(char c) { return c >= '0' && c <= '9'; }
     static boolean hex(char c) { return dig(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
     // C atof (strtod): leading white space, sign, decimal or hexadecimal digits with an optional exponent, "inf" / "infinity" / "nan"
@@ -37,7 +37,7 @@ public final class CStd {
         if (k < n && (s.charAt(k) == 'e' || s.charAt(k) == 'E')) { int q = k + 1; if (q < n && (s.charAt(q) == '+' || s.charAt(q) == '-')) q++; final int q0 = q; while (q < n && dig(s.charAt(q))) q++; if (q > q0) k = q; }
         return Double.parseDouble(s.substring(st, k)); }
     // C strtod(s, &e) with the whole string required (*e == 0): the value, or null when no number starts there or anything is left over
-    // (FU15-3 / DEC 23: laes_tool.cpp masterArg). The same parse as atof; the end is where atof's number ends.
+    // (laes_tool.cpp masterArg). The same parse as atof; the end is where atof's number ends.
     public static Double strtodFull(String s) {
         int i = 0; final int n = s.length(); while (i < n && space(s.charAt(i))) i++;
         if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) i++;

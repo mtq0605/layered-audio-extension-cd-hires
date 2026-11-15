@@ -27,7 +27,7 @@ import java.util.List;
  * (3 bytes per cell).
  * usage: lossy &lt;raw s32le stereo&gt; &lt;rate&gt;; environment PART, FULLBAND, DEPTHADAPT, CHSEL, K0FRAC, OCTSPLIT, MASTERREF, RULE_D, RULE_F,
  * ZSIGN, PARTEQ, PARTW, DUMP, PLANE, SEGCOUNT, LAE_BLOCKUNITS, PARTTHREADS.
- * Sorts (PORT_RULES 9): std::sort / nth_element are applied to plain double / float values only; the value at a position of a sorted
+ * Sorts: std::sort / nth_element are applied to plain double / float values only; the value at a position of a sorted
  * multiset does not depend on the algorithm (no NaN can occur, and no -0.0: the values are sums of squares, square roots of them and
  * quotients of them by positive constants), so Arrays.sort gives the same values. The event list uses std::stable_sort by frequency
  * = Collections.sort (stable) with the same comparator.

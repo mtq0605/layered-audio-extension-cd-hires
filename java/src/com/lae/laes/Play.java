@@ -309,7 +309,7 @@ public final class Play {
 
     /** port of laes_play.h:File */
     public static final class File {
-        /** DEC 19: bytes of ID3v2 tags in front of a FLAC file, of APEv2 / ID3v1 tags after its last frame (kept, not read) */
+        /** bytes of ID3v2 tags in front of a FLAC file, of APEv2 / ID3v1 tags after its last frame (kept, not read) */
         public long foreignFront = 0, foreignBehind = 0;
         public boolean flac = false; public int baseRate = 0, coreBits = 0; public long coreFrames = 0;
         public byte[] fileSha = new byte[32]; public String why = "";            // why: "" when the payload passed every check; else the reason (the core still plays)
@@ -337,7 +337,7 @@ public final class Play {
             laeMagic[0] = ""; quick = quickInfo; synchronized (idxM) { idx.clear(); } final long n = src.size(); if (n < 12) return "not LAES";
             // WAV: RIFF, or RF64 / BW64 (EBU Tech 3306, ITU-R BS.2088) for files beyond 4 GB: their 64-bit sizes are in the first chunk, "ds64"
             byte[] h = new byte[12]; src.read(0, h, 0, 12);
-            foreignFront = Flac.flacStart(new Flac.Rd() { public void read(long at, byte[] buf, int k) { src.read(at, buf, 0, k); } }, n); foreignBehind = 0;   // DEC 19: ID3v2 tags in front of "fLaC"
+            foreignFront = Flac.flacStart(new Flac.Rd() { public void read(long at, byte[] buf, int k) { src.read(at, buf, 0, k); } }, n); foreignBehind = 0;   // ID3v2 tags in front of "fLaC"
             if (foreignFront != 0) { if (n < foreignFront + 12) return "not LAES"; src.read(foreignFront, h, 0, 12); if (!eq4(h, 0, "fLaC")) return "not LAES"; }
             flac = eq4(h, 0, "fLaC"); final boolean rf64 = (eq4(h, 0, "RF64") || eq4(h, 0, "BW64")) && eq4(h, 8, "WAVE");
             final boolean wav = (eq4(h, 0, "RIFF") && eq4(h, 8, "WAVE")) || rf64; if (!flac && !wav) return "not LAES";
@@ -360,7 +360,7 @@ public final class Play {
                 if (!haveSi) return "no STREAMINFO";
                 if (payload.total == 0) { if (lae1) laeMagic[0] = "LAE1"; return "not LAES"; }
                 if (fi.total == 0 || fi.maxBs < 16 || fi.channels != 2 || (fi.bps != 16 && fi.bps != 24 && fi.bps != 32)) return "core master is not 2-channel 16/24/32-bit FLAC with a sample count";
-                foreignBehind = Flac.trailerLen(new Flac.Rd() { public void read(long at, byte[] buf, int k) { src.read(at, buf, 0, k); } }, p, n);   // DEC 19: APEv2 / ID3v1 tags at the end (checked after the frames)
+                foreignBehind = Flac.trailerLen(new Flac.Rd() { public void read(long at, byte[] buf, int k) { src.read(at, buf, 0, k); } }, p, n);   // APEv2 / ID3v1 tags at the end (checked after the frames)
                 audioOff = p; audioLen = n - p; baseRate = fi.rate; coreBits = fi.bps; coreFrames = fi.total; }
             else {   // RIFF/WAVE chunks (the last 'fmt ', 'data' and 'LAE ' count; sizes clamped to the file), LIST/INFO tags
                 long pos = 12, laeOff = 0, laeLen = 0; boolean haveLae = false, haveData = false;
@@ -407,7 +407,7 @@ public final class Play {
          * have for this decoder to offer them; a file with more plays its core master only, with the reason in why (as a payload that failed a
          * check). Measured on a PC (Java, 64 MB budget, 44.1 kHz masters in a reference chain): about 1 MB more heap per master of the chain
          * (40 deep: 76 MB) and decoding time growing with the chain; 255 masters do not fit a phone.
-         * A constant (FU26-2, user 2026-11-14: a phone must never open a file with more masters): it cannot be raised from outside, and the
+         * A constant (user 2026-11-14: a phone must never open a file with more masters): it cannot be raised from outside, and the
          * Java LAES encoder refuses more than this many masters before it starts.
          */
         public static final int maxMasters = 16;
@@ -419,7 +419,7 @@ public final class Play {
         // port of laes_play.h:File::open (lambda flacFrames)
         private void flacFrames(boolean fin) {
             final int fby = (fiC.bps + 7) / 8; byte[] mb = new byte[0];
-            while (coreErr.isEmpty() && fbHead < fbSize && coreCount < fiC.total && (fin || fbSize - fbHead > (4 << 20))) {   // DEC 19: no frame after the last sample
+            while (coreErr.isEmpty() && fbHead < fbSize && coreCount < fiC.total && (fin || fbSize - fbHead > (4 << 20))) {   // no frame after the last sample
                 final Flac.Frame F = Flac.decodeFrame(fbA, fbHead, fbSize - fbHead, fiC, frameNo, coreCount, frO);
                 if (!F.err.isEmpty()) { coreErr = F.err; break; } cs.addFrame(fbFile0 + fbHead, coreCount); fbHead += F.used; frameNo++; cs.frEnd = fbFile0 + fbHead;
                 if (mb.length < F.n * 2 * fby) mb = new byte[F.n * 2 * fby]; int mf = 0;
@@ -464,11 +464,11 @@ public final class Play {
                         synchronized (cm) { while (cq.size() >= 4) { try { cm.wait(); } catch (InterruptedException x) { Thread.currentThread().interrupt(); throw fail("interrupted"); } } cq.addLast(piece); cm.notifyAll(); } } }
                 readAll = true;
             } finally { synchronized (cm) { cend = true; cm.notifyAll(); } joinQuiet(ct);
-                if (!readAll) hs.close(); }   // FU25-1: a read that failed half-way also ends the SHA-256 thread (it waited for ever, holding its buffers)
+                if (!readAll) hs.close(); }   // a read that failed half-way also ends the SHA-256 thread (it waited for ever, holding its buffers)
             hs.finish(fileSha);
             final long crcV = crc.getValue();
             if (flac) { flacFrames(true); if (!coreErr.isEmpty()) return "FLAC core master: " + coreErr;
-                {   // DEC 19: after the last frame only APEv2 / ID3v1 tags (before, any byte there was refused as a frame)
+                {   // after the last frame only APEv2 / ID3v1 tags (before, any byte there was refused as a frame)
                     final int rest = fbSize - fbHead;
                     if (rest != 0 && Flac.trailerLen(Flac.rdOf(fbA, fbHead), 0, rest) != rest) return "FLAC core master: bytes after the last audio frame that are no APEv2 / ID3v1 tag";
                     foreignBehind = rest; }
@@ -509,7 +509,7 @@ public final class Play {
                     I.name = LaesFile.nameOf(nb, 0, nb.length); I.flags = (int) fl; I.menu = (int) mp; }
                 if ((I.bits != 16 && I.bits != 24 && I.bits != 32) || I.stages > 3 || I.w >= I.bits || I.storage > 2 || (I.storage != 1 && I.refTier > (int) mi) || (I.storage == 2 && I.refTier < 1)
                     || (I.storage == 1 && I.refTier != 0) || I.rate != (baseRate << I.stages) || F64 == 0 || U.gt((F64 + (1L << I.stages) - 1) >>> I.stages, nc + (1L << 24))
-                    || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !LaesFile.tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";   // DEC 11
+                    || I.whole <= -(1L << 40) || I.whole >= (1L << 40) || !LaesFile.tWithinTrack(I.whole, I.frac, nc)) return "invalid master record";
                 if (F64 < 0) return "master too long for this decoder"; I.frames = F64;   // F64 > INT64_MAX: as laes_play.h / laes_stream.h since 635019a
                 M.j = I.storage == 2 ? Math.min(I.stages, ms.get(I.refTier - 1).I.stages) : 0;
                 for (int c = 0; c < 2; c++) for (int k = M.j; k <= I.stages; k++) { final long l = R.u(4); if (trunc[0] || pos[0] + l > end) return "LAES block truncated"; M.layOff[c][k - M.j] = pos[0]; M.layLen[c][k - M.j] = l; pos[0] += l; }
@@ -625,7 +625,7 @@ public final class Play {
         public String err = "";
         // the nodes: per decoded master, per channel; tiers' lower levels are shared
         /** port of laes_play.h:Player::MD */
-        static final class MD { int idx = -1; List<Node> own = new ArrayList<Node>(); Node[] top = new Node[2]; Node[][] lev = new Node[2][]; Hasher sha = new Hasher(); long hashed = 0; boolean shaOk = false; boolean wide = false; }   // wide: a sample outside the word length (FU12-7)
+        static final class MD { int idx = -1; List<Node> own = new ArrayList<Node>(); Node[] top = new Node[2]; Node[][] lev = new Node[2][]; Hasher sha = new Hasher(); long hashed = 0; boolean shaOk = false; boolean wide = false; }   // wide: a sample outside the word length
         List<MD> chain = new ArrayList<MD>(); CoreNode[] coreSig = {new CoreNode(), new CoreNode()};
         long[] rng = {20261029L + 0x9E3779B97F4A7C15L * 1, 20261029L + 0x9E3779B97F4A7C15L * 2};
         // port of laes_play.h:Player::xs64Apply / xs64Jump (2026-11-12): the derived 16-bit dither's xorshift64 state after `steps` steps
@@ -795,7 +795,7 @@ public final class Play {
         private void hashTo(final MD d, long want) { final LaesFile.MasterInfo I = f.ms.get(d.idx).I;
             while (d.hashed < want) { final long h0 = d.hashed, e = Math.min(want, d.hashed + unit); final int na = (int) (e - h0); if (ha.length < na) { ha = new long[na]; hb = new long[na]; } final long[] a = ha, b = hb;   // Java: reused arrays
                 bothChannels(new Chan() { public void run(int c) { d.top[c].get(h0, e, c != 0 ? b : a, 0); } });
-                for (int i = 0; i < na; i++) if (!LaesFile.inWord(a[i] << I.w, I.bits) || !LaesFile.inWord(b[i] << I.w, I.bits)) d.wide = true;   // FU12-7 / FU13-4
+                for (int i = 0; i < na; i++) if (!LaesFile.inWord(a[i] << I.w, I.bits) || !LaesFile.inWord(b[i] << I.w, I.bits)) d.wide = true;
                 final byte[] buf = d.sha.take(na * 8); for (int i = 0; i < na; i++) { final int l = (int) (a[i] << I.w), r = (int) (b[i] << I.w);
                     for (int q = 0; q < 4; q++) { buf[i * 8 + q] = (byte) (l >>> (8 * q)); buf[i * 8 + 4 + q] = (byte) (r >>> (8 * q)); } }
                 d.sha.push(buf, na * 8, true); d.hashed = e; } }

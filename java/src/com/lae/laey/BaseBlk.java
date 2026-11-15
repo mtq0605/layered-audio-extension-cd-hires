@@ -55,7 +55,7 @@ final class BaseBlk {
         if (argv.length < 5) return 1;
         int R = Fmt.atoi(argv[2]), R0 = Fmt.atoi(argv[3]);
         int stages = 0; while ((R0 << stages) < R) stages++;
-        if ((R0 << stages) != R) { env.printf("rate %d is not base %d * 2^n\n", R, R0); return 2; }   // FU23-5: said, as the C++ (there on stderr)
+        if ((R0 << stages) != R) { env.printf("rate %d is not base %d * 2^n\n", R, R0); return 2; }   // said, as the C++ (there on stderr)
         BlkIo.ReaderI raw = new BlkIo.ReaderI(argv[1], 2); BlkIo.Writer out = null, o24 = null;
         try { Cascade C = new Cascade(); C.stages = stages; C.raw = raw; C.len = new long[stages + 1]; C.len[stages] = raw.frames;
             for (int k = stages - 1; k >= 0; k--) C.len[k] = C.len[k + 1] / 2;

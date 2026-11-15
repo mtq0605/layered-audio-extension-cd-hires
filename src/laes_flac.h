@@ -39,7 +39,7 @@ inline int64_t fixedPred(const int64_t* x, int64_t i, int o) { return laes::fixe
 // ---- reader
 struct BR { const uint8_t* p; size_t n, pos = 0; bool fail = false;   // MSB-first bit reader over a byte range; pos in bits
     // up to 8 bits per step (the same value as bit by bit)
-    uint64_t get(int w) { if (fail || w < 0 || w > 64 || (uint64_t)pos + (uint64_t)w > (uint64_t)n * 8) { fail = true; return 0; } uint64_t v = 0;   // in 64 bits: n * 8 wraps in a 32-bit program for n >= 2^29 (FU12-6)
+    uint64_t get(int w) { if (fail || w < 0 || w > 64 || (uint64_t)pos + (uint64_t)w > (uint64_t)n * 8) { fail = true; return 0; } uint64_t v = 0;   // in 64 bits: n * 8 wraps in a 32-bit program for n >= 2^29
         while (w > 0) { const int off = (int)(pos & 7), avail = 8 - off, take = w < avail ? w : avail; v = (v << take) | (uint64_t)((p[pos >> 3] >> (avail - take)) & ((1u << take) - 1)); pos += (size_t)take; w -= take; }
         return v; }
     int64_t getS(int w) { if (w == 0) return 0; uint64_t v = get(w); if (w < 64 && (v >> (w - 1) & 1)) v |= ~0ull << w; return (int64_t)v; }
@@ -77,7 +77,7 @@ inline bool readSubframe(BR& r, int64_t* x, int64_t n, int bps) {
     const int64_t lim = 1LL << (b - 1); for (int64_t i = 0; i < n; i++) if (x[i] < -lim || x[i] >= lim) return false;   // every sample inside the subframe's bit depth
     if (wasted) for (int64_t i = 0; i < n; i++) x[i] = (int64_t)((uint64_t)x[i] << wasted); return true; }
 inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, uint64_t frameNo, uint64_t have, V ch[2], size_t& used);
-// DEC 19 (2026-11-15): tags that other programs put around a FLAC stream are accepted and left in the file: ID3v2 tags in front of
+// 2026-11-15: tags that other programs put around a FLAC stream are accepted and left in the file: ID3v2 tags in front of
 // "fLaC" (each "ID3", version, flags, a 28-bit synchsafe size; +10 bytes with a footer) and, after the last audio frame, APEv2 tags
 // (footer "APETAGEX", its size, a 32-byte header when flag bit 31 is set) and ID3v1 tags ("TAG", 128 bytes), in any order, at most 4.
 // They are not read. rd(offset, buffer, bytes) reads the file.
@@ -102,7 +102,7 @@ inline std::string foreignNote(uint64_t front, uint64_t behind) {
     if (front) s += " " + std::to_string((unsigned long long)front) + " bytes of ID3v2 in front of the FLAC stream"; if (front && behind) s += ";";
     if (behind) s += " " + std::to_string((unsigned long long)behind) + " bytes of APEv2 / ID3v1 after its last audio frame"; return s; }
 // reads a whole FLAC file: STREAMINFO, the concatenated "LAE2" APPLICATION data, and the audio (two independent channels).
-// DEC 19: ID3v2 tags in front and APEv2 / ID3v1 tags after the last frame are skipped (the frames end when STREAMINFO's count is reached;
+// ID3v2 tags in front and APEv2 / ID3v1 tags after the last frame are skipped (the frames end when STREAMINFO's count is reached;
 // what follows must be such tags).
 // Returns "" or the reason. md5ok: the decoded audio matches STREAMINFO's MD5 (an all-zero MD5 counts as "not given").
 inline std::string readFlac(const std::vector<uint8_t>& f, Info& in, V ch[2], std::vector<uint8_t>& app, bool& md5ok) {
@@ -118,7 +118,7 @@ inline std::string readFlac(const std::vector<uint8_t>& f, Info& in, V ch[2], st
     if (!haveSi) return "no STREAMINFO"; if (in.total == 0) return "STREAMINFO gives no sample count (an LAES core master always has one)"; if (in.maxBs < 16) return "bad STREAMINFO block size"; if (in.channels != 2) return "LAES core master must have 2 channels"; if (in.bps != 16 && in.bps != 24 && in.bps != 32) return "core master must be 16, 24 or 32 bit";
     ch[0].clear(); ch[1].clear(); uint64_t frameNo = 0;
     while (p < f.size() && ch[0].size() < in.total) { size_t used = 0; const std::string e = decodeFrame(f.data() + p, f.size() - p, in, frameNo, ch[0].size(), ch, used); if (!e.empty()) return e; p += used; frameNo++; }
-    if (p < f.size() && trailerLen(rdv, p, f.size()) != f.size() - p) return "bytes after the last audio frame that are no APEv2 / ID3v1 tag";   // DEC 19
+    if (p < f.size() && trailerLen(rdv, p, f.size()) != f.size() - p) return "bytes after the last audio frame that are no APEv2 / ID3v1 tag";
     if (in.total && in.total != ch[0].size()) return "sample count differs from STREAMINFO";
     uint8_t m[16]; audioMd5(ch, (int64_t)ch[0].size(), in.bps, m); bool zero = true; for (int i = 0; i < 16; i++) zero &= in.md5[i] == 0; md5ok = !zero && !memcmp(m, in.md5, 16);
     return ""; }
@@ -137,7 +137,7 @@ inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, 
         const int bps = ssc == 0 ? in.bps : ssc == 1 ? 8 : ssc == 2 ? 12 : ssc == 4 ? 16 : ssc == 5 ? 20 : ssc == 6 ? 24 : ssc == 7 ? 32 : 0; if (bps != in.bps) return "frame bit depth differs from STREAMINFO";
         if (r.fail || (r.pos & 7)) return "frame header truncated"; const size_t hb = r.pos / 8; const uint8_t c8 = (uint8_t)r.get(8); if (r.fail || c8 != crc8(fp, hb)) return "frame header CRC-8 mismatch";
         if (strategy == 0 && num != frameNo) return "frame number out of order";
-        if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the first sample's number (FU12-6)
+        if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the first sample's number
         const size_t base = ch[0].size(); for (int c = 0; c < 2; c++) { ch[c].resize(base + n); if (!readSubframe(r, ch[c].data() + base, n, bps)) return "damaged subframe"; }
         r.pos = (r.pos + 7) & ~(size_t)7; const size_t fb = r.pos / 8; if (fb + 2 > r.n) return "frame truncated";
         if (crc16(fp, fb) != (uint16_t)(fp[fb] << 8 | fp[fb + 1])) return "frame CRC-16 mismatch";

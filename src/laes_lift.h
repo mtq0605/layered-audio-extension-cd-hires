@@ -48,7 +48,7 @@ struct Acc128 { uint64_t lo = 0; int64_t hi = 0;
     void mac(int64_t a, int64_t b) { int64_t h; uint64_t l; mul128(a, b, l, h); uint64_t n = lo + l; hi += h + (n < lo ? 1 : 0); lo = n; }
     int64_t shr(int s) const { uint64_t add = 1ull << (s - 1), n = lo + add; int64_t h = hi + (n < lo ? 1 : 0); return (int64_t)((n >> s) | ((uint64_t)h << (64 - s))); } };
 inline int64_t mir(int64_t i, int64_t n) { if (n == 1) return 0; int64_t p = 2 * (n - 1); i %= p; if (i < 0) i += p; return i < n ? i : p - i; }
-inline int64_t maxAbs(const V& x) { int64_t m = 0; for (int64_t v : x) { int64_t a = v < 0 ? (v == INT64_MIN ? INT64_MAX : -v) : v;   /* FU13-3: INT64_MIN counts as the largest (wide path) */ if (a > m) m = a; } return m; }
+inline int64_t maxAbs(const V& x) { int64_t m = 0; for (int64_t v : x) { int64_t a = v < 0 ? (v == INT64_MIN ? INT64_MAX : -v) : v;   /* INT64_MIN counts as the largest (wide path) */ if (a > m) m = a; } return m; }
 template <int NT, class H> inline int64_t sumAbs(const H* h) { int64_t s = 0; for (int t = 0; t < NT; t++) s += h[t] < 0 ? -(int64_t)h[t] : (int64_t)h[t]; return s; }
 // one filtered value: sum_t h[t] (x[a(t)] + x[b(t)]) with a(t) = i + oa - t, b(t) = i + ob + t, rounded by 2^sh
 template <int NT, bool WIDE, class H> inline int64_t tap(const H* h, const int64_t* x, int64_t n, int64_t i, int64_t oa, int64_t ob, int sh) {

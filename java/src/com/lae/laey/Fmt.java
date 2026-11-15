@@ -111,7 +111,7 @@ final class Fmt {
         boolean neg = false; if (i < n && (s.charAt(i) == '+' || s.charAt(i) == '-')) neg = s.charAt(i++) == '-';
         long v = 0; while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') v = v * 10 + (s.charAt(i++) - '0');
         return neg ? -v : v; }
-    // FU22-10: C digits only (Character.isDigit took full-width digits such as U+FF11, then Double.parseDouble threw)
+    // C digits only (Character.isDigit took full-width digits such as U+FF11, then Double.parseDouble threw)
     private static boolean dig(char c) { return c >= '0' && c <= '9'; }
     // port of the C library's atof (the longest prefix that is a decimal floating-point number; 0 if none; correctly rounded as the UCRT strtod)
     static double atof(String s) {

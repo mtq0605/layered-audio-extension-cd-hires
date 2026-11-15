@@ -19,7 +19,7 @@ All code is standard C++17 and uses no third-party libraries.
 - The foobar2000 component is built with `plugins/foo_input_lae/build_fb2k.cmd` ([plugins/foo_input_lae/README.md](../plugins/foo_input_lae/README.md)).
 - The encoder uses `std::filesystem`. On systems other than Windows, it also uses `setenv`/`unsetenv`.
 - The source files of each program are listed in the [README](../README.md), Section 14.1.
-- On Windows, file names and tags outside the system code page need Windows 10 version 1803 or later (the tools use the UTF-8 locale, `src/win_utf8.h`); on an older Windows, the tools print a warning and work in the system code page.
+- On Windows, file names and tags outside the system code page need Windows 10 version 1803 or later (the tools use the UTF-8 locale, `src/win_utf8.h`); on older versions of Windows, the tools print a warning and work in the system code page.
 
 | Platform | Compiler | Options |
 |---|---|---|
@@ -78,14 +78,14 @@ Example (Windows, the unified decoder `lae_udec`, which links `liblae` staticall
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_udec.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_udec.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
 ```
 
-`liblae` (the LAE Lossy decoder, `src/lae_api.cpp`) is compiled with `/fp:precise`, which meets the floating-point rules of [spec/lossy/SPEC.md](../spec/lossy/SPEC.md), Section 2.2: no contraction, because the build scripts (MSVC 2022) give no `/arch:AVX2` or higher option, so the compiler has no fused multiply-add instruction to emit. Do not add such an option. The LAE Lossless decoder of the plug-ins (`src/laes_api.cpp`) is compiled with `/fp:strict`. The verified flags are given in the build scripts of the plug-ins, for example `plugins/foo_input_lae/build_fb2k.cmd`.
+`liblae` (the LAE Lossy decoder, `src/lae_api.cpp`) is compiled with `/fp:precise`, which meets the floating-point rules of [spec/lossy/SPEC.md](../spec/lossy/SPEC.md), Section 2.2: no contraction, because the build scripts (MSVC 2022) pass no `/arch:AVX2` or higher option, so the compiler has no fused multiply-add instruction to emit. Do not add such an option. The LAE Lossless decoder of the plug-ins (`src/laes_api.cpp`) is compiled with `/fp:strict`. The verified flags are given in the build scripts of the plug-ins, for example `plugins/foo_input_lae/build_fb2k.cmd`.
 
 ### Auxiliary programs
 
 The repository also contains the following programs. The header comment of each file describes its usage.
 
 - `tools/selftest_ref.cpp` prints the self-test fingerprint of a build (Section 2).
-- `tools/gen_halfband.cpp` and `tools/gen_mdct_tables.cpp` generate `src/halfband.h` and `src/mdct_tables.h`, respectively. The committed `src/mdct_tables.h` is the normative table: the generator writes its result into the current folder, only for comparison. Built with x64 MSVC it reproduces the committed table exactly; built for x86 (`/arch:SSE2`), 75 values differ in the last bit (measured 2026-11-14), and other compilers or C libraries may differ as well, because the generator uses the C library's `sin` and `cos`. Never commit a regenerated table: every decoder must use the same constants. The generators (and `gen_noise_test`) do not replace an existing output file silently: on a console they ask twice and replace it only after two yes answers; otherwise, it is refused unless `--overwrite` is given (README, Section 14.11).
+- `tools/gen_halfband.cpp` and `tools/gen_mdct_tables.cpp` generate `src/halfband.h` and `src/mdct_tables.h`, respectively. The committed `src/mdct_tables.h` is the normative table: the generator writes its result into the current folder, only for comparison. Built with x64 MSVC, it reproduces the committed table exactly; built for x86 (`/arch:SSE2`), 75 values differ in the last bit (measured 2026-11-14), and other compilers or C libraries may differ as well, because the generator uses the C library's `sin` and `cos`. Never commit a regenerated table: every decoder must use the same constants. The generators (and `gen_noise_test`) do not replace an existing output file silently: on a console they ask twice and replace it only after two yes answers; otherwise, it is refused unless `--overwrite` is given (README, Section 14.11).
 - `tools/test_mdct_tb.cpp` is a test program for `src/mdct_tb.h`.
 - `tools/lae_math_check.cpp` checks the encoder's functions in `src/lae_math.h` against the C library and prints their platform checksum.
 - `src/gen_suite.cpp` generates the synthetic test signals (optionally a single category).
@@ -125,7 +125,7 @@ The Linux checks are performed by two scripts:
 
 The scripts print a summary of the comparisons. A GitHub Actions workflow in `.github/workflows/` runs them.
 
-**Checks run by hand (2026-11-15).** The workflow does not run the following checks; they are run by hand on a local machine before a release, and the workflow will take them up when it is next changed:
+**Checks run by hand (2026-11-15).** The workflow does not run the following checks; they are run by hand on a local machine before a release, and they will be added to the workflow when it is next changed:
 
 - `tests/check_packs.sh <bin folder> <older lae_dec> <scratch folder>`: extension packs (Windows with Git Bash, or Linux);
 - `tests/check_flacform.sh <lae_enc> <lae_dec> <master.wav> <scratch folder>`: the FLAC form;
@@ -186,7 +186,7 @@ For the whole-track encoders above, time and memory grew linearly with length (m
 - the scans accumulate whole-track summaries (floors, tone and transient events, mean energies, code-length statistics, shares), the plan (tags, lambdas) is made from these summaries, and every block is then coded according to the plan;
 - the range coder and its self-check work on one row of root blocks at a time, and the output file is written and read back piece by piece.
 
-Without `cd=`, memory use does not grow with length, apart from the per-cell records (3 bytes per cell); for `cd=`, see below. Large intermediate data are written to the work folder: at most 13,185 MB was measured for a 10.16-minute 352.8 kHz 32-bit master (an unpublished test master; bits=24, mode 3, s1; 823 s and 465 MB peak with 8 threads), which is about 61 bytes per master frame. Since 2026-11-05, the work folder is smaller (8.0 GB for a master of that length and rate; README Section 14.2), and the free-space check before the run assumes 45 bytes per master frame (55 with `cd=`, and 12 more with `g`). With `cd=`, the master is also read through file windows, and the placement on the CD's time line (the digital silence added around the shifted master, the whole-sample shift itself and the cut of that silence) is written from file to file; the alignment search itself, however, correlates over the whole track at the CD rate (about 2.4 GB for 10 minutes). The option `resume` continues an interrupted run from its last finished step (with `cd=`, it continues after the alignment, which is performed again).
+Without `cd=`, memory use does not grow with length, apart from the per-cell records (3 bytes per cell); for `cd=`, see below. Large intermediate data are written to the work folder: at most 13,185 MB was measured for a 10.16-minute 352.8 kHz 32-bit master (an unpublished test master; bits=24, mode 3, s1; 823 s and 465 MB peak with 8 threads), which is about 61 bytes per master frame. Since 2026-11-05, the work folder has been smaller (8.0 GB for a master of that length and rate; README Section 14.2), and the free-space check before the run assumes 45 bytes per master frame (55 with `cd=`, and 12 more with `g`). With `cd=`, the master is also read through file windows, and the placement on the CD's time line (the digital silence added around the shifted master, the whole-sample shift itself and the cut of that silence) is written from file to file; the alignment search itself, however, correlates over the whole track at the CD rate (about 2.4 GB for 10 minutes). The option `resume` continues an interrupted run from its last finished step (with `cd=`, it continues after the alignment, which is performed again).
 
 **Decoder input.** The decoder reads the CD audio of its input file in place (one copy, 2 bytes per CD sample).
 

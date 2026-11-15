@@ -75,7 +75,7 @@ If the WAV decoder comes first, an LAE `.wav` file plays only its CD layer.
 | Bit-depth layer only · 24-bit | The CD/core layer and the bit-depth layer at the base rate, for example 44.1 kHz / 24-bit. |
 | CD/core layer only · 16-bit | The CD/core layer unchanged, for example 44.1 kHz / 16-bit. |
 
-When "Maximum sample rate, Hz" (Advanced settings) is below twice the base rate, for example 48000 for a 44.1 kHz file, no rate above the base rate fits: "All layers" then plays the bit-depth layer (24-bit at the base rate) and "Frequency layer only" the CD/core layer (16-bit), as in the DirectShow and VLC plug-ins; the status bar adds "maximum sample rate" and the limit.
+When "Maximum sample rate, Hz" (Advanced settings) is below twice the base rate, for example 48000 for a 44.1 kHz file, no rate above the base rate fits: "All layers" then plays as "Bit-depth layer only" (24-bit at the base rate) and "Frequency layer only" as "CD/core layer only" (16-bit), as in the DirectShow and VLC plug-ins; the status bar adds "maximum sample rate" and the limit.
 
 A selection made during playback takes effect immediately and continues from the current position; the track does not restart. The first field of the status bar names the layers that are playing:
 
@@ -170,7 +170,7 @@ The following files are stored in the foobar2000 profile folder (and are specifi
 
 | File | Contents |
 |---|---|
-| `laes_choices.txt` | The choice for each track: `<choice name>` TAB `<path>`. The choice name is the technical name of the entry, as in the file names of `laes dec` (`core`, `master_<k>_<rate>_<bits>`, `master_<k>_level_<rate>_<bits>`, `derived16_<rate>_from_<entry>`; k is the master's place in the menu), never the publisher's master name; an LAEY extension pack is stored as `laeypack=<n>`. Up to 0.10, this file was mistakenly written beside the profile folder; 0.11 reads it from there once. |
+| `laes_choices.txt` | The choice for each track: `<choice name>` TAB `<path>`. The choice name is the technical name of the entry, as in the file names of `laes dec` (`core`, `master_<k>_<rate>_<bits>`, `master_<k>_level_<rate>_<bits>`, `derived16_<rate>_from_<entry>`; k is the master's place in the menu), never the publisher's master name; an LAEY extension pack is stored as `laeypack=<n>` (n counted from 0, as in `lae_dec pack=`; the main body is not stored). Up to 0.10, this file was mistakenly written beside the profile folder; 0.11 reads it from there once. |
 | `laes_speed.txt` | For each file, the SHA-256 and choice (or `all`): the decoding speed as a multiple of real time. |
 | `laes_debug.log` | Only if you create it (as an empty file): an event log of LAES playback (open, seek, switch, close) for reporting a playback fault; delete it to turn logging off. |
 

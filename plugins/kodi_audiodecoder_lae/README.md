@@ -30,7 +30,7 @@ The settings are under Add-ons → My add-ons → Audio decoder → LAE decoder 
 
 | Setting | Values |
 |---|---|
-| LAEY layers | All layers (LAES: the master); Bit-depth layer only (CD or core layer + depth layer, base rate); CD/core layer only (LAES: the core master); Frequency layer only (LAES: as All layers) |
+| LAEY layers | All layers (LAES: the master); Bit-depth layer only (CD or core layer + bit-depth layer, base rate; LAES: the default master's base-rate level); CD/core layer only (LAES: the core master); Frequency layer only (LAES: as All layers) |
 | Maximum sample rate | No limit; 192 kHz; 96 kHz |
 | LAES maximum bit depth | No limit; 16-bit; 24-bit; 32-bit |
 | LAEY extension pack | Pack 1 … Pack 9 (see above) |

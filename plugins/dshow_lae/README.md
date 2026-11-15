@@ -17,7 +17,7 @@ The filter delivers uncompressed PCM, with seeking, at the sample rate of what i
 ## Changes in this update
 
 - LAEY files in the FLAC form are opened as well ([spec/lossy/SPEC.md](../../spec/lossy/SPEC.md), Section 3.4); files are recognised by content.
-- LAEY extension packs (Section 5.6 of the same specification): the registry value `pack` (DWORD) in `HKCU\Software\LAE\DirectShow` selects the pack. It counts from 0, as `lae_dec pack=`: 0 = the main body, the pack of master 1; n = the pack of master n + 1 (foobar2000 and Kodi count from 1 in their menus, so their "Pack n + 1" is n here). A file without that pack plays the main body (0). No pack is chosen automatically.
+- LAEY extension packs (Section 5.6 of the same specification): the registry value `pack` (DWORD) in `HKCU\Software\LAE\DirectShow` selects the pack. It counts from 0, as `lae_dec pack=` does: 0 = the main body, the pack of master 1; n = the pack of master n + 1 (foobar2000 and Kodi count from 1 in their menus, so their "Pack n + 1" is n here). A file without that pack plays the main body (0). No pack is chosen automatically.
 - LAES payload version 2 ([spec/lossless/SPEC.md](../../spec/lossless/SPEC.md), Section 10.3): when nothing else is set, the default master stored in the file plays; without one, the core master.
 - A master plays only after it and its chain of tiers have matched their SHA-256 values; the result is kept per file content (in `%APPDATA%\LAE`, shared with the other LAE plug-ins). A derived 16-bit version starts at the seek position, bit for bit.
 - Two standalone builds of the filter and its installer, English (`-en`) and Chinese (`-zh`).
@@ -45,13 +45,13 @@ Playback is controlled by DWORD registry values under `HKCU\Software\LAE\DirectS
 
 | Value | Meaning |
 |---|---|
-| `layers` | 0: all layers / the master; 1: bit-depth layer only (CD or core layer + depth layer, base rate; LAES: the default master's base-rate level); 2: CD or core layer only (LAES: the core master); 3: frequency layer only (CD or core layer + frequency layer, 16-bit; LAES: as 0) |
+| `layers` | 0: all layers / the master; 1: bit-depth layer only (CD or core layer + bit-depth layer, base rate; LAES: the default master's base-rate level); 2: CD or core layer only (LAES: the core master); 3: frequency layer only (CD or core layer + frequency layer, 16-bit; LAES: as 0) |
 | `maxrate` | Highest sample rate in Hz; 0 = no limit (for example, 96000 for a sound card or renderer that cannot accept higher rates) |
 | `maxbits` | LAES only: highest word length; 0 = no limit, 16, 24 or 32 |
 
 ## Rules (as in the foobar2000 component)
 
-- A master is played as that master only after it has been decoded completely and its SHA-256 has matched. The first time a given file content is opened, all masters are checked in one pass, with a small progress window that has a Cancel button. For Grand (10 min, 4 masters), this took about 1 minute on the test machine. The result is stored by the SHA-256 of the whole file in `%APPDATA%\LAE\laes_verified.txt`, so later opens take a few seconds (the file check). After Cancel, the core master plays this time and nothing is recorded: the chosen master plays only after a complete check has passed, which runs again the next time the file is opened. Whenever the core master plays instead of the chosen master (the check was cancelled, the master did not pass, or it could not be checked), a message box says so.
+- A master is played as that master only after it has been decoded completely and its SHA-256 has matched. The first time a given file content is opened, all masters are checked in one pass, with a small progress window that has a Cancel button. For Grand (10 min, 4 masters), this took about 1 minute on the test machine. The result is stored by the SHA-256 of the whole file in `%APPDATA%\LAE\laes_verified.txt`, so later opens take a few seconds (the file check). After Cancel, the core master plays this time and nothing is recorded: the check runs again the next time the file is opened, and the chosen master plays only after a complete check has passed. Whenever the core master plays instead of the chosen master (the check was cancelled, the master did not pass, or it could not be checked), a message box says so.
 - Seeking starts at the block that contains the requested time. Block positions (every 16th block, tens of kB) are stored in `%APPDATA%\LAE\laes_index\` and are never written to the media file.
 
 ## Tested (Windows 11)

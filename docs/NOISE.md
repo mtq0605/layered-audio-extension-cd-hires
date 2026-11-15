@@ -6,7 +6,7 @@ LAEY can omit noise that you mark in the ultrasonic band of a master. This takes
 
 1. **Align.** `lae_enc plan` aligns the master with the CD layer, and you confirm the result. Make all marks on the aligned master.
 2. **Mark.** LAE Noise Marker (`lae_noise`, `tools/noise_panel.html`; see `plugins/lae_noise_marker/`) lists steady noise and fixed
-   narrow lines and lets you choose which to mark. It writes a marking file (`.laenoise`). It never removes sound and writes no cleaned copy of the master; besides the marking file, it writes only short listening previews (the first 10 s of each position by default and at most the first 30 s, with at most 1 s of context on each side, and at most 30 s for `preview-all`; the program cuts a longer request and says so, so no command writes a cleaned excerpt longer than 30 s).
+   narrow lines and lets you choose which to mark. It writes a marking file (`.laenoise`). It never removes sound and writes no cleaned copy of the master; the only audio that it writes is short listening previews (the first 10 s of each position by default and at most the first 30 s, with at most 1 s of context on each side, and at most 30 s for `preview-all`; the program cuts a longer request and says so, so no file holds more than 30 s of cleaned sound).
 3. **Encode.** `lae_enc <master.wav> <out.wav> [mode] noise=<marks.laenoise> [g | g=b | g=c | g=d]`.
 
 Without `noise=` and `g`, the encoder writes exactly the same file as the encoder before these options were added (2026-11-04), byte for byte.
@@ -29,7 +29,7 @@ The usual terms are *interpolation images* or *image components*.
 
 - A decoder plays the high-resolution version as the CD layer up-sampled to the master's rate, plus the frequency layer.
 - Up-sampling leaves the original samples and the 0–20 kHz content unchanged. It computes the new samples in between with a filter
-  that removes the spectral copies of the CD band. The filter is designed for a stopband attenuation of 120 dB (tools/gen_halfband.cpp; not yet measured, README Section 17.3), so each copy retains the music at about −120 dB.
+  that removes the spectral copies of the CD band. The filter is designed for a stopband attenuation of 120 dB (`tools/gen_halfband.cpp`; not yet measured, README Section 17.3), so each copy retains the music at about −120 dB.
   This remainder is G.
 - Normally the frequency layer holds "master − up-sampled CD", so it carries −G, and the two cancel during decoding.
 - In a tier-A cell the frequency layer is zero, so G remains in the decoded output. `g` treats two kinds of such cell:

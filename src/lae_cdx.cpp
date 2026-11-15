@@ -376,8 +376,26 @@ static string cueText(const Image& im, bool withData) {
     c += "REM LEAD-OUT " + msf(im.A2) + "\r\n";
     if (withData) { char b[128]; snprintf(b, sizeof b, "REM SESSION 02\r\nFILE \"DATA.ISO\" BINARY\r\n  TRACK %02d MODE2/2048\r\n    INDEX 01 00:00:00\r\n", (int)im.p.size() + 1); c += b; }
     return c; }
+// a disc above the capacity of a standard 80-minute blank (359,849 sectors = 79:57:74; possible with capacity= above it): BURN.TXT
+// begins with a warning in English and Chinese (2026-11-15). overburnFrom stays CAPDEF in the program; only the test program
+// tests/fix_2026-11-14/dec_cdx_overburn.cpp, which compiles this file, lowers it to reach the case with small discs.
+static long long overburnFrom = CAPDEF;
+static string thousands(long long v) { string s = to_string(v); for (int i = (int)s.size() - 3; i > 0; i -= 3) s.insert((size_t)i, ","); return s; }
+static string overburnText(long long total) {
+    if (total <= overburnFrom) return "";
+    const long long over = total - overburnFrom; char x[1024]; const string n = thousands(total), c = thousands(overburnFrom), o = thousands(over);
+    const int dp = over < 75 ? 2 : 1;   // seconds: two decimals below one second
+    snprintf(x, sizeof x, "*** OVERBURN: this image needs %s sectors (%s), %s %s (%s, about %.*f s) more than a standard 80-minute blank (%s sectors, %s). ***\r\n"
+                          "*** A standard 80-minute blank is too small: use a blank whose real capacity is at least %s sectors (a 90- or 99-minute blank),\r\n"
+                          "    or a burner and burning program with overburning switched on. Some blanks and burners refuse. ***\r\n"
+                          "*** 超刻：这个映像需要 %s 个扇区（%s），比标准 80 分钟空白盘（%s 个扇区，%s）多 %s 个扇区（%s，约 %.*f 秒）。***\r\n"
+                          "*** 标准 80 分钟空白盘容量不够：请用实际容量不少于 %s 扇区的空白盘（90 或 99 分钟盘），或在刻录机和刻录软件里打开超刻。\r\n"
+                          "    个别空白盘和刻录机会拒绝。***\r\n\r\n",
+             n.c_str(), msf(total).c_str(), o.c_str(), over == 1 ? "sector" : "sectors", msf(over).c_str(), dp, (double)over / 75.0, c.c_str(), msf(overburnFrom).c_str(), n.c_str(),
+             n.c_str(), msf(total).c_str(), c.c_str(), msf(overburnFrom).c_str(), o.c_str(), msf(over).c_str(), dp, (double)over / 75.0, n.c_str());
+    return x; }
 static string burnText(const Image& im) {
-    string b = "LAE CD-Extra: burning and acceptance / 刻录与验收\r\n\r\nLayout / 布局 (LBA = sector address; track 1 INDEX 01 = LBA 0):\r\n"; char x[240];
+    string b = overburnText(im.total) + "LAE CD-Extra: burning and acceptance / 刻录与验收\r\n\r\nLayout / 布局 (LBA = sector address; track 1 INDEX 01 = LBA 0):\r\n"; char x[240];
     for (size_t k = 0; k < im.p.size(); k++) { if (im.pub) for (auto& i : im.lay.tracks[k].idx) if (i.first == 0 && k > 0) { snprintf(x, sizeof x, "  track %02zu INDEX 00: LBA %lld (%s)\r\n", k + 1, i.second / SECTOR, msf(i.second / SECTOR).c_str()); b += x; }
         snprintf(x, sizeof x, "  track %02zu INDEX 01: LBA %lld (%s)%s\r\n", k + 1, im.idx1[k] / SECTOR, msf(im.idx1[k] / SECTOR).c_str(),
                                                   im.noext.count((int)k + 1) ? "  CD only, no extension file / 只作 CD" : ""); b += x; }
@@ -977,6 +995,7 @@ static int realMain(int argc, char** argv) {
         for (size_t k = 0; k < im.lax.size() && ok; k++) { if (im.lax[k].empty()) continue; char nm[32]; snprintf(nm, sizeof nm, "TRACK%02d.LAX", (int)k + 1); ok = put(out / "LAE" / nm, im.lax[k].data(), im.lax[k].size()); }
         if (!ok) { for (auto& p : written) { std::error_code rc; fs::remove(p, rc); } std::error_code rc; if (fs::is_empty(out / "LAE", rc) && !rc) fs::remove(out / "LAE", rc);
             printf("cannot write the deliverables in %s; the %zu file(s) written so far were removed again, nothing written\n", pos[0].c_str(), written.size()); return 2; }
+        if (im.total > overburnFrom) printf("note: the disc needs %lld sectors, %lld more than a standard 80-minute blank (%lld): overburn warning written at the top of BURN.TXT\n", im.total, im.total - overburnFrom, overburnFrom);
         printf("CD-Extra image written to %s: AUDIO.BIN, IMAGE.CUE, DATA.ISO, SESSION1.CUE, BURN.TXT, LAE\\TRACKnn.LAX\n", pos[0].c_str()); return 0; }
     if (cmd == "data" && pos.size() == 3) {   // session 2 of a CD: every file must be a CD extension file (track 1-98, 44100 Hz)
         if (!mayReplaceAll({pos[2]})) return 1;

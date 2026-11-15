@@ -254,7 +254,7 @@ Exception (independent-CD mode, track 1 only): the CD layer of track 1 MAY begin
 
 - N1 = A2: the number of sectors of session 1 from LBA 0, padding included.
 - N2 = file system sectors + Σ ceil(file size in bytes / 2048) + trailing zero sectors. With few files, the file system occupies only a few tens of sectors (estimate).
-- C = capacity of the blank disc from its ATIP, in sectors from LBA 0, less any safety margin the producer chooses. For an 80-minute disc, the capacity is 359,849 sectors: the ATIP maximum 79:59:74 is 359,999 sectors of absolute time, less the 150 sectors before LBA 0 (secondary source; to be measured, Appendix A.1 item 9). The encapsulation tool uses 359,849 unless another capacity is given.
+- C = capacity of the blank disc from its ATIP, in sectors from LBA 0, less any safety margin the producer chooses. For an 80-minute disc, the capacity is 359,849 sectors: the ATIP maximum 79:59:74 is 359,999 sectors of absolute time, less the 150 sectors before LBA 0 (secondary source; to be measured, Appendix A.1 item 9). The encapsulation tool uses 359,849 unless another capacity is given. *Informative: reference tool (since 2026-11-15).* When N1 + 11,400 + N2 exceeds 359,849 (with a larger capacity given), the tool writes a warning in English and Chinese at the top of BURN.TXT with the sectors needed and the excess: a standard 80-minute blank is too small, a blank of larger real capacity or overburning is needed.
 
 **In disc minutes** (1 disc minute = 4500 sectors; every term in disc minutes): L·(1 + r) + padding + 2.533 + file system + trailing zero sectors ≤ C / 4500, where:
 

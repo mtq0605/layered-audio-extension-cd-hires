@@ -1017,7 +1017,7 @@ A track may be published without an extension, for example when capacity is insu
 
 - an image for writing in one pass: `IMAGE.CUE`, `AUDIO.BIN` (session 1 from LBA 0 to A2, 16-bit little-endian stereo, whole sectors) and the data track as `DATA.BIN` (2352 bytes per sector) or `DATA.ISO` (2048 bytes per sector);
 - a kit for writing in two steps: a CUE sheet for session 1 only, and a command that regenerates session 2 for the start address actually reported by the drive. The address reported by READ TRACK INFORMATION (MMC [17]) is checked against the TOC value B0 and against A2 + 11,400; if any of the three differs from the others, the tool stops;
-- burning and acceptance instructions (`BURN.TXT`) with a layout table giving the LBA of each INDEX 01, A2 and the start of the data track.
+- burning and acceptance instructions (`BURN.TXT`) with a layout table giving the LBA of each INDEX 01, A2 and the start of the data track. When the whole disc needs more than 359,849 sectors (possible only with `capacity=` above it), `BURN.TXT` begins with a warning in English and Chinese that gives the sectors needed and the excess and says that a standard 80-minute blank is too small (a larger blank or overburning is needed); the tool also prints one line.
 
 The CUE sheet contains no CRC, MD5 or other hash.
 

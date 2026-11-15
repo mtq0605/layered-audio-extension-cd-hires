@@ -90,7 +90,7 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 - `tools/lae_math_check.cpp` 将编码器在 `src/lae_math.h` 中的函数与 C 库进行对比检查，并输出其平台校验和。
 - `src/gen_suite.cpp` 生成合成测试信号（可以只生成一个类别）。
 - `src/cd_variant.cpp` 生成定义精确的 CD 或母带测试变体（平移、补静音、截去开头、增益、极性、左右互换、淡出等），用于对齐和扩展包测试（`tests/check_packs.sh`）。
-- `tools/lae_abx/lae_abx.cpp` 是独立运行的 ABX 听音测试（Windows x64，需要 Windows 10 1703 版或更新版本：它使用该版本的按显示器 DPI 函数），需要旁边有 `lae_udec.exe`。编译（x64）：`cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`。准备好的音源连同 `lae_abx` 和旁边 `lae_udec.exe` 的标识一起保存在 `%TEMP%\lae_abx_cache`，别的版本做的副本会重新准备；“Clear kept copies”按钮清除这些副本。每一对的日志从开始就写，每答一题记一行；整轮总结写出每一对的测试采样率。`lae_abx --prepare <对> <采样率> <文件夹> [--overwrite]` 不加 `--overwrite` 就不替换已有的输出。
+- `tools/lae_abx/lae_abx.cpp` 是独立运行的 ABX 听音测试（Windows x64，需要 Windows 10 1703 版或更新版本：它使用该版本的按显示器 DPI 函数），需要旁边有 `lae_udec.exe`。编译（x64）：`cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE tools\lae_abx\lae_abx.cpp user32.lib gdi32.lib comctl32.lib ole32.lib shell32.lib mfplat.lib mfreadwrite.lib mfuuid.lib winmm.lib comdlg32.lib`。准备好的音源连同 `lae_abx` 和旁边 `lae_udec.exe` 的标识一起保存在 `%TEMP%\lae_abx_cache`，别的版本做的副本会重新准备；"Clear kept copies"按钮清除这些副本。每一对的日志从开始就写，每答一题记一行；整轮总结写出每一对的测试采样率。`lae_abx --prepare <pair> <rate> <folder> [--overwrite]` 不加 `--overwrite` 就不替换已有的输出。
 - `src/cut_wav.cpp` 和 `src/cmp_wav.cpp` 是 WAV 实用程序。`src/cmp_wav.cpp` 计算 README 第 12.1 节所定义的误差度量。
 
 ## 2. 启动自检
@@ -116,7 +116,7 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 
 在 Linux x86 上，256 个解码器结果中有 256 个与参考一致；在 Linux ARM64 上，192 个中有 192 个一致。
 
-`liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 13.3 和 13.7 节）。`laes` 和 `lae_cdx` 不在表中：在 Linux 上，CI 在 x86-64 和 ARM64 上用 g++ 和 clang++ 构建这两个程序，并运行 `laes selftest` 和 `lae_cdx selftest`（`tests/check_laes_linux.sh`）；它们的其他命令 CI 在该平台上不运行。2026-11-14 在 Linux x64（WSL 下的 g++ 13.3）上运行过一次 `laes` 的 `dec`、`verify`、`extract` 和 `add` 命令，以及 `lae_cdx` 的读取器（`read` 和 `repack`，WAV 和 FLAC 抓轨），输出与 Windows 构建逐字节相同；`laes enc` 和 `laes align` 没有在该平台上检查过（[spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.zh.md) 的“编译”一节）。
+`liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 13.3 和 13.7 节）。`laes` 和 `lae_cdx` 不在表中：在 Linux 上，CI 在 x86-64 和 ARM64 上用 g++ 和 clang++ 构建这两个程序，并运行 `laes selftest` 和 `lae_cdx selftest`（`tests/check_laes_linux.sh`）；它们的其他命令 CI 在该平台上不运行。2026-11-14 在 Linux x64（WSL 下的 g++ 13.3）上运行过一次 `laes` 的 `dec`、`verify`、`extract` 和 `add` 命令，以及 `lae_cdx` 的读取器（`read` 和 `repack`，WAV 和 FLAC 抓轨），输出与 Windows 构建逐字节相同；`laes enc` 和 `laes align` 没有在该平台上检查过（[spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.zh.md) 的"编译"一节）。
 
 Linux 上的检查由五个脚本执行：
 
@@ -130,8 +130,8 @@ Linux 上的检查由五个脚本执行：
 
 **手动运行的检查（2026-11-15）。**下面几项检查工作流不运行，发布之前在本机手动运行；下次修改工作流时再把它们加进去：
 
-- `tests/check_packs.sh <程序文件夹> <较早的 lae_dec> <临时文件夹>`：扩展包（Windows 上用 Git Bash，或 Linux）；
-- `tests/check_flacform.sh <lae_enc> <lae_dec> <master.wav> <临时文件夹>`：FLAC 形式；
+- `tests/check_packs.sh <bin folder> <older lae_dec> <scratch folder>`：扩展包（Windows 上用 Git Bash，或 Linux）；
+- `tests/check_flacform.sh <lae_enc> <lae_dec> <master.wav> <scratch folder>`：FLAC 形式；
 - `tools/lae_math_check`：编码器在 `src/lae_math.h` 中的函数与 C 库对照，并给出一个在所有平台上都必须相同的校验和；
 - `laes` 的 32 位（x86）构建及其 `laes selftest`。
 

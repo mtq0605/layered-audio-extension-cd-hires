@@ -13,9 +13,9 @@ SPDX-License-Identifier: CC0-1.0
 
 ## 承诺中使用的术语
 
-- **“作者”**指 mtq0605，即作为 LAE 作者及著作权人的自然人。作者以 GitHub
-  账号“mtq0605”发布 LAE，该账号名作为化名使用。
-- **“LAE 格式”**与**“LAE 规范”**指 LAE（Layered Audio Extension）的所有已发布版本。其中包括：
+- **"作者"**指 mtq0605，即作为 LAE 作者及著作权人的自然人。作者以 GitHub
+  账号"mtq0605"发布 LAE，该账号名作为化名使用。
+- **"LAE 格式"**与**"LAE 规范"**指 LAE（Layered Audio Extension）的所有已发布版本。其中包括：
   - LAE Lossy（LAEY），其规范见
     [spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md)；
   - LAE Lossless（LAES），其规范见
@@ -24,7 +24,7 @@ SPDX-License-Identifier: CC0-1.0
   - CD-Extra 封装，其规范见 [spec/cdx/SPEC.md](spec/cdx/SPEC.zh.md)；
   - LAENOISE 标记文件，其规范见
     [plugins/lae_noise_marker/SPEC_LAENOISE.md](plugins/lae_noise_marker/SPEC_LAENOISE.zh.md)。
-- **“任何实现”**指任何人出于任何目的所做的任何实现，无论完整与否。其中包括商业实现和闭源实现。无论该实现是否源自本仓库中的代码，均适用。
+- **"任何实现"**指任何人出于任何目的所做的任何实现，无论完整与否。其中包括商业实现和闭源实现。无论该实现是否源自本仓库中的代码，均适用。
 
 ## 承诺的适用方式
 

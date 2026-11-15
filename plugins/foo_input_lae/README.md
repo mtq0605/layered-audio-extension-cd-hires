@@ -4,7 +4,7 @@
 
 This component plays both LAE formats in foobar2000:
 
-- **LAE Lossy (LAEY)** (LAE container version 5, lossy extension, ID `LAE1`): the CD layer together with the depth layer and the frequency layer, decoded up to the master rate (for example, 352.8 kHz / 24 bit).
+- **LAE Lossy (LAEY)** (LAE container version 5, lossy extension, ID `LAE1`): the CD layer together with the bit-depth layer and the frequency layer, decoded up to the master rate (for example, 352.8 kHz / 24 bit).
 - **LAE Lossless (LAES)** (ID `LAE2`): the core master (which can be CD-compatible), one of the lossless masters (16/24/32 bit, 44.1/48 kHz × 1, 2, 4 or 8), or a rate level of a master. A master is played as that master only after its SHA-256 has been checked (see [LAES](#laes-lossless)).
 
 A WAV or FLAC file without an LAE extension is rejected immediately and passed unchanged to foobar2000's own decoder.
@@ -90,7 +90,7 @@ The same settings are also available under Preferences → Advanced → Decoding
 - Status bar (LAEY): `LAEY · All layers` / `LAEY · Bit-depth layer only` / `LAEY · Frequency layer only` / `LAEY · CD layer only` (`core layer` in the 48 kHz family), with the pack between them when the file has extension packs (`LAEY · <pack name> · All layers`), followed by the decoded sample rate.
 - File properties → Details: the sample rate, the bit depth and the codec (LAE); under "Other": `lae_layers` (the layers that the file contains), `lae_master` (the master rate) and
   `lae_cd_layer` (the format of the CD layer).
-- Bit rate: LAE has a variable bit rate. The CD layer is fixed (1411.2 kbps in the 44.1 kHz family); the extension layers (depth layer and frequency layer) are entropy-coded and require more data for complex content and
+- Bit rate: LAE has a variable bit rate. The CD layer is fixed (1411.2 kbps in the 44.1 kHz family); the extension layers (bit-depth layer and frequency layer) are entropy-coded and require more data for complex content and
   less for quiet content. During playback, the status bar shows the bit rate actually used, updated once per second (the CD layer plus the extension bytes read in that second); during the first second, and in the file properties,
   the average for the whole file (file size ÷ duration) is shown. When only the CD layer plays, the bit rate is fixed at 1411 kbps (1411.2 kbps, displayed rounded). For the test excerpts, the extension layers averaged between about 10 kbps and about 2150 kbps.
 

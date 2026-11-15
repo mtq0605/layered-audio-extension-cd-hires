@@ -163,7 +163,7 @@ LAE 在以下约束下解决这一问题：**CD 层是一张普通的、未经�
 
 - LAE 将 CD-Extra 用作 44.1 kHz 系列的实体光盘容器（第 10.5 节）。
 - CD 层原样占用音频区段，扩展文件位于数据区段中，处于带 Joliet 扩展 [15] 的 ISO 9660 [5] 文件系统内。
-- 使用“CD EXTRA”标志须获得许可。
+- 使用"CD EXTRA"标志须获得许可。
 
 **时延估计与分数延迟。**独立 CD 的对齐（第 4.3 节）使用两种形式的互相关：普通互相关，以及经广义互相关的相位变换 [12] 白化的互相关。母带的分数移动使用带限加窗 sinc 插值 [13]，这是分数延迟滤波器的一种标准形式 [14]。
 
@@ -353,7 +353,7 @@ CD 的采样绝不会被更改，CD 层保持逐位精确。由于母带在派�
 2. **后续各级。**每一级将块减半，并将采样率加倍。它在上一级峰值周围的固定小范围内搜索：第一个这样的级别为 ±32 个本级采样，其他级别为 ±8 个。
 3. **最后一级。**最后一级在母带采样率下，通过波形残差比较与上一级峰值相距两个 CD 采样以内的各个整数母带采样位置。
 
-若峰值位于某一级范围的边缘，搜索以“alignment failed”结束。这样的峰值表明 CD 属于其他版本、经过剪辑或速度不同。
+若峰值位于某一级范围的边缘，搜索以"alignment failed"结束。这样的峰值表明 CD 属于其他版本、经过剪辑或速度不同。
 
 **两次搜索。**搜索运行两次：一次使用白化互相关（带相位变换的广义互相关，GCC-PHAT [12]），一次使用普通的、不加权的能量归一化互相关。白化并不总是更好的选择。例如，在一段缓慢的 79–182 Hz 扫频的 2 s 片段上，只有普通相关找到了位置：白化搜索失败，而普通搜索报告的结果为 +0.3000226 个母带采样，真实偏移为 +0.3。
 
@@ -381,7 +381,7 @@ CD 的采样绝不会被更改，CD 层保持逐位精确。由于母带在派�
 | ≤ −40 dB | 已对齐 |
 | −40 至 −33 dB | 需要确认 |
 | 高于 −33 dB | 需要确认，并警告文件可能显著增大 |
-| 漂移（在任一侧相距两个 CD 采样处拟合更好），或部分而非全部检查块不匹配（相对于 CD 的残差高于 −3 dB） | 自动搜索报告“alignment failed”。手动给出偏移（`cdalign=`）时：警告一个位置无法适用于整段，并需要确认，与高于 −33 dB 时相同。不作任何补偿 |
+| 漂移（在任一侧相距两个 CD 采样处拟合更好），或部分而非全部检查块不匹配（相对于 CD 的残差高于 −3 dB） | 自动搜索报告"alignment failed"。手动给出偏移（`cdalign=`）时：警告一个位置无法适用于整段，并需要确认，与高于 −33 dB 时相同。不作任何补偿 |
 | 无拟合（没有检查块匹配，或未找到位置） | 绝不编码；不能确认 |
 
 确认按以下方式处理：
@@ -396,7 +396,7 @@ CD 的采样绝不会被更改，CD 层保持逐位精确。由于母带在派�
 
 1. 执行两次搜索；
 2. 对于每个结果，测量小数部分，尝试包括移动在内的放置，并完全按照手动给出偏移时的方式再次检查；
-3. 打印两个结果，每个结果为“aligned at `cdalign=<offset>`”“not aligned within the limit at …”或“alignment failed …”之一；
+3. 打印两个结果，每个结果为"aligned at `cdalign=<offset>`""not aligned within the limit at …"或"alignment failed …"之一；
 4. 打印一行 `ALIGN_SUGGEST whitened=<status>:<offset> plain=<status>:<offset>`；
 5. 不写入任何内容即停止，退出代码为 1（使用 `cdcheck` 时退出代码为 0）。
 
@@ -486,7 +486,7 @@ CD 层就是输出 WAV 文件的音频内容。因此，它与派生 CD 逐字�
 
 **操作顺序。**规划器按以下固定顺序处理：
 
-1. **拼接。**多个母带文件按给定顺序逐采样拼接。不使用这些文件自身的分割点；若这些分割点与 CD 的不同，规划器打印“the master is re-split at the CD's positions”。
+1. **拼接。**多个母带文件按给定顺序逐采样拼接。不使用这些文件自身的分割点；若这些分割点与 CD 的不同，规划器打印"the master is re-split at the CD's positions"。
 2. **检查静音与覆盖。**在任何移动之前，对原样的母带检查静音和覆盖情况。
 3. **对齐。**每一段（即 CD 的每条音轨）在母带中围绕其预期位置、在 ± max(60 s, 段长度) 范围内搜索。在 CD 上为数字静音的段不进行搜索，其母带范围必须为数字静音。在各段之间，母带与 CD 只能在数字静音上存在差异。
 4. **确认。**用户确认每个位置。
@@ -718,7 +718,7 @@ $$w_n = \exp\left(-i \frac{2\pi (n + 1/8)}{2N}\right), \qquad n = 0, \dots, N/2 
 - **混合块。**只有所有单元均为 A 类的块才能为 A 类。任何包含保留内容的块至少为 B 类。将 A 类单元混入 B 类叶节点会产生 B 类字节开销，因此分区搜索会自行将 A 类与保留内容分开。
 - **跨组单元。**跨越两个分析组的单元，只有在两个组均为 A 类时才为 A 类。在这种情况下，使用两个噪声底中较低者。
 - **噪声底估计。**单元组的噪声底取两个值中的较小者：时间方向的第 10 百分位数，以及该组各单元间的频谱中位数。因此，持续音不会被误认为噪声底。
-- **A 类的阈值。**噪声底按单元组、每秒估计一次，单位是 24 位 LSB，取 MDCT 系数的均方根。某一帧的一个单元组，噪声底不超过 1.5、这一帧里最大的系数不超过 8、并且那里没有标出持续音或瞬态时，属于 A 类。在一个 88.2 kHz、24 位母带的频率层上用白噪声实测：均方根不超过约 1.2 个 24 位 LSB（峰值约 2 个 LSB）的稳定噪声，即约 −137 dBFS，归为 A 类，不编码；均方根 1.78 个 LSB 时，22 kHz 以上的噪声保留 28 %，±16 个 LSB 时保留 70 %。纯音在测过的每个电平上都保留（35 kHz，幅度 0.7 到 64 个 LSB）。所以该阈值比“低于一个 24 位 LSB”宽。改动它会改变编码出的文件。
+- **A 类的阈值。**噪声底按单元组、每秒估计一次，单位是 24 位 LSB，取 MDCT 系数的均方根。某一帧的一个单元组，噪声底不超过 1.5、这一帧里最大的系数不超过 8、并且那里没有标出持续音或瞬态时，属于 A 类。在一个 88.2 kHz、24 位母带的频率层上用白噪声实测：均方根不超过约 1.2 个 24 位 LSB（峰值约 2 个 LSB）的稳定噪声，即约 −137 dBFS，归为 A 类，不编码；均方根 1.78 个 LSB 时，22 kHz 以上的噪声保留 28 %，±16 个 LSB 时保留 70 %。纯音在测过的每个电平上都保留（35 kHz，幅度 0.7 到 64 个 LSB）。所以该阈值比"低于一个 24 位 LSB"宽。改动它会改变编码出的文件。
 
 ### 7.4 标记与闭环（编码器）
 
@@ -926,7 +926,7 @@ WAV 文件之外的封装在 v5 容器之外由封装规范定义（第 10.5–1
 |---|---|
 | 标识 | 魔数 `LAE1`；容器版本 5 |
 | 采样率和长度 | 母带采样率；基础采样率；倍频程级数；母带长度；母带采样率下每侧的填充长度 P |
-| 信息字段 | CD 截止频率；模式索引（0 max、1 “1”、2 “3”、3 “5”、4 keep、5 keep20）；等分切分标志；比例度量。这些字段仅用于显示，不影响解码；但模式索引仍必须在 0–5 范围内。 |
+| 信息字段 | CD 截止频率；模式索引（0 max、1 "1"、2 "3"、3 "5"、4 keep、5 keep20）；等分切分标志；比例度量。这些字段仅用于显示，不影响解码；但模式索引仍必须在 0–5 范围内。 |
 | 边界 | 扩展基础层的长度 nb；两端各自的扩展采样数 pb；每端的 pb 个立体声 CD 采样 |
 | 抖动标志 | 标志字节数，随后为每个声道、每 4096 个基础采样率采样 1 字节的标志，所有左声道标志在前 |
 | 位深层 | L 流、R 流 |
@@ -1084,19 +1084,19 @@ CUE 表不包含 CRC、MD5 或其他哈希。
 2. CUE 表；
 3. 一组逐轨文件的顺序和长度；报告中醒目标出此来源。
 
-每个文件放在 CUE 表或 TOC 给出的位置。未被任何文件覆盖的位置为未知，按零读取；读取器不尝试其他取值。没有 TOC 时，按内容搜索每个文件，报告中注明 “no TOC”。无法识别的 CUE 结构使读取器停止。
+每个文件放在 CUE 表或 TOC 给出的位置。未被任何文件覆盖的位置为未知，按零读取；读取器不尝试其他取值。没有 TOC 时，按内容搜索每个文件，报告中注明 "no TOC"。无法识别的 CUE 结构使读取器停止。
 
 **逐轨定位。**每条音轨独立定位；读取器既不假定、也不需要整张光盘具有共同偏移。对于每个扩展文件，读取器按以下步骤处理：
 
 1. **粗定位。**粗略位置取自 TOC 以及信息范围，即流中第一个和最后一个非零采样的位置，经 lead0 和 tail0 校正。
-2. **精定位。**测试距粗略位置半径 $W \ge 5880$ 个采样范围内的每个窗口起点；没有 TOC 时测试整个文件中的每个窗口起点。只有滑动和等于 S1 和 S2 的窗口才成为候选。W 默认为 5880；`lae_cdx read … W=<n>` 可设更大的半径，最大为 441000（小于 5880 的值按 5880 计）。偏移超过 W 的音轨，如果开头或结尾是数字静音，仍能找到，因为这时粗略位置来自信息范围；否则作为 CD 写出，原因为 “no match”。
+2. **精定位。**测试距粗略位置半径 $W \ge 5880$ 个采样范围内的每个窗口起点；没有 TOC 时测试整个文件中的每个窗口起点。只有滑动和等于 S1 和 S2 的窗口才成为候选。W 默认为 5880；`lae_cdx read … W=<n>` 可设更大的半径，最大为 441000（小于 5880 的值按 5880 计）。偏移超过 W 的音轨，如果开头或结尾是数字静音，仍能找到，因为这时粗略位置来自信息范围；否则作为 CD 写出，原因为 "no match"。
 3. **接受。**只有当候选的整轨 MD5 等于尾部记录中的 MD5 时，才接受该候选。
 
 音轨内部的滑移（例如丢失或重复一个采样）只改变该音轨的 MD5。该音轨作为 CD 播放，其他音轨不受影响。
 
 **输出与失败。**读取器按以下方式写入输出：
 
-- **已接受的音轨。**每条已接受的音轨重建为 `TRACKnn.lae.wav`，与编码器写出的文件逐字节相同。写出之前，该音轨先完整解一遍（自 2026-11-15 起）：LAEY 音轨的每个扩展包解到最后一帧（每个熵编码流必须正好在最后一个字节结束），LAES 音轨的每个母带都和它的 SHA-256 比对；内存放不下的 LAES 块用流式解码器加临时文件来解，绝不只凭整轨 MD5 通过。解码器拒绝的音轨作为 CD 写出，原因为“extension layer damaged: the decoder refuses it”。检查无法进行时（例如内存或临时空间不够），读取停止。每一条通过的音轨打印一行，说明解了什么（`track nn: decoder check passed: …`）。
+- **已接受的音轨。**每条已接受的音轨重建为 `TRACKnn.lae.wav`，与编码器写出的文件逐字节相同。写出之前，该音轨先完整解一遍（自 2026-11-15 起）：LAEY 音轨的每个扩展包解到最后一帧（每个熵编码流必须正好在最后一个字节结束），LAES 音轨的每个母带都和它的 SHA-256 比对；内存放不下的 LAES 块用流式解码器加临时文件来解，绝不只凭整轨 MD5 通过。解码器拒绝的音轨作为 CD 写出，原因为"extension layer damaged: the decoder refuses it"。检查无法进行时（例如内存或临时空间不够），读取停止。每一条通过的音轨打印一行，说明解了什么（`track nn: decoder check passed: …`）。
 - **其他音轨。**其他每条音轨写为 `TRACKnn.cd.wav`，其中包含未经改动的抓轨 CD 音频，并附上原因。原因类别包括：未知采样（文件缺失或被截断）、文件过短、无匹配、无尾部记录、尾部记录损坏、无法识别的版本或扩展块类型、尾部记录字段无效、音轨编号不在 TOC 中、扩展损坏，以及有损基础层。
 - **没有音轨被接受。**若没有任何音轨被接受，读取器报告输入可能是另一张光盘或另一个版本。
 - **无扩展的音轨。**TOC 中没有扩展文件的音轨作为 CD 输出；这不属于失败。
@@ -1156,7 +1156,7 @@ CUE 表不包含 CRC、MD5 或其他哈希。
 
 ### 11.2 测量依据
 
-表 11.3a–11.5 和 12.2 中的数据是在开发期间（2026-10-16）v5 候选发布版的测试轮次（“候选发布轮次”）中测得的。该轮次包括：
+表 11.3a–11.5 和 12.2 中的数据是在开发期间（2026-10-16）v5 候选发布版的测试轮次（"候选发布轮次"）中测得的。该轮次包括：
 
 - 23 段真实录音和 60 个合成信号；
 - 10 秒立体声片段；
@@ -1168,7 +1168,7 @@ CUE 表不包含 CRC、MD5 或其他哈希。
 - 已发布数据中的录音经过匿名化，采样率为 88.2–192 kHz。
 - 在 352.8 和 384 kHz 下，已发布数据仅包含合成信号。
 - 因此，352.8 kHz 录音的数据不属于已发布数据，在下表中标记为 **(U)**。
-- 已发布数据未将 DSD 转换录音或 “Synth” 信号单独标为一类。
+- 已发布数据未将 DSD 转换录音或 "Synth" 信号单独标为一类。
 
 **构建版本。**候选发布版与已发布的 v5 编解码器在零系数重建上存在差异。对相同片段，已发布的 v5 编码器生成的频率层小 0.01–0.3 %，SNR 高 0–0.6 dB。因此，下文的频率层大小应视为接近实际值的上限。
 
@@ -1369,7 +1369,7 @@ $$L(1 + r) + 2.5 + 0.2 \le C$$
 - 在各采样率及 `max` 至 `keep` 各模式下为 −111 至 −115 dBFS；
 - 使用 keep20 时为 −121 至 −125 dBFS。
 
-**Synth，16 位路径。**合成压力测试信号 “Synth” 包含方波，其带限形式超过满量程。CD 层必须对其削波，而 16 位路径没有可用于恢复它们的位深层。因此，对于这类信号，其 16 位路径的 CD 频带误差是该路径的固有限制：
+**Synth，16 位路径。**合成压力测试信号 "Synth" 包含方波，其带限形式超过满量程。CD 层必须对其削波，而 16 位路径没有可用于恢复它们的位深层。因此，对于这类信号，其 16 位路径的 CD 频带误差是该路径的固有限制：
 
 - 在 40 秒片段上为 −42 dBFS，为开发期间测得（2026-10-17）；
 - 在候选发布轮次的 10 秒片段上为 −35 至 −36 dBFS。
@@ -1564,7 +1564,7 @@ LAE Lossy 的可听频带由 CD 层加上波形编码的细化组成。尚未发
 - **文件。**不带 LAE 扩展的 WAV 或 FLAC 文件交由宿主自身的解码器处理。不支持 LAE 的播放器播放 LAEY 文件的 CD 层和 LAES 文件的核心母带。
 - **选择。**LAEY 扩展包按文件中存储的名称列出，各带自己的层；LAES 母带按文件的菜单顺序列出编号和名称，采样率档位和派生版本放在各母带的子菜单中（[spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md) 第 10.3 节）。没有选择时，播放文件的默认母带（没有时为核心母带），LAEY 文件播放主体。选择由播放器按文件保存，从不写入文件。
 - **校验。**母带及其参照链的 SHA-256 全部相符后才播放该母带。改为播放核心母带时（母带没有通过校验、无法校验，或首次校验被取消），插件会说明：foobar2000 在状态栏和控制台，DirectShow 用消息框，VLC 用错误对话框，Kodi 用通知。首次校验在 foobar2000（停止播放）、DirectShow 和 VLC（这一次播放核心母带；不记录结果，下次打开时重新校验）中可以取消。
-- **采样率上限。**最高采样率低于基础采样率的 2 倍时（例如 44.1 kHz 的文件设为 48 kHz），没有高于基础采样率的采样率可用：“全部层”改为播放 CD 层 / 核心层加位深层（基础采样率下 24 位），“仅频率层”改为只播放 CD 层 / 核心层（16 位），foobar2000、DirectShow 和 VLC 相同。
+- **采样率上限。**最高采样率低于基础采样率的 2 倍时（例如 44.1 kHz 的文件设为 48 kHz），没有高于基础采样率的采样率可用："全部层"改为播放 CD 层 / 核心层加位深层（基础采样率下 24 位），"仅频率层"改为只播放 CD 层 / 核心层（16 位），foobar2000、DirectShow 和 VLC 相同。
 - **语言。**每个插件都有英文（`-en`）和中文（`-zh`）两个独立版本。
 - **标签。**这些插件读取两种形式的标签：FLAC 中的 Vorbis 注释，以及 WAV 中的 RIFF `LIST/INFO` 块和 `id3 ` 块。
 - **VLC。**VLC 可能将音轨末尾缩短约 40 ms；这是 VLC 自身的行为。
@@ -1621,7 +1621,7 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 | `zs` | 可选零级别（第 8.4 节）；默认关闭 |
 | `cd=<file>` | 独立 CD：采样率为母带所属系列基础采样率（44.1/48 kHz）的 16 位立体声 WAV；其采样原样写入 CD 层。CD 按第 4.3 节所述方式对齐。未给出 `cdalign=` 时，编码器报告两次搜索的结果，不写入任何内容。 |
 | `cdalign=<offset>` | 已确认的偏移，以母带采样为单位；正值表示 CD 开始得较晚。可为整数，或以 `.` 为小数点、最多 9 位小数的数值（`cdalign=1,5` 会被拒绝）。使用编码器打印的偏移会得到相同的文件。 |
-| `cdcheck` | 执行对齐检查但不编码（退出代码 0）。未给出 `cdalign=` 时，报告两次搜索的结果；给出 `cdalign=` 时，最后一行注明 “would encode”、“would ask for confirmation” 或 “would not encode”。 |
+| `cdcheck` | 执行对齐检查但不编码（退出代码 0）。未给出 `cdalign=` 时，报告两次搜索的结果；给出 `cdalign=` 时，最后一行注明 "would encode"、"would ask for confirmation" 或 "would not encode"。 |
 | `cdaccept` | 剩余时间差超出 −40 dB 时，以及使用 `cdalign=` 并出现漂移或检查块不匹配的警告之后，不经询问继续（第 4.3 节需要确认的各种情况） |
 | `cdedge=pad` | 针对只有母带在开头或结尾具有的声音：在 CD 层的该处添加数字静音，并完整保留母带（CD 层比给定的 CD 长） |
 | `cdedge=cut` | 针对只有母带在开头或结尾具有的声音：将母带切至 CD 的长度；母带超出 CD 的声音不保留（CD 层与给定的 CD 完全相同） |
@@ -1916,7 +1916,7 @@ TEST MODE (LAE_TEST_MODE=1): active test switches: <list>. Unset LAE_TEST_MODE t
 
 作者尚未、也不会就 LAE 提交任何专利申请。作者针对 LAE 规范的实现作出以下**不主张专利权的承诺**：
 
-> “作者尚未且不会就 LAE 格式提交专利申请，也不会针对 LAE 规范的任何实现主张任何专利权利要求。”
+> "作者尚未且不会就 LAE 格式提交专利申请，也不会针对 LAE 规范的任何实现主张任何专利权利要求。"
 
 该承诺及其术语的定义见 [PATENTS.md](PATENTS.zh.md)。
 
@@ -1954,7 +1954,7 @@ LAE Lossy 基于以下已公开技术构建：
 | 参考解码器及 `src/` 中其他解码器端源文件，包括解码器库 `src/lae_decoder.h` 和 `liblae`（`src/lae_api.*`）；`tools/` 中的工具 | Apache License 2.0 |
 | 封装工具 `lae_cdx`（`src/lae_cdx.*`、`src/lae_cdx_read.h`、`src/iso9660.h`） | Apache License 2.0 |
 | 播放器插件源文件（`plugins/`） | Apache License 2.0。构建出的 Kodi 附加组件以 GPL-3.0-or-later 分发，因为它使用 Kodi 的 GPL 头文件构建。已构建软件包中的第三方代码：[THIRD_PARTY.md](THIRD_PARTY.zh.md)。 |
-| Java 库（`java/`） | 与 C++ 源文件相同：解码器和共享辅助代码为 Apache-2.0；编码器文件为 GPL-3.0-or-later 或商业许可证。只有编码器使用的三个文件（`WavIo`、`LaeDec`、`NoiseMarks`）属于编码器文件；所有 Apache-2.0 文件（包括解码器和 `Play`）不需要任何编码器文件即可编译（[java/README.md](java/README.zh.md) 的“许可”一节） |
+| Java 库（`java/`） | 与 C++ 源文件相同：解码器和共享辅助代码为 Apache-2.0；编码器文件为 GPL-3.0-or-later 或商业许可证。只有编码器使用的三个文件（`WavIo`、`LaeDec`、`NoiseMarks`）属于编码器文件；所有 Apache-2.0 文件（包括解码器和 `Play`）不需要任何编码器文件即可编译（[java/README.md](java/README.zh.md) 的"许可"一节） |
 | 发布中包含的演示音频和母带 | 保留所有权利：仅供收听和验证（[AUDIO_LICENSE.md](AUDIO_LICENSE.zh.md)）。代码和文档许可证不适用。 |
 | 参考编码器（`src/` 中编码器端源文件，包括对齐 `src/cd_align.cpp`、规划器 `src/cd_plan.cpp`、LAES 工具 `src/laes_tool.cpp` 和流媒体导出 `src/laes_export.cpp`） | GNU General Public License v3.0 或更高版本（GPL-3.0-or-later），或作者提供的商业许可证（[COMMERCIAL.md](COMMERCIAL.zh.md)） |
 | 测试脚本、构建文件、CI 配置 | Apache License 2.0 |
@@ -2061,8 +2061,8 @@ SPEC.md 中定义的比特流对容器版本 5 已冻结。
 
 1. FLAC，Free Lossless Audio Codec，格式规范，IETF RFC 9639。
 2. MPEG-4 Audio：Bit-Sliced Arithmetic Coding（BSAC）和 Scalable Lossless Coding（SLS）。
-3. Compact Disc Digital Audio（“Red Book”）。
-4. CD-Extra / Enhanced CD（“Blue Book”），1995。
+3. Compact Disc Digital Audio（"Red Book"）。
+4. CD-Extra / Enhanced CD（"Blue Book"），1995。
 5. ISO 9660，CD-ROM 文件系统。
 6. FFmpeg，`libavcodec/mdct.c`，提交哈希 `bb6f569`，2002-10-28。
 7. IEEE 754，浮点算术标准（binary64）。
@@ -2070,9 +2070,9 @@ SPEC.md 中定义的比特流对容器版本 5 已冻结。
 9. CRC-32，循环冗余校验。
 10. SHA-256，安全哈希算法（FIPS 180）。
 11. ABX 和 webMUSHRA 听音测试流程。
-12. C. H. Knapp 和 G. C. Carter，“The generalized correlation method for estimation of time delay”，*IEEE Transactions on Acoustics, Speech, and Signal Processing*，vol. 24，no. 4，1976。
-13. J. O. Smith 和 P. Gossett，“A flexible sampling-rate conversion method”，*Proc. IEEE International Conference on Acoustics, Speech, and Signal Processing (ICASSP)*，1984。
-14. T. I. Laakso、V. Välimäki、M. Karjalainen 和 U. K. Laine，“Splitting the unit delay: tools for fractional delay filter design”，*IEEE Signal Processing Magazine*，vol. 13，no. 1，1996。
+12. C. H. Knapp 和 G. C. Carter，"The generalized correlation method for estimation of time delay"，*IEEE Transactions on Acoustics, Speech, and Signal Processing*，vol. 24，no. 4，1976。
+13. J. O. Smith 和 P. Gossett，"A flexible sampling-rate conversion method"，*Proc. IEEE International Conference on Acoustics, Speech, and Signal Processing (ICASSP)*，1984。
+14. T. I. Laakso、V. Välimäki、M. Karjalainen 和 U. K. Laine，"Splitting the unit delay: tools for fractional delay filter design"，*IEEE Signal Processing Magazine*，vol. 13，no. 1，1996。
 15. ISO 9660 的 Joliet 扩展（Microsoft）。
-16. R. Rivest，“The MD5 Message-Digest Algorithm”，IETF RFC 1321，1992。
+16. R. Rivest，"The MD5 Message-Digest Algorithm"，IETF RFC 1321，1992。
 17. SCSI Multimedia Commands（MMC）。

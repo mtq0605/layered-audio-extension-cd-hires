@@ -25,7 +25,7 @@ The following are independent implementations; no code is taken from the project
 | Plug-in | Built against | Licence of that dependency | Effect on a distributed binary |
 |---|---|---|---|
 | foobar2000 (`foo_input_lae`) | foobar2000 SDK 2019-12-27 (x86) and 2026-10-01 (x64) | foobar2000 SDK licence (BSD-style) | Parts of the SDK are compiled into the component; ship the SDK licence text with the binary |
-| VLC (`vlc_lae`) | VLC 3.0 SDK, `libvlccore` | LGPL-2.1-or-later | Dynamically linked; ship the LGPL notice and state where the VLC source is available. The module binary as a whole is distributed under LGPL-3.0-or-later and reports that licence to VLC. |
+| VLC (`vlc_lae`) | VLC 3.0 SDK, `libvlccore` | LGPL-2.1-or-later | Dynamically linked; ship the LGPL notice and state where the VLC source is available. The module binary as a whole is distributed under LGPL-3.0-or-later and reports that licence to VLC. Full text: `LICENSES/LGPL-3.0-or-later.txt`, which incorporates `LICENSES/GPL-3.0-or-later.txt`. |
 | Kodi (`kodi_audiodecoder_lae`) | `kodi-dev-kit` headers, Kodi 21.3 "Omega" | GPL-2.0-or-later | The add-on binary is a combined work and is distributed under GPL-3.0-or-later (Apache-2.0 is compatible with GPL version 3 but not with version 2); the plug-in's own source remains licensed under Apache-2.0 |
 | DirectShow (`dshow_lae`) | Windows SDK (`strmiids`, COM libraries) | Part of the Windows SDK | No further notice required |
 | LAE Noise Marker (`lae_noise_marker`; not a player plug-in) | C++17 standard library (`lae_noise`); the panel runs in a browser (HTML and JavaScript) | — | No third-party code |

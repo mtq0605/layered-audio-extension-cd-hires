@@ -63,4 +63,4 @@ plugins\vlc_lae\build_setup.cmd <VLC sdk folder> <output folder>
 
 ## 许可
 
-源文件采用 Apache-2.0 许可。模块二进制文件包含来自 VLC 插件头文件的代码（LGPL-2.1-or-later），其整体按 LGPL-3.0-or-later 分发。安装程序（`setup/setup.cpp`）采用 Apache-2.0 许可；其所安装的模块保持上述许可。
+源文件采用 Apache-2.0 许可。模块二进制文件包含来自 VLC 插件头文件的代码（LGPL-2.1-or-later），其整体按 LGPL-3.0-or-later 分发。许可全文见 [LICENSES/LGPL-3.0-or-later.txt](../../LICENSES/LGPL-3.0-or-later.txt)；它引用了 GNU GPL 第 3 版，其全文见 [LICENSES/GPL-3.0-or-later.txt](../../LICENSES/GPL-3.0-or-later.txt)。安装程序（`setup/setup.cpp`）采用 Apache-2.0 许可；其所安装的模块保持上述许可。

@@ -19,6 +19,8 @@ The full licence texts are in the LICENSES/ directory:
 
   LICENSES/Apache-2.0.txt                 Apache License, Version 2.0
   LICENSES/GPL-3.0-or-later.txt           GNU General Public License, version 3
+  LICENSES/LGPL-3.0-or-later.txt          GNU Lesser General Public License,
+                                          version 3 (the VLC module binary)
   LICENSES/CC-BY-4.0.txt                  Creative Commons Attribution 4.0
                                           International
   LICENSES/CC0-1.0.txt                    Creative Commons CC0 1.0 Universal

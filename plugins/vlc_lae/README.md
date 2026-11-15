@@ -63,4 +63,4 @@ The build requires VS2022 Build Tools (x64). The `sdk` folder (headers and `libv
 
 ## Licence
 
-The source files are licensed under Apache-2.0. The module binary contains code from VLC's plug-in headers (LGPL-2.1-or-later) and, as a whole, is distributed under LGPL-3.0-or-later. The installer program (`setup/setup.cpp`) is licensed under Apache-2.0; the module that it installs keeps the licence given above.
+The source files are licensed under Apache-2.0. The module binary contains code from VLC's plug-in headers (LGPL-2.1-or-later) and, as a whole, is distributed under LGPL-3.0-or-later. The full licence text is in [LICENSES/LGPL-3.0-or-later.txt](../../LICENSES/LGPL-3.0-or-later.txt); it incorporates the GNU GPL version 3, whose text is in [LICENSES/GPL-3.0-or-later.txt](../../LICENSES/GPL-3.0-or-later.txt). The installer program (`setup/setup.cpp`) is licensed under Apache-2.0; the module that it installs keeps the licence given above.

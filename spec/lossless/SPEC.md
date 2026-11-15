@@ -5,7 +5,7 @@
 
 **English** | [中文](SPEC.zh.md)
 
-**Status:** Stable, payload version 2, 2026-11-12 (payload version 1: 2026-11-07).
+**Status:** Stable, payload version 2, 2026-11-12 (payload version 1: 2026-11-07); revised 2026-11-15 (Appendix B).
 **Applies to:** LAE Lossless (short name LAES), the lossless tier of the LAE (Layered Audio Extension) format family, payload versions 1 and 2.
 **Licence of this document:** CC BY 4.0. (c) 2026 mtq0605.
 
@@ -400,7 +400,7 @@ An LAES FLAC file is a FLAC stream (RFC 9639) with the following structure:
 * Tags and pictures (optional): at most one VORBIS_COMMENT block and any number of PICTURE blocks (RFC 9639, Sections 8.6 and 8.8). Writers place them before the `LAE2` blocks, so that a player reads them without skipping the payload. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking an output (Section 10).
 * The audio frames hold the core master, coded with independent left and right channels: channel assignment 0b0001 in every frame header, with no inter-channel decorrelation. Within this channel assignment, any valid FLAC coding of the core master is allowed. Support for inter-channel decorrelation may be added in a later revision.
 * No SEEKTABLE or CUESHEET block is written.
-* Tags written by other software: a reader accepts ID3v2 tags before `fLaC`, and APEv2 and ID3v1 tags after the last audio frame (that is, once the sample count given in STREAMINFO has been reached). It does not interpret them, and a tool that writes a new file from such a file keeps them unchanged.
+* Tags written by other software: a reader SHOULD accept ID3v2 tags before `fLaC`, and APEv2 and ID3v1 tags after the last audio frame (that is, once the sample count given in STREAMINFO has been reached); it MAY ignore their content. A tool that writes a new file from such a file SHOULD keep them unchanged. The reference tools accept them, do not interpret them and keep them.
 
 Every FLAC decoder that implements RFC 9639 in full plays the core master and skips the APPLICATION blocks (checked 2026-11-05 with libFLAC and FFmpeg). Decoders that implement only part of it may not do so: the built-in FLAC decoder of Windows (Media Foundation, also used by Explorer) does not decode 32-bit FLAC, and it does not recognise a file whose first audio frame starts more than about 4 MiB into the file, as is the case in an LAES FLAC file whose payload is larger than that. Tested decoders and workarounds are given in [COMPATIBILITY.md](../COMPATIBILITY.md).
 
@@ -610,3 +610,4 @@ The fast forms (`src/laes_lift.h` and the fast paths in `src/laes_codec.h`) were
 * The core master may have 16, 24 or 32 bits. The FLAC form and the CD-Extra extension type 2 are specified.
 * Decoder outputs include a derived 16-bit master, labelled as derived (lossless relative to Section 10.1, not lossless relative to the master from which it is made).
 * 2026-11-11 and 2026-11-12: payload version 2: up to 255 masters, and per master a name, a flag that turns its derived versions off, and a menu position; in the header, a default master and a flag for the core master. A payload that fits version 1 is still written as version 1, byte for byte unchanged. Derived 16-bit versions are now one per source (the core master, each master and each of its levels); Section 10.3 sets out selection and display. The file order remains the smallest one found by the encoder; the menu order is the one that the publisher marks. A player plays a master only after the master and its chain of tiers have matched their SHA-256 values (Section 1.3).
+* 2026-11-15 (payload version unchanged): a decoder MUST reject a master whose T lies outside −N … N (Section 6.7), and the reference encoder refuses such a T (Section 11.3). For storage 1, the T fields hold the T relative to the core master; decoders do not use them (Section 6.6). Section 8 states how a reader treats ID3v2, APEv2 and ID3v1 tags written by other software around a FLAC-form file.

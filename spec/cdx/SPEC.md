@@ -230,7 +230,7 @@ Exception (independent-CD mode, track 1 only): the CD layer of track 1 MAY begin
 
 - SHOULD be an explanation in Chinese and English, encoded in UTF-8. It states what the disc is, that session 1 plays on any CD player, and how high resolution is obtained.
 - MUST NOT contain hashes, positions, offsets or tables of lengths.
-- *Reference tool (since 2026-11-15).* The README.TXT and BURN.TXT written by the tool state that the audio tracks are to be ripped as WAV or FLAC (16 bit, 44.1 kHz) and that a lossy format such as MP3 cannot be used.
+- *Informative: reference tool (since 2026-11-15).* The README.TXT and BURN.TXT written by the tool state that the audio tracks are to be ripped as WAV or FLAC (16 bit, 44.1 kHz) and that a lossy format such as MP3 cannot be used.
 
 **[D6]** End of the data track:
 
@@ -516,7 +516,7 @@ The player treats streams and rips in the same way:
 **[P2]** The v5 file and trailer record of each track:
 
 - The v5 file of every track MUST pass all checks of the decoder ([SPEC] 4.3, V1–V13).
-- *Reference tool (since 2026-11-15).* The packaging tool decodes every input file completely before anything is written: for an LAEY file, every extension pack (the main body is pack 0) to its last frame, where every entropy stream must end exactly at its last byte; for an LAES file, every master, which is compared with its SHA-256. A file that does not decode is refused, and no image is written.
+- *Informative: reference tool (since 2026-11-15).* The packaging tool decodes every input file completely before anything is written: for an LAEY file, every extension pack (the main body is pack 0) to its last frame, where every entropy stream must end exactly at its last byte; for an LAES file, every master, which is compared with its SHA-256. A file that does not decode is refused, and no image is written.
 - The trailer record MUST be computed from the CD layer of that file:
   - ncd = nb − 2·pb;
   - sample rate = base;
@@ -629,7 +629,7 @@ The v5 WAV of each track (4.1) MAY be supplied in addition, for file distributio
 
 **[P15]** For two-step writing, the next writable address MUST be taken from the drive's READ TRACK INFORMATION report (MMC 52h). It is checked against both the B0 entry of the TOC and A2 + 11,400. If any of the three values differs from the others, the tool MUST stop. Published descriptions of the B0 entry disagree, and B0 alone may be off by 150 sectors (secondary source).
 
-*Reference tool (since 2026-11-15).* `lae_cdx data` and `lae_cdx read` with `iso:…@N` stop when the start address N is not A2 + 11,400. A2 is taken from the option `a2=` or, without it, from the BURN.TXT of the image (for `data`: beside the folder of the .lax files or in it; for `read`: beside DATA.ISO); when neither is available, the tool stops. N = 0 produces a copy for mounting on a computer (C34) and is not checked.
+*Informative: reference tool (since 2026-11-15).* `lae_cdx data` and `lae_cdx read` with `iso:…@N` stop when the start address N is not A2 + 11,400. A2 is taken from the option `a2=` or, without it, from the BURN.TXT of the image (for `data`: beside the folder of the .lax files or in it; for `read`: beside DATA.ISO); when neither is available, the tool stops. N = 0 produces a copy for mounting on a computer (C34) and is not checked.
 
 ### 5.5 Closed-Loop Self-Check
 
@@ -692,7 +692,7 @@ Each of these tracks MUST fall back. If any one of them does not fall back, the 
 
 **[R1]** The reader has three kinds of input:
 
-- **Rips:** a whole-disc image (BIN, WAV or FLAC, with or without CUE), per-track files (with or without CUE), or a single per-track file. They may come from any ripping software and any offset setting; the reader uses only audio that is stored losslessly (WAV, FLAC or BIN, 16 bit, 44.1 kHz).
+- **Rips:** a whole-disc image (BIN, WAV or FLAC, with or without CUE), per-track files (with or without CUE), or a single per-track file. They may come from any ripping software and any offset setting; the reader MUST use only audio that is stored losslessly (for example WAV, FLAC or BIN, 16 bit, 44.1 kHz; the accepted forms are listed below).
 - **LAE streams:** the CD layer delivered per track, plus the extension file (4.5).
 - **Extension files:** from the `/LAE/` directory of session 2 of a CD, from a copied folder, or delivered with an LAE stream.
 
@@ -771,7 +771,7 @@ W ≥ 5880. W MAY be larger, for example 44 100. For windows that are entirely z
 - Its CD layer consists of the ncd samples within the matching window, without pregap or padding.
 - For extension block type 1, a v5 WAV is reconstructed according to 4.4 and passed to the unmodified decoder.
 - If the decoder rejects the file, the track takes the CD route with the reason "extension layer corrupted".
-- *Reference tool (since 2026-11-15).* The reader decodes every verified track completely, in the same way as the packaging tool ([P2]); an LAES block that does not fit into memory is decoded by the stream decoder, which uses temporary files, and is never accepted on the whole-track MD5 alone. A track that the decoder refuses takes the CD route; if a check cannot be run, reading stops. One line per track states what was decoded.
+- *Informative: reference tool (since 2026-11-15).* The reader decodes every verified track completely, in the same way as the packaging tool ([P2]); an LAES block that does not fit into memory is decoded by the stream decoder, which uses temporary files, and is never accepted on the whole-track MD5 alone. A track that the decoder refuses takes the CD route; if a check cannot be run, reading stops. One line per track states what was decoded.
 
 **[R9]** If several candidates pass, their window contents are identical, barring an MD5 collision (for example in an entirely silent track). Any one of them may be used, and the result is the same.
 

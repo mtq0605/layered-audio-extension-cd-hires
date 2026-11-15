@@ -35,7 +35,7 @@ Windows (Visual Studio 2022, x64 Native Tools prompt):
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /bigobj /D_USE_MATH_DEFINES /Fe:laes.exe src\laes_tool.cpp
 ```
 
-Linux and macOS: the source contains POSIX code paths (`g++ -O2 -std=c++17 -ffp-contract=off -pthread`), but the project's CI does not yet build or test `laes` on these systems. Until it does, use the Windows build for files that you publish. On 2026-11-14, `dec`, `verify`, `extract` and `add` were run on Linux x64 (g++ 13.3 under WSL): the decoded WAV files and the files written by `extract` and `add` were byte-identical to those of the Windows build. In builds before that date, `dec` on Linux wrote its WAV files beside the output folder, and `extract` and `add` failed.
+Linux and macOS: the source contains POSIX code paths (`g++ -O2 -std=c++17 -ffp-contract=off -pthread`), and the project's CI builds `laes` on Linux (x86-64 and ARM64, with g++ and clang++) and runs `laes selftest` there; it runs no other command on Linux and does not build `laes` on macOS. Until the other commands are tested there, use the Windows build for files that you publish. On 2026-11-14, `dec`, `verify`, `extract` and `add` were run on Linux x64 (g++ 13.3 under WSL): the decoded WAV files and the files written by `extract` and `add` were byte-identical to those of the Windows build. In builds before that date, `dec` on Linux wrote its WAV files beside the output folder, and `extract` and `add` failed.
 
 `laes selftest` runs the built-in regression tests on synthetic signals. Exit code 0 indicates that all tests passed.
 

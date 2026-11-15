@@ -35,7 +35,7 @@ Windows（Visual Studio 2022，x64 Native Tools 命令提示符）：
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /bigobj /D_USE_MATH_DEFINES /Fe:laes.exe src\laes_tool.cpp
 ```
 
-Linux 和 macOS：源代码中包含 POSIX 代码路径（`g++ -O2 -std=c++17 -ffp-contract=off -pthread`），但本项目的 CI 尚未在这些系统上编译或测试 `laes`。在此之前，用于发布的文件应使用 Windows 版本制作。2026-11-14 在 Linux x64（WSL 中的 g++ 13.3）上运行了 `dec`、`verify`、`extract` 和 `add`：解码出的 WAV 文件，以及 `extract` 和 `add` 写出的文件，与 Windows 版本逐字节相同。在此日期之前的版本中，Linux 上的 `dec` 把 WAV 文件写在输出文件夹旁边，`extract` 和 `add` 失败。
+Linux 和 macOS：源代码中包含 POSIX 代码路径（`g++ -O2 -std=c++17 -ffp-contract=off -pthread`），本项目的 CI 在 Linux 上（x86-64 和 ARM64，g++ 和 clang++）编译 `laes` 并运行 `laes selftest`；在 Linux 上不运行其他命令，也不在 macOS 上编译 `laes`。在其他命令在这些系统上测试之前，用于发布的文件应使用 Windows 版本制作。2026-11-14 在 Linux x64（WSL 中的 g++ 13.3）上运行了 `dec`、`verify`、`extract` 和 `add`：解码出的 WAV 文件，以及 `extract` 和 `add` 写出的文件，与 Windows 版本逐字节相同。在此日期之前的版本中，Linux 上的 `dec` 把 WAV 文件写在输出文件夹旁边，`extract` 和 `add` 失败。
 
 `laes selftest` 使用合成信号运行内置回归测试。退出码 0 表示全部测试通过。
 

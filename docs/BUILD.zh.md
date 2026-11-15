@@ -116,12 +116,15 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 
 在 Linux x86 上，256 个解码器结果中有 256 个与参考一致；在 Linux ARM64 上，192 个中有 192 个一致。
 
-`lae_cdx`、`liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 10.9、13.3 和 13.7 节）；`lae_cdx` 只有读取器（`read` 和 `repack`，WAV 和 FLAC 抓轨）也在 Linux x64 上运行过（g++ 13，2026-11-14）。`laes` 也不在表中：CI 不在 Linux 或 macOS 上构建它。2026-11-14 在 Linux x64（WSL 下的 g++ 13.3）上运行过一次它的 `dec`、`verify`、`extract` 和 `add` 命令，输出与 Windows 构建逐字节相同；`enc`、`align` 和 `selftest` 没有在该平台上检查过（[spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.zh.md) 的“编译”一节）。
+`liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 13.3 和 13.7 节）。`laes` 和 `lae_cdx` 不在表中：在 Linux 上，CI 在 x86-64 和 ARM64 上用 g++ 和 clang++ 构建这两个程序，并运行 `laes selftest` 和 `lae_cdx selftest`（`tests/check_laes_linux.sh`）；它们的其他命令 CI 在该平台上不运行。2026-11-14 在 Linux x64（WSL 下的 g++ 13.3）上运行过一次 `laes` 的 `dec`、`verify`、`extract` 和 `add` 命令，以及 `lae_cdx` 的读取器（`read` 和 `repack`，WAV 和 FLAC 抓轨），输出与 Windows 构建逐字节相同；`laes enc` 和 `laes align` 没有在该平台上检查过（[spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.zh.md) 的“编译”一节）。
 
-Linux 上的检查由两个脚本执行：
+Linux 上的检查由五个脚本执行：
 
 - `tests/check_vectors_linux.sh` 检查解码器；
-- `tests/check_encoder_linux.sh` 检查编码器。
+- `tests/check_encoder_linux.sh` 检查编码器；
+- `tests/check_laes_linux.sh` 构建 `laes` 和 `lae_cdx` 并运行它们的自检；
+- `tests/check_noise_linux.sh` 检查噪声扫描；
+- `tests/check_tags_linux.sh` 检查标签和图片。
 
 这些脚本输出比较结果的摘要。`.github/workflows/` 中的一个 GitHub Actions 工作流运行这些脚本。
 

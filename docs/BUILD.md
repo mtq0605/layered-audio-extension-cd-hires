@@ -116,12 +116,15 @@ At every start, the decoder passes a fixed data pattern through the inverse MDCT
 
 On Linux x86, 256 of 256 decoder results were identical to the reference; on Linux ARM64, 192 of 192 were.
 
-`lae_cdx`, `liblae` and the foobar2000 component have been built and tested only on Windows with MSVC 2022 (README, Sections 10.9, 13.3 and 13.7); of `lae_cdx`, only the reader (`read` and `repack`, with WAV and FLAC rips) has also been run on Linux x64 (g++ 13, 2026-11-14). `laes` is not in the table either: the CI does not build it on Linux or macOS. On 2026-11-14, its commands `dec`, `verify`, `extract` and `add` were run once on Linux x64 (g++ 13.3 under WSL), with output byte-identical to that of the Windows build; `enc`, `align` and `selftest` were not checked there ([spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.md), section "Building").
+`liblae` and the foobar2000 component have been built and tested only on Windows with MSVC 2022 (README, Sections 13.3 and 13.7). `laes` and `lae_cdx` are not in the table: on Linux, the CI builds both with g++ and clang++, on x86-64 and on ARM64, and runs `laes selftest` and `lae_cdx selftest` (`tests/check_laes_linux.sh`); their other commands are not run by the CI there. On 2026-11-14, the `laes` commands `dec`, `verify`, `extract` and `add`, and the `lae_cdx` reader (`read` and `repack`, with WAV and FLAC rips), were run once on Linux x64 (g++ 13.3 under WSL), with output byte-identical to that of the Windows build; `laes enc` and `laes align` were not checked there ([spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.md), section "Building").
 
-The Linux checks are performed by two scripts:
+The Linux checks are performed by five scripts:
 
 - `tests/check_vectors_linux.sh` checks the decoder;
-- `tests/check_encoder_linux.sh` checks the encoder.
+- `tests/check_encoder_linux.sh` checks the encoder;
+- `tests/check_laes_linux.sh` builds `laes` and `lae_cdx` and runs their self-tests;
+- `tests/check_noise_linux.sh` checks the noise scan;
+- `tests/check_tags_linux.sh` checks tags and pictures.
 
 The scripts print a summary of the comparisons. A GitHub Actions workflow in `.github/workflows/` runs them.
 

@@ -559,9 +559,9 @@ return 2^(len-1) + top*2^nr + rest                  // uint32
 
 The reference encoder flushes four bytes at the end of a stream. A decoder MUST NOT require any termination pattern: the values of these bytes are not checked.
 
-**A stream ends exactly at its last byte.** When the last symbol of a stream (the end of the walk of Section 7) has been decoded, `next()` MUST have returned each of the `plen` bytes of the coded payload once and MUST NOT have been called beyond them. An encoder MUST write every stream so; the streams of the reference encoder always meet this. A file with a stream that ends earlier or later is not a conforming file.
+**A stream ends exactly at its last byte.** When the last symbol of a stream (the end of the walk of Section 7) has been decoded, `next()` MUST have returned each of the `plen` bytes of the coded payload once and MUST NOT have been called beyond them. An encoder MUST write every stream in this way; the streams of the reference encoder always satisfy this requirement. A file containing a stream that ends earlier or later does not conform to this specification.
 
-A decoder MAY refuse such a file as damaged (Section 12). The player library `liblae` refuses it since v5-2026-11-07: its one-time check of a file decodes every stream from start to end, and a stream that ends earlier or later makes the open fail, so that a player plays the CD layer alone. Reads beyond `plen` return 0 (Section 6.1); a decoder that does not refuse such a stream decodes it with these zero bytes. *Informative:* since 2026-11-15, the command-line decoder `lae_dec` and the Java decoder refuse such a file as well: `lae_dec` checks every stream of the chosen pack to its end before it writes anything, and exits with code 3 and the message "LAE chunk damaged (entropy stream <i> does not end at its last byte): refusing to decode; the CD audio itself still plays"; the Java library checks the main body when a file is opened and a further extension pack when it is first selected.
+A decoder MAY refuse such a file as damaged (Section 12). The player library `liblae` has refused it since v5-2026-11-07: its one-time check of a file decodes every stream from start to end, and a stream that ends earlier or later causes the open to fail, so that a player plays the CD layer / core layer alone. Reads beyond `plen` return 0 (Section 6.1); a decoder that does not refuse such a stream decodes it with these zero bytes. *Informative:* since 2026-11-15, the command-line decoder `lae_dec` and the Java decoder refuse such a file as well: `lae_dec` checks every stream of the chosen pack to its end before it writes anything, and exits with code 3 and the message "LAE chunk damaged (entropy stream <i> does not end at its last byte): refusing to decode; the CD audio itself still plays"; the Java library checks the main body when a file is opened, and a further extension pack when that pack is first selected.
 
 ### 6.8 Model persistence
 
@@ -938,7 +938,7 @@ The value bounds of Sections 8.3 and 9.4 do not by themselves exclude `int64` ov
 * The absolute values of the taps of table 0 sum to more than 2^30.
 * The worst-case accumulator of Section 10.3 therefore exceeds 2^63.
 
-**64-bit wrap (since 2026-11-15).** All sums, products and the final rounding of the half-band up-conversion (Section 10.3), the mix with the frequency layer (Section 11.5), the half-band decimation (this section) and the step to 24 bits (Section 11.7) are computed in 64-bit two's-complement arithmetic modulo 2^64: a result that does not fit wraps around. Arithmetic right shifts are used for the roundings (`rq31`: add 2^30, shift right by 31; the final step: add 8, shift right by 4). For a damaged stream that no other check detects, every decoder therefore gives the same wrapped value. The reference decoder does not detect such a wrap. A guaranteed bound below which valid streams cannot wrap is not stated (Appendix C, item 5).
+**64-bit wrap (since 2026-11-15).** All sums and products in the half-band interpolation (Section 10.3), the mix with the frequency layer (Section 11.5), the half-band decimation (this section) and the final rounding (Section 11.7) are computed in 64-bit two's-complement arithmetic modulo 2^64: a result that does not fit wraps around. The roundings use arithmetic right shifts (`rq31`: add 2^30, then shift right by 31; the final rounding: add 8, then shift right by 4). For a damaged stream that no other check detects, every decoder therefore gives the same wrapped value. The reference decoder does not detect such a wrap. A guaranteed bound below which valid streams cannot wrap is not yet stated (Appendix C, item 5).
 
 ---
 
@@ -1082,7 +1082,7 @@ The CD layer is ordinary PCM and is never affected by an error in the extension.
 | A pack number `k >= 1` for which the file has no pack record (Section 5.6) | MUST refuse the request | 1 |
 | FLAC form: a failed frame check or a missing or wrong MD5 (Section 3.4) | MUST NOT decode the extension | 3 |
 | A stream record outside the payload; a decoded stream header invalid (Section 5.3); `nseg` outside `[1, 8]` | MUST refuse | 3 |
-| A stream that does not end exactly at its last byte (Section 6.7) | MAY refuse; `liblae` refuses (since v5-2026-11-07) | 3 (`lae_udec`); `lae_dec` decodes such a file |
+| A stream that does not end exactly at its last byte (Section 6.7) | MAY refuse; `liblae` refuses (since v5-2026-11-07), as do `lae_dec` and the Java decoder (since 2026-11-15) | 3 |
 | Output exceeds the WAV size limit (Section 11.8) | MUST refuse | 1 |
 | `CORRUPT` raised during decoding (Sections 7.4, 7.5, 8.3, 9.4) | MUST report the stream as corrupt and MUST NOT deliver the output. The reference decoder deletes the file it has written | 3 |
 

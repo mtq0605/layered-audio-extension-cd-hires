@@ -65,7 +65,7 @@ This specification does not define:
 - The extension block in an extension file is, byte for byte, the body of the `LAE ` chunk of a v5 WAV file ([SPEC] 3.3).
 - Everything specified here lies outside container version 5: the CD layout, the trailer record, file pairing and the delivery of LAE streams. This specification has its own version number (Section 8).
 - `.lae` remains reserved for the complete file layout of [SPEC] 1.1. `.LAX` is a different kind of file.
-- [SPEC] Appendix C item 7 asked how FLAC carries LAE; it is answered there ("Done"): the single-file FLAC form of [SPEC] Section 3.4 carries the extension in `LAE1` APPLICATION blocks. This specification adds the two-file form of 4.2, in which a FLAC or WAV file carries only the base layer and the extension layer is placed in an accompanying .lax file, which has the same format as the extension file on CD.
+- [SPEC] Appendix C item 7 asked how FLAC carries LAE. That item is now marked "Done": the single-file FLAC form of [SPEC] 3.4 carries the extension in `LAE1` APPLICATION blocks. This specification adds the two-file form of 4.2, in which a FLAC or WAV file carries only the base layer and the extension layer is placed in an accompanying .lax file, which has the same format as the extension file on CD.
 
 ### 1.3 Key Words and Clause Identifiers
 
@@ -230,7 +230,7 @@ Exception (independent-CD mode, track 1 only): the CD layer of track 1 MAY begin
 
 - SHOULD be an explanation in Chinese and English, encoded in UTF-8. It states what the disc is, that session 1 plays on any CD player, and how high resolution is obtained.
 - MUST NOT contain hashes, positions, offsets or tables of lengths.
-- *Reference tool (since 2026-11-15).* README.TXT and BURN.TXT say to rip the audio tracks as WAV or FLAC, 16 bit, 44.1 kHz, and that a lossy format such as MP3 cannot be used.
+- *Reference tool (since 2026-11-15).* The README.TXT and BURN.TXT written by the tool state that the audio tracks are to be ripped as WAV or FLAC (16 bit, 44.1 kHz) and that a lossy format such as MP3 cannot be used.
 
 **[D6]** End of the data track:
 
@@ -423,7 +423,7 @@ This section applies to every form other than CD: ordinary file downloads, files
 
 **[F1]** In a single v5 WAV file, the CD layer is in the data chunk, and the `LAE ` chunk follows the audio ([SPEC] 3.1).
 
-- A v5 WAV written by the encoder without tags, and every v5 WAV written by a re-encapsulation tool, MUST have the canonical layout below. An encoder given tags (for example `lae_enc --tag=` or `--cover=`) writes a `LIST`/`INFO` and an `id3 ` chunk between `fmt ` and `data`; such a file is a valid v5 WAV ([SPEC] 3.1), but not in this layout.
+- A v5 WAV written by the encoder without tags, and every v5 WAV written by a re-encapsulation tool, MUST have the canonical layout below. An encoder given tags (for example `lae_enc --tag=` or `--cover=`) writes a `LIST`/`INFO` chunk and an `id3 ` chunk between `fmt ` and `data`; such a file is a valid v5 WAV ([SPEC] 3.1), but it does not have this layout.
 - This layout is the same as the output of wavio::writeCD ([WV]).
 - Let D = ncd × 4.
 
@@ -447,7 +447,7 @@ Version 0 does not define a trailer record appended inside the WAV file.
   - A base-layer WAV contains no `LAE ` chunk.
   - Ordinary players play only this file.
 - **Extension file:** it has the same name as the base-layer file, with the file name extension .lax, and its format is that of Section 3. If the same track is also released on CD, this file MUST be byte-identical to TRACKnn.LAX on the CD.
-- In this two-file form, the extension layer and the trailer record MUST NOT be placed inside the base-layer FLAC file: no FLAC metadata block of it carries them. (A single file that carries the extension is the FLAC form of [SPEC] Section 3.4, not a base-layer file.)
+- In this two-file form, the extension layer and the trailer record MUST NOT be placed inside the base-layer FLAC file: none of its metadata blocks carries them. (A single FLAC file that carries the extension is the FLAC form of [SPEC] 3.4, not a base-layer file.)
 - The audio MD5 SHOULD be written into the FLAC STREAMINFO.
 
 ### 4.3 Pairing and Ripped Files
@@ -479,7 +479,7 @@ When pairing succeeds, no offset needs to be found, and S1 and S2 are not used.
 - Input: a verified CD layer, plus the extension block from the extension file. The CD layer comes from one of the following:
   - a rip or an LAE stream ([R8]);
   - a successfully paired base-layer file ([F3]).
-- Output: a v5 WAV in the canonical layout of 4.1. The result MUST be byte-identical to the file originally written by the encoder when that file carried no tags. Tags are not part of the extension file: from a tagged file, re-encapsulation gives the canonical layout without the tags, whose `data` chunk (the CD layer) and `LAE ` chunk are byte-identical to those of the tagged file.
+- Output: a v5 WAV in the canonical layout of 4.1. If the file originally written by the encoder carried no tags, the result MUST be byte-identical to it. Tags are not part of the extension file: for a tagged file, re-encapsulation yields the canonical layout without the tags; its `data` chunk (the CD layer) and its `LAE ` chunk are byte-identical to those of the tagged file.
 
 ### 4.5 LAE Stream
 
@@ -516,7 +516,7 @@ The player treats streams and rips in the same way:
 **[P2]** The v5 file and trailer record of each track:
 
 - The v5 file of every track MUST pass all checks of the decoder ([SPEC] 4.3, V1–V13).
-- *Reference tool (since 2026-11-15).* The packaging tool decodes every input file completely before anything is written: an LAEY file every extension pack to its last frame (every entropy stream must end exactly at its last byte), an LAES file every master against its SHA-256. A file that does not decode is refused and no image is written.
+- *Reference tool (since 2026-11-15).* The packaging tool decodes every input file completely before anything is written: for an LAEY file, every extension pack (the main body is pack 0) to its last frame, where every entropy stream must end exactly at its last byte; for an LAES file, every master, which is compared with its SHA-256. A file that does not decode is refused, and no image is written.
 - The trailer record MUST be computed from the CD layer of that file:
   - ncd = nb − 2·pb;
   - sample rate = base;
@@ -629,7 +629,7 @@ The v5 WAV of each track (4.1) MAY be supplied in addition, for file distributio
 
 **[P15]** For two-step writing, the next writable address MUST be taken from the drive's READ TRACK INFORMATION report (MMC 52h). It is checked against both the B0 entry of the TOC and A2 + 11,400. If any of the three values differs from the others, the tool MUST stop. Published descriptions of the B0 entry disagree, and B0 alone may be off by 150 sectors (secondary source).
 
-*Reference tool (since 2026-11-15).* `lae_cdx data` and `read iso:…@N` stop when N is not A2 + 11,400. A2 is taken from the option `a2=`, otherwise from the BURN.TXT of the image (beside or in the folder of the .lax files; beside DATA.ISO); when neither is there, the tool stops. N = 0 makes a copy for mounting on a computer (C34) and is not checked.
+*Reference tool (since 2026-11-15).* `lae_cdx data` and `lae_cdx read` with `iso:…@N` stop when the start address N is not A2 + 11,400. A2 is taken from the option `a2=` or, without it, from the BURN.TXT of the image (for `data`: beside the folder of the .lax files or in it; for `read`: beside DATA.ISO); when neither is available, the tool stops. N = 0 produces a copy for mounting on a computer (C34) and is not checked.
 
 ### 5.5 Closed-Loop Self-Check
 
@@ -692,7 +692,7 @@ Each of these tracks MUST fall back. If any one of them does not fall back, the 
 
 **[R1]** The reader has three kinds of input:
 
-- **Rips:** a whole-disc image (BIN, WAV or FLAC, with or without CUE), per-track files (with or without CUE), or a single per-track file. They may come from any ripping software and any offset setting; the audio must be stored losslessly (WAV, FLAC or BIN, 16 bit, 44.1 kHz).
+- **Rips:** a whole-disc image (BIN, WAV or FLAC, with or without CUE), per-track files (with or without CUE), or a single per-track file. They may come from any ripping software and any offset setting; the reader uses only audio that is stored losslessly (WAV, FLAC or BIN, 16 bit, 44.1 kHz).
 - **LAE streams:** the CD layer delivered per track, plus the extension file (4.5).
 - **Extension files:** from the `/LAE/` directory of session 2 of a CD, from a copied folder, or delivered with an LAE stream.
 
@@ -771,7 +771,7 @@ W ≥ 5880. W MAY be larger, for example 44 100. For windows that are entirely z
 - Its CD layer consists of the ncd samples within the matching window, without pregap or padding.
 - For extension block type 1, a v5 WAV is reconstructed according to 4.4 and passed to the unmodified decoder.
 - If the decoder rejects the file, the track takes the CD route with the reason "extension layer corrupted".
-- *Reference tool (since 2026-11-15).* The reader decodes every verified track completely, in the same way as the packaging tool ([P2]); an LAES block that does not fit into memory is decoded by the stream decoder with temporary files, never accepted by the whole-track MD5 alone. A track the decoder refuses takes the CD route; a check that cannot run stops the reading. One line per track says what was decoded.
+- *Reference tool (since 2026-11-15).* The reader decodes every verified track completely, in the same way as the packaging tool ([P2]); an LAES block that does not fit into memory is decoded by the stream decoder, which uses temporary files, and is never accepted on the whole-track MD5 alone. A track that the decoder refuses takes the CD route; if a check cannot be run, reading stops. One line per track states what was decoded.
 
 **[R9]** If several candidates pass, their window contents are identical, barring an MD5 collision (for example in an entirely silent track). Any one of them may be used, and the result is the same.
 

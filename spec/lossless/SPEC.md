@@ -287,7 +287,7 @@ The encoder sets bytes 56 and 57 as the publisher chooses; if the publisher choo
 | 36 | 4 | reserved | 0 |
 | 40 | 32 | master SHA-256 | Section 6.5 |
 
-For storage 1, the T fields hold the T of the master relative to the core master; decoders do not use them (Section 6.6). Files written before 2026-11-15 hold 0 there.
+For storage 1, the T fields hold the T of the master relative to the core master; decoders do not use them (Section 6.6). Files written before 2026-11-15 hold 0 in these fields.
 
 In version 2, each master record is followed directly by the N bytes of its **name** and then by its layers; version 1 has no names.
 
@@ -400,7 +400,7 @@ An LAES FLAC file is a FLAC stream (RFC 9639) with the following structure:
 * Tags and pictures (optional): at most one VORBIS_COMMENT block and any number of PICTURE blocks (RFC 9639, Sections 8.6 and 8.8). Writers place them before the `LAE2` blocks, so that a player reads them without skipping the payload. One set describes the core master and every master; no hash defined in this specification covers them, and they take no part in choosing or checking an output (Section 10).
 * The audio frames hold the core master, coded with independent left and right channels: channel assignment 0b0001 in every frame header, with no inter-channel decorrelation. Within this channel assignment, any valid FLAC coding of the core master is allowed. Support for inter-channel decorrelation may be added in a later revision.
 * No SEEKTABLE or CUESHEET block is written.
-* Tags of other software: a reader accepts ID3v2 tags in front of `fLaC` and APEv2 / ID3v1 tags after the last audio frame (once the sample count of STREAMINFO is reached); it does not read them, and a tool that writes a new file from such a file keeps them as they are.
+* Tags written by other software: a reader accepts ID3v2 tags before `fLaC`, and APEv2 and ID3v1 tags after the last audio frame (that is, once the sample count given in STREAMINFO has been reached). It does not interpret them, and a tool that writes a new file from such a file keeps them unchanged.
 
 Every FLAC decoder that implements RFC 9639 in full plays the core master and skips the APPLICATION blocks (checked 2026-11-05 with libFLAC and FFmpeg). Decoders that implement only part of it may not do so: the built-in FLAC decoder of Windows (Media Foundation, also used by Explorer) does not decode 32-bit FLAC, and it does not recognise a file whose first audio frame starts more than about 4 MiB into the file, as is the case in an LAES FLAC file whose payload is larger than that. Tested decoders and workarounds are given in [COMPATIBILITY.md](../COMPATIBILITY.md).
 
@@ -522,7 +522,7 @@ With more than sixteen masters (since 2026-11-11), each candidate is first coded
 
 A master derived from the same production as the core master has T = 0. For an independently produced core master (a released CD), the reference tool `laes align` uses the automatic search of the LAE Lossy encoder and stores the measured position as T, including the fraction; the master itself is never moved. An alignment error (the residual energy after alignment, relative to the energy of the signal, as measured by the LAE Lossy search) of −60 dB or less is accepted. Otherwise, the error is shown and the user decides whether to continue or stop. A whole album is cut at the track boundaries of the CD by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`), which writes the master of each track unmoved, with its own T.
 
-A T given as a decimal number is split as whole = floor(T) and q = round((T − whole) · 2^32); when q = 2^32, the whole part is increased by one and the fraction is 0; otherwise, the fraction is q. The reference encoder refuses a T outside −N … N (Section 6.7), and it does not use a reference tier against which the T of the master lies outside this range.
+A T given as a decimal number is split into whole = floor(T) and q = round((T − whole) · 2^32). If q = 2^32, the whole part is increased by one and the fraction is 0; otherwise, the fraction is q. The reference encoder refuses a T outside −N … N (Section 6.7), and it does not use a tier relative to which the T of the master would lie outside this range.
 
 ### 11.4 Measured sizes
 

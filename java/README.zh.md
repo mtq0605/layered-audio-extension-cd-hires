@@ -62,9 +62,9 @@ Java 移植有两处行为不同：
 
 ## 检查、已有的输出和测试开关（2026-11-15）
 
-- **码流检查。**Java 的 LAEY 解码器和 `lae_dec`、C++ 播放器一样，拒绝熵编码流没有正好在最后一个字节结束的文件：播放库（`LaeyDecoder`）打开文件时检查主体的每条码流，其他扩展包在第一次选中时检查。和 C++ 播放器不同，它不保存这次检查的记录，所以每次打开都重新检查。
-- **已有的输出。**Java 工具（`LaeEncTool` 的编码和 `tag`、`LaesTool enc` 和 `dec`）不会悄悄替换已有的输出文件：在控制台上（`System.console()` 不为 null）问两次，两次都回答 yes 才替换；否则拒绝，除非给了 `--overwrite`。提示和 C++ 工具相同（[README.zh.md](../README.zh.md) 第 14.11 节）。`laes enc` 接着做上次没做完的工作不算替换。调用 `LaeyEncoder` 或 `LaesEncoder` 的应用没有控制台，要设 `Options.overwrite`。
-- **测试开关。**Java 工具的测试开关（`LaeEncTool` 的 `LAEY_TEST_PIECE`、`LAE_TESTMAXFRAMES`、`LAE_TESTFAIL`、`LAE_BLOCKUNITS`、`LAE_TESTSEQUENTIAL`、`PARTTHREADS`；`LaesTool` 的 `LAES_NO_SHORTLIST`、`LAES_FORCE_RF64`、`LAES_PIECE`、`LAES_SELFCHECK_FLIP`、`LAES_DISK_RESERVE`）和 C++ 工具一样，只在设了 `LAE_TEST_MODE=1` 时起作用；这时运行打印和 C++ 工具相同的一行。`KEEPTMP`、`TIMING` 和 Java 独有的 `LAE_WORKDIR` 不受它管。
+- **码流检查**。Java 的 LAEY 解码器和 `lae_dec`、C++ 播放器一样，拒绝熵编码流没有正好在最后一个字节结束的文件：播放库（`LaeyDecoder`）打开文件时检查主体的每条码流，其他扩展包在第一次选中时检查。和 C++ 播放器不同，它不保存这次检查的记录，所以每次打开都重新检查。
+- **已有的输出**。Java 工具（`LaeEncTool` 的编码和 `tag`、`LaesTool enc` 和 `dec`）不会悄悄替换已有的输出文件：在控制台上（`System.console()` 不为 null）问两次，两次都回答 yes 才替换；否则拒绝，除非给了 `--overwrite`。提示和 C++ 工具相同（[README.zh.md](../README.zh.md) 第 14.11 节）。`laes enc` 接着做上次没做完的工作不算替换。调用 `LaeyEncoder` 或 `LaesEncoder` 的应用没有控制台，要设 `Options.overwrite`。
+- **测试开关**。Java 工具的测试开关（`LaeEncTool` 的 `LAEY_TEST_PIECE`、`LAE_TESTMAXFRAMES`、`LAE_TESTFAIL`、`LAE_BLOCKUNITS`、`LAE_TESTSEQUENTIAL`、`PARTTHREADS`；`LaesTool` 的 `LAES_NO_SHORTLIST`、`LAES_FORCE_RF64`、`LAES_PIECE`、`LAES_SELFCHECK_FLIP`、`LAES_DISK_RESERVE`）和 C++ 工具一样，只在设了 `LAE_TEST_MODE=1` 时起作用；这时运行打印和 C++ 工具相同的一行。`KEEPTMP`、`TIMING` 和 Java 独有的 `LAE_WORKDIR` 不受它管。
 - **LAES 文件。**`LaesTool` 和 Java 播放器与 C++ 工具一样，接受前面带 ID3v2、后面带 APEv2 / ID3v1 标签的 FLAC 文件；这些标签不读取，留在文件里。同一条 `LaesTool` 命令不能同时跑两次：第二次立刻停下（工作文件夹里有锁文件）。`LaesTool dec --list` 只读母带记录，不解码。文件旁边建不了工作文件夹时，改建在系统临时文件夹（`java.io.tmpdir`），并说明；那里的文件夹名字和 C++ 工具的不同。
 - **编码器选项。**`LaeyEncoder.Options` 还可以设 `form`（`flac` 或 `wav`）、`mainName`（`master1name=`）、`packs`（扩展包的其他母带，每个可设对齐、名字、边缘和 accept）和 `overwrite`。
 

@@ -60,14 +60,14 @@ LAE 文件是普通的 WAV 或 FLAC 文件。不支持 LAE 的播放器播放 LA
    - Windows（Media Foundation，媒体播放器和电影和电视应用使用它，资源管理器读取时长和标签时也使用它）仅在 FLAC 文件的前 4 MiB 内查找第一个音频帧。实测：第一个音频帧位于字节偏移 4,194,308（4 MiB + 4）或更早处时可被识别；自 4,194,309 起则无法识别。
    - 包含母带的 LAES FLAC 文件将母带存放在音频帧之前，这是 RFC 9639 对所有元数据的要求。因此其第一个帧的起始位置超出上述界限，Windows 无法识别该文件。
    - 该解码器也不解码 32 bit FLAC。尽管如此，LAES FLAC 文件仍是有效的 FLAC 文件：libFLAC 和 FFmpeg 均能播放（已使用 16 bit 和 24 bit 核心母带测试；见上表）。
-   - **替代方法：**使用 WAV 形式、基于 libFLAC 或 FFmpeg 的播放器，或 LAE 插件。
+   - **替代方法**：使用 WAV 形式、基于 libFLAC 或 FFmpeg 的播放器，或 LAE 插件。
 2. **32 bit FLAC。**
    - 许多解码器不播放 32 bit FLAC。Android 13 的解码器无法识别它，Windows 的解码器能打开但不能解码。
    - 因此，LAES 参考编码器默认在 WAV 形式中写入 16 bit 核心母带，在 FLAC 形式中写入至多 24 bit 的核心母带；`--core-bits=32` 则生成 32 bit 核心母带。为获得最广泛的兼容性，请勿使用 `--core-bits=32`。
 3. **RF64（超过 4 GiB 的 LAES WAV 形式）。**
    - RIFF WAV 文件不能超过 4 GiB，因此更大的 LAES WAV 文件（例如包含众多母带的长专辑）以 RF64 写入。
    - 许多 WAV 读取器不支持 RF64。Android 13 的解码器无法打开它。
-   - **替代方法：**此类文件使用 FLAC 形式。LAEY 文件始终为普通 RIFF。
+   - **替代方法**：此类文件使用 FLAC 形式。LAEY 文件始终为普通 RIFF。
 4. **`.lae` 扩展名。**
    - 按文件名选择解码器的播放器（例如 foobar2000、Windows 媒体播放器和许多手机应用）在未安装 LAE 插件时无法打开 `.lae` 文件。
    - 按内容识别的播放器会播放核心母带（LAEY 为 CD 层）。如需在大多数播放器中播放核心母带，请按文件的形式将其重命名为 `.wav` 或 `.flac`（受限制 1–3 的约束）。
@@ -84,8 +84,8 @@ LAE 文件是普通的 WAV 或 FLAC 文件。不支持 LAE 的播放器播放 LA
 
 ## 播放器无法播放 LAE 文件时
 
-- **文件名以 `.lae` 结尾：**按文件的形式将其重命名为 `.wav` 或 `.flac`，或安装 LAE 插件。
-- **文件为 FLAC 文件且播放器为 Windows 自带播放器：**使用 WAV 形式、其他播放器或 LAE 插件（限制 1）。
-- **文件为核心母带为 32 bit 的 FLAC 文件：**以 24 bit 编码核心母带（限制 2）。
-- **文件为大于 4 GiB 的 WAV 文件：**该文件为 RF64。请使用 FLAC 形式（限制 3）。
-- **均不属于上述情形：**使用 `laes verify` 或 `laes parts` 检查文件，并用 FFmpeg 尝试（`ffmpeg -i file -f null -`）。若 FFmpeg 能播放，则问题在于该播放器。
+- **文件名以 `.lae` 结尾**：按文件的形式将其重命名为 `.wav` 或 `.flac`，或安装 LAE 插件。
+- **文件为 FLAC 文件且播放器为 Windows 自带播放器**：使用 WAV 形式、其他播放器或 LAE 插件（限制 1）。
+- **文件为核心母带为 32 bit 的 FLAC 文件**：以 24 bit 编码核心母带（限制 2）。
+- **文件为大于 4 GiB 的 WAV 文件**：该文件为 RF64。请使用 FLAC 形式（限制 3）。
+- **均不属于上述情形**：使用 `laes verify` 或 `laes parts` 检查文件，并用 FFmpeg 尝试（`ffmpeg -i file -f null -`）。若 FFmpeg 能播放，则问题在于该播放器。

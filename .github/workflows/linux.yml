@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 name: conformance
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Manual start only: "Run workflow" on the Actions page, or gh workflow run.
   workflow_dispatch: {}
 permissions:
   contents: read

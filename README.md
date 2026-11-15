@@ -115,8 +115,8 @@ LAE addresses this problem under one constraint: **the CD layer is an ordinary, 
 
 3. **Reduce precision, not content (LAE Lossy).** LAE Lossy may represent content with reduced precision. It must not discard meaningful content.
    - Sustained tones, transients, musical tones, harmonics and reverberation tails are all retained.
-   - Noise present in the master is treated as part of the music and coded like any other content. This includes the noise floor, inaudible random noise and deliberately added noise.
-   - Only content that is certainly not information is zeroed automatically: digital silence, and rounding-level residue of about one to two 24-bit LSBs (the exact threshold is given in Section 7.3).
+   - Noise present in the master above the threshold of class A is treated as part of the music and coded like any other content. This includes the noise floor, inaudible random noise and deliberately added noise.
+   - Only content that is certainly not information is zeroed automatically: digital silence, and rounding-level residue, which includes steady noise up to an RMS of about 1.2 LSB of 24 bits (peaks of about 2 LSB, about −137 dBFS; the exact threshold is given in Section 7.3).
 
    LAE Noise Marker and the encoder option `noise=` let the user mark noise regions, which the encoder then codes as silence (Section 8.6).
 

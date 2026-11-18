@@ -22,6 +22,7 @@
 - [Extracting masters into a new file: `laes extract`](#extracting-masters-into-a-new-file-laes-extract)
 - [Checking: `laes verify`](#checking-laes-verify)
 - [Time position: `laes align`](#time-position-laes-align)
+- [Repairing a file: `lae_repair`](#repairing-a-file-lae_repair)
 - [Test helpers](#test-helpers)
 - [Text, file names and exit codes](#text-file-names-and-exit-codes)
 
@@ -76,6 +77,7 @@ laes enc <out.flac | out.wav | out.lae> (--derive-core | --core=<core.wav>) <mas
 - If the header of a master WAV / RF64 or of the `--core` WAV gives a data length beyond the end of the file, `laes enc` and `laes add` print a `NOTE` that the file may be cut off, read it to its end and continue (since 2026-11-14). A data length of 2^63 bytes or more in the header (RF64 `ds64`) is refused, and the reason is given; `laes parts`, `tag`, `add`, `extract` and `names` refuse such a chunk length in an LAES file in the same way.
 - The order on the command line does not change the file size: the tool chooses the order in the file and the way each master is stored, selecting whichever is smallest. The order on the command line is the menu order (see [Menu order](#menu-order---menu-order)).
 - `--name=<k>:<text>`: names the k-th master on the command line (counting from 1; repeat the option for other masters). The name is free text from the publisher: UTF-8, at most 255 bytes (about 255 Latin letters or 85 Chinese characters; emoji are allowed), without control characters (line breaks, tabs). Players show it as it is; a name never chooses anything. The tool never fills in a file name, path or date as a name. At the end, it prints "given k -> master n -> name".
+- `--part2=<k>:<text>` … `--part5=<k>:<text>` (since 2026-11-18): optional positions 2 to 5 of the k-th master's name, free text without a fixed meaning. They are joined after the name as `<name> - <part2>, <part3>, <part4>, <part5>` (empty ones left out; without a name, the rest alone, joined by `, `); together at most 255 bytes. The file stores only the joined name, byte for byte as if it had been given with `--name=`. `laes add` and `laes names` take the same options; in `laes names`, give `--name=<k>:` together with them, because the whole name is written anew.
 - `--no-derive`: no derived 16-bit version at all, neither for the masters nor for the core master. `--no-derive=<k>`: only the k-th master on the command line offers none. `--no-derive=core`: only the core master offers none.
 - `--default=<k>`: the k-th master on the command line is what players play when the listener has chosen nothing. `--default=core`, or no `--default`: the core master. The default is always a master itself, never a rate level or a derived version. A player that cannot play it plays the core master. At the end, the tool prints `default: given k -> master n in menus`.
 - With a name, `--no-derive`, `--default=<k>`, more than 16 masters, or a menu order other than the file order chosen by the encoder, the file is written in payload version 2; players and tools from before 2026-11-11 play only the core master of such a file. Otherwise, the file is written in payload version 1, byte for byte as before.
@@ -237,7 +239,7 @@ The order of the masters in the file is still chosen by the encoder (for the sma
 ## Changing master names: `laes names`
 
 ```
-laes names <in> <out> [--name=<k>:<text> ...] [--no-derive[=<k>|core]] [--derive[=<k>|core]] [--menu-order=<k1>,<k2>,...] [--default=<k>|core]
+laes names <in> <out> [--name=<k>:<text> [--part2= ... --part5=<k>:<text>] ...] [--no-derive[=<k>|core]] [--derive[=<k>|core]] [--menu-order=<k1>,<k2>,...] [--default=<k>|core]
 ```
 
 - Writes a new file without re-encoding; the old file is kept, and an existing `<out>` is not replaced silently (see "Text, file names and exit codes").
@@ -249,7 +251,7 @@ laes names <in> <out> [--name=<k>:<text> ...] [--no-derive[=<k>|core]] [--derive
 ## Adding masters: `laes add`
 
 ```
-laes add <in> <out> <new master>[@T] ... [--name=<k>:<text>] [--no-derive[=<k>]] [--menu-order=<k1>,<k2>,...]
+laes add <in> <out> <new master>[@T] ... [--name=<k>:<text>] [--part2= ... --part5=<k>:<text>] [--no-derive[=<k>]] [--menu-order=<k1>,<k2>,...]
 ```
 
 - Writes a new file: the core master and the record and layers of every old master are copied byte for byte, without re-encoding. The new masters are placed at the end of the payload; each is coded against the core master and every master before it, and the smallest result is kept (as in `laes enc`).
@@ -284,6 +286,24 @@ laes align <cd.wav> <master.wav> [--lae-enc=<path>] [--accept]
 ```
 
 For a core master that was produced independently, such as a released CD, this command measures the time position T of the master on the CD's time line, including the fractional part. It uses the automatic search of the LAE Lossy encoder (`lae_enc`, which is found next to `laes` or given with `--lae-enc`). A path that the shell would change is refused, as for `@auto`. An alignment error of −60 dB or lower passes; otherwise, the error is displayed and you decide, or `--accept` accepts it without asking. A check block in which the master is silent and the core master is not is counted as not matching (since 2026-11-15); the tool names the block and asks whether the alignment is to be used. The command writes nothing; when the alignment is accepted, it prints `use <master>@<T>` for use with `laes enc` (exit code 0). A whole album is cut into tracks by the whole-disc planner of LAE Lossy (`lae_enc plan … laes`).
+
+## Repairing a file: `lae_repair`
+
+```
+lae_repair <in> <out> [--overwrite]
+```
+
+`lae_repair` (since 2026-11-18) is a separate program. It puts an LAEY or LAES file that another program changed back into the LAE form, when the LAE data is still complete. Two cases, recognised by the content:
+
+- **FLAC form re-encoded by another encoder** (inter-channel decorrelation): every frame is decoded, the audio must match STREAMINFO's MD5, and the core is coded again with the frame writer of the LAE encoders. The frames are then the same bytes that the LAE encoder writes for this audio. Metadata blocks are kept in their order (tags, pictures, padding, the LAE blocks byte for byte); SEEKTABLE and CUESHEET are left out. Output: FLAC.
+- **WAV form in a FLAC file made by `flac --keep-foreign-metadata`**: the chunks are put together again with the decoded audio. The output is the original WAV file, byte for byte. FLAC metadata blocks that `flac` added are left out (the WAV file's tags are in its own chunks). Output: WAV.
+
+The result is written as `<out>.part`, checked as `lae_udec verify` checks a file (LAES: every master's SHA-256; LAEY: every extension pack decoded to its end), and only then renamed. When a check fails, nothing is left. An existing output is replaced only with `--overwrite`. A file already in the LAE form, a plain FLAC or WAV file, and a WAV-form LAE file are reported as "nothing to repair".
+
+Exit code: 0 repaired, every check passed; 1 usage, or nothing to repair; 2 a check failed (the audio against the MD5, or the result against the LAE records); 3 the file cannot be read or written; 4 the floating-point self-test failed.
+
+Build: `cl /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_repair.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp` (Linux: the same sources with g++, as `lae_udec`; [docs/BUILD.md](../../docs/BUILD.md)). Licence: GPL-3.0-or-later or the commercial licence (it uses the frame writer `src/laes_flac_enc.h`). What other programs leave of a file: [COMPATIBILITY.md](../COMPATIBILITY.md).
+
 
 ## Test helpers
 

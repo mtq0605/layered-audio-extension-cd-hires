@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install compilers
-        run: sudo apt-get update -q && sudo apt-get install -y -q g++-multilib clang
+        run: sudo apt-get update -q && sudo apt-get install -y -q g++-multilib clang flac
       - name: Decoder - all conformance vectors, four builds
         shell: bash
         run: sh tests/check_vectors_linux.sh
@@ -31,12 +31,16 @@ jobs:
         if: always()
         shell: bash
         run: sh tests/check_tags_linux.sh
+      - name: lae_repair - repairs files re-encoded or packed by flac
+        if: always()
+        shell: bash
+        run: sh tests/check_repair_linux.sh
   linux-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
       - name: Install compilers
-        run: sudo apt-get update -q && sudo apt-get install -y -q g++ clang
+        run: sudo apt-get update -q && sudo apt-get install -y -q g++ clang flac
       - name: Decoder - all conformance vectors
         shell: bash
         run: sh tests/check_vectors_linux.sh
@@ -56,3 +60,7 @@ jobs:
         if: always()
         shell: bash
         run: sh tests/check_tags_linux.sh
+      - name: lae_repair - repairs files re-encoded or packed by flac
+        if: always()
+        shell: bash
+        run: sh tests/check_repair_linux.sh

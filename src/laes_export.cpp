@@ -21,6 +21,7 @@
 // tag LAES_UNVERIFIED=1. The core master needs no note (it is checked when the file is opened).
 // Every output is one ordinary FLAC file (RFC 9639): its samples are exactly those of the choice in that time range, its STREAMINFO has
 // their MD5, and its tags name the source: LAES_CHOICE, LAES_FILE_SHA256 (the LAES file), LAES_MASTER_SHA256 (for a master), LAES_FIRST_FRAME.
+// Since 2026-11-18 a one-file output also carries the pictures of the source file (laestag::readFileTags); --seg pieces carry none.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -40,7 +41,7 @@ static std::string hex(const uint8_t* p, int n) { static const char* d = "012345
 // 2026-11-14: written as <out>.part with every write checked (a failure removes it); the caller renames it with finishPart
 static int closeF(FILE*& f) { const int r = f ? fclose(f) : 0; f = nullptr; return r; }
 struct CloseGuard { FILE*& f; ~CloseGuard() { closeF(f); } };
-static bool writeFlacFrom0(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {
+static bool writeFlacFrom0(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err, const std::vector<laestag::Picture>* pics) {
     const std::string out = outName + ".part";
     FILE* fo = fopen(out.c_str(), "wb"); if (!fo) { err = "cannot write " + out; return false; }
     CloseGuard guard{fo};   // closed also when an exception leaves this function
@@ -48,7 +49,9 @@ static bool writeFlacFrom0(laesp::Player& p, int64_t frames, int rate, int bps, 
     { std::vector<uint8_t> vc; auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) vc.push_back((uint8_t)(v >> (8 * i))); };   // VORBIS_COMMENT (little-endian lengths)
       const std::string vendor = "laes_export"; u32((uint32_t)vendor.size()); vc.insert(vc.end(), vendor.begin(), vendor.end()); u32((uint32_t)tags.size());
       for (const std::string& t : tags) { u32((uint32_t)t.size()); vc.insert(vc.end(), t.begin(), t.end()); }
-      laesflac::putBlockHeader(h, true, 4, (uint32_t)vc.size()); h.insert(h.end(), vc.begin(), vc.end()); }
+      const bool withPics = pics && !pics->empty(); laesflac::putBlockHeader(h, !withPics, 4, (uint32_t)vc.size()); h.insert(h.end(), vc.begin(), vc.end());
+      if (withPics) { laestag::Tags pt; pt.pics = *pics; std::string pe; const std::vector<uint8_t> pb = laestag::flacBlocks(pt, true, laestag::kEncoder, &pe);   // library care (2026-11-18): the source file's pictures
+          if (pb.empty()) { err = "the pictures cannot be written: " + pe; closeF(fo); fs::remove(out); return false; } h.insert(h.end(), pb.begin(), pb.end()); } }
     if (fwrite(h.data(), 1, h.size(), fo) != h.size()) { err = "cannot write " + out + " (disk full?)"; closeF(fo); fs::remove(out); return false; }
     // the frames are independent: a batch of blocks is encoded on all cores and written in order (the same bytes as one after another)
     const int64_t B = 4096; const int64_t G = 128; const unsigned T = std::max(1u, std::thread::hardware_concurrency());
@@ -72,8 +75,8 @@ static bool writeFlacFrom0(laesp::Player& p, int64_t frames, int rate, int bps, 
     const std::string mh = md5.hex(); for (int i = 0; i < 16; i++) si.b.push_back((uint8_t)std::stoul(mh.substr((size_t)i * 2, 2), nullptr, 16));
     const bool ok = fseek(fo, (long)siAt, SEEK_SET) == 0 && fwrite(si.b.data(), 1, si.b.size(), fo) == 34; if (closeF(fo) != 0 || !ok) { err = "cannot write " + out + " (disk full?)"; fs::remove(out); return false; }
     return true; }
-static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err) {   // an exception (memory) removes the .part, as a failed write does
-    try { return writeFlacFrom0(p, frames, rate, bps, tags, outName, err); }
+static bool writeFlacFrom(laesp::Player& p, int64_t frames, int rate, int bps, const std::vector<std::string>& tags, const std::string& outName, std::string& err, const std::vector<laestag::Picture>* pics = nullptr) {   // an exception (memory) removes the .part, as a failed write does
+    try { return writeFlacFrom0(p, frames, rate, bps, tags, outName, err, pics); }
     catch (const std::exception& x) { err = std::string(x.what()) + ": nothing written"; std::error_code ec; fs::remove(outName + ".part", ec); return false; } }
 // <out>.part (written and checked) becomes <out>; a failure removes the .part
 static bool finishPart(const std::string& out, std::string& err) {
@@ -164,11 +167,19 @@ static int run(int argc, char** argv) {
     if (!laespick::mayReplace(out, overwrite)) return 1;   // asked twice in a console, else --overwrite
     laesp::Player p; e = whole ? p.start(f, j, thr) : p.start(f, j, thr, false, first); if (!e.empty()) { printf("%s\n", e.c_str()); return 2; }
     std::vector<std::string> t = tags; t.push_back("LAES_FIRST_FRAME=" + std::to_string(first));
-    if (!writeFlacFrom(p, count, C.rate, C.bits, t, out, e)) { printf("%s\n", e.c_str()); return 2; }
+    // library care (2026-11-18): the pictures of the source file (FLAC PICTURE blocks, or the WAV file's id3 chunk) go into the exported file
+    // as they are (type, format, bytes); a picture that cannot be read is left out and named. Pieces of --seg carry none.
+    std::vector<laestag::Picture> pics; {
+        laestag::Tags ft; std::vector<std::string> skipped;
+        const std::string why = laestag::readFileTags([&](uint64_t at, void* d, size_t k) { return src.fn(at, d, k) == 0; }, size, f.foreignFront, ft, skipped);
+        if (!why.empty()) printf("note: pictures not read (%s): exported without them\n", why.c_str());
+        for (const std::string& s : skipped) if (s.find("picture") != std::string::npos || s.find("APIC") != std::string::npos || s.find("PICTURE") != std::string::npos) printf("note: %s: left out\n", s.c_str());
+        pics = std::move(ft.pics); }
+    if (!writeFlacFrom(p, count, C.rate, C.bits, t, out, e, &pics)) { printf("%s\n", e.c_str()); return 2; }
     if (whole && C.kind != 0) { int64_t k; int32_t tail[2]; while ((k = p.read(tail, 1)) > 0) {} if (!p.verified()) { fs::remove(out + ".part"); printf("%s did not match its SHA-256: nothing written\n", C.name.c_str()); return 2; } }
     if (!finishPart(out, e)) { printf("%s\n", e.c_str()); return 2; }
     if (whole && ofMaster) noteVerified(p);
-    printf("%s: %s, %lld frames from %lld%s\n", out.c_str(), C.name.c_str(), (long long)count, (long long)first, whole && C.kind != 0 ? ", SHA-256 ok" : ""); return 0; }
+    printf("%s: %s, %lld frames from %lld%s, %zu picture(s)\n", out.c_str(), C.name.c_str(), (long long)count, (long long)first, whole && C.kind != 0 ? ", SHA-256 ok" : "", pics.size()); return 0; }
 // 2026-11-14: an error thrown anywhere (memory, a folder that cannot be made) ends with a message and exit code 2, not a crash;
 // writeFlacFrom removes its .part itself
 int main(int argc, char** argv) {

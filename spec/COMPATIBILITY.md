@@ -82,10 +82,25 @@ Other players built on libFLAC or FFmpeg, for example mpv and most apps, are exp
    - Most players read the ID3 tags. Old Windows programs that read INFO in the system code page may display non-ASCII text as garbled characters.
    - FLAC tags are Vorbis comments in UTF-8, as FLAC requires.
 
+## Files changed by other programs
+
+Some programs rewrite a file without knowing LAE. Tested with `flac` 1.5.0 and 1.3.3 (2026-11-18):
+
+| Operation | What is left | Repair |
+|---|---|---|
+| `flac` re-encodes an LAE FLAC file (1.5.0 default and `-8`, 1.3.3) | extension and MD5 kept; the frames use inter-channel decorrelation: refused by the LAE tools | `lae_repair in.flac out.flac` |
+| `flac --keep-foreign-metadata` on an LAE WAV file | the `LAE ` chunk in APPLICATION `riff` blocks: plain FLAC audio to the LAE tools | `lae_repair in.flac out.wav`, or `flac -d --keep-foreign-metadata` |
+| the same with an `LAE ` chunk above 16 MiB | `flac` 1.5.0 stops (`foreign metadata chunk is too large`), nothing written | — |
+| `flac` on an LAE WAV file without that option | only the CD layer / core master, as plain FLAC | not possible (the LAE data is gone) |
+
+`lae_repair` checks the audio against the MD5 before it writes and checks the result as `lae_udec verify` does; when a check fails, nothing is written ([lossless/LAES_TOOL.md](lossless/LAES_TOOL.md), "Repairing a file").
+
+
 ## If a player does not play an LAE file
 
 - **The name ends in `.lae`:** rename the file to `.wav` or `.flac` (according to its form), or install the LAE plug-in.
 - **It is a FLAC file and the player is Windows' own:** use the WAV form, another player or the LAE plug-in (limitation 1).
 - **It is a FLAC file with a 32-bit core master:** encode the core master at 24 bit (limitation 2).
 - **It is a WAV file larger than 4 GiB:** it is RF64. Use the FLAC form (limitation 3).
+- **An LAE tool reports inter-channel decorrelation, or "riff" blocks:** the file was re-encoded or packed by `flac`; repair it with `lae_repair` (see "Files changed by other programs").
 - **None of these:** check the file with `laes verify` or `laes parts`, and try FFmpeg (`ffmpeg -i file -f null -`). If FFmpeg plays it, the problem lies in that player.

@@ -1638,6 +1638,7 @@ lae_enc tag <in.wav> <out.wav> [--tag=KEY=VALUE ...] [--cover=<image>] [--pictur
 | `--form=wav`、`--form=flac` | 输出文件的形式（第 10.1 节）。必须与 `.wav` 或 `.flac` 的文件名一致；只有 `.lae` 可以自由选择。不写时，WAV 形式与以前版本的输出逐字节相同。 |
 | `master2=<file>` … `master9=<file>` | 另加的母带，每个都对着与主体相同的 CD 层（由第一个母带派生，或用 `cd=` 给出的 CD）编成一个扩展包（[spec/lossy/SPEC.md](spec/lossy/SPEC.zh.md) 第 5.6 节）。每个都需要给出它在 CD 层上的位置 `master<n>align=<offset>`（写法同 `cdalign=`）；不给时报告两次搜索的结果，不写出任何文件。`master<n>accept` 和 `master<n>edge=pad|cut` 对该母带的作用与 `cdaccept`、`cdedge=` 相同。相对 CD 有速度漂移的母带（例如磁带的抖晃），或部分检查块与 CD 不匹配的母带，没有手动给出的位置和确认就不继续。另加的母带目前还不能与 `noise=`、`resume` 或 `cdcheck` 同时使用。 |
 | `master<n>name=<name>` | 包 n 的名称，在选择包的地方显示（UTF-8，最多 255 字节）；`master1name=` 给主体起名。名称只用于显示。不写时输出不变。 |
+| `master<n>part2=` … `master<n>part5=` | 包 n 名称后面可选的位置 2 到 5（自 2026-11-18 起）：自由文字，没有固定含义，用哪几个位置由发行方定。编码器把 `名称 - 位置2, 位置3, 位置4, 位置5`（没填的跳过；没有名称时只写后面几项）写成包的名称；合起来最多 255 字节，超过就不编码。 |
 | `lae_enc tag` | 无需重新编码即可为已有 LAE 文件设置新标签：写出一个新文件，带有给定的标签（若未给出则不带标签）、相同的 CD 音频和相同的 `LAE ` 块，并检查两者逐字节相同；输入不变。它先对输入做一次解码器的打开检查：损坏的文件被拒绝，不完整的文件也被拒绝（解码器把这种文件播到它的末尾，但 `lae_enc tag` 只复制完整的文件）。别的软件加的块（SEEKTABLE、CUESHEET、别的 APPLICATION 块、`cue ` 和其他块）按原顺序保留；只替换标签（FLAC 形式的 VORBIS_COMMENT、PICTURE 和 PADDING；WAV 形式的 `LIST/INFO` 和 `id3 `）。VORBIS_COMMENT 块或 PICTURE 块会达到 16 MB，或 WAV 形式的 ID3v2 标签（文字和图片合计）会达到 256 MB 时，拒绝这些标签。 |
 
 标签选项也可以不带前导 `--` 书写（`tag=`、`cover=`、`picture=`）。不使用这些选项时，输出不变。
@@ -1686,7 +1687,8 @@ lae_udec verify <file>
 
 - `lae_dec` 也拒绝熵编码流没有正好在最后一个字节结束的文件，和播放器库一样（退出代码 3，提示 "LAE chunk damaged (entropy stream <i> does not end at its last byte): refusing to decode; the CD audio itself still plays"）。它在写出任何内容之前检查所选扩展包的每条流。
 - `lae_udec verify` 对 LAEY 文件把每个扩展包（主体和其余各包）都按 `full` 路径、在它自己的母带采样率上解到最后，每包打一行结果。
-- `lae_udec` 的退出代码（所有命令）：0 完成，所有检查都通过；1 用法错误，或者文件里没有 LAE 扩展（普通 WAV 或 FLAC）；2 有检查没通过（例如 SHA-256 不符）；3 文件读不了或解不了（例如核心音频帧被重新编码成左右声道去相关的 FLAC）；4 这个程序没通过浮点自检。脚本可以用 `lae_udec verify` 和这些代码检查整个音乐库。
+- `lae_udec` 的退出代码（所有命令）：0 完成，所有检查都通过；1 用法错误，或者文件里没有 LAE 扩展（普通 WAV 或 FLAC）；2 有检查没通过（例如 SHA-256 不符）；3 文件读不了或解不了（例如核心音频帧被重新编码成左右声道去相关的 FLAC；这种文件可以用 `lae_repair` 修复）；4 这个程序没通过浮点自检。脚本可以用 `lae_udec verify` 和这些代码检查整个音乐库。
+- `lae_repair <in> <out>`（自 2026-11-18 起）把被其他程序改过的文件修回 LAE 的形式：被 `flac` 重新编码成左右声道去相关的 LAE FLAC 文件（上面的退出代码 3），以及被 `flac --keep-foreign-metadata` 压成 FLAC 的 LAE WAV 文件（"riff" 块；`lae_udec` 报告这是普通 FLAC 文件，并提到 `lae_repair`），后一种还原成原来的 WAV 文件，逐字节相同。写出之前用 MD5 核对音频，写出之后像 `lae_udec verify` 一样核对结果；有一项对不上就什么也不写（[spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.zh.md)，"修复被其他程序改过的文件"；[spec/COMPATIBILITY.md](spec/COMPATIBILITY.zh.md)）。
 - `lae_dec` 或 `lae_udec dec` 的输出文件已经存在时不直接替换：在控制台上问两次，两次都输入 yes 才替换；不在控制台上就拒绝，除非加 `--overwrite`（第 14.11 节）。
 - `lae_dec` 不保存定位用的检查点（它从不定位）；播放器库照旧保存。
 

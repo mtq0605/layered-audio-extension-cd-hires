@@ -142,12 +142,26 @@ std::string fillLaes(lae_any& a) {
         addCheck(a, "SHA-256", "master " + std::to_string(laes_master_number(a.s, ci.master)) + " (" + std::to_string(ci.rate) + " Hz " + std::to_string(ci.bits) + "-bit), all decoded samples", -1, "", true, ci.master); }
     return ""; }
 
+// 2026-11-18: an LAE WAV file packed by flac --keep-foreign-metadata keeps its "LAE " chunk in an APPLICATION "riff" block. To the
+// readers it is plain FLAC audio (the format is not changed); only the message says that lae_repair gives the WAV file back.
+bool riffHoldsLae(lae_read_fn rd, void* ctx, uint64_t size) {
+    uint64_t p = 0; uint8_t h[10];
+    for (int i = 0; i < 64 && p + 10 <= size && !rd(ctx, p, h, 10) && !memcmp(h, "ID3", 3); i++)   // ID3v2 tags in front
+        p += 10 + ((uint64_t)(h[6] & 0x7F) << 21 | (uint64_t)(h[7] & 0x7F) << 14 | (uint64_t)(h[8] & 0x7F) << 7 | (h[9] & 0x7F)) + ((h[5] & 0x10) ? 10 : 0);
+    if (p + 4 > size || rd(ctx, p, h, 4) || memcmp(h, "fLaC", 4)) return false; p += 4;
+    for (int k = 0; k < 100000; k++) { if (p + 4 > size || rd(ctx, p, h, 4)) return false; const bool last = h[0] & 0x80; const uint64_t len = (uint64_t)h[1] << 16 | (uint64_t)h[2] << 8 | h[3];
+        if ((h[0] & 0x7F) == 2 && len >= 8 && p + 12 <= size) { uint8_t id[8]; if (!rd(ctx, p + 4, id, 8) && !memcmp(id, "riff", 4) && !memcmp(id + 4, "LAE ", 4)) return true; }
+        p += 4 + len; if (last) return false; }
+    return false; }
+
 lae_any* openImpl(lae_read_fn rd, void* ctx, uint64_t size, FILE* own, lae_probe_info* format, char* err, int errlen) {
     std::unique_ptr<lae_any> a; try { a.reset(new lae_any()); } catch (...) { if (own) fclose(own); throw; }   // the file is closed also when this fails
     a->fp = own; a->rd = rd; a->ctx = ctx; a->size = size;
     std::string why; const int r = probe(rd, ctx, size, &a->pi, why); if (format) *format = a->pi;
     if (r) { setE(err, errlen, why); return nullptr; }
-    if (a->pi.format == LAE_FORMAT_NONE) { setE(err, errlen, a->pi.container == LAE_CONTAINER_NONE ? "no LAE extension: not a WAV or FLAC file" : "no LAE extension: a plain WAV / FLAC file"); return nullptr; }
+    if (a->pi.format == LAE_FORMAT_NONE) { setE(err, errlen, a->pi.container == LAE_CONTAINER_NONE ? "no LAE extension: not a WAV or FLAC file"
+            : a->pi.container == LAE_CONTAINER_FLAC && riffHoldsLae(rd, ctx, size) ? "no LAE extension: plain FLAC audio, but it holds an LAE WAV file packed by flac --keep-foreign-metadata (\"riff\" blocks): it can be repaired, lae_repair <in> <out.wav> gives the original WAV file back"
+            : "no LAE extension: a plain WAV / FLAC file"); return nullptr; }
     why = a->pi.format == LAE_FORMAT_LAEY ? fillLaey(*a) : fillLaes(*a);
     if (!why.empty()) { setE(err, errlen, why); return nullptr; }
     return a.release(); }

@@ -137,7 +137,7 @@ public final class Flac {
         BR r = new BR(buf, fp, avail);
         if (r.get(15) != 0x7FFC) return "lost frame sync"; final int strategy = (int) r.get(1); final int bsc = (int) r.get(4), src = (int) r.get(4), chc = (int) r.get(4), ssc = (int) r.get(3);
         if (r.get(1) != 0) return "frame header reserved bit set";
-        if (chc != 1) return chc <= 7 ? "core master frame without 2 channels" : "core master frame uses inter-channel decorrelation (not supported by this reader)";
+        if (chc != 1) return chc <= 7 ? "core master frame without 2 channels" : "core master frame uses inter-channel decorrelation (not supported by this reader; another encoder re-encoded the file: lae_repair codes it again by the LAE rules)";
         long num = r.get(8); { int extra = 0; if (num == 0xFF) return "bad frame number"; if (num >= 0xFE) { if (strategy == 0) return "bad frame number"; extra = 6; } else if (num >= 0xFC) extra = 5; else if (num >= 0xF8) extra = 4; else if (num >= 0xF0) extra = 3; else if (num >= 0xE0) extra = 2; else if (num >= 0xC0) extra = 1; else if (num >= 0x80) return "bad frame number";
             if (extra != 0) { num &= (0x3F >> extra); for (int i = 0; i < extra; i++) { final long b = r.get(8); if ((b & 0xC0) != 0x80) return "bad frame number"; num = num << 6 | (b & 0x3F); } } }
         long n; if (bsc == 1) n = 192; else if (bsc >= 2 && bsc <= 5) n = 576L << (bsc - 2); else if (bsc == 6) n = r.get(8) + 1; else if (bsc == 7) { n = r.get(16) + 1; if (n == 65536) return "bad block size"; } else if (bsc >= 8) n = 256L << (bsc - 8); else return "bad block size";

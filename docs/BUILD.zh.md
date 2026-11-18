@@ -78,6 +78,12 @@ laes selftest
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_udec.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_udec.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
 ```
 
+示例（Windows，`lae_repair`，它把被其他程序改过的文件修回 LAE 的形式；源文件与 `lae_udec` 相同；在 Linux 上用 g++ 和 `-DLAE_STATIC` 编译同样的源文件）：
+
+```bat
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_repair.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_repair.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
+```
+
 `liblae`（LAE Lossy 解码器，`src/lae_api.cpp`）以 `/fp:precise` 编译，满足 [spec/lossy/SPEC.zh.md](../spec/lossy/SPEC.zh.md) 第 2.2 节的浮点规则：不进行收缩，因为构建脚本（MSVC 2022）不带 `/arch:AVX2` 或更高的选项，编译器没有可用的融合乘加指令。不要加这样的选项。插件中的 LAE Lossless 解码器（`src/laes_api.cpp`）以 `/fp:strict` 编译。经验证的标志见各插件的构建脚本，例如 `plugins/foo_input_lae/build_fb2k.cmd`。
 
 ### 辅助程序
@@ -118,13 +124,14 @@ cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SEC
 
 `liblae` 和 foobar2000 组件仅在 Windows 上使用 MSVC 2022 构建和测试过（README，第 13.3 和 13.7 节）。`laes` 和 `lae_cdx` 不在表中：在 Linux 上，CI 在 x86-64 和 ARM64 上用 g++ 和 clang++ 构建这两个程序，并运行 `laes selftest` 和 `lae_cdx selftest`（`tests/check_laes_linux.sh`）；它们的其他命令 CI 在该平台上不运行。2026-11-14 在 Linux x64（WSL 下的 g++ 13.3）上运行过一次 `laes` 的 `dec`、`verify`、`extract` 和 `add` 命令，以及 `lae_cdx` 的读取器（`read` 和 `repack`，WAV 和 FLAC 抓轨），输出与 Windows 构建逐字节相同；`laes enc` 和 `laes align` 没有在该平台上检查过（[spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.zh.md) 的"编译"一节）。
 
-Linux 上的检查由五个脚本执行：
+Linux 上的检查由六个脚本执行：
 
 - `tests/check_vectors_linux.sh` 检查解码器；
 - `tests/check_encoder_linux.sh` 检查编码器；
 - `tests/check_laes_linux.sh` 构建 `laes` 和 `lae_cdx` 并运行它们的自检；
 - `tests/check_noise_linux.sh` 检查噪声扫描；
-- `tests/check_tags_linux.sh` 检查标签和图片。
+- `tests/check_tags_linux.sh` 检查标签和图片；
+- `tests/check_repair_linux.sh` 构建 `lae_udec` 和 `lae_repair`，并修复被 `flac` 重新编码或压缩过的 LAEY 和 LAES 文件（自 2026-11-19 起；需要 `flac` 命令）。
 
 这些脚本输出比较结果的摘要。`.github/workflows/` 中的一个 GitHub Actions 工作流运行这些脚本。
 

@@ -82,10 +82,25 @@ LAE 文件是普通的 WAV 或 FLAC 文件。不支持 LAE 的播放器播放 LA
    - 大多数播放器读取 ID3 标签。按系统代码页读取 INFO 的旧版 Windows 程序可能将非 ASCII 文本显示为乱码。
    - FLAC 标签为 Vorbis 注释，按 FLAC 的要求采用 UTF-8。
 
+## 被其他程序改过的文件
+
+有些程序不认识 LAE，会改写文件。用 `flac` 1.5.0 和 1.3.3 测过（2026-11-18）：
+
+| 操作 | 留下了什么 | 修复 |
+|---|---|---|
+| `flac` 重新编码 LAE FLAC 文件（1.5.0 默认和 `-8`，1.3.3） | 扩展和 MD5 保留；音频帧用了左右声道去相关：LAE 工具拒绝 | `lae_repair in.flac out.flac` |
+| 对 LAE WAV 文件用 `flac --keep-foreign-metadata` | `LAE ` 块在 APPLICATION `riff` 块中：对 LAE 工具来说是普通 FLAC 音频 | `lae_repair in.flac out.wav`，或 `flac -d --keep-foreign-metadata` |
+| 同上，但 `LAE ` 块大于 16 MiB | `flac` 1.5.0 停止（`foreign metadata chunk is too large`），什么也不写 | — |
+| 对 LAE WAV 文件用 `flac`，不加这个选项 | 只剩 CD 层 / 核心母带，成为普通 FLAC | 不能修复（LAE 数据已经没有了） |
+
+`lae_repair` 写出之前用 MD5 核对音频，写出之后像 `lae_udec verify` 一样核对结果；有一项对不上就什么也不写（[lossless/LAES_TOOL.md](lossless/LAES_TOOL.zh.md)，"修复被其他程序改过的文件"）。
+
+
 ## 播放器无法播放 LAE 文件时
 
 - **文件名以 `.lae` 结尾**：按文件的形式将其重命名为 `.wav` 或 `.flac`，或安装 LAE 插件。
 - **文件为 FLAC 文件且播放器为 Windows 自带播放器**：使用 WAV 形式、其他播放器或 LAE 插件（限制 1）。
 - **文件为核心母带为 32 bit 的 FLAC 文件**：以 24 bit 编码核心母带（限制 2）。
 - **文件为大于 4 GiB 的 WAV 文件**：该文件为 RF64。请使用 FLAC 形式（限制 3）。
+- **LAE 工具报告左右声道去相关，或者 "riff" 块**：文件被 `flac` 重新编码或压缩过；用 `lae_repair` 修复（见"被其他程序改过的文件"）。
 - **均不属于上述情形**：使用 `laes verify` 或 `laes parts` 检查文件，并用 FFmpeg 尝试（`ffmpeg -i file -f null -`）。若 FFmpeg 能播放，则问题在于该播放器。

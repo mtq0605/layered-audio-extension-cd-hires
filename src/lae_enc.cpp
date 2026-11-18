@@ -76,6 +76,7 @@ extern "C" __declspec(dllimport) int __stdcall GlobalMemoryStatusEx(LaeMemStatus
 #include "blk_io.h"      // block-wise reads / writes and filter windows (global, shared by the block-wise modules)
 #include "enc_io.h"      // checked I/O, shared by every module (global, like part_stream.h)
 #include "align_hash.h"
+#include "name_parts.h"   // the five positions of a pack's name: name, part2 .. part5 (2026-11-18)
 #include "lae_cdx_read.h"   // the publisher's CUE for the independent-CD planner (cd_plan.cpp)
 #include "halfband.h"
 #include "part_stream.h"
@@ -373,13 +374,13 @@ static int retag(int argc, char** argv) {
 // after the main body's last stream (lae_decoder.h), where v5 decoders do not read, so they play the core and the main body as before.
 // Nothing is shared between packs and nothing in one depends on another; the core must come out of every pack's
 // alignment unchanged, sample for sample. Without these options nothing here runs and the output is the earlier one, byte for byte.
-struct PackOpt { std::string path, align, name, edge; bool accept = false, any = false; };
-static bool packOptArg(const char* a) { return !strncmp(a, "master", 6) && a[6] >= '2' && a[6] <= '9' && (a[7] == '=' || !strncmp(a + 7, "align=", 6) || !strncmp(a + 7, "name=", 5) || !strncmp(a + 7, "edge=", 5) || !strcmp(a + 7, "accept")); }
+struct PackOpt { std::string path, align, name, edge; bool accept = false, any = false; nameparts::Parts np; };   // name = np joined (after the options are read)
+static bool packOptArg(const char* a) { const char* nr = nullptr; return !strncmp(a, "master", 6) && a[6] >= '2' && a[6] <= '9' && (a[7] == '=' || !strncmp(a + 7, "align=", 6) || nameparts::match(a + 7, &nr) >= 0 || !strncmp(a + 7, "edge=", 5) || !strcmp(a + 7, "accept")); }
 static std::string packOptParse(const char* a, PackOpt* pk) {   // pk[0] = master2 .. pk[7] = master9; "" or the reason
     PackOpt& q = pk[a[6] - '2']; const char* r = a + 7; const std::string key = std::string(a, 7); q.any = true;
     if (*r == '=') { if (!r[1]) return key + "=: give the master's file"; q.path = r + 1; return ""; }
     if (!strncmp(r, "align=", 6)) { if (!r[6]) return key + "align=: give the offset, as for cdalign="; q.align = r + 6; return ""; }
-    if (!strncmp(r, "name=", 5)) { if (strlen(r + 5) > 255) return key + "name=: a name has at most 255 bytes"; q.name = r + 5; return ""; }
+    { const char* t = nullptr; const int w = nameparts::match(r, &t); if (w >= 0) { if (strlen(t) > 255) return key + nameparts::key(w) + "=: at most 255 bytes"; q.np.v[w] = t; q.np.given[w] = true; return ""; } }   // name= by= year= note= tip=
     if (!strncmp(r, "edge=", 5)) { if (strcmp(r + 5, "cut") && strcmp(r + 5, "pad")) return key + "edge=: pad or cut, as for cdedge="; q.edge = r + 5; return ""; }
     q.accept = true; return ""; }
 
@@ -398,7 +399,7 @@ static int encode(int argc, char** argv) {
     double manualMove = 0;   // the fraction (master samples, |f| <= 1/2) the master is moved by when it is placed at manualT
     PackOpt pk[8]; int nPacks = 0;   // extension packs: master2= .. master9=
     bool overwrite = false;   // --overwrite (2026-11-15): replace an existing output without asking
-    std::string mainName;   // master1name=<text>: the name of the main body (the first master), "" = none stored
+    std::string mainName; nameparts::Parts mainParts;   // master1name=, master1part2= .. master1part5=: the name of the main body (the first master), joined; "" = none stored
     // internal steps of the extension packs (each a run of this encoder inside the calling run): alignout=<file> = align this master to
     // cd=, hand the aligned master to the calling run and encode nothing; rawin=<rate> = argument 1 is such an aligned master
     const char* alignOut = nullptr; int rawRate = 0; long cdAddLead = 0, cdAddTail = 0;   // cdAdd*: the digital-silence frames the alignment added before / after the given CD
@@ -407,7 +408,8 @@ static int encode(int argc, char** argv) {
     { const std::string e = tagArgs(argc, argv, opt0, tags); if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; }
       tagChunks = asFlac ? laestag::flacBlocks(tags, false, kLaeyEncoder) : laestag::wavChunks(tags, kLaeyEncoder); }   // FLAC form: VORBIS_COMMENT + PICTURE blocks, before the "LAE1" blocks
     for (int i = opt0; i < argc; i++) { const char* a = argv[i]; if (isTagOpt(a) || isFormOpt(a) || isOverwriteOpt(a)) { if (isOverwriteOpt(a)) overwrite = true; continue; }
-        if (!strncmp(a, "master1name=", 12)) { if (strlen(a + 12) > 255) { printf("master1name=: a name has at most 255 bytes\n"); return 1; } mainName = a + 12; continue; }   // the main body's name, shown where a master is chosen
+        { const char* t = nullptr; const int w = !strncmp(a, "master1", 7) ? nameparts::match(a + 7, &t) : -1;   // master1name= part2= .. part5=: the main body's name, shown where a master is chosen
+          if (w >= 0) { if (strlen(t) > 255) { printf("master1%s=: at most 255 bytes\n", nameparts::key(w)); return 1; } mainParts.v[w] = t; mainParts.given[w] = true; continue; } }
         if (!strcmp(a, "equal")) equal = true; else if (!strcmp(a, "energy")) wm = 1; else if (!strcmp(a, "s2")) scheme = 2; else if (!strcmp(a, "s1")) scheme = 1;
         else if (!strcmp(a, "zs")) zsOpt = true; else if (!strncmp(a, "cd=", 3) && a[3]) cdPath = a + 3; else if (!strcmp(a, "cdcheck")) cdCheck = true;
         else if (!strcmp(a, "cdaccept")) cdAccept = true; else if (!strcmp(a, "cdedge=pad")) cdEdge = m_align::EDGE_PAD; else if (!strcmp(a, "cdedge=cut")) cdEdge = m_align::EDGE_CUT; else if (!strcmp(a, "bits=24")) bits24 = true; else if (!strcmp(a, "resume")) resume = true;
@@ -425,9 +427,13 @@ static int encode(int argc, char** argv) {
                                                                               : "cdalign=%s: give the offset in master samples, a whole number or with a fraction of up to 9 digits (for example cdalign=-3 or cdalign=3.4999828)\n", v); return 1; }
             manual = true; manualText = v; manualSg = sg; manualI = I; manualF = F; manualFs = Fs; }
         else if (i == 3) { printf("mode must be max, 1, 3, 5, keep or keep20\n"); return 1; }   // the mode slot: neither a mode nor an option
-        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d master2=<master.wav> .. master9= master<n>align= master<n>name= (n from 1) master<n>accept master<n>edge= --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume --overwrite)\n", a); return 1; } }
+        else { printf("unknown option '%s': nothing encoded (options: s1 s2 zs energy equal cd=<CD.wav> cdcheck cdalign=<offset> cdaccept cdedge=pad cdedge=cut bits=24 mem=<GB> noise=<marks.laenoise> g g=b g=c g=d master2=<master.wav> .. master9= master<n>align= master<n>name= master<n>part2= .. master<n>part5= (n from 1) master<n>accept master<n>edge= --tag=KEY=VALUE --cover=<image> --picture=<type>:<image> resume --overwrite)\n", a); return 1; } }
     encrun::keepTmp = resume;
     if ((cdCheck || cdAccept || manual || cdEdge >= 0) && !cdPath) { printf("cdcheck, cdalign, cdaccept and cdedge= need cd=<CD.wav>\n"); return 1; }
+    // the five positions joined into one name each (name_parts.h); only a name given = that name, as before
+    { std::string e = mainParts.tooLong("master1"); for (int k = 0; k < 8 && e.empty(); k++) e = pk[k].np.tooLong("master" + std::to_string(k + 2));
+      if (!e.empty()) { printf("%s: nothing encoded\n", e.c_str()); return 1; }
+      mainName = mainParts.join(); for (int k = 0; k < 8; k++) pk[k].name = pk[k].np.join(); }
     for (int k = 0; k < 8; k++) { if (!pk[k].any) continue;
         if (pk[k].path.empty()) { printf("master%d...: master%d=<master.wav> is missing: nothing encoded\n", k + 2, k + 2); return 1; }
         if (k != nPacks) { printf("master%d=: the further masters are numbered without a gap (master%d= is missing): nothing encoded\n", k + 2, nPacks + 2); return 1; }

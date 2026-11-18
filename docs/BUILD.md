@@ -78,6 +78,12 @@ Example (Windows, the unified decoder `lae_udec`, which links `liblae` staticall
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_udec.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_udec.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
 ```
 
+Example (Windows, `lae_repair`, which puts a file that another program changed back into the LAE form; the same sources as `lae_udec`; on Linux, the same sources with g++ and `-DLAE_STATIC`):
+
+```bat
+cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_repair.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_repair.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
+```
+
 `liblae` (the LAE Lossy decoder, `src/lae_api.cpp`) is compiled with `/fp:precise`, which meets the floating-point rules of [spec/lossy/SPEC.md](../spec/lossy/SPEC.md), Section 2.2: no contraction, because the build scripts (MSVC 2022) pass no `/arch:AVX2` or higher option, so the compiler has no fused multiply-add instruction to emit. Do not add such an option. The LAE Lossless decoder of the plug-ins (`src/laes_api.cpp`) is compiled with `/fp:strict`. The verified flags are given in the build scripts of the plug-ins, for example `plugins/foo_input_lae/build_fb2k.cmd`.
 
 ### Auxiliary programs
@@ -118,13 +124,14 @@ On Linux x86, 256 of 256 decoder results were identical to the reference; on Lin
 
 `liblae` and the foobar2000 component have been built and tested only on Windows with MSVC 2022 (README, Sections 13.3 and 13.7). `laes` and `lae_cdx` are not in the table: on Linux, the CI builds both with g++ and clang++, on x86-64 and on ARM64, and runs `laes selftest` and `lae_cdx selftest` (`tests/check_laes_linux.sh`); their other commands are not run by the CI there. On 2026-11-14, the `laes` commands `dec`, `verify`, `extract` and `add`, and the `lae_cdx` reader (`read` and `repack`, with WAV and FLAC rips), were run once on Linux x64 (g++ 13.3 under WSL), with output byte-identical to that of the Windows build; `laes enc` and `laes align` were not checked there ([spec/lossless/LAES_TOOL.md](../spec/lossless/LAES_TOOL.md), section "Building").
 
-The Linux checks are performed by five scripts:
+The Linux checks are performed by six scripts:
 
 - `tests/check_vectors_linux.sh` checks the decoder;
 - `tests/check_encoder_linux.sh` checks the encoder;
 - `tests/check_laes_linux.sh` builds `laes` and `lae_cdx` and runs their self-tests;
 - `tests/check_noise_linux.sh` checks the noise scan;
-- `tests/check_tags_linux.sh` checks tags and pictures.
+- `tests/check_tags_linux.sh` checks tags and pictures;
+- `tests/check_repair_linux.sh` builds `lae_udec` and `lae_repair` and repairs LAEY and LAES files that `flac` re-encoded or packed (since 2026-11-19; it needs the `flac` command).
 
 The scripts print a summary of the comparisons. A GitHub Actions workflow in `.github/workflows/` runs them.
 

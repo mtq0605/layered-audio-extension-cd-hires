@@ -28,6 +28,7 @@ lae_enc master1.wav out.wav 3 s1 master1name="original master" master2=master2.w
 | `master<n>align=<offset>` | The position of the master on the time line of the CD layer, written like `cdalign=` (in its own samples; fractions are allowed). |
 | `master<n>name=<name>` | The name that a player shows for this pack; at most 255 bytes. Without it, the pack has no name. |
 | `master1name=<name>` | The name that a player shows for the main body (the first master, pack 0); at most 255 bytes. Without it, the output is unchanged. |
+| `master<n>part2=` ... `master<n>part5=` (n = 1 ... 9) | Optional positions 2 to 5 after the name (since 2026-11-18). Each is free text without a fixed meaning; the publisher chooses which positions to use and what to write in them. The encoder writes `name - part2, part3, part4, part5` (empty positions left out; without a name, the rest alone) as that pack's name. Name and positions together: at most 255 bytes, otherwise nothing is encoded. The file holds only this one text; players show it as it is. |
 | `master<n>accept` | Like `cdaccept`: continue when the remaining time difference lies beyond −40 dB, or after a warning about drift or check blocks that do not match. |
 | `master<n>edge=pad` or `cut` | What to do when this master has sound outside the CD layer, like `cdedge=`. Without a choice, nothing is encoded. |
 

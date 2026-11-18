@@ -406,6 +406,8 @@ Every FLAC decoder that implements RFC 9639 in full plays the core master and sk
 
 *Informative:* the FLAC writer of the reference encoder (`src/laes_flac_enc.h`) uses a fixed block size of 4096, two independently coded channels, LPC orders up to 12, a precision of up to 15 and Rice partition orders up to 8. At 44.1 / 48 kHz, this conforms to FLAC's streamable subset. Many older players do not play 32-bit FLAC; the reference encoder therefore does not use a 32-bit core master in the FLAC form unless instructed otherwise (it uses the highest master word length up to 24 bits; Section 11.1). The reference decoder decodes only core masters with independently coded channels.
 
+*Informative (files changed by other programs):* a FLAC encoder that re-encodes the file (for example `flac` 1.3 and 1.5 with their default settings) usually keeps the APPLICATION blocks and STREAMINFO's MD5 but codes the audio frames with inter-channel decorrelation; such a file does not conform to this section, and the reference tools refuse it. The reference tool `lae_repair` decodes those frames, checks the audio against STREAMINFO's MD5, codes it again with independent channels and checks the result as a decoder does; the extension bytes stay as they are. A WAV-form file compressed with `flac --keep-foreign-metadata` keeps its chunks, `LAE ` included, in APPLICATION blocks with ID `riff`; to this specification it is plain FLAC audio. `lae_repair` (or `flac -d --keep-foreign-metadata`) gives the original WAV file back, byte for byte. `flac` 1.5.0 refuses a chunk larger than 16 MiB, so this case arises only for short files ([COMPATIBILITY.md](../COMPATIBILITY.md)).
+
 ---
 
 ## 9. CD-Extra

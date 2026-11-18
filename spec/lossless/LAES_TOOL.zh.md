@@ -22,6 +22,7 @@
 - [提取母带写成新文件：`laes extract`](#extracting-masters-into-a-new-file-laes-extract)
 - [校验：`laes verify`](#checking-laes-verify)
 - [时间位置：`laes align`](#time-position-laes-align)
+- [修复被其他程序改过的文件：`lae_repair`](#repairing-a-file-lae_repair)
 - [测试辅助命令](#test-helpers)
 - [文字、文件名和退出码](#text-file-names-and-exit-codes)
 
@@ -76,6 +77,7 @@ laes enc <out.flac | out.wav | out.lae> (--derive-core | --core=<core.wav>) <mas
 - 如果母带 WAV / RF64 或 `--core` WAV 的文件头给出的数据长度超出文件末尾，`laes enc` 和 `laes add` 会打印一条 `NOTE`，说明该文件可能不完整，然后读到文件末尾并继续运行（自 2026-11-14 起）。文件头中的数据长度为 2^63 字节或以上（RF64 的 `ds64`）时，给出原因并拒绝；`laes parts`、`tag`、`add`、`extract` 和 `names` 遇到 LAES 文件中这样的块长度时同样拒绝。
 - 命令行中的顺序不影响文件大小：工具自行选择各母带在文件中的顺序和存储方式，取其中最小者。命令行中的顺序就是菜单顺序（见[菜单顺序](#menu-order---menu-order)）。
 - `--name=<k>:<text>`：给命令行中的第 k 个母带起名称（从 1 起数；可重复使用，给其他母带起名称）。名称是发行方写的自由文本：UTF-8，最多 255 字节（约 255 个拉丁字母或 85 个汉字；可以用 emoji），不含控制字符（换行、制表符）。播放器原样显示；名称从不参与任何选择。工具不会把文件名、路径或日期自动当作名称。编码结束时打印"命令行第 k 个 -> 母带 n -> 名称"。
+- `--part2=<k>:<text>` … `--part5=<k>:<text>`（自 2026-11-18 起）：第 k 个母带名称可选的位置 2 到 5，自由文字，没有固定含义。它们接在名称后面，写成 `<名称> - <位置2>, <位置3>, <位置4>, <位置5>`（没填的跳过；没有名称时只写后面几项，用 `, ` 隔开），合起来最多 255 字节。文件里只存合起来的名称，与用 `--name=` 直接给出时逐字节相同。`laes add` 和 `laes names` 也有这些选项；在 `laes names` 中要同时给 `--name=<k>:`，因为整段名称是重写的。
 - `--no-derive`：完全不提供派生 16 位版本，母带和核心母带都没有。`--no-derive=<k>`：只有命令行中的第 k 个母带不提供。`--no-derive=core`：只有核心母带不提供。
 - `--default=<k>`：听众没有选择时，播放器播放命令行中的第 k 个母带。`--default=core`，或者不写 `--default`：播放核心母带。默认项总是母带本身，不能是采样率档位或派生版本。播放器无法播放它时，播放核心母带。编码结束时打印 `default: given k -> master n in menus`。
 - 有名称、有 `--no-derive`、有 `--default=<k>`、母带超过 16 个，或者菜单顺序与编码器选择的文件顺序不同时，文件写为有效载荷版本 2；2026-11-11 以前的播放器和工具对这样的文件只播放核心母带。其他情况下，文件写为有效载荷版本 1，与以前逐字节相同。
@@ -237,7 +239,7 @@ Numbers:
 ## 修改母带名称：`laes names`
 
 ```
-laes names <in> <out> [--name=<k>:<text> ...] [--no-derive[=<k>|core]] [--derive[=<k>|core]] [--menu-order=<k1>,<k2>,...] [--default=<k>|core]
+laes names <in> <out> [--name=<k>:<text> [--part2= ... --part5=<k>:<text>] ...] [--no-derive[=<k>|core]] [--derive[=<k>|core]] [--menu-order=<k1>,<k2>,...] [--default=<k>|core]
 ```
 
 - 不重新编码，写出一个新文件；原文件保留，已有的 `<out>` 不会被悄悄替换（见"文字、文件名和退出码"）。
@@ -249,7 +251,7 @@ laes names <in> <out> [--name=<k>:<text> ...] [--no-derive[=<k>|core]] [--derive
 ## 加入母带：`laes add`
 
 ```
-laes add <in> <out> <new master>[@T] ... [--name=<k>:<text>] [--no-derive[=<k>]] [--menu-order=<k1>,<k2>,...]
+laes add <in> <out> <new master>[@T] ... [--name=<k>:<text>] [--part2= ... --part5=<k>:<text>] [--no-derive[=<k>]] [--menu-order=<k1>,<k2>,...]
 ```
 
 - 写出一个新文件：核心母带以及每个原有母带的记录和各层逐字节复制，不重新编码。新母带放在有效载荷末尾；每个新母带相对核心母带和它前面的每个母带编码，取最小的结果（与 `laes enc` 相同）。
@@ -284,6 +286,24 @@ laes align <cd.wav> <master.wav> [--lae-enc=<path>] [--accept]
 ```
 
 对于独立制作的核心母带（例如已发行的 CD），本命令测量母带在该 CD 时间轴上的时间位置 T，包括小数部分。它使用 LAE Lossy 编码器（`lae_enc`，位于 `laes` 旁边或通过 `--lae-enc` 指定）的自动搜索。会被命令解释器改动的路径被拒绝，与 `@auto` 相同。对齐误差为 −60 dB 或更低时通过；否则显示该误差并由用户决定，或由 `--accept` 不经询问直接接受。母带静音而核心母带不静音的检查段算作没对上（自 2026-11-15 起）；工具说明是哪一段，并问是否采用这个对齐。本命令不写入任何内容；对齐被接受时，打印 `use <master>@<T>` 供 `laes enc` 使用（退出码 0）。整张专辑由 LAE Lossy 的整盘规划器（`lae_enc plan … laes`）切分为音轨。
+
+## 修复被其他程序改过的文件：`lae_repair`
+
+```
+lae_repair <in> <out> [--overwrite]
+```
+
+`lae_repair`（自 2026-11-18 起）是一个单独的程序。LAEY 或 LAES 文件被其他程序改过、但 LAE 数据还完整时，它把文件修回 LAE 的形式。按内容分两种情况：
+
+- **FLAC 形式被其他编码器重新编码**（左右声道去相关）：解码每一帧，音频必须与 STREAMINFO 中的 MD5 相符，然后用 LAE 编码器的帧写入器重新编码核心音频。这样得到的帧，与 LAE 编码器对这段音频写出的字节相同。元数据块按原来的顺序保留（标签、图片、填充，LAE 块逐字节不变）；SEEKTABLE 和 CUESHEET 不保留。输出：FLAC。
+- **WAV 形式被 `flac --keep-foreign-metadata` 压成 FLAC 文件**：把各个块和解码出的音频重新拼起来。输出就是原来的 WAV 文件，逐字节相同。`flac` 加上的 FLAC 元数据块不保留（WAV 文件的标签在它自己的块里）。输出：WAV。
+
+结果先写成 `<out>.part`，像 `lae_udec verify` 一样核对（LAES：每个母带的 SHA-256；LAEY：每个扩展包解到最后），通过后才改名。有一项核对失败，就什么也不留下。输出已经存在时，只有加 `--overwrite` 才替换。已经是 LAE 形式的文件、普通 FLAC 或 WAV 文件，以及 WAV 形式的 LAE 文件，都报告"不用修"。
+
+退出码：0 修好了，所有核对都通过；1 用法错误，或者不用修；2 有核对没通过（音频对 MD5，或结果对 LAE 记录）；3 文件读不了或写不了；4 浮点自检没通过。
+
+编译：`cl /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_repair.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp`（Linux：同样的源文件用 g++ 编译，与 `lae_udec` 相同；[docs/BUILD.md](../../docs/BUILD.zh.md)）。许可：GPL-3.0-or-later 或商业许可（它用到帧写入器 `src/laes_flac_enc.h`）。其他程序会给文件留下什么：[COMPATIBILITY.md](../COMPATIBILITY.zh.md)。
+
 
 ## 测试辅助命令
 

@@ -76,7 +76,10 @@ inline bool readSubframe(BR& r, int64_t* x, int64_t n, int bps) {
     if (r.fail) return false;
     const int64_t lim = 1LL << (b - 1); for (int64_t i = 0; i < n; i++) if (x[i] < -lim || x[i] >= lim) return false;   // every sample inside the subframe's bit depth
     if (wasted) for (int64_t i = 0; i < n; i++) x[i] = (int64_t)((uint64_t)x[i] << wasted); return true; }
-inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, uint64_t frameNo, uint64_t have, V ch[2], size_t& used);
+// stereoOk (2026-11-18, only lae_repair passes true): also decode frames with inter-channel decorrelation (channel
+// assignments 8 left/side, 9 side/right, 10 mid/side, RFC 9639 section 9.1.3), which other encoders write. Every other caller
+// keeps refusing them: the LAE forms require independent channels.
+inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, uint64_t frameNo, uint64_t have, V ch[2], size_t& used, bool stereoOk = false);
 // 2026-11-15: tags that other programs put around a FLAC stream are accepted and left in the file: ID3v2 tags in front of
 // "fLaC" (each "ID3", version, flags, a 28-bit synchsafe size; +10 bytes with a footer) and, after the last audio frame, APEv2 tags
 // (footer "APETAGEX", its size, a 32-byte header when flag bit 31 is set) and ID3v1 tags ("TAG", 128 bytes), in any order, at most 4.
@@ -124,11 +127,11 @@ inline std::string readFlac(const std::vector<uint8_t>& f, Info& in, V ch[2], st
     return ""; }
 // one audio frame at fp (avail bytes left in the stream): appends its samples to ch[0] / ch[1] and gives its size in bytes (used).
 // have = samples of the stream decoded before this frame; frameNo = its index. Returns "" or the reason.
-inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, uint64_t frameNo, uint64_t have, V ch[2], size_t& used) {
+inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, uint64_t frameNo, uint64_t have, V ch[2], size_t& used, bool stereoOk) {
     { BR r{fp, avail};
         if (r.get(15) != 0x7FFC) return "lost frame sync"; const int strategy = (int)r.get(1); const int bsc = (int)r.get(4), src = (int)r.get(4), chc = (int)r.get(4), ssc = (int)r.get(3);
         if (r.get(1)) return "frame header reserved bit set";
-        if (chc != 1) return chc <= 7 ? "core master frame without 2 channels" : "core master frame uses inter-channel decorrelation (not supported by this reader)";
+        if (chc != 1 && !(stereoOk && chc >= 8 && chc <= 10)) return chc <= 7 ? "core master frame without 2 channels" : chc <= 10 ? "core master frame uses inter-channel decorrelation (not supported by this reader; another encoder re-encoded the file: lae_repair codes it again by the LAE rules)" : "bad channel assignment";
         uint64_t num = r.get(8); { int extra = 0; if (num == 0xFF) return "bad frame number"; if (num >= 0xFE) { if (strategy == 0) return "bad frame number"; extra = 6; } else if (num >= 0xFC) extra = 5; else if (num >= 0xF8) extra = 4; else if (num >= 0xF0) extra = 3; else if (num >= 0xE0) extra = 2; else if (num >= 0xC0) extra = 1; else if (num >= 0x80) return "bad frame number";
             if (extra) { num &= (0x3F >> extra); for (int i = 0; i < extra; i++) { const uint64_t b = r.get(8); if ((b & 0xC0) != 0x80) return "bad frame number"; num = num << 6 | (b & 0x3F); } } }
         int64_t n; if (bsc == 1) n = 192; else if (bsc >= 2 && bsc <= 5) n = 576L << (bsc - 2); else if (bsc == 6) n = (int64_t)r.get(8) + 1; else if (bsc == 7) { n = (int64_t)r.get(16) + 1; if (n == 65536) return "bad block size"; } else if (bsc >= 8) n = 256L << (bsc - 8); else return "bad block size";
@@ -138,7 +141,14 @@ inline std::string decodeFrame(const uint8_t* fp, size_t avail, const Info& in, 
         if (r.fail || (r.pos & 7)) return "frame header truncated"; const size_t hb = r.pos / 8; const uint8_t c8 = (uint8_t)r.get(8); if (r.fail || c8 != crc8(fp, hb)) return "frame header CRC-8 mismatch";
         if (strategy == 0 && num != frameNo) return "frame number out of order";
         if (strategy == 1 && num != have) return "frame sample number out of order";   // variable block size: the first sample's number
-        const size_t base = ch[0].size(); for (int c = 0; c < 2; c++) { ch[c].resize(base + n); if (!readSubframe(r, ch[c].data() + base, n, bps)) return "damaged subframe"; }
+        const size_t base = ch[0].size();
+        for (int c = 0; c < 2; c++) { const bool side = (chc == 8 && c == 1) || (chc == 9 && c == 0) || (chc == 10 && c == 1);   // the side channel has one bit more
+            ch[c].resize(base + n); if (!readSubframe(r, ch[c].data() + base, n, side ? bps + 1 : bps)) return "damaged subframe"; }
+        if (chc >= 8) { int64_t* a = ch[0].data() + base; int64_t* b = ch[1].data() + base; const int64_t lim = 1LL << (bps - 1);
+            for (int64_t i = 0; i < n; i++) { int64_t L, R;
+                if (chc == 8) { L = a[i]; R = a[i] - b[i]; } else if (chc == 9) { R = b[i]; L = a[i] + b[i]; }
+                else { const int64_t m = (int64_t)((uint64_t)a[i] << 1) | (b[i] & 1); L = (m + b[i]) >> 1; R = (m - b[i]) >> 1; }   // arithmetic shift (static_assert above)
+                if (L < -lim || L >= lim || R < -lim || R >= lim) return "damaged subframe"; a[i] = L; b[i] = R; } }
         r.pos = (r.pos + 7) & ~(size_t)7; const size_t fb = r.pos / 8; if (fb + 2 > r.n) return "frame truncated";
         if (crc16(fp, fb) != (uint16_t)(fp[fb] << 8 | fp[fb + 1])) return "frame CRC-16 mismatch";
         used = fb + 2; }

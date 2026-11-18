@@ -377,7 +377,7 @@ LAES WAV 文件是包含下列块的 RIFF/WAVE 文件（超过 4 GiB 时为 RF64
 
 任何 WAV 播放器均播放核心母带（32 位核心母带仅在支持 32 位 PCM 的播放器中播放）。`LAE ` 块的前 4 个字节标识格式：`LAE1` = LAE Lossy（LAEY），`LAE2` = LAE Lossless（LAES）（本规范）。读取方应告知用户其识别出的格式；LAEY 解码器遇到 `LAE2` 时报告这是 LAES 文件且不对其解码，播放器则播放核心母带。
 
-**超过 4 GiB 的文件（RF64**）。当文件的 RIFF 大小（RIFF 大小字段的值：文件长度减 8）将超过 0xFFFFFFFF 时，写入方使用 RF64 形式（EBU Tech 3306，ITU-R BS.2088）；否则使用 RIFF 形式。RF64 形式与 RIFF 形式仅有以下区别：
+**超过 4 GiB 的文件（RF64）**。当文件的 RIFF 大小（RIFF 大小字段的值：文件长度减 8）将超过 0xFFFFFFFF 时，写入方使用 RF64 形式（EBU Tech 3306，ITU-R BS.2088）；否则使用 RIFF 形式。RF64 形式与 RIFF 形式仅有以下区别：
 
 * 字节 0–3 为 `RF64`，偏移 4 处的 32 位大小字段为 0xFFFFFFFF；
 * 偏移 12 处的第一个块为 `ds64`，其主体为 40 字节：以 `uint64` 表示的 RIFF 大小（文件长度减 8）、以 `uint64` 表示的 `data` 主体大小、以 `uint64` 表示的核心母带帧数、以 `uint32` 表示的表长度 1，以及一个表项：块 ID `LAE ` 及以 `uint64` 表示的其主体大小；

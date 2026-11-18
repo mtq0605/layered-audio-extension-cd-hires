@@ -52,7 +52,7 @@ SPDX-License-Identifier: CC-BY-4.0
 
 **不支持 x87 构建**。解码器的启动自检会拒绝此类构建（第 2 节）。
 
-**编码器在所有平台上同样逐位一致（2026-11-03**）。凡决定其输出的部分（码长、检测器窗口与阈值、滤波器系数、FFT 以及对齐）均使用 `src/lae_math.h` 中的函数（`log2`、`sinpi`、`cospi`、`exp2`、`log10`），而不使用 C 库中的对应函数。这些函数仅按固定顺序使用 IEEE-754 运算 `+ − × ÷`、`sqrt`、`floor`、`frexp` 和 `ldexp`，与 LAES 在 `src/laes_math.h` 中的做法相同。频率相等的音调按其被发现的顺序合并（`std::stable_sort`）。编码器应使用上表中的标志构建（即解码器的标志，在 MSVC 上另加 `/fp:strict`；在 GCC / Clang 上使用 `-ffp-contract=off`；在 32 位 x86 上使用 SSE2）：此时 x64 与 x86 构建写出逐字节一致的文件，`tests/check_encoder_*` 将任何不一致的文件判为失败。`tools/lae_math_check.cpp` 将这些函数与 C 库进行对比测量（`log2` 至多相差 3 个末位单位），并输出一个在所有平台上必须相同的校验和。在 2026-11-03 之前，C 库的 `log2` 在不同平台之间可能在最后一位上存在差异，从而改变两个代价相等的划分之间的选择；解码所得的音频则相同。
+**编码器在所有平台上同样逐位一致（2026-11-03）**。凡决定其输出的部分（码长、检测器窗口与阈值、滤波器系数、FFT 以及对齐）均使用 `src/lae_math.h` 中的函数（`log2`、`sinpi`、`cospi`、`exp2`、`log10`），而不使用 C 库中的对应函数。这些函数仅按固定顺序使用 IEEE-754 运算 `+ − × ÷`、`sqrt`、`floor`、`frexp` 和 `ldexp`，与 LAES 在 `src/laes_math.h` 中的做法相同。频率相等的音调按其被发现的顺序合并（`std::stable_sort`）。编码器应使用上表中的标志构建（即解码器的标志，在 MSVC 上另加 `/fp:strict`；在 GCC / Clang 上使用 `-ffp-contract=off`；在 32 位 x86 上使用 SSE2）：此时 x64 与 x86 构建写出逐字节一致的文件，`tests/check_encoder_*` 将任何不一致的文件判为失败。`tools/lae_math_check.cpp` 将这些函数与 C 库进行对比测量（`log2` 至多相差 3 个末位单位），并输出一个在所有平台上必须相同的校验和。在 2026-11-03 之前，C 库的 `log2` 在不同平台之间可能在最后一位上存在差异，从而改变两个代价相等的划分之间的选择；解码所得的音频则相同。
 
 第 3 节列出已经验证的构建。其他构建，包括 32 位 ARM 及 ARM 上的 macOS，尚未验证。
 
@@ -78,7 +78,7 @@ laes selftest
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_udec.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_udec.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
 ```
 
-示例（Windows，`lae_repair`，它把被其他程序改过的文件修回 LAE 的形式；源文件与 `lae_udec` 相同；在 Linux 上用 g++ 和 `-DLAE_STATIC` 编译同样的源文件）：
+示例（Windows，`lae_repair`，它把被其他程序改动过的文件恢复成 LAE 的形式；源文件与 `lae_udec` 相同；在 Linux 上用 g++ 和 `-DLAE_STATIC` 编译同样的源文件）：
 
 ```bat
 cl /nologo /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_repair.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp /Fe:lae_repair.exe /link /MANIFEST:EMBED /MANIFESTINPUT:src\win_longpath.manifest
@@ -135,7 +135,7 @@ Linux 上的检查由六个脚本执行：
 
 这些脚本输出比较结果的摘要。`.github/workflows/` 中的一个 GitHub Actions 工作流运行这些脚本。
 
-**手动运行的检查（2026-11-15**）。下面几项检查工作流不运行，发布之前在本机手动运行；下次修改工作流时再把它们加进去：
+**手动运行的检查（2026-11-15）**。下面几项检查工作流不运行，发布之前在本机手动运行；下次修改工作流时再把它们加进去：
 
 - `tests/check_packs.sh <bin folder> <older lae_dec> <scratch folder>`：扩展包（Windows 上用 Git Bash，或 Linux）；
 - `tests/check_flacform.sh <lae_enc> <lae_dec> <master.wav> <scratch folder>`：FLAC 形式；
@@ -189,7 +189,7 @@ Linux 上的检查由六个脚本执行：
 - 逐帧对逆 MDCT 进行重叠相加；
 - 通过短滑动窗口拉动每一个重采样级。
 
-**编码器（分块，2026-10-29**）。模式比例及其他全轨决策在整个音轨上测量，但音轨按块读取和编码：
+**编码器（分块，2026-10-29）**。模式比例及其他全轨决策在整个音轨上测量，但音轨按块读取和编码：
 
 - 母带逐段读取（WAV、RF64、Sony Wave64）；
 - CD 层、路径分离和层编码器以由完整基底段和完整根块行构成的块（约 32 s）为单位工作，每个块在读取时附带其滤波器所需的边距；每个值均以与此前相同的运算、按相同的顺序计算，因此输出逐字节一致；

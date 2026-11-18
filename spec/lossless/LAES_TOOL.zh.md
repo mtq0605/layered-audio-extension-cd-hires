@@ -293,14 +293,14 @@ laes align <cd.wav> <master.wav> [--lae-enc=<path>] [--accept]
 lae_repair <in> <out> [--overwrite]
 ```
 
-`lae_repair`（自 2026-11-18 起）是一个单独的程序。LAEY 或 LAES 文件被其他程序改过、但 LAE 数据还完整时，它把文件修回 LAE 的形式。按内容分两种情况：
+`lae_repair`（自 2026-11-18 起）是一个单独的程序。LAEY 或 LAES 文件被其他程序改动过、但 LAE 数据仍然完整时，它把文件恢复成 LAE 的形式。按内容分两种情况：
 
 - **FLAC 形式被其他编码器重新编码**（左右声道去相关）：解码每一帧，音频必须与 STREAMINFO 中的 MD5 相符，然后用 LAE 编码器的帧写入器重新编码核心母带（LAEY：CD 层）。这样得到的帧，与 LAE 编码器对这段音频写出的字节相同。元数据块按原来的顺序保留（标签、图片、填充，LAE 块逐字节不变）；SEEKTABLE 和 CUESHEET 不保留。输出：FLAC。
 - **WAV 形式被 `flac --keep-foreign-metadata` 压成 FLAC 文件**：把各个块和解码出的音频重新拼起来。输出就是原来的 WAV 文件，逐字节相同。`flac` 加上的 FLAC 元数据块不保留（WAV 文件的标签在它自己的块里）。输出：WAV。
 
-结果先写成 `<out>.part`，像 `lae_udec verify` 一样核对（LAES：每个母带的 SHA-256；LAEY：每个扩展包解到最后），通过后才改名。有一项核对失败，就删掉 `.part` 文件，什么也不写。输出已经存在时不会悄悄替换：在控制台上问两次，否则只有加 `--overwrite` 才替换。已经是 LAE 形式的文件、普通 FLAC 或 WAV 文件，以及 WAV 形式的 LAE 文件，都报告"不用修"。
+结果先写成 `<out>.part`，像 `lae_udec verify` 一样核对（LAES：每个母带的 SHA-256；LAEY：每个扩展包解到最后），通过后才改名。任何一项核对失败，就删除 `.part` 文件，什么也不写。输出已经存在时不会悄悄替换：在控制台上问两次，否则只有加 `--overwrite` 才替换。已经是 LAE 形式的文件、普通 FLAC 或 WAV 文件，以及 WAV 形式的 LAE 文件，都报告"不需要修复"。
 
-退出码：0 修好了，所有核对都通过；1 用法错误，或者不用修；2 有核对没通过（音频对 MD5，或结果对 LAE 记录）；3 文件读不了或写不了；4 浮点自检没通过。
+退出代码：0 修复完成，所有核对都通过；1 用法错误，或者文件不需要修复；2 有一项核对没有通过（音频与 MD5 不符，或结果与 LAE 记录不符）；3 文件无法读取或写入；4 浮点自检没有通过。
 
 编译：`cl /O2 /EHsc /std:c++17 /utf-8 /fp:strict /D_USE_MATH_DEFINES /D_CRT_SECURE_NO_WARNINGS /DLAE_STATIC /bigobj src\lae_repair.cpp src\lae_any.cpp src\lae_api.cpp src\laes_api.cpp`（Linux：同样的源文件用 g++ 编译，与 `lae_udec` 相同；[docs/BUILD.md](../../docs/BUILD.zh.md)）。许可：GPL-3.0-or-later 或商业许可（它用到帧写入器 `src/laes_flac_enc.h`）。其他程序会给文件留下什么：[COMPATIBILITY.md](../COMPATIBILITY.zh.md)。
 

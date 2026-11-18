@@ -1430,9 +1430,10 @@ The audible band of LAE Lossy is the CD layer plus a waveform-coded refinement.
 Since 2026-11-13, the release page of v5-2026-11-07 has offered two files for listening tests:
 
 - `LAE_ABX_tool.zip`: a stand-alone ABX test program for Windows (source: `tools/lae_abx/`, [docs/BUILD.md](docs/BUILD.md)). It decodes the LAE demonstration files itself and compares, in blind trials, a master with the LAEY file made from it, or with an MP3 at 320 kbps.
-- `LAEY_packs_demo_docs.zip`: among other documents, the report of an ABX test on these demonstration files, with its logs.
+- `LAEY_packs_demo_docs.zip`: among other documents, the report of an ABX test on these demonstration files, with its logs. The
+  author was the only listener; the report is not an independent listening test.
 
-No listening test with a panel of listeners has been published. Such tests on difference-sensitive material, for example with webMUSHRA [11], are future work (Section 17.3).
+No listening test by other listeners, and none with a panel of listeners, has been published. Such tests on difference-sensitive material, for example with webMUSHRA [11], are future work (Section 17.3).
 
 ---
 
@@ -2029,7 +2030,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - The effect of the leakage-compensation term on the `cd24` route (Section 6.5).
   - Analysis of the Synth CD-band values at 176.4 and 352.8 kHz (Section 12.3).
   - Player compatibility tests.
-  - Listening tests with a panel of listeners, for example with webMUSHRA [11]. An ABX tool and one ABX report have been published (Section 12.6).
+  - Listening tests with a panel of listeners, for example with webMUSHRA [11]. An ABX tool and the report of one ABX test, with the author as the only listener, have been published (Section 12.6).
 - **Quality estimators.** The exact definitions of the quality measures of Section 12.1 are to be given in the test documentation.
 - **Normative text.** SPEC.md specifies the M/S lifting, the dither generator and its seeds, the entropy-coder binarisation, the stream header field K and the filter tables. Its open items ([SPEC.md](spec/lossy/SPEC.md), Appendix C) include:
   - `src/mdct_tables.h` as a normative annex;

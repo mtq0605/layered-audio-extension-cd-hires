@@ -93,7 +93,7 @@ LAE 文件是普通的 WAV 或 FLAC 文件。不支持 LAE 的播放器播放 LA
 | 同上，但 `LAE ` 块大于 16 MiB | `flac` 1.5.0 停止（`foreign metadata chunk is too large`），什么也不写 | — |
 | 对 LAE WAV 文件用 `flac`，不加这个选项 | 只剩 CD 层 / 核心母带，成为普通 FLAC | 不能修复（LAE 数据已经没有了） |
 
-`lae_repair` 写出之前用 MD5 核对音频，写出之后像 `lae_udec verify` 一样核对结果；有一项对不上就什么也不写（[lossless/LAES_TOOL.md](lossless/LAES_TOOL.zh.md)，"修复被其他程序改过的文件"）。
+`lae_repair` 写出之前用 MD5 核对音频，写出之后按 `lae_udec verify` 的方式核对结果；任何一项不符，就什么也不写（[lossless/LAES_TOOL.md](lossless/LAES_TOOL.zh.md)，"修复被其他程序改过的文件"）。
 
 
 ## 播放器无法播放 LAE 文件时

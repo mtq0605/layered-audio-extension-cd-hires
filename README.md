@@ -1879,7 +1879,7 @@ The audio is not covered by the code or documentation licences: it may be downlo
 
 ### 14.11 Existing output files and test switches
 
-**Existing output files (since 2026-11-15).** No tool replaces an existing output file silently. This holds for `lae_enc` (encode and `tag`), `lae_dec`, `lae_udec dec`, `lae_cdx` (`pack`, `split`, `repack`, `data`, `sim`), `laes` (`enc`, `dec`, `tag`, `add`, `extract`, `names`), `laes_export`, `lae_noise` (`mark`, `spectro`, `scan`, `preview`, `preview-all`), the table generators `gen_halfband`, `gen_mdct_tables` and `gen_noise_test`, `lae_abx --prepare`, `tools/laes_disc.ps1` and the Java tools (java/README.md).
+**Existing output files (since 2026-11-15).** No tool replaces an existing output file silently. This holds for `lae_enc` (encode and `tag`), `lae_dec`, `lae_udec dec`, `lae_cdx` (`pack`, `split`, `repack`, `data`, `sim`), `laes` (`enc`, `dec`, `tag`, `add`, `extract`, `names`), `laes_export`, `lae_repair`, `lae_noise` (`mark`, `spectro`, `scan`, `preview`, `preview-all`), the table generators `gen_halfband`, `gen_mdct_tables` and `gen_noise_test`, `lae_abx --prepare`, `tools/laes_disc.ps1` and the Java tools (java/README.md).
 
 - At a console (input and output both a terminal), the tool asks twice, and only two answers `yes` replace the file. Every tool applies the same rule to an answer: only the word `yes` counts, in any letter case (`yes`, `Yes`, `YES`), and spaces around it are ignored.
 

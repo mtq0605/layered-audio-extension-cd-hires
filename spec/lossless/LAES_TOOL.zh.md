@@ -298,7 +298,7 @@ lae_repair <in> <out> [--overwrite]
 - **FLAC 形式被其他编码器重新编码**（左右声道去相关）：解码每一帧，音频必须与 STREAMINFO 中的 MD5 相符，然后用 LAE 编码器的帧写入器重新编码核心母带（LAEY：CD 层）。这样得到的帧，与 LAE 编码器对这段音频写出的字节相同。元数据块按原来的顺序保留（标签、图片、填充，LAE 块逐字节不变）；SEEKTABLE 和 CUESHEET 不保留。输出：FLAC。
 - **WAV 形式被 `flac --keep-foreign-metadata` 压成 FLAC 文件**：把各个块和解码出的音频重新拼起来。输出就是原来的 WAV 文件，逐字节相同。`flac` 加上的 FLAC 元数据块不保留（WAV 文件的标签在它自己的块里）。输出：WAV。
 
-结果先写成 `<out>.part`，像 `lae_udec verify` 一样核对（LAES：每个母带的 SHA-256；LAEY：每个扩展包解到最后），通过后才改名。有一项核对失败，就删掉 `.part` 文件，什么也不写。输出已经存在时，只有加 `--overwrite` 才替换（`lae_repair` 在控制台上也不询问）。已经是 LAE 形式的文件、普通 FLAC 或 WAV 文件，以及 WAV 形式的 LAE 文件，都报告"不用修"。
+结果先写成 `<out>.part`，像 `lae_udec verify` 一样核对（LAES：每个母带的 SHA-256；LAEY：每个扩展包解到最后），通过后才改名。有一项核对失败，就删掉 `.part` 文件，什么也不写。输出已经存在时不会悄悄替换：在控制台上问两次，否则只有加 `--overwrite` 才替换。已经是 LAE 形式的文件、普通 FLAC 或 WAV 文件，以及 WAV 形式的 LAE 文件，都报告"不用修"。
 
 退出码：0 修好了，所有核对都通过；1 用法错误，或者不用修；2 有核对没通过（音频对 MD5，或结果对 LAE 记录）；3 文件读不了或写不了；4 浮点自检没通过。
 

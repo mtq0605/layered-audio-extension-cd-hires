@@ -34,6 +34,7 @@
 #include "laes_flac_enc.h"
 #include "align_hash.h"
 #include "lae_api.h"
+#include "laes_pick.h"   // mayReplace: an existing output is replaced only after two answers yes at a console, or with --overwrite (2026-11-19)
 namespace fs = std::filesystem;
 using laes::V;
 
@@ -149,7 +150,8 @@ int main(int argc, char** argv) {
 
     // ---- the output (as <out>.part)
     { std::error_code ec;
-        if (fs::exists(fs::u8path(outPath), ec) && !overwrite) { printf("%s already exists: give another name or --overwrite; nothing written\n", outPath.c_str()); return 1; }
+        // an existing output (2026-11-19, as every other tool): at a console asked twice, otherwise replaced only with --overwrite
+        if (fs::exists(fs::u8path(outPath), ec)) { if (!laespick::mayReplace(outPath, overwrite)) { printf("nothing written\n"); return 1; } overwrite = true; }
         if (fs::exists(fs::u8path(part), ec)) { printf("%s exists and was not made by this run: remove it or choose another name; nothing written\n", part.c_str()); return 3; } }
     FILE* o = fopen(part.c_str(), "wb"); if (!o) { printf("cannot write %s\n", part.c_str()); return 3; }
     auto fail = [&](int code, const std::string& why) { if (o) fclose(o); o = nullptr; std::error_code ec; fs::remove(fs::u8path(part), ec); printf("%s; nothing written\n", why.c_str()); return code; };

@@ -1879,7 +1879,7 @@ laes verify Grand_LAES.flac Grand_352k8_32bit.wav Grand_352k8_24bit.wav Grand_17
 
 ### 14.11 已有的输出文件和测试开关
 
-**已有的输出文件（自 2026-11-15 起**）。任何工具都不会悄悄替换已有的输出文件。适用于 `lae_enc`（编码和 `tag`）、`lae_dec`、`lae_udec dec`、`lae_cdx`（`pack`、`split`、`repack`、`data`、`sim`）、`laes`（`enc`、`dec`、`tag`、`add`、`extract`、`names`）、`laes_export`、`lae_noise`（`mark`、`spectro`、`scan`、`preview`、`preview-all`）、表生成器 `gen_halfband`、`gen_mdct_tables` 和 `gen_noise_test`、`lae_abx --prepare`、`tools/laes_disc.ps1`，以及各 Java 工具（java/README.zh.md）。
+**已有的输出文件（自 2026-11-15 起**）。任何工具都不会悄悄替换已有的输出文件。适用于 `lae_enc`（编码和 `tag`）、`lae_dec`、`lae_udec dec`、`lae_cdx`（`pack`、`split`、`repack`、`data`、`sim`）、`laes`（`enc`、`dec`、`tag`、`add`、`extract`、`names`）、`laes_export`、`lae_repair`、`lae_noise`（`mark`、`spectro`、`scan`、`preview`、`preview-all`）、表生成器 `gen_halfband`、`gen_mdct_tables` 和 `gen_noise_test`、`lae_abx --prepare`、`tools/laes_disc.ps1`，以及各 Java 工具（java/README.zh.md）。
 
 - 在控制台上（输入和输出都是终端），工具问两次，两次都回答 `yes` 才替换。每个工具对回答用同一条规则：只认 `yes` 这个词，大小写不限（`yes`、`Yes`、`YES` 都算），前后的空格不计。
 

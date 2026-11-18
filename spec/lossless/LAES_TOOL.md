@@ -161,11 +161,12 @@ laes enc Piece_LAES.flac --derive-core Piece_352k_32.wav Piece_176k_24.wav "--ta
 ## Changing tags: `laes tag`
 
 ```
-laes tag <in> <out> [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]
+laes tag <in> <out> [--keep] [--tag=KEY=VALUE ...] [--cover=<image>] [--picture=<type>:<image> ...]
 ```
 
 - Writes a **new** file whose tags and pictures are exactly those given. Without tag options, the new file has no tags at all.
-- The old tags are discarded. The audio bytes, the payload and every other block or chunk are copied byte for byte.
+- The old tags are discarded, unless `--keep` is given. The audio bytes, the payload and every other block or chunk are copied byte for byte.
+- `--keep` (since 2026-11-18): the old tags and pictures are read first and kept (FLAC: VORBIS_COMMENT and PICTURE blocks; WAV: the `id3 ` chunk, ID3v2.3 or v2.4, or else LIST/INFO). A key given with `--tag` replaces every old value of that key, and `--tag=KEY=` with nothing after `=` removes the key. `--cover` replaces the old front cover, and `--picture=<type>:` replaces the old pictures of that type. Old ones that cannot be read are named and not kept.
 - The result is byte-for-byte identical to re-encoding the same masters with the same options and the same version of the tool, with these tags.
 - The new file is then fully decoded, and every master is checked against its stored SHA-256. The audio bytes and the payload are also compared with those of the old file. Any difference causes the new file to be removed.
 - The old file is never modified. An existing `<out>` is not replaced silently (see "Text, file names and exit codes").

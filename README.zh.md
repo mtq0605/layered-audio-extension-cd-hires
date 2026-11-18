@@ -1686,6 +1686,7 @@ lae_udec verify <file>
 
 - `lae_dec` 也拒绝熵编码流没有正好在最后一个字节结束的文件，和播放器库一样（退出代码 3，提示 "LAE chunk damaged (entropy stream <i> does not end at its last byte): refusing to decode; the CD audio itself still plays"）。它在写出任何内容之前检查所选扩展包的每条流。
 - `lae_udec verify` 对 LAEY 文件把每个扩展包（主体和其余各包）都按 `full` 路径、在它自己的母带采样率上解到最后，每包打一行结果。
+- `lae_udec` 的退出代码（所有命令）：0 完成，所有检查都通过；1 用法错误，或者文件里没有 LAE 扩展（普通 WAV 或 FLAC）；2 有检查没通过（例如 SHA-256 不符）；3 文件读不了或解不了（例如核心音频帧被重新编码成左右声道去相关的 FLAC）；4 这个程序没通过浮点自检。脚本可以用 `lae_udec verify` 和这些代码检查整个音乐库。
 - `lae_dec` 或 `lae_udec dec` 的输出文件已经存在时不直接替换：在控制台上问两次，两次都输入 yes 才替换；不在控制台上就拒绝，除非加 `--overwrite`（第 14.11 节）。
 - `lae_dec` 不保存定位用的检查点（它从不定位）；播放器库照旧保存。
 
@@ -1837,7 +1838,7 @@ laes_export <in> <choice> <out.flac> [--from=<s>] [--len=<s>] [--index=<record>]
 laes_export <in> <choice> --seg=<s> --dir=<folder> [--index=<record>] [--unverified] [--overwrite]
 ```
 
-母带与其 SHA-256 相符之后才能给出（[spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md) 第 1.3 节）。解码整条音轨的运行就是这项检查：整轨导出，以及对整条音轨使用 `--seg`。每个输出先写成 `<out>.part`（使用 `--seg` 时为每一片），只有写完整并且 SHA-256 相符后才改成正式的文件名；SHA-256 不相符时不留下任何文件，退出代码为 2。带 `--index=<record>` 时，这样的运行把相符的母带记在文本文件 `<record>.verified` 中。母带、采样率档位或派生 16 位版本的一段（`--from`、`--len`）或这一段的分片，只有存在这条记录时才导出；没有记录时拒绝导出，退出代码为 2，并说明怎样得到记录。`--unverified` 不经检查直接导出，并加上标签 `LAES_UNVERIFIED=1`。核心母带不需要记录，因为它在打开文件时已经核对。每次写入都经过检查：输出无法写出时（例如磁盘已满），删除它的 `.part` 文件，退出代码为 2。每个输出都是普通 FLAC 文件，其采样与所选版本的采样完全相同，STREAMINFO 中带有其 MD5，并带有标识来源的标签（`LAES_CHOICE`、`LAES_FILE_SHA256`、`LAES_MASTER_SHA256`、`LAES_FIRST_FRAME`）。WAV 形式文件的 RIFF INFO 标签按 Vorbis 名字写出（INAM → TITLE、IART → ARTIST、IPRD → ALBUM、ICRD → DATE、ICOP → COPYRIGHT、ICMT → COMMENT、IGNR → GENRE、ITRK → TRACKNUMBER、IENG → ENGINEER、ISBJ → DESCRIPTION、ISFT → ENCODER；其他 INFO 名字原样保留）；只在 `id3 ` 块里的标签不导出。已有的输出（文件，或 `--seg` 的分片）不会被悄悄替换（第 14.11 节）。`laes_export` 包含编码器的 FLAC 写入器，其许可方式与编码器相同。
+母带与其 SHA-256 相符之后才能给出（[spec/lossless/SPEC.md](spec/lossless/SPEC.zh.md) 第 1.3 节）。解码整条音轨的运行就是这项检查：整轨导出，以及对整条音轨使用 `--seg`。每个输出先写成 `<out>.part`（使用 `--seg` 时为每一片），只有写完整并且 SHA-256 相符后才改成正式的文件名；SHA-256 不相符时不留下任何文件，退出代码为 2。带 `--index=<record>` 时，这样的运行把相符的母带记在文本文件 `<record>.verified` 中。母带、采样率档位或派生 16 位版本的一段（`--from`、`--len`）或这一段的分片，只有存在这条记录时才导出；没有记录时拒绝导出，退出代码为 2，并说明怎样得到记录。`--unverified` 不经检查直接导出，并加上标签 `LAES_UNVERIFIED=1`。核心母带不需要记录，因为它在打开文件时已经核对。每次写入都经过检查：输出无法写出时（例如磁盘已满），删除它的 `.part` 文件，退出代码为 2。每个输出都是普通 FLAC 文件，其采样与所选版本的采样完全相同，STREAMINFO 中带有其 MD5，并带有标识来源的标签（`LAES_CHOICE`、`LAES_FILE_SHA256`、`LAES_MASTER_SHA256`、`LAES_FIRST_FRAME`）。WAV 形式文件的 RIFF INFO 标签按 Vorbis 名字写出（INAM → TITLE、IART → ARTIST、IPRD → ALBUM、ICRD → DATE、ICOP → COPYRIGHT、ICMT → COMMENT、IGNR → GENRE、ITRK → TRACKNUMBER、IENG → ENGINEER、ISBJ → DESCRIPTION、ISFT → ENCODER；其他 INFO 名字原样保留）；只在 `id3 ` 块里的标签不导出。自 2026-11-18 起，导出成一个文件时（整轨，或 `--from` / `--len`），原文件的图片（封面和其他图片：FLAC 的 PICTURE 块，或 WAV 形式文件 ID3v2.3 / v2.4 `id3 ` 块里的 APIC 帧）也一起写出，类型、格式和字节都不变；读不了的图片不写，并说明是哪一张。`--seg` 的分片不带图片。已有的输出（文件，或 `--seg` 的分片）不会被悄悄替换（第 14.11 节）。`laes_export` 包含编码器的 FLAC 写入器，其许可方式与编码器相同。
 
 `tools/laes_disc.ps1`（Windows）利用 Windows 的光盘镜像服务（IMAPI2），为一张由 LAES 文件组成的专辑创建 DVD 或 BD 数据光盘镜像。该镜像包含原样的文件、一个播放列表和一个 SHA-256 列表。它是数据光盘，而非 BD-Video 或 DVD-Audio。任何能从光盘读取 FLAC 或 WAV 文件的播放器都会播放每个文件的核心母带；LAES 播放器则播放各母带。
 

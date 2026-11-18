@@ -1425,9 +1425,14 @@ $$L(1 + r) + 2.5 + 0.2 \le C$$
 
 ### 12.6 听音测试
 
-LAE Lossy 的可听频带由 CD 层加上波形编码的细化组成。尚未发布任何听音测试结果。
+LAE Lossy 的可听频带由 CD 层加上波形编码的细化组成。
 
-针对差异敏感材料的听音测试属于未来工作（第 17.3 节）。候选流程为 ABX 和 webMUSHRA [11]。
+自 2026-11-13 起，v5-2026-11-07 的发布页上提供两个用于听音测试的文件：
+
+- `LAE_ABX_tool.zip`：Windows 上独立运行的 ABX 测试程序（源代码：`tools/lae_abx/`，[docs/BUILD.md](docs/BUILD.zh.md)）。它自己解码 LAE 演示文件，用盲听比较母带和由它制作的 LAEY 文件，或者母带和 320 kbps 的 MP3。
+- `LAEY_packs_demo_docs.zip`：其中有一份对这些演示文件所做 ABX 测试的报告，附带日志。
+
+还没有发布多名听者参加的听音测试。针对差异敏感材料的这类测试（例如用 webMUSHRA [11]）属于未来工作（第 17.3 节）。
 
 ---
 
@@ -1555,10 +1560,10 @@ LAE Lossy 的可听频带由 CD 层加上波形编码的细化组成。尚未发
 
 | 组成部分 | 宿主 | 版本 | 文档 |
 |---|---|---|---|
-| `foo_input_lae` | foobar2000 1.4、1.5 和 2.x，32 位和 64 位 | 0.30 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.zh.md) |
-| `liblae_plugin.dll` | VLC 3.0，Windows 64 位 | 0.1.11 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.zh.md) |
-| `audiodecoder.lae` | Kodi 21（Omega），Windows 64 位 | 0.2.12 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.zh.md) |
-| `lae_source.ax` | DirectShow 播放器（PotPlayer、MPC-BE、MPC-HC、Windows Media Player），Windows 64 位 | 0.2.11 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.zh.md) |
+| `foo_input_lae` | foobar2000 1.4、1.5 和 2.x，32 位和 64 位 | 0.31 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.zh.md) |
+| `liblae_plugin.dll` | VLC 3.0，Windows 64 位 | 0.1.12 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.zh.md) |
+| `audiodecoder.lae` | Kodi 21（Omega），Windows 64 位 | 0.2.13 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.zh.md) |
+| `lae_source.ax` | DirectShow 播放器（PotPlayer、MPC-BE、MPC-HC、Windows Media Player），Windows 64 位 | 0.2.12 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.zh.md) |
 | Java 库 | Java 8，Android API 24 及以上 | — | [java/README.md](java/README.zh.md) |
 
 - **文件**。不带 LAE 扩展的 WAV 或 FLAC 文件交由宿主自身的解码器处理。不支持 LAE 的播放器播放 LAEY 文件的 CD 层和 LAES 文件的核心母带。
@@ -2024,7 +2029,7 @@ SPEC.md 中定义的比特流对容器版本 5 已冻结。
   - 泄漏补偿项对 `cd24` 路径的影响（第 6.5 节）。
   - 分析 176.4 和 352.8 kHz 下 Synth 的 CD 频带数值（第 12.3 节）。
   - 播放器兼容性测试。
-  - 听音测试。
+  - 多名听者参加的听音测试，例如用 webMUSHRA [11]。ABX 测试程序和一份 ABX 报告已经发布（第 12.6 节）。
 - **音质估算器**。第 12.1 节音质指标的精确定义将在测试文档中给出。
 - **规范性文本**。SPEC.md 规定了 M/S 提升变换、抖动生成器及其种子、熵编码器的二值化、数据流头部字段 K 和滤波器表。其待办事项（[SPEC.md](spec/lossy/SPEC.zh.md)，附录 C）包括：
   - 将 `src/mdct_tables.h` 作为规范性附录；

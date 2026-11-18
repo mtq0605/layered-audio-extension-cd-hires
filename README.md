@@ -1425,9 +1425,14 @@ Of these variants, version 5 uses:
 
 ### 12.6 Listening tests
 
-The audible band of LAE Lossy is the CD layer plus a waveform-coded refinement. No listening-test results have been published.
+The audible band of LAE Lossy is the CD layer plus a waveform-coded refinement.
 
-Listening tests on difference-sensitive material are future work (Section 17.3). Candidate procedures are ABX and webMUSHRA [11].
+Since 2026-11-13, the release page of v5-2026-11-07 has offered two files for listening tests:
+
+- `LAE_ABX_tool.zip`: a stand-alone ABX test for Windows (source: `tools/lae_abx/`, [docs/BUILD.md](docs/BUILD.md)). It decodes the LAE demonstration files itself and compares, in blind trials, a master with the LAEY file made from it, or with an MP3 at 320 kbps.
+- `LAEY_packs_demo_docs.zip`: among other documents, the report of an ABX test on these demonstration files, with its logs.
+
+No listening test with a panel of listeners has been published. Such tests on difference-sensitive material, for example with webMUSHRA [11], are future work (Section 17.3).
 
 ---
 
@@ -1555,10 +1560,10 @@ Four player plug-ins and a Java library decode both LAE formats: LAEY (container
 
 | Component | Host | Version | Documentation |
 |---|---|---|---|
-| `foo_input_lae` | foobar2000 1.4, 1.5 and 2.x, 32-bit and 64-bit | 0.30 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md) |
-| `liblae_plugin.dll` | VLC 3.0, Windows 64-bit | 0.1.11 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.md) |
-| `audiodecoder.lae` | Kodi 21 (Omega), Windows 64-bit | 0.2.12 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.md) |
-| `lae_source.ax` | DirectShow players (PotPlayer, MPC-BE, MPC-HC, Windows Media Player), Windows 64-bit | 0.2.11 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.md) |
+| `foo_input_lae` | foobar2000 1.4, 1.5 and 2.x, 32-bit and 64-bit | 0.31 | [plugins/foo_input_lae/README.md](plugins/foo_input_lae/README.md) |
+| `liblae_plugin.dll` | VLC 3.0, Windows 64-bit | 0.1.12 | [plugins/vlc_lae/README.md](plugins/vlc_lae/README.md) |
+| `audiodecoder.lae` | Kodi 21 (Omega), Windows 64-bit | 0.2.13 | [plugins/kodi_audiodecoder_lae/README.md](plugins/kodi_audiodecoder_lae/README.md) |
+| `lae_source.ax` | DirectShow players (PotPlayer, MPC-BE, MPC-HC, Windows Media Player), Windows 64-bit | 0.2.12 | [plugins/dshow_lae/README.md](plugins/dshow_lae/README.md) |
 | Java library | Java 8, Android API 24 and later | — | [java/README.md](java/README.md) |
 
 - **Files.** A WAV or FLAC file without an LAE extension is left to the host's own decoder. Players without LAE support play the CD layer of an LAEY file and the core master of an LAES file.
@@ -2024,7 +2029,7 @@ The bitstream defined in SPEC.md is frozen for container version 5.
   - The effect of the leakage-compensation term on the `cd24` route (Section 6.5).
   - Analysis of the Synth CD-band values at 176.4 and 352.8 kHz (Section 12.3).
   - Player compatibility tests.
-  - Listening tests.
+  - Listening tests with a panel of listeners, for example with webMUSHRA [11]. An ABX tool and one ABX report have been published (Section 12.6).
 - **Quality estimators.** The exact definitions of the quality measures of Section 12.1 are to be given in the test documentation.
 - **Normative text.** SPEC.md specifies the M/S lifting, the dither generator and its seeds, the entropy-coder binarisation, the stream header field K and the filter tables. Its open items ([SPEC.md](spec/lossy/SPEC.md), Appendix C) include:
   - `src/mdct_tables.h` as a normative annex;

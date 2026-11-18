@@ -25,10 +25,10 @@ The FLAC application IDs `LAE1` (LAEY) and `LAE2` (LAES) are registered with IAN
 | `lae_cdx` (CD-Extra tool) | commit of the release | CDX v0 |
 | `lae_udec` (unified decoder) and `liblae` | commit of the release; `liblae` API 9 | LAEY v5 (both forms, extension packs), LAES v1 and v2 |
 | `lae_noise` and the noise panel `noise_panel.html` (LAE Noise Marker) | commit of the release | LAENOISE v1 |
-| foobar2000 component `foo_input_lae` | 0.30 | LAEY v5, LAES v1 and v2 |
-| Kodi add-on `audiodecoder.lae` | 0.2.12 | LAEY v5, LAES v1 and v2 |
-| DirectShow filter `dshow_lae` | 0.2.11 | LAEY v5, LAES v1 and v2 |
-| VLC module `vlc_lae` | 0.1.11 | LAEY v5, LAES v1 and v2 |
+| foobar2000 component `foo_input_lae` | 0.31 | LAEY v5, LAES v1 and v2 |
+| Kodi add-on `audiodecoder.lae` | 0.2.13 | LAEY v5, LAES v1 and v2 |
+| DirectShow filter `dshow_lae` | 0.2.12 | LAEY v5, LAES v1 and v2 |
+| VLC module `vlc_lae` | 0.1.12 | LAEY v5, LAES v1 and v2 |
 | Java library (`java/`) | commit of the release | LAEY v5, LAES v1 and v2 |
 
 ## Compatibility

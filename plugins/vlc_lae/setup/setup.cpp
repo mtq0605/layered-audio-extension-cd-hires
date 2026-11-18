@@ -24,7 +24,7 @@ bool g_quiet = false;
 const wchar_t* T(const wchar_t* en, const wchar_t* zh) { return g_zh ? zh : en; }
 const wchar_t* kTitle = L"LAE VLC";
 const wchar_t* kUninstKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LAE.VLC";
-const wchar_t* kVersion = L"0.1.11";
+const wchar_t* kVersion = L"0.1.12";
 
 std::wstring installDir() { wchar_t* p = nullptr; std::wstring d; if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &p))) d = p; CoTaskMemFree(p);
     return d + L"\\Programs\\LAE\\VLC"; }

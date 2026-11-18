@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<addon id="audiodecoder.lae" version="0.2.12" name="LAE decoder" provider-name="mtq0605">
+<addon id="audiodecoder.lae" version="0.2.13" name="LAE decoder" provider-name="mtq0605">
   <requires>
     <import addon="kodi.binary.global.main" version="2.0.2"/>
     <import addon="kodi.binary.global.general" version="1.0.5"/>

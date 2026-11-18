@@ -24,10 +24,10 @@ FLAC 应用 ID `LAE1`（LAEY）和 `LAE2`（LAES）已在 IANA 的 FLAC Applicat
 | `lae_cdx`（CD-Extra 工具） | 发布时的提交哈希 | CDX v0 |
 | `lae_udec`（统一解码器）和 `liblae` | 发布时的提交哈希；`liblae` API 9 | LAEY v5（两种形式、扩展包）、LAES v1 和 v2 |
 | `lae_noise` 和噪声面板 `noise_panel.html`（LAE Noise Marker） | 发布时的提交哈希 | LAENOISE v1 |
-| foobar2000 组件 `foo_input_lae` | 0.30 | LAEY v5、LAES v1 和 v2 |
-| Kodi 插件 `audiodecoder.lae` | 0.2.12 | LAEY v5、LAES v1 和 v2 |
-| DirectShow 过滤器 `dshow_lae` | 0.2.11 | LAEY v5、LAES v1 和 v2 |
-| VLC 模块 `vlc_lae` | 0.1.11 | LAEY v5、LAES v1 和 v2 |
+| foobar2000 组件 `foo_input_lae` | 0.31 | LAEY v5、LAES v1 和 v2 |
+| Kodi 插件 `audiodecoder.lae` | 0.2.13 | LAEY v5、LAES v1 和 v2 |
+| DirectShow 过滤器 `dshow_lae` | 0.2.12 | LAEY v5、LAES v1 和 v2 |
+| VLC 模块 `vlc_lae` | 0.1.12 | LAEY v5、LAES v1 和 v2 |
 | Java 库（`java/`） | 发布时的提交哈希 | LAEY v5、LAES v1 和 v2 |
 
 ## 兼容性

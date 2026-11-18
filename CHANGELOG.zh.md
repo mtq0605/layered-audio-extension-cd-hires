@@ -11,7 +11,9 @@ v5-2026-11-14 的发布包里没有这些改动；`src/` 中的源代码已经�
 - **新工具 `lae_repair`（2026-11-18）。**LAE 文件被其他程序改过、但 LAE 数据还完整时，它把文件修回 LAE 的形式：被 `flac` 重新编码成左右声道去相关的 LAE FLAC 文件（按 LAE 的规则重新编码各帧，输出 FLAC），以及被 `flac --keep-foreign-metadata` 压成 FLAC 的 LAE WAV 文件（还原出原来的 WAV 文件，逐字节相同）。写出之前用 MD5 核对音频，写出之后像 `lae_udec verify` 一样核对结果；有一项对不上就什么也不写（[spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.zh.md)、[spec/COMPATIBILITY.md](spec/COMPATIBILITY.zh.md)）。FLAC 读取器只为这个工具解码左右声道去相关；播放器和其他工具照旧拒绝这种帧，提示里现在会提到 `lae_repair`。
 - **名称的位置（2026-11-18）。**`lae_enc master<n>part2=` … `master<n>part5=` 和 `laes enc / add / names --part2=` … `--part5=<k>:<text>`：母带或扩展包名称可选的位置 2 到 5，自由文字，没有固定含义，接在名称后面，写成 `<名称> - <位置2>, <位置3>, <位置4>, <位置5>`（合起来最多 255 字节）。文件里只存合起来的名称，与把这段文字直接作为名称写出的文件逐字节相同（[docs/PACKS.md](docs/PACKS.zh.md)、[spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.zh.md)）。
 - **音乐库维护（2026-11-18）。**`laes verify` 先找 LAE 扩展再读音频：普通 FLAC 文件报告"没有 LAE2"，LAEY 文件报告是 LAEY。`laes_export` 导出成一个文件时带上源文件的图片（FLAC 的 PICTURE 块，或 WAV 文件的 `id3 ` 块；`--seg` 的分片不带）。`laes tag --keep` 保留旧的标签和图片，只替换给出的键和图片类型。读取这些标签时，ID3v2.4 中每个值各带字节序标记的 UTF-16 多值能正确读出（以前第 2 个起的值开头多一个 U+FEFF），32 位程序里精心构造的 VORBIS_COMMENT vendor 长度也不再回绕。被 `flac --keep-foreign-metadata` 压过的 LAE WAV 文件会被认出来，并提到 `lae_repair`；有效载荷太短的 LAE2 块报告为文件损坏。
-- **文档。**`lae_udec` 的退出代码 0–4（README 第 14.3 节）；两份规范的 FLAC 形式一节各加了一段关于被其他程序改过的文件的说明性文字。
+- **播放器插件**：foobar2000 `foo_input_lae` 0.31、VLC 0.1.12、Kodi 0.2.13 和 DirectShow 0.2.12，用这些源代码编译。其中是这次更新的 FLAC 读取器：用左右声道去相关重新编码过的文件照旧被拒绝，提示里现在会提到 `lae_repair`。正常文件的播放不变。
+- **文档。**`lae_udec` 的退出代码 0–4（README 第 14.3 节）；两份规范的 FLAC 形式一节各加了一段关于被其他程序改过的文件的说明性文字。README 第 12.6 和 17.3 节写明了 2026-11-13 起放在 v5-2026-11-07 发布页上的 ABX 测试程序和 ABX 报告；多名听者参加的听音测试仍是今后的工作。
+- **这次更新没有测试的**：核心母带为 32 位的 LAES 文件的端到端修复（左右声道去相关的解码已在 16、24、32 位上测过）；插件编译并加载过，但没有在各自的播放器里重新播放；Picard 联网匹配 MusicBrainz（只测了手动改标签）；Jellyfin。
 
 ## 2026-11-14（v5-2026-11-14）
 

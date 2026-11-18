@@ -51,7 +51,7 @@ constexpr bool zh() { return false; }
 const char* T(const char* en, const char* cn) { return zh() ? cn : en; }
 }
 
-DECLARE_COMPONENT_VERSION(T("LAE decoder", "LAE 解码器"), "0.30",
+DECLARE_COMPONENT_VERSION(T("LAE decoder", "LAE 解码器"), "0.31",
     T("Decoder for LAE (Layered Audio Extension) audio.\n"
       "LAES (lossless): core master, masters, sample-rate levels, derived 16-bit versions; masters verified by SHA-256.\n"
       "LAEY (lossy): CD/core layer, bit-depth layer, frequency layer, up to the master sample rate.\n"

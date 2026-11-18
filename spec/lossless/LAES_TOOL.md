@@ -295,10 +295,10 @@ lae_repair <in> <out> [--overwrite]
 
 `lae_repair` (since 2026-11-18) is a separate program. It puts an LAEY or LAES file that another program changed back into the LAE form, when the LAE data is still complete. Two cases, recognised by the content:
 
-- **FLAC form re-encoded by another encoder** (inter-channel decorrelation): every frame is decoded, the audio must match STREAMINFO's MD5, and the core is coded again with the frame writer of the LAE encoders. The frames are then the same bytes that the LAE encoder writes for this audio. Metadata blocks are kept in their order (tags, pictures, padding, the LAE blocks byte for byte); SEEKTABLE and CUESHEET are left out. Output: FLAC.
+- **FLAC form re-encoded by another encoder** (inter-channel decorrelation): every frame is decoded, the audio must match STREAMINFO's MD5, and the core master (LAEY: the CD layer) is coded again with the frame writer of the LAE encoders. The frames are then the same bytes that the LAE encoder writes for this audio. Metadata blocks are kept in their order (tags, pictures, padding, the LAE blocks byte for byte); SEEKTABLE and CUESHEET are left out. Output: FLAC.
 - **WAV form in a FLAC file made by `flac --keep-foreign-metadata`**: the chunks are put together again with the decoded audio. The output is the original WAV file, byte for byte. FLAC metadata blocks that `flac` added are left out (the WAV file's tags are in its own chunks). Output: WAV.
 
-The result is written as `<out>.part`, checked as `lae_udec verify` checks a file (LAES: every master's SHA-256; LAEY: every extension pack decoded to its end), and only then renamed. When a check fails, nothing is left. An existing output is replaced only with `--overwrite`. A file already in the LAE form, a plain FLAC or WAV file, and a WAV-form LAE file are reported as "nothing to repair".
+The result is written as `<out>.part`, checked as `lae_udec verify` checks a file (LAES: every master's SHA-256; LAEY: every extension pack decoded to its end), and only then renamed. When a check fails, the `.part` file is removed and nothing is written. An existing output is replaced only with `--overwrite` (`lae_repair` does not ask at a console). A file already in the LAE form, a plain FLAC or WAV file, and a WAV-form LAE file are reported as "nothing to repair".
 
 Exit code: 0 repaired, every check passed; 1 usage, or nothing to repair; 2 a check failed (the audio against the MD5, or the result against the LAE records); 3 the file cannot be read or written; 4 the floating-point self-test failed.
 

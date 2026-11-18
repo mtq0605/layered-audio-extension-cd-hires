@@ -1429,7 +1429,7 @@ The audible band of LAE Lossy is the CD layer plus a waveform-coded refinement.
 
 Since 2026-11-13, the release page of v5-2026-11-07 has offered two files for listening tests:
 
-- `LAE_ABX_tool.zip`: a stand-alone ABX test for Windows (source: `tools/lae_abx/`, [docs/BUILD.md](docs/BUILD.md)). It decodes the LAE demonstration files itself and compares, in blind trials, a master with the LAEY file made from it, or with an MP3 at 320 kbps.
+- `LAE_ABX_tool.zip`: a stand-alone ABX test program for Windows (source: `tools/lae_abx/`, [docs/BUILD.md](docs/BUILD.md)). It decodes the LAE demonstration files itself and compares, in blind trials, a master with the LAEY file made from it, or with an MP3 at 320 kbps.
 - `LAEY_packs_demo_docs.zip`: among other documents, the report of an ABX test on these demonstration files, with its logs.
 
 No listening test with a panel of listeners has been published. Such tests on difference-sensitive material, for example with webMUSHRA [11], are future work (Section 17.3).

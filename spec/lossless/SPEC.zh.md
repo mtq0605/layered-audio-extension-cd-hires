@@ -406,7 +406,7 @@ LAES FLAC 文件是具有以下结构的 FLAC 流（RFC 9639）：
 
 *说明性：*参考编码器的 FLAC 写入器（`src/laes_flac_enc.h`）使用固定块长 4096、两个独立编码的声道、至多 12 的 LPC 阶数、至多 15 的精度以及至多 8 的 Rice 分区阶。在 44.1 / 48 kHz 下，这符合 FLAC 的可流式子集。许多较旧的播放器不播放 32 位 FLAC；因此，除非另有指示，参考编码器在 FLAC 形式中不使用 32 位核心母带（它使用至多 24 位的最高母带字长；第 11.1 节）。参考解码器仅解码声道独立编码的核心母带。
 
-*说明性（被其他程序改过的文件）：*重新编码文件的 FLAC 编码器（例如 `flac` 1.3 和 1.5 的默认设置）通常保留 APPLICATION 块和 STREAMINFO 中的 MD5，但用左右声道去相关来编码音频帧；这样的文件不符合本节，参考工具拒绝它。参考工具 `lae_repair` 解码这些帧，用 STREAMINFO 的 MD5 核对音频，再用独立声道重新编码，并像解码器一样核对结果；扩展字节保持原样。用 `flac --keep-foreign-metadata` 压缩的 WAV 形式文件，把各个块（包括 `LAE ` 块）放在 ID 为 `riff` 的 APPLICATION 块中；按本规范，它是普通的 FLAC 音频。`lae_repair`（或 `flac -d --keep-foreign-metadata`）能还原出原来的 WAV 文件，逐字节相同。`flac` 1.5.0 拒绝大于 16 MiB 的块，所以这种情况只出现在短文件上（[COMPATIBILITY.md](../COMPATIBILITY.zh.md)）。
+*说明性（被其他程序改过的文件）：*重新编码文件的 FLAC 编码器（例如 `flac` 1.3 和 1.5 的默认设置）通常保留 APPLICATION 块和 STREAMINFO 中的 MD5，但用左右声道去相关来编码音频帧；这样的文件不符合本节，参考解码器拒绝它。参考工具 `lae_repair` 解码这些帧，用 STREAMINFO 的 MD5 核对音频，再用独立声道重新编码，并像解码器一样核对结果；扩展字节保持原样。用 `flac --keep-foreign-metadata` 压缩的 WAV 形式文件，把各个块（包括 `LAE ` 块）放在 ID 为 `riff` 的 APPLICATION 块中；按本规范，它是普通的 FLAC 音频。`lae_repair`（或 `flac -d --keep-foreign-metadata`）能还原出原来的 WAV 文件，逐字节相同。`flac` 1.5.0 拒绝大于 16 MiB 的块，所以这种情况只出现在 `LAE ` 块不超过 16 MiB 的文件上（[COMPATIBILITY.md](../COMPATIBILITY.zh.md)）。
 
 ---
 

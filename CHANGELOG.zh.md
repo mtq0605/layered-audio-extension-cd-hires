@@ -4,9 +4,9 @@
 
 本文件记录 LAE（Layered Audio Extension）及其有损层级 LAE Lossy（LAEY）和无损层级 LAE Lossless（LAES）的重要变更，按时间由新到旧排列。
 
-## 尚未发布（v5-2026-11-14 之后）
+## 2026-11-19（v5-2026-11-19）
 
-v5-2026-11-14 的发布包里没有这些改动；`src/` 中的源代码已经包含。文件格式不变：没有新增字段，也没有新的版本号。对于以前就有的文件和选项，编码出的文件和解码出的采样与 v5-2026-11-14 逐字节相同。
+本次更新命令行工具和播放器插件。文件格式不变：没有新增字段，也没有新的版本号。对于以前就有的文件和选项，编码出的文件和解码出的采样与 v5-2026-11-14 逐字节相同。
 
 - **新工具 `lae_repair`（2026-11-18）**。LAE 文件被其他程序改动过、但 LAE 数据仍然完整时，它把文件恢复成 LAE 的形式：被 `flac` 用左右声道去相关重新编码过的 LAE FLAC 文件（按 LAE 的规则重新编码各帧，输出 FLAC），以及被 `flac --keep-foreign-metadata` 压成 FLAC 的 LAE WAV 文件（还原出原来的 WAV 文件，逐字节相同）。写出之前用 MD5 核对音频，写出之后按 `lae_udec verify` 的方式核对结果；任何一项不符，就什么也不写；和其他工具一样，输出已经存在时，只有在控制台上两次回答 `yes`，或者加了 `--overwrite`，才会替换（[spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.zh.md)、[spec/COMPATIBILITY.md](spec/COMPATIBILITY.zh.md)）。FLAC 读取器只为这个工具解码左右声道去相关；播放器和其他工具照旧拒绝这种帧，提示里现在会提到 `lae_repair`。
 - **名称的位置（2026-11-18）。**`lae_enc master<n>part2=` … `master<n>part5=` 和 `laes enc / add / names --part2=` … `--part5=<k>:<text>`：在母带名或扩展包名后面可选地加上位置 2 到 5 的文字。文字内容自由，没有固定含义，按 `<名称> - <位置2>, <位置3>, <位置4>, <位置5>`连接（合计最多 255 字节）。文件里只保存连接后的名称，与直接把这段文字作为名称写出的文件逐字节相同（[docs/PACKS.md](docs/PACKS.zh.md)、[spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.zh.md)）。

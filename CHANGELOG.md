@@ -4,9 +4,9 @@
 
 This file records the notable changes to LAE (Layered Audio Extension), its lossy tier LAE Lossy (LAEY) and its lossless tier LAE Lossless (LAES), newest first.
 
-## Not yet released (after v5-2026-11-14)
+## 2026-11-19 (v5-2026-11-19)
 
-The release packages of v5-2026-11-14 do not contain these changes; the sources in `src/` do. The file formats do not change: no new field, no new version number. For files and options that existed before, the encoded files and the decoded samples are byte-identical to those of v5-2026-11-14.
+An update of the command-line tools and the player plug-ins. The file formats do not change: no new field, no new version number. For files and options that existed before, the encoded files and the decoded samples are byte-identical to those of v5-2026-11-14.
 
 - **New tool `lae_repair` (2026-11-18).** It puts an LAE file that another program changed back into the LAE form, when the LAE data is still complete: an LAE FLAC file that `flac` re-encoded with inter-channel decorrelation (frames coded again by the LAE rules, output FLAC), and an LAE WAV file that `flac --keep-foreign-metadata` packed into FLAC (the original WAV file given back, byte for byte). It checks the audio against the MD5 before it writes, and checks the result as `lae_udec verify` does; when a check fails, nothing is written; like every other tool, it replaces an existing output only after two answers `yes` at a console, or with `--overwrite` ([spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.md), [spec/COMPATIBILITY.md](spec/COMPATIBILITY.md)). The FLAC reader decodes inter-channel decorrelation only for this tool; players and the other tools still refuse such frames, and their message now names `lae_repair`.
 - **Name positions (2026-11-18).** `lae_enc master<n>part2=` … `master<n>part5=` and `laes enc / add / names --part2=` … `--part5=<k>:<text>`: optional positions 2 to 5 of a master's or pack's name, free text without a fixed meaning, joined after the name as `<name> - <part2>, <part3>, <part4>, <part5>` (at most 255 bytes together). The file holds only the joined name and is byte for byte the file written with that text as the name ([docs/PACKS.md](docs/PACKS.md), [spec/lossless/LAES_TOOL.md](spec/lossless/LAES_TOOL.md)).
